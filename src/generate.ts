@@ -3,6 +3,7 @@ import type {
   EbnfGrammar,
   LexicalSpec,
   LexicalTokenSpec,
+  TreeSitterCaptureMetadata,
   TreeSitterExtra,
   TreeSitterInjectionMetadata,
   TreeSitterMetadata,
@@ -11,6 +12,11 @@ import type {
   TreeSitterRuleMetadata,
   TreeSitterRuleToken,
   TreeSitterRuleWrap,
+  WorkbenchAstMetadata,
+  WorkbenchAstNodeMetadata,
+  WorkbenchFormatterMetadata,
+  WorkbenchLanguageMetadata,
+  WorkbenchLspMetadata,
 } from "./ast.ts";
 import { parseEbnf } from "./parser.ts";
 
@@ -807,16 +813,26 @@ function parseTreeSitterMetadataObject(
 ): TreeSitterMetadata {
   const object = expectObject(value, path);
   assertKnownKeys(object, path, [
+    "language",
     "extras",
     "word",
     "supertypes",
     "conflicts",
     "inline",
     "queries",
+    "ast",
+    "formatter",
+    "lsp",
     "rules",
   ]);
 
   const metadata: TreeSitterMetadata = {};
+  if (hasKey(object, "language")) {
+    metadata.language = parseLanguageMetadata(
+      object.language,
+      `${path}.language`,
+    );
+  }
   if (hasKey(object, "extras")) {
     metadata.extras = expectArray(object.extras, `${path}.extras`).map((
       extra,
@@ -843,6 +859,18 @@ function parseTreeSitterMetadataObject(
   }
   if (hasKey(object, "queries")) {
     metadata.queries = parseQueriesMetadata(object.queries, `${path}.queries`);
+  }
+  if (hasKey(object, "ast")) {
+    metadata.ast = parseAstMetadata(object.ast, `${path}.ast`);
+  }
+  if (hasKey(object, "formatter")) {
+    metadata.formatter = parseFormatterMetadata(
+      object.formatter,
+      `${path}.formatter`,
+    );
+  }
+  if (hasKey(object, "lsp")) {
+    metadata.lsp = parseLspMetadata(object.lsp, `${path}.lsp`);
   }
   if (hasKey(object, "rules")) {
     const rulesObject = expectObject(object.rules, `${path}.rules`);
@@ -873,14 +901,63 @@ function parseTreeSitterExtra(value: unknown, path: string): TreeSitterExtra {
   throw new Error(`Invalid ${path}.kind '${kind}'`);
 }
 
+function parseLanguageMetadata(
+  value: unknown,
+  path: string,
+): WorkbenchLanguageMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["scope", "fileTypes", "comment"]);
+
+  const metadata: WorkbenchLanguageMetadata = {};
+  if (hasKey(object, "scope")) {
+    metadata.scope = expectString(object.scope, `${path}.scope`);
+  }
+  if (hasKey(object, "fileTypes")) {
+    metadata.fileTypes = expectStringArray(
+      object.fileTypes,
+      `${path}.fileTypes`,
+    );
+  }
+  if (hasKey(object, "comment")) {
+    metadata.comment = expectString(object.comment, `${path}.comment`);
+  }
+  return metadata;
+}
+
 function parseQueriesMetadata(
   value: unknown,
   path: string,
 ): TreeSitterMetadata["queries"] {
   const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["rainbows", "injections"]);
+  assertKnownKeys(object, path, [
+    "highlights",
+    "locals",
+    "folds",
+    "indents",
+    "tags",
+    "rainbows",
+    "injections",
+  ]);
 
   const queries: NonNullable<TreeSitterMetadata["queries"]> = {};
+  if (hasKey(object, "highlights")) {
+    queries.highlights = parseCaptureArray(
+      object.highlights,
+      `${path}.highlights`,
+    );
+  }
+  if (hasKey(object, "locals")) {
+    queries.locals = parseCaptureArray(object.locals, `${path}.locals`);
+  }
+  if (hasKey(object, "folds")) {
+    queries.folds = parseCaptureArray(object.folds, `${path}.folds`);
+  }
+  if (hasKey(object, "indents")) {
+    queries.indents = parseCaptureArray(object.indents, `${path}.indents`);
+  }
+  if (hasKey(object, "tags")) {
+    queries.tags = parseCaptureArray(object.tags, `${path}.tags`);
+  }
   if (hasKey(object, "rainbows")) {
     queries.rainbows = parseRainbowsMetadata(
       object.rainbows,
@@ -894,6 +971,39 @@ function parseQueriesMetadata(
       );
   }
   return queries;
+}
+
+function parseCaptureArray(
+  value: unknown,
+  path: string,
+): TreeSitterCaptureMetadata[] {
+  return expectArray(value, path).map((capture, index) =>
+    parseCaptureMetadata(capture, `${path}[${index}]`)
+  );
+}
+
+function parseCaptureMetadata(
+  value: unknown,
+  path: string,
+): TreeSitterCaptureMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["node", "literal", "capture"]);
+
+  const hasNode = hasKey(object, "node");
+  const hasLiteral = hasKey(object, "literal");
+  if (hasNode === hasLiteral) {
+    throw new Error(
+      `Expected ${path} to specify exactly one of node or literal`,
+    );
+  }
+
+  const capture = normalizeCaptureName(
+    expectString(object.capture, `${path}.capture`),
+    `${path}.capture`,
+  );
+  return hasNode
+    ? { node: expectString(object.node, `${path}.node`), capture }
+    : { literal: expectString(object.literal, `${path}.literal`), capture };
 }
 
 function parseRainbowsMetadata(
@@ -923,6 +1033,101 @@ function parseInjectionMetadata(
     node: expectString(object.node, `${path}.node`),
     language: expectString(object.language, `${path}.language`),
   };
+}
+
+function parseAstMetadata(
+  value: unknown,
+  path: string,
+): WorkbenchAstMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["nodes"]);
+
+  const metadata: WorkbenchAstMetadata = {};
+  if (hasKey(object, "nodes")) {
+    const nodesObject = expectObject(object.nodes, `${path}.nodes`);
+    const nodes: Record<string, WorkbenchAstNodeMetadata> = {};
+    for (const [nodeName, nodeValue] of Object.entries(nodesObject)) {
+      nodes[nodeName] = parseAstNodeMetadata(
+        nodeValue,
+        `${path}.nodes.${nodeName}`,
+      );
+    }
+    metadata.nodes = nodes;
+  }
+  return metadata;
+}
+
+function parseAstNodeMetadata(
+  value: unknown,
+  path: string,
+): WorkbenchAstNodeMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["kind", "fields"]);
+
+  const metadata: WorkbenchAstNodeMetadata = {};
+  if (hasKey(object, "kind")) {
+    metadata.kind = expectString(object.kind, `${path}.kind`);
+  }
+  if (hasKey(object, "fields")) {
+    metadata.fields = expectStringRecord(object.fields, `${path}.fields`);
+  }
+  return metadata;
+}
+
+function parseFormatterMetadata(
+  value: unknown,
+  path: string,
+): WorkbenchFormatterMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["blocks", "lists", "spacing"]);
+
+  const metadata: WorkbenchFormatterMetadata = {};
+  if (hasKey(object, "blocks")) {
+    metadata.blocks = expectStringArray(object.blocks, `${path}.blocks`);
+  }
+  if (hasKey(object, "lists")) {
+    metadata.lists = expectStringArray(object.lists, `${path}.lists`);
+  }
+  if (hasKey(object, "spacing")) {
+    metadata.spacing = parseSpacingRecord(object.spacing, `${path}.spacing`);
+  }
+  return metadata;
+}
+
+function parseSpacingRecord(
+  value: unknown,
+  path: string,
+): Record<string, "tight" | "space" | "newline"> {
+  const object = expectObject(value, path);
+  const record: Record<string, "tight" | "space" | "newline"> = {};
+  for (const [key, item] of Object.entries(object)) {
+    const spacing = expectString(item, `${path}.${key}`);
+    if (spacing !== "tight" && spacing !== "space" && spacing !== "newline") {
+      throw new Error(`Invalid ${path}.${key} '${spacing}'`);
+    }
+    record[key] = spacing;
+  }
+  return record;
+}
+
+function parseLspMetadata(value: unknown, path: string): WorkbenchLspMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["documentSymbols", "diagnostics"]);
+
+  const metadata: WorkbenchLspMetadata = {};
+  if (hasKey(object, "documentSymbols")) {
+    metadata.documentSymbols = expectStringArray(
+      object.documentSymbols,
+      `${path}.documentSymbols`,
+    );
+  }
+  if (hasKey(object, "diagnostics")) {
+    metadata.diagnostics = expectStringArray(
+      object.diagnostics,
+      `${path}.diagnostics`,
+    );
+  }
+  return metadata;
 }
 
 function parseRuleMetadataShape(
@@ -1077,6 +1282,14 @@ function parseRegexPattern(value: unknown, path: string): string {
     throw new Error(`Invalid ${path}: ${message}`);
   }
   return pattern;
+}
+
+function normalizeCaptureName(value: string, path: string): string {
+  const capture = value.startsWith("@") ? value.slice(1) : value;
+  if (!/^[A-Za-z][A-Za-z0-9._-]*$/.test(capture)) {
+    throw new Error(`Invalid ${path} '${value}'`);
+  }
+  return capture;
 }
 
 function assertKnownKeys(
@@ -1257,6 +1470,822 @@ export function generateTreeSitterInjectionsQuery(
   return `${blocks.join("\n").trimEnd()}\n`;
 }
 
+/** Generates a tree-sitter highlight query. */
+export function generateTreeSitterHighlightsQuery(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateTreeSitterQueryMetadata(grammar, metadata);
+
+  const explicit = metadata.queries?.highlights ?? [];
+  const explicitSelectors = new Set(explicit.map(captureSelectorKey));
+  const lines = [
+    ...renderCaptureQueryEntries(explicit),
+    ...defaultHighlightQueryEntries(grammar, metadata, explicitSelectors),
+  ];
+  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+}
+
+/** Generates a metadata-driven tree-sitter locals query. */
+export function generateTreeSitterLocalsQuery(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateTreeSitterQueryMetadata(grammar, metadata);
+  return renderCaptureQuery(metadata.queries?.locals ?? []);
+}
+
+/** Generates a metadata-driven tree-sitter folds query. */
+export function generateTreeSitterFoldsQuery(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateTreeSitterQueryMetadata(grammar, metadata);
+  return renderCaptureQuery(metadata.queries?.folds ?? []);
+}
+
+/** Generates a metadata-driven tree-sitter indentation query. */
+export function generateTreeSitterIndentsQuery(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateTreeSitterQueryMetadata(grammar, metadata);
+  return renderCaptureQuery(metadata.queries?.indents ?? []);
+}
+
+/** Generates a metadata-driven tree-sitter tags query. */
+export function generateTreeSitterTagsQuery(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateTreeSitterQueryMetadata(grammar, metadata);
+  return renderCaptureQuery(metadata.queries?.tags ?? []);
+}
+
+/** Generates TypeScript AST facade types for tree-sitter nodes. */
+export function generateAstTypesSource(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateWorkbenchMetadataSemantics(grammar, metadata);
+
+  const nodeTypes = grammar.rules.map((rule) => astTypeName(rule.name));
+  const union = nodeTypes.length ? nodeTypes.join(" | ") : "never";
+  const interfaces = grammar.rules.map((rule) => {
+    const astNode = metadata.ast?.nodes?.[rule.name];
+    const kind = astNode?.kind ?? rule.name;
+    const fields = astFieldsForNode(rule.name, metadata);
+    const fieldType = fields.length === 0
+      ? "Record<string, never>"
+      : `{\n${
+        fields.map((field) =>
+          `    ${quoteProperty(field.name)}: SyntaxNodeLike | null;`
+        ).join("\n")
+      }\n  }`;
+    return `export interface ${astTypeName(rule.name)} {
+  kind: ${JSON.stringify(kind)};
+  type: ${JSON.stringify(rule.name)};
+  node: SyntaxNodeLike;
+  fields: ${fieldType};
+}`;
+  });
+
+  return `// Generated by @mewhhaha/baba. Do not edit by hand.
+export interface SyntaxNodeLike {
+  type: string;
+  text: string;
+  namedChildren?: readonly SyntaxNodeLike[];
+  childForFieldName?(name: string): SyntaxNodeLike | null;
+}
+
+export type AstNode = ${union};
+
+${interfaces.join("\n\n")}
+`;
+}
+
+/** Generates TypeScript visitor helpers for generated AST facade types. */
+export function generateAstVisitorSource(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateWorkbenchMetadataSemantics(grammar, metadata);
+
+  const imports = [
+    "AstNode",
+    "SyntaxNodeLike",
+    ...grammar.rules.map((rule) => astTypeName(rule.name)),
+  ];
+  const visitorMethods = grammar.rules.map((rule) => {
+    const kind = metadata.ast?.nodes?.[rule.name]?.kind ?? rule.name;
+    return `  ${quoteProperty(kind)}?: (node: ${astTypeName(rule.name)}) => R;`;
+  });
+  const projectCases = grammar.rules.map((rule) => {
+    const fields = astFieldsForNode(rule.name, metadata);
+    const renderedFields = fields.length === 0
+      ? "{}"
+      : `{\n${
+        fields.map((field) =>
+          `        ${quoteProperty(field.name)}: readField(node, ${
+            JSON.stringify(field.treeField)
+          }),`
+        ).join("\n")
+      }\n      }`;
+    return `    case ${JSON.stringify(rule.name)}:
+      return {
+        kind: ${
+      JSON.stringify(metadata.ast?.nodes?.[rule.name]?.kind ?? rule.name)
+    },
+        type: ${JSON.stringify(rule.name)},
+        node,
+        fields: ${renderedFields},
+      };`;
+  });
+
+  return `// Generated by @mewhhaha/baba. Do not edit by hand.
+import type { ${imports.join(", ")} } from "./types.ts";
+
+export interface AstVisitor<R = void> {
+${visitorMethods.join("\n")}
+  unknown?: (node: SyntaxNodeLike) => R;
+}
+
+export function projectNode(node: SyntaxNodeLike): AstNode | null {
+  switch (node.type) {
+${projectCases.join("\n")}
+    default:
+      return null;
+  }
+}
+
+export function visitAstNode<R>(
+  node: AstNode,
+  visitor: AstVisitor<R>,
+): R | undefined {
+  const visit = (visitor as Record<string, ((node: AstNode) => R) | undefined>)[node.kind];
+  if (visit) return visit(node);
+  return visitor.unknown?.(node.node);
+}
+
+export function walkSyntaxNode(
+  node: SyntaxNodeLike,
+  visit: (node: SyntaxNodeLike) => void,
+): void {
+  visit(node);
+  for (const child of node.namedChildren ?? []) walkSyntaxNode(child, visit);
+}
+
+function readField(node: SyntaxNodeLike, name: string): SyntaxNodeLike | null {
+  return node.childForFieldName?.(name) ?? null;
+}
+`;
+}
+
+/** Generates a conservative formatter scaffold that preserves unsupported text. */
+export function generateFormatterScaffoldSource(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateWorkbenchMetadataSemantics(grammar, metadata);
+
+  return `// Generated by @mewhhaha/baba. Do not edit by hand.
+export interface FormatNode {
+  type: string;
+  text: string;
+  namedChildren?: readonly FormatNode[];
+}
+
+export interface FormatOptions {
+  indent?: string;
+}
+
+const blockNodes = new Set(${
+    formatStringArray(metadata.formatter?.blocks ?? [])
+  });
+const listNodes = new Set(${
+    formatStringArray(metadata.formatter?.lists ?? [])
+  });
+const spacing = new Map(${
+    JSON.stringify(Object.entries(metadata.formatter?.spacing ?? {}))
+  });
+
+export function formatNode(node: FormatNode, options: FormatOptions = {}): string {
+  const indent = options.indent ?? "  ";
+  if (blockNodes.has(node.type)) return formatBlock(node, indent);
+  if (listNodes.has(node.type)) return formatList(node, indent);
+  return node.text;
+}
+
+function formatBlock(node: FormatNode, _indent: string): string {
+  return node.text;
+}
+
+function formatList(node: FormatNode, _indent: string): string {
+  return node.text;
+}
+
+export function spacingForLiteral(literal: string): "tight" | "space" | "newline" | undefined {
+  return spacing.get(literal) as "tight" | "space" | "newline" | undefined;
+}
+`;
+}
+
+/** Generates a Deno-friendly LSP state scaffold. */
+export function generateLspScaffoldSource(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  validateWorkbenchMetadataSemantics(grammar, metadata);
+
+  return `// Generated by @mewhhaha/baba. Do not edit by hand.
+export interface TextDocument {
+  uri: string;
+  version: number;
+  text: string;
+}
+
+export interface Diagnostic {
+  uri: string;
+  message: string;
+  severity: "error" | "warning" | "information";
+}
+
+export interface DocumentSymbol {
+  name: string;
+  kind: string;
+}
+
+const documentSymbolNodes = new Set(${
+    formatStringArray(metadata.lsp?.documentSymbols ?? [])
+  });
+const diagnosticNodes = new Set(${
+    formatStringArray(metadata.lsp?.diagnostics ?? [])
+  });
+
+export class LanguageServerState {
+  readonly documents = new Map<string, TextDocument>();
+
+  updateDocument(document: TextDocument): void {
+    this.documents.set(document.uri, document);
+  }
+
+  removeDocument(uri: string): void {
+    this.documents.delete(uri);
+  }
+
+  diagnostics(uri: string): Diagnostic[] {
+    const document = this.documents.get(uri);
+    if (!document) return [];
+    void diagnosticNodes;
+    return [];
+  }
+
+  documentSymbols(uri: string): DocumentSymbol[] {
+    const document = this.documents.get(uri);
+    if (!document) return [];
+    void documentSymbolNodes;
+    return [];
+  }
+}
+`;
+}
+
+/** Generates the complete opt-in workbench scaffold as path/content pairs. */
+export function generateWorkbenchBundle(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: {
+    name?: string;
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+  } = {},
+): Record<string, string> {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  const name = options.name ?? "grammar";
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  const metadata = options.metadata ?? {};
+  validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  validateTreeSitterMetadataSemantics(grammar, rootRuleName, metadata);
+  validateTreeSitterQueryMetadata(grammar, metadata);
+  validateWorkbenchMetadataSemantics(grammar, metadata);
+
+  const treeSitter = generateTreeSitterGrammar(grammar, {
+    name,
+    rootRule: rootRuleName,
+    metadata,
+  });
+  const queries = generateWorkbenchQueries(grammar, { metadata });
+  const sample = generateGrammarSample(grammar, rootRuleName);
+
+  return {
+    "lexical.json": generateLexicalManifest(grammar),
+    "tokenizer.ts": generateTokenizerSource(grammar),
+    "grammar.js": treeSitter,
+    "tree-sitter.json": generateTreeSitterConfigSource(name, metadata),
+    "package.json": generateTreeSitterPackageSource(name, metadata),
+    "queries/highlights.scm": queries["highlights.scm"],
+    "queries/locals.scm": queries["locals.scm"],
+    "queries/folds.scm": queries["folds.scm"],
+    "queries/indents.scm": queries["indents.scm"],
+    "queries/tags.scm": queries["tags.scm"],
+    "queries/rainbows.scm": queries["rainbows.scm"],
+    "queries/injections.scm": queries["injections.scm"],
+    "editor/helix/languages.toml": generateHelixLanguageSource(name, metadata),
+    "editor/nvim/README.md": generateNvimReadmeSource(name),
+    "editor/vscode/package.json": generateVsCodePackageSource(name, metadata),
+    "editor/vscode/language-configuration.json":
+      generateVsCodeLanguageConfigurationSource(metadata),
+    "editor/vscode/syntaxes/README.md": generateVsCodeSyntaxReadmeSource(name),
+    "ast/types.ts": generateAstTypesSource(grammar, { metadata }),
+    "ast/visitor.ts": generateAstVisitorSource(grammar, { metadata }),
+    "tests/corpus/basic.txt": generateCorpusTestSource(sample),
+    "tests/tokenizer_test.ts": generateTokenizerSmokeTestSource(sample),
+    "lsp/server.ts": generateLspScaffoldSource(grammar, { metadata }),
+    "lsp/README.md": generateLspReadmeSource(name),
+    "formatter/format.ts": generateFormatterScaffoldSource(grammar, {
+      metadata,
+    }),
+    "formatter/README.md": generateFormatterReadmeSource(name),
+  };
+}
+
+/** Generates every tree-sitter query file used by the workbench preset. */
+export function generateWorkbenchQueries(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata } = {},
+): Record<string, string> {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  const metadata = options.metadata;
+  return {
+    "highlights.scm": generateTreeSitterHighlightsQuery(grammar, { metadata }),
+    "locals.scm": generateTreeSitterLocalsQuery(grammar, { metadata }),
+    "folds.scm": generateTreeSitterFoldsQuery(grammar, { metadata }),
+    "indents.scm": generateTreeSitterIndentsQuery(grammar, { metadata }),
+    "tags.scm": generateTreeSitterTagsQuery(grammar, { metadata }),
+    "rainbows.scm": generateTreeSitterRainbowsQuery(grammar, { metadata }),
+    "injections.scm": generateTreeSitterInjectionsQuery(grammar, { metadata }),
+  };
+}
+
+function renderCaptureQuery(captures: TreeSitterCaptureMetadata[]): string {
+  const lines = renderCaptureQueryEntries(captures);
+  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+}
+
+function renderCaptureQueryEntries(
+  captures: TreeSitterCaptureMetadata[],
+): string[] {
+  return captures.map((capture) => {
+    if (capture.node) return `(${capture.node}) @${capture.capture}`;
+    return `${JSON.stringify(capture.literal)} @${capture.capture}`;
+  });
+}
+
+function captureSelectorKey(capture: TreeSitterCaptureMetadata): string {
+  return capture.node ? `node:${capture.node}` : `literal:${capture.literal}`;
+}
+
+function defaultHighlightQueryEntries(
+  grammar: EbnfGrammar,
+  metadata: TreeSitterMetadata,
+  explicitSelectors: Set<string>,
+): string[] {
+  const lines: string[] = [];
+  const terminals = collectTerminals(grammar);
+  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+    grammar,
+    metadata,
+  );
+  const pushNode = (node: string, capture: string) => {
+    if (!knownNodes.has(node) || explicitSelectors.has(`node:${node}`)) return;
+    lines.push(`(${node}) @${capture}`);
+  };
+  const pushLiteral = (literal: string, capture: string) => {
+    if (explicitSelectors.has(`literal:${literal}`)) return;
+    lines.push(`${JSON.stringify(literal)} @${capture}`);
+  };
+
+  for (const terminal of terminals) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(terminal)) {
+      pushLiteral(terminal, "keyword");
+    }
+  }
+
+  const bracketLiterals = new Set(["(", ")", "[", "]", "{", "}"]);
+  const delimiterLiterals = new Set([",", ";", ":", "."]);
+  for (const terminal of terminals) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(terminal)) continue;
+    if (bracketLiterals.has(terminal)) {
+      pushLiteral(terminal, "punctuation.bracket");
+    } else if (delimiterLiterals.has(terminal)) {
+      pushLiteral(terminal, "punctuation.delimiter");
+    } else {
+      pushLiteral(terminal, "operator");
+    }
+  }
+
+  pushNode("string", "string");
+  pushNode("char", "string.special");
+  pushNode("fenced_text", "string.special");
+  pushNode("fenced_template", "string.special");
+  pushNode("int", "number");
+  pushNode("number", "number");
+  pushNode("ident", "variable");
+  pushNode("line_comment", "comment");
+
+  for (const token of grammar.tokens) {
+    if (token.kind !== "token") continue;
+    if (explicitSelectors.has(`node:${token.name}`)) continue;
+    const capture = token.name === "ident"
+      ? "variable"
+      : token.name === "int" || token.name === "number"
+      ? "number"
+      : "constant";
+    lines.push(`(${token.name}) @${capture}`);
+  }
+
+  return lines;
+}
+
+function generateTreeSitterConfigSource(
+  name: string,
+  metadata: TreeSitterMetadata,
+): string {
+  return `${
+    JSON.stringify(
+      {
+        grammars: [
+          {
+            name,
+            scope: languageScope(name, metadata),
+            "file-types": languageFileTypes(name, metadata),
+            "injection-regex": name,
+          },
+        ],
+      },
+      null,
+      2,
+    )
+  }\n`;
+}
+
+function generateTreeSitterPackageSource(
+  name: string,
+  metadata: TreeSitterMetadata,
+): string {
+  return `${
+    JSON.stringify(
+      {
+        name: `tree-sitter-${name}`,
+        version: "0.0.0",
+        type: "module",
+        main: "grammar.js",
+        files: [
+          "grammar.js",
+          "queries",
+          "tree-sitter.json",
+        ],
+        "tree-sitter": [
+          {
+            scope: languageScope(name, metadata),
+            "file-types": languageFileTypes(name, metadata),
+          },
+        ],
+      },
+      null,
+      2,
+    )
+  }\n`;
+}
+
+function generateHelixLanguageSource(
+  name: string,
+  metadata: TreeSitterMetadata,
+): string {
+  const fileTypes = languageFileTypes(name, metadata)
+    .map((fileType) => JSON.stringify(fileType))
+    .join(", ");
+  return `[[language]]
+name = ${JSON.stringify(name)}
+scope = ${JSON.stringify(languageScope(name, metadata))}
+file-types = [${fileTypes}]
+roots = []
+comment-token = ${JSON.stringify(languageComment(metadata))}
+
+[[grammar]]
+name = ${JSON.stringify(name)}
+source = { path = "../.." }
+`;
+}
+
+function generateNvimReadmeSource(name: string): string {
+  return `# Neovim scaffold for ${name}
+
+Copy the generated \`queries/\` directory into your Neovim tree-sitter runtime path for this language.
+`;
+}
+
+function generateVsCodePackageSource(
+  name: string,
+  metadata: TreeSitterMetadata,
+): string {
+  return `${
+    JSON.stringify(
+      {
+        name: `${name}-language`,
+        displayName: `${name} language`,
+        version: "0.0.0",
+        engines: { vscode: "^1.90.0" },
+        contributes: {
+          languages: [
+            {
+              id: name,
+              aliases: [name],
+              extensions: languageFileTypes(name, metadata).map((fileType) =>
+                fileType.startsWith(".") ? fileType : `.${fileType}`
+              ),
+              configuration: "./language-configuration.json",
+            },
+          ],
+        },
+      },
+      null,
+      2,
+    )
+  }\n`;
+}
+
+function generateVsCodeLanguageConfigurationSource(
+  metadata: TreeSitterMetadata,
+): string {
+  const comment = languageComment(metadata);
+  return `${
+    JSON.stringify(
+      {
+        comments: {
+          lineComment: comment,
+        },
+        brackets: [
+          ["{", "}"],
+          ["[", "]"],
+          ["(", ")"],
+        ],
+        autoClosingPairs: [
+          { open: "{", close: "}" },
+          { open: "[", close: "]" },
+          { open: "(", close: ")" },
+          { open: '"', close: '"' },
+        ],
+      },
+      null,
+      2,
+    )
+  }\n`;
+}
+
+function generateVsCodeSyntaxReadmeSource(name: string): string {
+  return `# VS Code syntax scaffold for ${name}
+
+This directory is reserved for a TextMate grammar if you need VS Code syntax highlighting without tree-sitter support.
+`;
+}
+
+function generateCorpusTestSource(sample: string): string {
+  return `==================
+basic
+==================
+${sample}
+
+---
+
+(source_file)
+`;
+}
+
+function generateTokenizerSmokeTestSource(sample: string): string {
+  return `import { lex } from "../tokenizer.ts";
+
+Deno.test("tokenizer smoke", () => {
+  const tokens = lex(${JSON.stringify(sample)});
+  if (tokens.at(-1)?.kind !== "eof") {
+    throw new Error("Expected eof token");
+  }
+});
+`;
+}
+
+function generateLspReadmeSource(name: string): string {
+  return `# ${name} LSP scaffold
+
+This is a minimal state container for a language server. Wire it to a JSON-RPC transport and a parser implementation before using it as a production LSP.
+`;
+}
+
+function generateFormatterReadmeSource(name: string): string {
+  return `# ${name} formatter scaffold
+
+The generated formatter preserves source text by default. Add node-specific formatting once the language syntax is stable.
+`;
+}
+
+function languageScope(name: string, metadata: TreeSitterMetadata): string {
+  return metadata.language?.scope ?? `source.${name}`;
+}
+
+function languageFileTypes(
+  name: string,
+  metadata: TreeSitterMetadata,
+): string[] {
+  return metadata.language?.fileTypes ?? [name];
+}
+
+function languageComment(metadata: TreeSitterMetadata): string {
+  return metadata.language?.comment ?? "//";
+}
+
+function astFieldsForNode(
+  nodeName: string,
+  metadata: TreeSitterMetadata,
+): Array<{ name: string; treeField: string }> {
+  const astFields = metadata.ast?.nodes?.[nodeName]?.fields;
+  if (astFields) {
+    return Object.entries(astFields).map(([name, treeField]) => ({
+      name,
+      treeField,
+    }));
+  }
+
+  const ruleFields = metadata.rules?.[nodeName]?.fields;
+  if (!ruleFields) return [];
+  return [...new Set(Object.values(ruleFields))].map((field) => ({
+    name: field,
+    treeField: field,
+  }));
+}
+
+function astTypeName(name: string): string {
+  return `${pascalCase(name)}AstNode`;
+}
+
+function pascalCase(name: string): string {
+  const converted = name
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join("");
+  return /^[A-Za-z]/.test(converted) ? converted : `Node${converted}`;
+}
+
+function quoteProperty(name: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);
+}
+
+function generateGrammarSample(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+): string {
+  const root = grammar.rules.find((rule) => rule.name === rootRuleName) ??
+    grammar.rules[0];
+  const sample = sampleExpression(grammar, root.expression, new Set()).trim();
+  return sample.length === 0 ? "example" : sample;
+}
+
+function sampleExpression(
+  grammar: EbnfGrammar,
+  expression: EbnfExpression,
+  seenRules: Set<string>,
+): string {
+  switch (expression.kind) {
+    case "literal":
+      return expression.value;
+    case "ref":
+      return sampleRef(grammar, expression.name, seenRules);
+    case "sequence":
+      return joinSampleParts(
+        expression.items.map((item) =>
+          sampleExpression(grammar, item, seenRules)
+        )
+          .filter((part) => part.length > 0),
+      );
+    case "choice":
+      return expression.options.length === 0
+        ? ""
+        : sampleExpression(grammar, expression.options[0], seenRules);
+    case "optional":
+    case "repeat":
+      return "";
+    case "repeat1":
+      return sampleExpression(grammar, expression.expression, seenRules);
+    case "separated": {
+      const item = sampleExpression(grammar, expression.item, seenRules);
+      const separator = sampleExpression(
+        grammar,
+        expression.separator,
+        seenRules,
+      );
+      return joinSampleParts(
+        [item, separator, item].filter((part) => part.length > 0),
+      );
+    }
+  }
+}
+
+function sampleRef(
+  grammar: EbnfGrammar,
+  name: string,
+  seenRules: Set<string>,
+): string {
+  const token = grammar.tokens.find((candidate) => candidate.name === name);
+  if (token?.kind === "token") return sampleToken(name);
+  if (name === "ident") return "example";
+  if (name === "int" || name === "number") return "1";
+  if (name === "string") return `"text"`;
+  if (name === "char") return `'x'`;
+  if (name === "newline") return "\n";
+  if (name === "indent" || name === "dedent") return "";
+  if (name === "fenced_text") return "```text\nsample\n```";
+  if (name === "fenced_template") return "```template\nsample\n```";
+
+  if (seenRules.has(name)) return "";
+  const rule = grammar.rules.find((candidate) => candidate.name === name);
+  if (!rule) return name;
+  const nextSeen = new Set(seenRules);
+  nextSeen.add(name);
+  return sampleExpression(grammar, rule.expression, nextSeen);
+}
+
+function sampleToken(name: string): string {
+  if (name.includes("int") || name.includes("number")) return "1";
+  if (name.includes("string")) return `"text"`;
+  return "example";
+}
+
+function joinSampleParts(parts: string[]): string {
+  let output = "";
+  for (const part of parts) {
+    if (output.length === 0) {
+      output = part;
+      continue;
+    }
+    if (/^[,.;:)\]}]/.test(part) || /[(\[{]$/.test(output)) {
+      output += part;
+    } else if (part === "\n" || output.endsWith("\n")) {
+      output += part;
+    } else {
+      output += ` ${part}`;
+    }
+  }
+  return output;
+}
+
 function validateTreeSitterMetadataSemantics(
   grammar: EbnfGrammar,
   rootRuleName: string,
@@ -1316,6 +2345,8 @@ function validateTreeSitterMetadataSemantics(
     }
     validateRuleMetadata(ruleMeta, expression, ruleName);
   }
+
+  validateWorkbenchMetadataSemantics(grammar, metadata);
 }
 
 function validateTreeSitterQueryMetadata(
@@ -1327,6 +2358,102 @@ function validateTreeSitterQueryMetadata(
 
   validateTreeSitterRainbowsMetadata(grammar, metadata, queries.rainbows);
   validateTreeSitterInjectionsMetadata(grammar, metadata, queries.injections);
+  validateCaptureMetadata(grammar, metadata, queries.highlights, "highlight");
+  validateCaptureMetadata(grammar, metadata, queries.locals, "locals");
+  validateCaptureMetadata(grammar, metadata, queries.folds, "fold");
+  validateCaptureMetadata(grammar, metadata, queries.indents, "indent");
+  validateCaptureMetadata(grammar, metadata, queries.tags, "tag");
+}
+
+function validateCaptureMetadata(
+  grammar: EbnfGrammar,
+  fullMetadata: TreeSitterMetadata,
+  metadata: TreeSitterCaptureMetadata[] | undefined,
+  context: string,
+): void {
+  if (!metadata) return;
+
+  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+    grammar,
+    fullMetadata,
+  );
+  const terminals = new Set(collectTerminals(grammar));
+  for (const capture of metadata) {
+    if (capture.node && !knownNodes.has(capture.node)) {
+      throw new Error(`Unknown ${context} capture node '${capture.node}'`);
+    }
+    if (capture.literal && !terminals.has(capture.literal)) {
+      throw new Error(
+        `Unknown ${context} capture literal '${capture.literal}'`,
+      );
+    }
+  }
+}
+
+function validateWorkbenchMetadataSemantics(
+  grammar: EbnfGrammar,
+  metadata: TreeSitterMetadata,
+): void {
+  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+    grammar,
+    metadata,
+  );
+
+  if (metadata.language?.scope !== undefined) {
+    if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(metadata.language.scope)) {
+      throw new Error(`Invalid language scope '${metadata.language.scope}'`);
+    }
+  }
+  for (const fileType of metadata.language?.fileTypes ?? []) {
+    if (!/^[A-Za-z0-9_.+-]+$/.test(fileType)) {
+      throw new Error(`Invalid language file type '${fileType}'`);
+    }
+  }
+
+  for (const node of Object.keys(metadata.ast?.nodes ?? {})) {
+    if (!knownNodes.has(node)) throw new Error(`Unknown AST node '${node}'`);
+  }
+  for (
+    const [node, nodeMetadata] of Object.entries(
+      metadata.ast?.nodes ?? {},
+    )
+  ) {
+    if (
+      nodeMetadata.kind && !/^[A-Za-z][A-Za-z0-9_-]*$/.test(nodeMetadata.kind)
+    ) {
+      throw new Error(
+        `Invalid AST kind '${nodeMetadata.kind}' on node '${node}'`,
+      );
+    }
+  }
+
+  for (const node of metadata.formatter?.blocks ?? []) {
+    if (!knownNodes.has(node)) {
+      throw new Error(`Unknown formatter block '${node}'`);
+    }
+  }
+  for (const node of metadata.formatter?.lists ?? []) {
+    if (!knownNodes.has(node)) {
+      throw new Error(`Unknown formatter list '${node}'`);
+    }
+  }
+  const terminals = new Set(collectTerminals(grammar));
+  for (const literal of Object.keys(metadata.formatter?.spacing ?? {})) {
+    if (!terminals.has(literal)) {
+      throw new Error(`Unknown formatter spacing literal '${literal}'`);
+    }
+  }
+
+  for (const node of metadata.lsp?.documentSymbols ?? []) {
+    if (!knownNodes.has(node)) {
+      throw new Error(`Unknown LSP document symbol node '${node}'`);
+    }
+  }
+  for (const node of metadata.lsp?.diagnostics ?? []) {
+    if (!knownNodes.has(node)) {
+      throw new Error(`Unknown LSP diagnostic node '${node}'`);
+    }
+  }
 }
 
 function validateTreeSitterRainbowsMetadata(

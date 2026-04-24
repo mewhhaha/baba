@@ -1,10 +1,21 @@
 import {
   createLexicalSpec,
   formatEbnfError,
+  generateAstTypesSource,
+  generateAstVisitorSource,
+  generateFormatterScaffoldSource,
+  generateLspScaffoldSource,
   generateTokenizerSource,
+  generateTreeSitterFoldsQuery,
   generateTreeSitterGrammar,
+  generateTreeSitterHighlightsQuery,
+  generateTreeSitterIndentsQuery,
   generateTreeSitterInjectionsQuery,
+  generateTreeSitterLocalsQuery,
   generateTreeSitterRainbowsQuery,
+  generateTreeSitterTagsQuery,
+  generateWorkbenchBundle,
+  generateWorkbenchQueries,
   parseEbnf,
   parseTreeSitterMetadata,
   validateEbnfGrammar,
@@ -90,6 +101,19 @@ async function assertMissing(path: string): Promise<void> {
     throw error;
   }
   throw new Error(`Expected ${path} to be missing`);
+}
+
+async function denoCheck(paths: string[]): Promise<void> {
+  const command = new Deno.Command(Deno.execPath(), {
+    args: ["check", ...paths],
+  });
+  const output = await command.output();
+  if (!output.success) {
+    const decoder = new TextDecoder();
+    throw new Error(
+      `${decoder.decode(output.stdout)}${decoder.decode(output.stderr)}`,
+    );
+  }
 }
 
 Deno.test("parses EBNF rules and derives lexical terminals", () => {
@@ -476,6 +500,137 @@ Deno.test("tree-sitter metadata can generate injection queries", () => {
   assertIncludes(injections, '(#set! injection.language "wgsl"))');
 });
 
+Deno.test("workbench query generators emit metadata and defaults", () => {
+  const source = `
+    token ident = /[a-z]+/ ;
+    module = function ;
+    function = "fn" ident "(" ")" block ;
+    block = "{" "}" ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: [
+        { node: "function", capture: "function" },
+        { literal: "fn", capture: "keyword.function" },
+      ],
+      locals: [{ node: "ident", capture: "local.definition" }],
+      folds: [{ node: "block", capture: "fold" }],
+      indents: [{ literal: "{", capture: "indent.begin" }],
+      tags: [{ node: "function", capture: "tag.definition" }],
+    },
+  }));
+
+  const highlights = generateTreeSitterHighlightsQuery(source, { metadata });
+  assertIncludes(highlights, "(function) @function");
+  assertIncludes(highlights, '"fn" @keyword.function');
+  assertIncludes(highlights, '"(" @punctuation.bracket');
+  assertIncludes(highlights, "(ident) @variable");
+  assertIncludes(
+    generateTreeSitterLocalsQuery(source, { metadata }),
+    "(ident) @local.definition",
+  );
+  assertIncludes(
+    generateTreeSitterFoldsQuery(source, { metadata }),
+    "(block) @fold",
+  );
+  assertIncludes(
+    generateTreeSitterIndentsQuery(source, { metadata }),
+    '"{" @indent.begin',
+  );
+  assertIncludes(
+    generateTreeSitterTagsQuery(source, { metadata }),
+    "(function) @tag.definition",
+  );
+
+  const queries = generateWorkbenchQueries(source, { metadata });
+  assertIncludes(queries["highlights.scm"], "@keyword.function");
+  assertEquals(queries["rainbows.scm"].length > 0, true);
+});
+
+Deno.test("workbench bundle emits stable scaffold and type-checks generated sources", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const source = `
+      token ident = /[a-z]+/ ;
+      module = function ;
+      function = "fn" ident "(" ")" block ;
+      block = "{" "}" ;
+    `;
+    const metadata = parseTreeSitterMetadata(JSON.stringify({
+      language: {
+        scope: "source.tiny",
+        fileTypes: ["tiny"],
+        comment: "//",
+      },
+      queries: {
+        locals: [{ node: "ident", capture: "local.definition" }],
+        folds: [{ node: "block", capture: "fold" }],
+      },
+      ast: {
+        nodes: {
+          function: {
+            kind: "function",
+            fields: { name: "name" },
+          },
+        },
+      },
+      formatter: {
+        blocks: ["block"],
+        lists: ["module"],
+        spacing: { "(": "tight" },
+      },
+      lsp: {
+        documentSymbols: ["function"],
+        diagnostics: ["module"],
+      },
+    }));
+    const bundle = generateWorkbenchBundle(source, {
+      name: "tiny",
+      metadata,
+    });
+
+    assertIncludes(bundle["tree-sitter.json"], '"scope": "source.tiny"');
+    assertIncludes(bundle["package.json"], '"tree-sitter"');
+    assertIncludes(bundle["queries/highlights.scm"], '"fn" @keyword');
+    assertEquals(bundle["queries/locals.scm"], "(ident) @local.definition\n");
+    assertIncludes(bundle["editor/helix/languages.toml"], 'name = "tiny"');
+    assertIncludes(bundle["ast/types.ts"], "export type AstNode");
+    assertIncludes(bundle["ast/visitor.ts"], "projectNode");
+    assertIncludes(bundle["formatter/format.ts"], "formatNode");
+    assertIncludes(bundle["lsp/server.ts"], "LanguageServerState");
+    assertIncludes(bundle["tests/corpus/basic.txt"], "fn example");
+
+    for (const [path, content] of Object.entries(bundle)) {
+      const slash = path.lastIndexOf("/");
+      if (slash !== -1) {
+        await Deno.mkdir(`${dir}/${path.slice(0, slash)}`, {
+          recursive: true,
+        });
+      }
+      await Deno.writeTextFile(`${dir}/${path}`, content);
+    }
+    await denoCheck([
+      `${dir}/ast/types.ts`,
+      `${dir}/ast/visitor.ts`,
+      `${dir}/formatter/format.ts`,
+      `${dir}/lsp/server.ts`,
+    ]);
+
+    assertIncludes(generateAstTypesSource(source, { metadata }), "name:");
+    assertIncludes(generateAstVisitorSource(source, { metadata }), "readField");
+    assertIncludes(
+      generateFormatterScaffoldSource(source, { metadata }),
+      "blockNodes",
+    );
+    assertIncludes(
+      generateLspScaffoldSource(source, { metadata }),
+      "documentSymbolNodes",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("fenced text and template builtins generate tokenizer and tree-sitter rules", () => {
   const source = `
     module = text_block | template_block | shader_decl ;
@@ -855,6 +1010,74 @@ Deno.test("tree-sitter metadata parser rejects invalid shapes", () => {
       })),
     "Expected metadata.extras[0].value to stay on one line",
   );
+  assertThrowsIncludes(
+    () =>
+      parseTreeSitterMetadata(JSON.stringify({
+        queries: { highlights: { node: "x", capture: "keyword" } },
+      })),
+    "Expected metadata.queries.highlights to be array",
+  );
+  assertThrowsIncludes(
+    () =>
+      parseTreeSitterMetadata(JSON.stringify({
+        queries: {
+          highlights: [{ node: "x", literal: "fn", capture: "keyword" }],
+        },
+      })),
+    "Expected metadata.queries.highlights[0] to specify exactly one of node or literal",
+  );
+  assertThrowsIncludes(
+    () =>
+      parseTreeSitterMetadata(JSON.stringify({
+        queries: {
+          highlights: [{ node: "x", capture: "bad capture" }],
+        },
+      })),
+    "Invalid metadata.queries.highlights[0].capture",
+  );
+  assertThrowsIncludes(
+    () =>
+      parseTreeSitterMetadata(JSON.stringify({
+        formatter: { spacing: { ",": "wide" } },
+      })),
+    "Invalid metadata.formatter.spacing., 'wide'",
+  );
+  assertThrowsIncludes(
+    () =>
+      parseTreeSitterMetadata(JSON.stringify({
+        language: { unknown: true },
+      })),
+    "Unknown metadata.language key 'unknown'",
+  );
+  assertThrowsIncludes(
+    () =>
+      generateTreeSitterHighlightsQuery(`module = "fn" ident ;`, {
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          queries: {
+            highlights: [{ node: "missing", capture: "keyword" }],
+          },
+        })),
+      }),
+    "Unknown highlight capture node 'missing'",
+  );
+  assertThrowsIncludes(
+    () =>
+      generateWorkbenchBundle(`module = "fn" ident ;`, {
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          language: { fileTypes: ["bad type"] },
+        })),
+      }),
+    "Invalid language file type 'bad type'",
+  );
+  assertThrowsIncludes(
+    () =>
+      generateWorkbenchBundle(`module = "fn" ident ;`, {
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          formatter: { blocks: ["missing"] },
+        })),
+      }),
+    "Unknown formatter block 'missing'",
+  );
 });
 
 Deno.test("cli writes requested output destinations", async () => {
@@ -950,6 +1173,54 @@ Deno.test("cli writes requested output destinations", async () => {
     await assertMissing(`${staleOutDir}/injections.scm`);
     await assertMissing(`${dir}/stale-tree-sitter/queries/rainbows.scm`);
     await assertMissing(`${dir}/stale-tree-sitter/queries/injections.scm`);
+
+    const workbenchOutDir = `${dir}/workbench`;
+    const workbenchTreeSitterOut = `${dir}/workbench-tree-sitter/grammar.js`;
+    await main([
+      grammarPath,
+      "--out",
+      workbenchOutDir,
+      "--ts-out",
+      workbenchTreeSitterOut,
+      "--preset",
+      "workbench",
+      "--name",
+      "tiny",
+      "--ts-meta",
+      metadataPath,
+    ]);
+    assertIncludes(
+      await Deno.readTextFile(`${workbenchOutDir}/queries/highlights.scm`),
+      '"fn" @keyword',
+    );
+    assertEquals(
+      await Deno.readTextFile(`${workbenchOutDir}/queries/locals.scm`),
+      "",
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${workbenchOutDir}/tree-sitter.json`),
+      '"name": "tiny"',
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${workbenchOutDir}/ast/types.ts`),
+      "export type AstNode",
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${workbenchTreeSitterOut}`),
+      "export default grammar({",
+    );
+    assertIncludes(
+      await Deno.readTextFile(
+        `${dir}/workbench-tree-sitter/queries/highlights.scm`,
+      ),
+      '"fn" @keyword',
+    );
+    assertEquals(
+      await Deno.readTextFile(
+        `${dir}/workbench-tree-sitter/queries/locals.scm`,
+      ),
+      "",
+    );
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -963,5 +1234,9 @@ Deno.test("cli reports argument errors", async () => {
   await assertRejectsIncludes(
     () => main(["--bad"]),
     "Unknown option '--bad'",
+  );
+  await assertRejectsIncludes(
+    () => main(["--preset", "huge"]),
+    "Unknown preset 'huge'",
   );
 });

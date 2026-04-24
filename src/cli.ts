@@ -10,6 +10,8 @@ import {
   generateTreeSitterGrammar,
   generateTreeSitterInjectionsQuery,
   generateTreeSitterRainbowsQuery,
+  generateWorkbenchBundle,
+  generateWorkbenchQueries,
   parseTreeSitterMetadata,
 } from "./generate.ts";
 import { EbnfError, formatEbnfError, parseEbnf } from "./parser.ts";
@@ -20,6 +22,7 @@ interface Options {
   treeSitterMeta?: string;
   treeSitterOut?: string;
   name: string;
+  preset: "core" | "workbench";
   help: boolean;
 }
 
@@ -59,32 +62,48 @@ export async function main(args: string[]): Promise<void> {
   });
   const rainbows = generateTreeSitterRainbowsQuery(grammar, { metadata });
   const injections = generateTreeSitterInjectionsQuery(grammar, { metadata });
+  const workbench = options.preset === "workbench"
+    ? generateWorkbenchBundle(grammar, { name: options.name, metadata })
+    : undefined;
 
   if (!options.outDir) {
     console.log(manifest.trimEnd());
   }
 
   if (options.outDir) {
-    await Deno.mkdir(options.outDir, { recursive: true });
-    await Deno.writeTextFile(`${options.outDir}/lexical.json`, manifest);
-    await Deno.writeTextFile(`${options.outDir}/tokenizer.ts`, tokenizer);
-    await Deno.writeTextFile(`${options.outDir}/grammar.js`, treeSitter);
-    await writeOptionalTextFile(`${options.outDir}/rainbows.scm`, rainbows);
-    await writeOptionalTextFile(`${options.outDir}/injections.scm`, injections);
+    if (workbench) {
+      await writeBundle(options.outDir, workbench);
+    } else {
+      await Deno.mkdir(options.outDir, { recursive: true });
+      await Deno.writeTextFile(`${options.outDir}/lexical.json`, manifest);
+      await Deno.writeTextFile(`${options.outDir}/tokenizer.ts`, tokenizer);
+      await Deno.writeTextFile(`${options.outDir}/grammar.js`, treeSitter);
+      await writeOptionalTextFile(`${options.outDir}/rainbows.scm`, rainbows);
+      await writeOptionalTextFile(
+        `${options.outDir}/injections.scm`,
+        injections,
+      );
+    }
   }
 
   if (options.treeSitterOut) {
+    const queryFiles = options.preset === "workbench"
+      ? generateWorkbenchQueries(grammar, { metadata })
+      : {
+        "rainbows.scm": rainbows,
+        "injections.scm": injections,
+      };
     await writeTreeSitterOutput(
       options.treeSitterOut,
       treeSitter,
-      rainbows,
-      injections,
+      queryFiles,
+      options.preset === "workbench",
     );
   }
 }
 
 function parseArgs(args: string[]): Options {
-  const options: Options = { name: "grammar", help: false };
+  const options: Options = { name: "grammar", preset: "core", help: false };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -119,6 +138,15 @@ function parseArgs(args: string[]): Options {
         options.treeSitterOut = treeSitterOut;
         break;
       }
+      case "--preset": {
+        const preset = args[++i];
+        if (!preset) throw new Error("Expected preset after --preset");
+        if (preset !== "core" && preset !== "workbench") {
+          throw new Error(`Unknown preset '${preset}'`);
+        }
+        options.preset = preset;
+        break;
+      }
       default:
         if (arg.startsWith("-")) throw new Error(`Unknown option '${arg}'`);
         if (options.input) throw new Error(`Unexpected extra input '${arg}'`);
@@ -143,6 +171,7 @@ Outputs:
   injections.scm Generated tree-sitter injection query when metadata enables it
 
 Options:
+  --preset      Generation preset: core or workbench. Defaults to core
   --ts-meta      JSON metadata for tree-sitter-specific conflicts, precedence, fields, aliases, node shaping, and queries
   --ts-out       Additional output path for the production tree-sitter grammar`;
 }
@@ -157,8 +186,8 @@ function parentDir(path: string): string | null {
 async function writeTreeSitterOutput(
   treeSitterOut: string,
   grammar: string,
-  rainbows: string,
-  injections: string,
+  queries: Record<string, string>,
+  writeEmptyQueries: boolean,
 ): Promise<void> {
   const parent = parentDir(treeSitterOut);
   if (parent) await Deno.mkdir(parent, { recursive: true });
@@ -166,9 +195,31 @@ async function writeTreeSitterOutput(
   if (!parent) return;
 
   const queryDir = `${parent}/queries`;
-  if (rainbows || injections) await Deno.mkdir(queryDir, { recursive: true });
-  await writeOptionalTextFile(`${queryDir}/rainbows.scm`, rainbows);
-  await writeOptionalTextFile(`${queryDir}/injections.scm`, injections);
+  const queryEntries = Object.entries(queries);
+  if (writeEmptyQueries || queryEntries.some(([, content]) => content)) {
+    await Deno.mkdir(queryDir, { recursive: true });
+  }
+  for (const [name, content] of queryEntries) {
+    const path = `${queryDir}/${name}`;
+    if (writeEmptyQueries) {
+      await Deno.writeTextFile(path, content);
+    } else {
+      await writeOptionalTextFile(path, content);
+    }
+  }
+}
+
+async function writeBundle(
+  outDir: string,
+  bundle: Record<string, string>,
+): Promise<void> {
+  await Deno.mkdir(outDir, { recursive: true });
+  for (const [relativePath, content] of Object.entries(bundle)) {
+    const path = `${outDir}/${relativePath}`;
+    const parent = parentDir(path);
+    if (parent) await Deno.mkdir(parent, { recursive: true });
+    await Deno.writeTextFile(path, content);
+  }
 }
 
 async function writeOptionalTextFile(

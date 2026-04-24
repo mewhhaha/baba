@@ -80,6 +80,8 @@ export interface LexicalTokenSpec {
 
 /** Optional tree-sitter generation metadata. */
 export interface TreeSitterMetadata {
+  /** Language package/editor identity metadata. */
+  language?: WorkbenchLanguageMetadata;
   /** Extra tokens or rules allowed between tree-sitter tokens. */
   extras?: TreeSitterExtra[];
   /** Word rule used by tree-sitter. */
@@ -92,16 +94,52 @@ export interface TreeSitterMetadata {
   inline?: string[];
   /** Query generation metadata. */
   queries?: TreeSitterQueriesMetadata;
+  /** Typed AST helper generation metadata. */
+  ast?: WorkbenchAstMetadata;
+  /** Formatter scaffold metadata. */
+  formatter?: WorkbenchFormatterMetadata;
+  /** LSP scaffold metadata. */
+  lsp?: WorkbenchLspMetadata;
   /** Per-rule tree-sitter shaping metadata. */
   rules?: Record<string, TreeSitterRuleMetadata>;
 }
 
+/** Language identity metadata used by workbench scaffolds. */
+export interface WorkbenchLanguageMetadata {
+  /** Tree-sitter/editor scope, default `source.<name>`. */
+  scope?: string;
+  /** File extensions or names without a leading dot, default `[name]`. */
+  fileTypes?: string[];
+  /** Line comment token, default `//`. */
+  comment?: string;
+}
+
 /** Query generation metadata. */
 export interface TreeSitterQueriesMetadata {
+  /** Highlight capture query entries. */
+  highlights?: TreeSitterCaptureMetadata[];
+  /** Locals capture query entries. */
+  locals?: TreeSitterCaptureMetadata[];
+  /** Fold capture query entries. */
+  folds?: TreeSitterCaptureMetadata[];
+  /** Indentation capture query entries. */
+  indents?: TreeSitterCaptureMetadata[];
+  /** Tag capture query entries. */
+  tags?: TreeSitterCaptureMetadata[];
   /** Rainbow bracket query settings. */
   rainbows?: TreeSitterRainbowsMetadata;
   /** Injection query settings. */
   injections?: TreeSitterInjectionMetadata[];
+}
+
+/** A metadata-driven tree-sitter query capture. */
+export interface TreeSitterCaptureMetadata {
+  /** Node name to capture. Mutually exclusive with `literal`. */
+  node?: string;
+  /** Literal terminal to capture. Mutually exclusive with `node`. */
+  literal?: string;
+  /** Capture name without the leading `@`. */
+  capture: string;
 }
 
 /** Rainbow bracket query settings. */
@@ -162,4 +200,36 @@ export interface TreeSitterPathMetadata {
   inline_path?: boolean;
   /** Hide the node produced at this path. */
   hidden_path?: boolean;
+}
+
+/** Typed AST helper generation metadata. */
+export interface WorkbenchAstMetadata {
+  /** Rule/node-specific AST metadata keyed by tree-sitter node name. */
+  nodes?: Record<string, WorkbenchAstNodeMetadata>;
+}
+
+/** Typed AST metadata for one node. */
+export interface WorkbenchAstNodeMetadata {
+  /** Generated discriminant value, defaulting to the node name. */
+  kind?: string;
+  /** Generated field names mapped to tree-sitter field names. */
+  fields?: Record<string, string>;
+}
+
+/** Formatter scaffold metadata. */
+export interface WorkbenchFormatterMetadata {
+  /** Nodes that should be treated as blocks by the formatter scaffold. */
+  blocks?: string[];
+  /** Nodes that should be treated as lists by the formatter scaffold. */
+  lists?: string[];
+  /** Literal spacing hints keyed by terminal text. */
+  spacing?: Record<string, "tight" | "space" | "newline">;
+}
+
+/** LSP scaffold metadata. */
+export interface WorkbenchLspMetadata {
+  /** Nodes exposed as document symbols. */
+  documentSymbols?: string[];
+  /** Nodes that should be considered for parser diagnostics. */
+  diagnostics?: string[];
 }

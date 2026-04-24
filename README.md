@@ -16,6 +16,8 @@ scaffolding from it:
 - `grammar.js`: ESM tree-sitter grammar
 - `rainbows.scm`: optional tree-sitter rainbow-bracket query
 - `injections.scm`: optional tree-sitter injection query
+- workbench scaffold: query bundle, editor config, typed AST helpers, starter
+  tests, LSP skeleton, and formatter skeleton
 
 Tree-sitter-specific concerns such as conflicts, precedence, supertypes, extras,
 field names, aliases, and query shaping live in optional JSON metadata, so the
@@ -61,6 +63,30 @@ generated/
   lexical.json
   tokenizer.ts
   grammar.js
+```
+
+Generate the opt-in workbench scaffold:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated \
+  --name tiny \
+  --ts-meta tree-sitter-meta.json \
+  --preset workbench
+```
+
+That keeps the core files and adds:
+
+```text
+generated/
+  tree-sitter.json
+  package.json
+  queries/
+  editor/
+  ast/
+  tests/
+  lsp/
+  formatter/
 ```
 
 Use the generated tokenizer:
@@ -116,6 +142,7 @@ import {
   generateLexicalManifest,
   generateTokenizerSource,
   generateTreeSitterGrammar,
+  generateWorkbenchBundle,
   parseEbnf,
   parseTreeSitterMetadata,
   validateEbnfGrammar,
@@ -133,10 +160,15 @@ try {
     name: "tiny",
     rootRule: "module",
   });
+  const workbench = generateWorkbenchBundle(grammar, {
+    name: "tiny",
+    rootRule: "module",
+  });
 
   await Deno.writeTextFile("generated/tokenizer.ts", tokenizer);
   await Deno.writeTextFile("generated/lexical.json", manifest);
   await Deno.writeTextFile("generated/grammar.js", treeSitter);
+  console.log(Object.keys(workbench));
 } catch (error) {
   if (error instanceof EbnfError) {
     console.error(formatEbnfError(error));
@@ -249,6 +281,11 @@ the EBNF:
 
 ```json
 {
+  "language": {
+    "scope": "source.tiny",
+    "fileTypes": ["tiny"],
+    "comment": "//"
+  },
   "extras": [
     { "kind": "regex", "value": "[ \\t\\r\\n]" },
     { "kind": "rule", "name": "line_comment" }
@@ -266,6 +303,22 @@ the EBNF:
     }
   },
   "queries": {
+    "highlights": [
+      { "literal": "fn", "capture": "keyword.function" },
+      { "node": "function", "capture": "function" }
+    ],
+    "locals": [
+      { "node": "ident", "capture": "local.definition" }
+    ],
+    "folds": [
+      { "node": "block", "capture": "fold" }
+    ],
+    "indents": [
+      { "literal": "{", "capture": "indent.begin" }
+    ],
+    "tags": [
+      { "node": "function", "capture": "tag.definition" }
+    ],
     "rainbows": {
       "scopes": ["function", "block"],
       "brackets": ["(", "{", "["]
@@ -273,6 +326,23 @@ the EBNF:
     "injections": [
       { "node": "wgsl_content", "language": "wgsl" }
     ]
+  },
+  "ast": {
+    "nodes": {
+      "function": {
+        "kind": "function",
+        "fields": { "name": "name" }
+      }
+    }
+  },
+  "formatter": {
+    "blocks": ["block"],
+    "lists": ["module"],
+    "spacing": { "(": "tight" }
+  },
+  "lsp": {
+    "documentSymbols": ["function"],
+    "diagnostics": ["module"]
   }
 }
 ```
