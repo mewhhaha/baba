@@ -1,3 +1,9 @@
+/**
+ * Command-line entrypoint for generating baba outputs.
+ *
+ * @module
+ */
+
 import {
   generateLexicalManifest,
   generateTokenizerSource,
@@ -29,6 +35,7 @@ if (import.meta.main) {
   }
 }
 
+/** Runs the baba CLI with explicit argv-style arguments. */
 export async function main(args: string[]): Promise<void> {
   const options = parseArgs(args);
   if (options.help) {

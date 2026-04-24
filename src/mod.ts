@@ -1,3 +1,9 @@
+/**
+ * EBNF parser and generator tools for building language scaffolding.
+ *
+ * @module
+ */
+
 export type {
   EbnfExpression,
   EbnfGrammar,

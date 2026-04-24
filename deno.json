@@ -1,7 +1,22 @@
 {
-  "name": "baba",
-  "exports": "./src/mod.ts",
+  "name": "@mewhhaha/baba",
+  "version": "0.1.0",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/mod.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "publish": {
+    "include": [
+      "README.md",
+      "LICENSE",
+      "deno.json",
+      "src/**/*.ts"
+    ]
+  },
   "tasks": {
-    "test": "deno test --allow-read --allow-write"
+    "test": "deno test --allow-read --allow-write",
+    "check": "deno check src/mod.ts src/cli.ts tests/grammar_test.ts",
+    "publish:dry-run": "deno publish --dry-run"
   }
 }

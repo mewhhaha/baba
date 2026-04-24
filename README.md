@@ -2,43 +2,189 @@
 
 EBNF tooling for language projects.
 
-This package currently parses a compact EBNF dialect and can generate:
+The name comes from:
 
-- `lexical.json`: sorted keyword and symbol tables
-- `tokenizer.ts`: a standalone TypeScript tokenizer
-- `grammar.js`: an ESM tree-sitter grammar from EBNF plus optional parser
-  metadata
-- `rainbows.scm`: optional tree-sitter rainbow-bracket query from metadata plus
-  grammar terminals
-
-```sh
-deno run --allow-read --allow-write src/cli.ts \
-  path/to/grammar.ebnf \
-  --out generated \
-  --name language_name \
-  --ts-meta path/to/tree-sitter-meta.json \
-  --ts-out path/to/tree-sitter/grammar.js
+```text
+Grammar -> Gramma -> Grandma -> Baba
 ```
 
-The EBNF remains the language source of truth. Tree-sitter-specific concerns
-such as conflicts, precedence, supertypes, extras, field names, and generated
-query shaping live in a sidecar JSON metadata file so the grammar stays readable
-without giving up a production parser.
+baba keeps a grammar as the source of truth, then generates practical parser
+scaffolding from it:
 
-## EBNF dialect
+- `lexical.json`: sorted keyword, symbol, token, and skip manifest
+- `tokenizer.ts`: standalone TypeScript tokenizer
+- `grammar.js`: ESM tree-sitter grammar
+- `rainbows.scm`: optional tree-sitter rainbow-bracket query
+- `injections.scm`: optional tree-sitter injection query
 
-Rules use `name = expression ;`. Expressions support sequences, `|` choices,
-groups, literals, refs, `[ optional ]`, `{ repeated }`, and postfix operators:
+Tree-sitter-specific concerns such as conflicts, precedence, supertypes, extras,
+field names, aliases, and query shaping live in optional JSON metadata, so the
+grammar stays readable.
+
+## Quick Start
+
+Create a grammar file:
+
+```ebnf
+token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token int = /[0-9]+/ ;
+skip whitespace = /[ \t\r\n]+/ ;
+
+module = function+ ;
+function = "fn" ident "(" params? ")" block ;
+params = param % "," ;
+param = ident ":" ident ;
+block = "{" statement* "}" ;
+statement = "let" ident "=" int ";" ;
+```
+
+After publishing, run the CLI directly from JSR:
+
+```sh
+deno run --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
+  --out generated \
+  --name tiny
+```
+
+For local development from this repository, run the same CLI source file:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated \
+  --name tiny
+```
+
+That writes:
+
+```text
+generated/
+  lexical.json
+  tokenizer.ts
+  grammar.js
+```
+
+Use the generated tokenizer:
+
+```ts
+import { lex } from "./generated/tokenizer.ts";
+
+const tokens = lex(`fn add(a: i32) { let n = 1; }`);
+console.log(tokens.map((token) => [token.kind, token.text]));
+```
+
+Generate only the lexical manifest to stdout:
+
+```sh
+deno run --allow-read src/cli.ts grammar.ebnf
+```
+
+Generate a tree-sitter grammar at a specific path while still printing the
+lexical manifest:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --name tiny \
+  --ts-out tree-sitter-tiny/grammar.js
+```
+
+Generate both the local bundle and a tree-sitter output copy:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated \
+  --name tiny \
+  --ts-out tree-sitter-tiny/grammar.js
+```
+
+Pass tree-sitter metadata when needed:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated \
+  --name tiny \
+  --ts-meta tree-sitter-meta.json
+```
+
+## Library API
+
+After publishing, import the public API from JSR:
+
+```ts
+import {
+  EbnfError,
+  formatEbnfError,
+  generateLexicalManifest,
+  generateTokenizerSource,
+  generateTreeSitterGrammar,
+  parseEbnf,
+  parseTreeSitterMetadata,
+  validateEbnfGrammar,
+} from "jsr:@mewhhaha/baba";
+
+const source = await Deno.readTextFile("grammar.ebnf");
+
+try {
+  const grammar = parseEbnf(source);
+  validateEbnfGrammar(grammar, { rootRule: "module" });
+
+  const tokenizer = generateTokenizerSource(grammar);
+  const manifest = generateLexicalManifest(grammar);
+  const treeSitter = generateTreeSitterGrammar(grammar, {
+    name: "tiny",
+    rootRule: "module",
+  });
+
+  await Deno.writeTextFile("generated/tokenizer.ts", tokenizer);
+  await Deno.writeTextFile("generated/lexical.json", manifest);
+  await Deno.writeTextFile("generated/grammar.js", treeSitter);
+} catch (error) {
+  if (error instanceof EbnfError) {
+    console.error(formatEbnfError(error));
+  } else {
+    throw error;
+  }
+}
+```
+
+Inside this repository, use `./src/mod.ts` instead of the JSR specifier.
+
+Parse tree-sitter metadata separately:
+
+```ts
+const metadata = parseTreeSitterMetadata(
+  await Deno.readTextFile("tree-sitter-meta.json"),
+);
+
+const treeSitter = generateTreeSitterGrammar(source, {
+  name: "tiny",
+  metadata,
+});
+```
+
+## EBNF Dialect
+
+Rules use `name = expression ;`.
 
 ```ebnf
 module = item+ ;
+item = function | declaration ;
+```
+
+Expressions support sequences, choices, groups, literals, refs, optional values,
+repetition, one-or-more repetition, and separated lists.
+
+```ebnf
 maybe = item? ;
 many = item* ;
+many_old_style = { item } ;
+one_or_more = item+ ;
+optional_old_style = [ item ] ;
+grouped = (item | other) ;
 list = item % "," ;
 optional_list = (item % ",")? ;
 ```
 
-Terminals can be declared before rules. `token` declarations emit tokens; `skip`
+Terminals can be declared before rules. `token` declarations emit tokens. `skip`
 declarations are consumed by the tokenizer and become tree-sitter extras.
 
 ```ebnf
@@ -49,6 +195,117 @@ skip whitespace = /[ \t\r\n]+/ ;
 module = ident int ;
 ```
 
-Undeclared builtins such as `ident`, `int`, `string`, `char`, `newline`,
-`indent`, and `dedent` still work for compact grammars. Parse errors include
-line/column diagnostics with a source marker.
+Regex literals use `/.../` with escaped `/` when needed. Flags are not
+supported.
+
+Undeclared builtins still work for compact grammars:
+
+```ebnf
+module = ident int string ;
+```
+
+Current builtin refs include:
+
+- `ident`
+- `int`
+- `number`
+- `string`
+- `char`
+- `fenced_text`
+- `fenced_template`
+- `newline`
+- `indent`
+- `dedent`
+
+Layout tokens are enabled when a grammar references `newline`, `indent`, or
+`dedent`. Fenced blocks are scanned atomically, so indentation inside fenced
+content is ignored.
+
+## Validation And Diagnostics
+
+baba validates grammar semantics before generation:
+
+- duplicate rule or token names fail
+- rule and token names share one namespace
+- rule names cannot collide with generated tree-sitter builtins
+- unknown rule refs fail
+- unknown root rules fail
+- token regexes must compile and must not match the empty string
+- metadata JSON is parsed and validated strictly
+
+Parse errors include source locations:
+
+```text
+Unterminated string literal at 1:10
+module = "unterminated
+         ^
+```
+
+## Tree-Sitter Metadata
+
+Metadata is optional JSON passed through `--ts-meta` or
+`parseTreeSitterMetadata`. Use it for tree-sitter concerns that do not belong in
+the EBNF:
+
+```json
+{
+  "extras": [
+    { "kind": "regex", "value": "[ \\t\\r\\n]" },
+    { "kind": "rule", "name": "line_comment" }
+  ],
+  "word": "ident",
+  "supertypes": ["expr"],
+  "conflicts": [["expr", "pattern"]],
+  "rules": {
+    "call": {
+      "fields": {
+        "0": "function",
+        "2": "arguments"
+      },
+      "wrap": { "kind": "prec", "value": 1 }
+    }
+  },
+  "queries": {
+    "rainbows": {
+      "scopes": ["function", "block"],
+      "brackets": ["(", "{", "["]
+    },
+    "injections": [
+      { "node": "wgsl_content", "language": "wgsl" }
+    ]
+  }
+}
+```
+
+## Development
+
+Run tests:
+
+```sh
+deno task test
+```
+
+Check public entrypoints:
+
+```sh
+deno check src/mod.ts src/cli.ts tests/grammar_test.ts
+```
+
+Lint:
+
+```sh
+deno lint
+```
+
+Check the package before publishing:
+
+```sh
+deno task publish:dry-run
+```
+
+Publish when the dry run is clean and the version in `deno.json` has been
+bumped:
+
+```sh
+deno publish
+```

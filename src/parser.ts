@@ -14,11 +14,16 @@ interface Token {
   span: SourceSpan;
 }
 
+/** Syntax error raised while parsing EBNF source. */
 export class EbnfError extends Error {
+  /** One-based source line where the error starts. */
   readonly line: number;
+  /** One-based source column where the error starts. */
   readonly column: number;
+  /** Full source line containing the error. */
   readonly sourceLine: string;
 
+  /** Creates a parse error with source context. */
   constructor(message: string, readonly span: SourceSpan, source: string) {
     super(`${message} at ${span.line}:${span.column}`);
     this.name = "EbnfError";
@@ -27,19 +32,23 @@ export class EbnfError extends Error {
     this.sourceLine = getSourceLine(source, span.start);
   }
 
+  /** Zero-based inclusive source offset where the error starts. */
   get start(): number {
     return this.span.start;
   }
 
+  /** Zero-based exclusive source offset where the error ends. */
   get end(): number {
     return this.span.end;
   }
 }
 
+/** Parses EBNF source into a span-rich grammar AST. */
 export function parseEbnf(source: string): EbnfGrammar {
   return new Parser(source, lexEbnf(source)).parseGrammar();
 }
 
+/** Formats an EBNF parse error with source line and caret marker. */
 export function formatEbnfError(error: EbnfError): string {
   const markerWidth = Math.max(1, error.span.end - error.span.start);
   const marker = `${" ".repeat(Math.max(0, error.column - 1))}${
