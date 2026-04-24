@@ -1,0 +1,30 @@
+export type {
+  EbnfExpression,
+  EbnfGrammar,
+  EbnfRule,
+  EbnfTokenDeclaration,
+  LexicalSpec,
+  LexicalTokenSpec,
+  SourceSpan,
+  TreeSitterExtra,
+  TreeSitterInjectionMetadata,
+  TreeSitterMetadata,
+  TreeSitterPathMetadata,
+  TreeSitterQueriesMetadata,
+  TreeSitterRainbowsMetadata,
+  TreeSitterRuleMetadata,
+  TreeSitterRuleToken,
+  TreeSitterRuleWrap,
+} from "./ast.ts";
+export {
+  collectTerminals,
+  createLexicalSpec,
+  generateLexicalManifest,
+  generateTokenizerSource,
+  generateTreeSitterGrammar,
+  generateTreeSitterInjectionsQuery,
+  generateTreeSitterRainbowsQuery,
+  parseTreeSitterMetadata,
+  validateEbnfGrammar,
+} from "./generate.ts";
+export { EbnfError, formatEbnfError, parseEbnf } from "./parser.ts";
