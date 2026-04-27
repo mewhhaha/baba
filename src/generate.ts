@@ -1,6 +1,7 @@
 import type {
   EbnfExpression,
   EbnfGrammar,
+  GeneratedBundle,
   LexicalSpec,
   LexicalTokenSpec,
   TreeSitterCaptureMetadata,
@@ -12,12 +13,8 @@ import type {
   TreeSitterRuleMetadata,
   TreeSitterRuleToken,
   TreeSitterRuleWrap,
-  WorkbenchAstMetadata,
-  WorkbenchAstNodeMetadata,
-  WorkbenchFormatterMetadata,
-  WorkbenchLanguageMetadata,
-  WorkbenchLspMetadata,
 } from "./ast.ts";
+import { generatedBundle } from "./bundle.ts";
 import { parseEbnf } from "./parser.ts";
 
 const lexicalBuiltins = new Set([
@@ -318,11 +315,12 @@ export function validateEbnfGrammar(
 /** Builds the lexical specification used by generated tokenizers. */
 export function createLexicalSpec(
   sourceOrGrammar: string | EbnfGrammar,
+  options: { skipValidation?: boolean } = {},
 ): LexicalSpec {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const terminals = collectTerminals(grammar);
   const keywords: string[] = [];
   const symbols: string[] = [];
@@ -359,20 +357,30 @@ export function collectTerminals(grammar: EbnfGrammar): string[] {
 /** Generates a formatted JSON manifest for lexical terminals. */
 export function generateLexicalManifest(
   sourceOrGrammar: string | EbnfGrammar,
+  options: { spec?: LexicalSpec; skipValidation?: boolean } = {},
 ): string {
-  return `${JSON.stringify(createLexicalSpec(sourceOrGrammar), null, 2)}\n`;
+  const spec = options.spec ??
+    createLexicalSpec(sourceOrGrammar, {
+      skipValidation: options.skipValidation,
+    });
+  return `${JSON.stringify(spec, null, 2)}\n`;
 }
 
 /** Generates standalone TypeScript source for a tokenizer. */
 export function generateTokenizerSource(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { exportName?: string } = {},
+  options: {
+    exportName?: string;
+    spec?: LexicalSpec;
+    skipValidation?: boolean;
+  } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
-  const spec = createLexicalSpec(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const spec = options.spec ??
+    createLexicalSpec(grammar, { skipValidation: options.skipValidation });
   const exportName = options.exportName ?? "lex";
   if (usesLayoutTokens(grammar)) {
     return generateLayoutTokenizerSource(spec, exportName);
@@ -793,519 +801,7 @@ function isIdentPart(char: string): boolean {
 `;
 }
 
-/** Parses and validates tree-sitter metadata JSON. */
-export function parseTreeSitterMetadata(source: string): TreeSitterMetadata {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(source);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid tree-sitter metadata JSON: ${message}`);
-  }
-  return parseTreeSitterMetadataObject(parsed, "metadata");
-}
-
-type UnknownRecord = Record<string, unknown>;
-
-function parseTreeSitterMetadataObject(
-  value: unknown,
-  path: string,
-): TreeSitterMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, [
-    "language",
-    "extras",
-    "word",
-    "supertypes",
-    "conflicts",
-    "inline",
-    "queries",
-    "ast",
-    "formatter",
-    "lsp",
-    "rules",
-  ]);
-
-  const metadata: TreeSitterMetadata = {};
-  if (hasKey(object, "language")) {
-    metadata.language = parseLanguageMetadata(
-      object.language,
-      `${path}.language`,
-    );
-  }
-  if (hasKey(object, "extras")) {
-    metadata.extras = expectArray(object.extras, `${path}.extras`).map((
-      extra,
-      index,
-    ) => parseTreeSitterExtra(extra, `${path}.extras[${index}]`));
-  }
-  if (hasKey(object, "word")) {
-    metadata.word = expectString(object.word, `${path}.word`);
-  }
-  if (hasKey(object, "supertypes")) {
-    metadata.supertypes = expectStringArray(
-      object.supertypes,
-      `${path}.supertypes`,
-    );
-  }
-  if (hasKey(object, "conflicts")) {
-    metadata.conflicts = expectArray(object.conflicts, `${path}.conflicts`).map(
-      (conflict, index) =>
-        expectStringArray(conflict, `${path}.conflicts[${index}]`),
-    );
-  }
-  if (hasKey(object, "inline")) {
-    metadata.inline = expectStringArray(object.inline, `${path}.inline`);
-  }
-  if (hasKey(object, "queries")) {
-    metadata.queries = parseQueriesMetadata(object.queries, `${path}.queries`);
-  }
-  if (hasKey(object, "ast")) {
-    metadata.ast = parseAstMetadata(object.ast, `${path}.ast`);
-  }
-  if (hasKey(object, "formatter")) {
-    metadata.formatter = parseFormatterMetadata(
-      object.formatter,
-      `${path}.formatter`,
-    );
-  }
-  if (hasKey(object, "lsp")) {
-    metadata.lsp = parseLspMetadata(object.lsp, `${path}.lsp`);
-  }
-  if (hasKey(object, "rules")) {
-    const rulesObject = expectObject(object.rules, `${path}.rules`);
-    const rules: Record<string, TreeSitterRuleMetadata> = {};
-    for (const [ruleName, ruleValue] of Object.entries(rulesObject)) {
-      rules[ruleName] = parseRuleMetadataShape(
-        ruleValue,
-        `${path}.rules.${ruleName}`,
-      );
-    }
-    metadata.rules = rules;
-  }
-
-  return metadata;
-}
-
-function parseTreeSitterExtra(value: unknown, path: string): TreeSitterExtra {
-  const object = expectObject(value, path);
-  const kind = expectString(object.kind, `${path}.kind`);
-  if (kind === "regex") {
-    assertKnownKeys(object, path, ["kind", "value"]);
-    return { kind, value: parseRegexPattern(object.value, `${path}.value`) };
-  }
-  if (kind === "rule") {
-    assertKnownKeys(object, path, ["kind", "name"]);
-    return { kind, name: expectString(object.name, `${path}.name`) };
-  }
-  throw new Error(`Invalid ${path}.kind '${kind}'`);
-}
-
-function parseLanguageMetadata(
-  value: unknown,
-  path: string,
-): WorkbenchLanguageMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["scope", "fileTypes", "comment"]);
-
-  const metadata: WorkbenchLanguageMetadata = {};
-  if (hasKey(object, "scope")) {
-    metadata.scope = expectString(object.scope, `${path}.scope`);
-  }
-  if (hasKey(object, "fileTypes")) {
-    metadata.fileTypes = expectStringArray(
-      object.fileTypes,
-      `${path}.fileTypes`,
-    );
-  }
-  if (hasKey(object, "comment")) {
-    metadata.comment = expectString(object.comment, `${path}.comment`);
-  }
-  return metadata;
-}
-
-function parseQueriesMetadata(
-  value: unknown,
-  path: string,
-): TreeSitterMetadata["queries"] {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, [
-    "highlights",
-    "locals",
-    "folds",
-    "indents",
-    "tags",
-    "rainbows",
-    "injections",
-  ]);
-
-  const queries: NonNullable<TreeSitterMetadata["queries"]> = {};
-  if (hasKey(object, "highlights")) {
-    queries.highlights = parseCaptureArray(
-      object.highlights,
-      `${path}.highlights`,
-    );
-  }
-  if (hasKey(object, "locals")) {
-    queries.locals = parseCaptureArray(object.locals, `${path}.locals`);
-  }
-  if (hasKey(object, "folds")) {
-    queries.folds = parseCaptureArray(object.folds, `${path}.folds`);
-  }
-  if (hasKey(object, "indents")) {
-    queries.indents = parseCaptureArray(object.indents, `${path}.indents`);
-  }
-  if (hasKey(object, "tags")) {
-    queries.tags = parseCaptureArray(object.tags, `${path}.tags`);
-  }
-  if (hasKey(object, "rainbows")) {
-    queries.rainbows = parseRainbowsMetadata(
-      object.rainbows,
-      `${path}.rainbows`,
-    );
-  }
-  if (hasKey(object, "injections")) {
-    queries.injections = expectArray(object.injections, `${path}.injections`)
-      .map((injection, index) =>
-        parseInjectionMetadata(injection, `${path}.injections[${index}]`)
-      );
-  }
-  return queries;
-}
-
-function parseCaptureArray(
-  value: unknown,
-  path: string,
-): TreeSitterCaptureMetadata[] {
-  return expectArray(value, path).map((capture, index) =>
-    parseCaptureMetadata(capture, `${path}[${index}]`)
-  );
-}
-
-function parseCaptureMetadata(
-  value: unknown,
-  path: string,
-): TreeSitterCaptureMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["node", "literal", "capture"]);
-
-  const hasNode = hasKey(object, "node");
-  const hasLiteral = hasKey(object, "literal");
-  if (hasNode === hasLiteral) {
-    throw new Error(
-      `Expected ${path} to specify exactly one of node or literal`,
-    );
-  }
-
-  const capture = normalizeCaptureName(
-    expectString(object.capture, `${path}.capture`),
-    `${path}.capture`,
-  );
-  return hasNode
-    ? { node: expectString(object.node, `${path}.node`), capture }
-    : { literal: expectString(object.literal, `${path}.literal`), capture };
-}
-
-function parseRainbowsMetadata(
-  value: unknown,
-  path: string,
-): TreeSitterRainbowsMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["scopes", "brackets"]);
-
-  const rainbows: TreeSitterRainbowsMetadata = {};
-  if (hasKey(object, "scopes")) {
-    rainbows.scopes = expectStringArray(object.scopes, `${path}.scopes`);
-  }
-  if (hasKey(object, "brackets")) {
-    rainbows.brackets = expectStringArray(object.brackets, `${path}.brackets`);
-  }
-  return rainbows;
-}
-
-function parseInjectionMetadata(
-  value: unknown,
-  path: string,
-): TreeSitterInjectionMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["node", "language"]);
-  return {
-    node: expectString(object.node, `${path}.node`),
-    language: expectString(object.language, `${path}.language`),
-  };
-}
-
-function parseAstMetadata(
-  value: unknown,
-  path: string,
-): WorkbenchAstMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["nodes"]);
-
-  const metadata: WorkbenchAstMetadata = {};
-  if (hasKey(object, "nodes")) {
-    const nodesObject = expectObject(object.nodes, `${path}.nodes`);
-    const nodes: Record<string, WorkbenchAstNodeMetadata> = {};
-    for (const [nodeName, nodeValue] of Object.entries(nodesObject)) {
-      nodes[nodeName] = parseAstNodeMetadata(
-        nodeValue,
-        `${path}.nodes.${nodeName}`,
-      );
-    }
-    metadata.nodes = nodes;
-  }
-  return metadata;
-}
-
-function parseAstNodeMetadata(
-  value: unknown,
-  path: string,
-): WorkbenchAstNodeMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["kind", "fields"]);
-
-  const metadata: WorkbenchAstNodeMetadata = {};
-  if (hasKey(object, "kind")) {
-    metadata.kind = expectString(object.kind, `${path}.kind`);
-  }
-  if (hasKey(object, "fields")) {
-    metadata.fields = expectStringRecord(object.fields, `${path}.fields`);
-  }
-  return metadata;
-}
-
-function parseFormatterMetadata(
-  value: unknown,
-  path: string,
-): WorkbenchFormatterMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["blocks", "lists", "spacing"]);
-
-  const metadata: WorkbenchFormatterMetadata = {};
-  if (hasKey(object, "blocks")) {
-    metadata.blocks = expectStringArray(object.blocks, `${path}.blocks`);
-  }
-  if (hasKey(object, "lists")) {
-    metadata.lists = expectStringArray(object.lists, `${path}.lists`);
-  }
-  if (hasKey(object, "spacing")) {
-    metadata.spacing = parseSpacingRecord(object.spacing, `${path}.spacing`);
-  }
-  return metadata;
-}
-
-function parseSpacingRecord(
-  value: unknown,
-  path: string,
-): Record<string, "tight" | "space" | "newline"> {
-  const object = expectObject(value, path);
-  const record: Record<string, "tight" | "space" | "newline"> = {};
-  for (const [key, item] of Object.entries(object)) {
-    const spacing = expectString(item, `${path}.${key}`);
-    if (spacing !== "tight" && spacing !== "space" && spacing !== "newline") {
-      throw new Error(`Invalid ${path}.${key} '${spacing}'`);
-    }
-    record[key] = spacing;
-  }
-  return record;
-}
-
-function parseLspMetadata(value: unknown, path: string): WorkbenchLspMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["documentSymbols", "diagnostics"]);
-
-  const metadata: WorkbenchLspMetadata = {};
-  if (hasKey(object, "documentSymbols")) {
-    metadata.documentSymbols = expectStringArray(
-      object.documentSymbols,
-      `${path}.documentSymbols`,
-    );
-  }
-  if (hasKey(object, "diagnostics")) {
-    metadata.diagnostics = expectStringArray(
-      object.diagnostics,
-      `${path}.diagnostics`,
-    );
-  }
-  return metadata;
-}
-
-function parseRuleMetadataShape(
-  value: unknown,
-  path: string,
-): TreeSitterRuleMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["fields", "token", "wrap", "paths"]);
-
-  const metadata: TreeSitterRuleMetadata = {};
-  if (hasKey(object, "fields")) {
-    metadata.fields = expectStringRecord(object.fields, `${path}.fields`);
-  }
-  if (hasKey(object, "token")) {
-    metadata.token = parseRuleToken(object.token, `${path}.token`);
-  }
-  if (hasKey(object, "wrap")) {
-    metadata.wrap = parseRuleWrap(object.wrap, `${path}.wrap`);
-  }
-  if (hasKey(object, "paths")) {
-    const pathsObject = expectObject(object.paths, `${path}.paths`);
-    const paths: Record<string, TreeSitterPathMetadata> = {};
-    for (const [pathKey, pathValue] of Object.entries(pathsObject)) {
-      paths[pathKey] = parsePathMetadataShape(
-        pathValue,
-        `${path}.paths.${pathKey}`,
-      );
-    }
-    metadata.paths = paths;
-  }
-  return metadata;
-}
-
-function parseRuleToken(value: unknown, path: string): TreeSitterRuleToken {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["kind"]);
-  const kind = expectString(object.kind, `${path}.kind`);
-  if (kind === "token" || kind === "token.immediate") return { kind };
-  throw new Error(`Invalid ${path}.kind '${kind}'`);
-}
-
-function parseRuleWrap(value: unknown, path: string): TreeSitterRuleWrap {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["kind", "value"]);
-  const kind = expectString(object.kind, `${path}.kind`);
-  if (kind === "prec") {
-    return { kind, value: expectInteger(object.value, `${path}.value`) };
-  }
-  if (kind === "prec.left" || kind === "prec.right") {
-    if (!hasKey(object, "value")) return { kind };
-    return { kind, value: expectInteger(object.value, `${path}.value`) };
-  }
-  throw new Error(`Invalid ${path}.kind '${kind}'`);
-}
-
-function parsePathMetadataShape(
-  value: unknown,
-  path: string,
-): TreeSitterPathMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, [
-    "field",
-    "wrap",
-    "alias_ref",
-    "alias_node",
-    "inline_path",
-    "hidden_path",
-  ]);
-
-  const metadata: TreeSitterPathMetadata = {};
-  if (hasKey(object, "field")) {
-    metadata.field = expectString(object.field, `${path}.field`);
-  }
-  if (hasKey(object, "wrap")) {
-    metadata.wrap = parseRuleWrap(object.wrap, `${path}.wrap`);
-  }
-  if (hasKey(object, "alias_ref")) {
-    metadata.alias_ref = expectString(object.alias_ref, `${path}.alias_ref`);
-  }
-  if (hasKey(object, "alias_node")) {
-    metadata.alias_node = expectString(object.alias_node, `${path}.alias_node`);
-  }
-  if (hasKey(object, "inline_path")) {
-    metadata.inline_path = expectBoolean(
-      object.inline_path,
-      `${path}.inline_path`,
-    );
-  }
-  if (hasKey(object, "hidden_path")) {
-    metadata.hidden_path = expectBoolean(
-      object.hidden_path,
-      `${path}.hidden_path`,
-    );
-  }
-  return metadata;
-}
-
-function expectObject(value: unknown, path: string): UnknownRecord {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as UnknownRecord;
-  }
-  throw new Error(`Expected ${path} to be object`);
-}
-
-function expectArray(value: unknown, path: string): unknown[] {
-  if (Array.isArray(value)) return value;
-  throw new Error(`Expected ${path} to be array`);
-}
-
-function expectString(value: unknown, path: string): string {
-  if (typeof value === "string") return value;
-  throw new Error(`Expected ${path} to be string`);
-}
-
-function expectBoolean(value: unknown, path: string): boolean {
-  if (typeof value === "boolean") return value;
-  throw new Error(`Expected ${path} to be boolean`);
-}
-
-function expectInteger(value: unknown, path: string): number {
-  if (typeof value === "number" && Number.isInteger(value)) return value;
-  throw new Error(`Expected ${path} to be integer`);
-}
-
-function expectStringArray(value: unknown, path: string): string[] {
-  return expectArray(value, path).map((item, index) =>
-    expectString(item, `${path}[${index}]`)
-  );
-}
-
-function expectStringRecord(
-  value: unknown,
-  path: string,
-): Record<string, string> {
-  const object = expectObject(value, path);
-  const record: Record<string, string> = {};
-  for (const [key, item] of Object.entries(object)) {
-    record[key] = expectString(item, `${path}.${key}`);
-  }
-  return record;
-}
-
-function parseRegexPattern(value: unknown, path: string): string {
-  const pattern = expectString(value, path);
-  if (pattern.includes("\n") || pattern.includes("\r")) {
-    throw new Error(`Expected ${path} to stay on one line`);
-  }
-  try {
-    new RegExp(pattern);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid ${path}: ${message}`);
-  }
-  return pattern;
-}
-
-function normalizeCaptureName(value: string, path: string): string {
-  const capture = value.startsWith("@") ? value.slice(1) : value;
-  if (!/^[A-Za-z][A-Za-z0-9._-]*$/.test(capture)) {
-    throw new Error(`Invalid ${path} '${value}'`);
-  }
-  return capture;
-}
-
-function assertKnownKeys(
-  object: UnknownRecord,
-  path: string,
-  keys: string[],
-): void {
-  const known = new Set(keys);
-  for (const key of Object.keys(object)) {
-    if (!known.has(key)) throw new Error(`Unknown ${path} key '${key}'`);
-  }
-}
-
-function hasKey(object: UnknownRecord, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(object, key);
-}
+export { parseTreeSitterMetadata } from "./metadata.ts";
 
 /** Generates an ESM tree-sitter grammar source file. */
 export function generateTreeSitterGrammar(
@@ -1314,6 +810,7 @@ export function generateTreeSitterGrammar(
     name?: string;
     rootRule?: string;
     metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
   } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
@@ -1321,11 +818,19 @@ export function generateTreeSitterGrammar(
     : sourceOrGrammar;
   const name = options.name ?? "waesm";
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
   const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
   if (!rootRule) throw new Error(`Unknown root rule '${rootRuleName}'`);
 
-  validateTreeSitterMetadataSemantics(grammar, rootRuleName, options.metadata);
+  if (!options.skipValidation) {
+    validateTreeSitterMetadataSemantics(
+      grammar,
+      rootRuleName,
+      options.metadata,
+    );
+  }
 
   const metadata = options.metadata ?? {};
   const context = createRenderContext(grammar, rootRuleName, metadata);
@@ -1415,14 +920,16 @@ export function generateTreeSitterGrammar(
 /** Generates an optional tree-sitter rainbow-bracket query. */
 export function generateTreeSitterRainbowsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateTreeSitterQueryMetadata(grammar, metadata);
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
 
   const rainbow = metadata.queries?.rainbows;
   const scopes = rainbow?.scopes ?? [];
@@ -1447,14 +954,16 @@ export function generateTreeSitterRainbowsQuery(
 /** Generates an optional tree-sitter injection query. */
 export function generateTreeSitterInjectionsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateTreeSitterQueryMetadata(grammar, metadata);
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
 
   const injections = metadata.queries?.injections ?? [];
   if (injections.length === 0) return "";
@@ -1473,14 +982,16 @@ export function generateTreeSitterInjectionsQuery(
 /** Generates a tree-sitter highlight query. */
 export function generateTreeSitterHighlightsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateTreeSitterQueryMetadata(grammar, metadata);
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
 
   const explicit = metadata.queries?.highlights ?? [];
   const explicitSelectors = new Set(explicit.map(captureSelectorKey));
@@ -1494,70 +1005,80 @@ export function generateTreeSitterHighlightsQuery(
 /** Generates a metadata-driven tree-sitter locals query. */
 export function generateTreeSitterLocalsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateTreeSitterQueryMetadata(grammar, metadata);
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
   return renderCaptureQuery(metadata.queries?.locals ?? []);
 }
 
 /** Generates a metadata-driven tree-sitter folds query. */
 export function generateTreeSitterFoldsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateTreeSitterQueryMetadata(grammar, metadata);
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
   return renderCaptureQuery(metadata.queries?.folds ?? []);
 }
 
 /** Generates a metadata-driven tree-sitter indentation query. */
 export function generateTreeSitterIndentsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateTreeSitterQueryMetadata(grammar, metadata);
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
   return renderCaptureQuery(metadata.queries?.indents ?? []);
 }
 
 /** Generates a metadata-driven tree-sitter tags query. */
 export function generateTreeSitterTagsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateTreeSitterQueryMetadata(grammar, metadata);
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
   return renderCaptureQuery(metadata.queries?.tags ?? []);
 }
 
 /** Generates TypeScript AST facade types for tree-sitter nodes. */
 export function generateAstTypesSource(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateWorkbenchMetadataSemantics(grammar, metadata);
+  if (!options.skipValidation) {
+    validateWorkbenchMetadataSemantics(grammar, metadata);
+  }
 
   const nodeTypes = grammar.rules.map((rule) => astTypeName(rule.name));
   const union = nodeTypes.length ? nodeTypes.join(" | ") : "never";
@@ -1597,14 +1118,16 @@ ${interfaces.join("\n\n")}
 /** Generates TypeScript visitor helpers for generated AST facade types. */
 export function generateAstVisitorSource(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateWorkbenchMetadataSemantics(grammar, metadata);
+  if (!options.skipValidation) {
+    validateWorkbenchMetadataSemantics(grammar, metadata);
+  }
 
   const imports = [
     "AstNode",
@@ -1679,14 +1202,16 @@ function readField(node: SyntaxNodeLike, name: string): SyntaxNodeLike | null {
 /** Generates a conservative formatter scaffold that preserves unsupported text. */
 export function generateFormatterScaffoldSource(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateWorkbenchMetadataSemantics(grammar, metadata);
+  if (!options.skipValidation) {
+    validateWorkbenchMetadataSemantics(grammar, metadata);
+  }
 
   return `// Generated by @mewhhaha/baba. Do not edit by hand.
 export interface FormatNode {
@@ -1733,14 +1258,16 @@ export function spacingForLiteral(literal: string): "tight" | "space" | "newline
 /** Generates a Deno-friendly LSP state scaffold. */
 export function generateLspScaffoldSource(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  validateEbnfGrammar(grammar);
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
   const metadata = options.metadata ?? {};
-  validateWorkbenchMetadataSemantics(grammar, metadata);
+  if (!options.skipValidation) {
+    validateWorkbenchMetadataSemantics(grammar, metadata);
+  }
 
   return `// Generated by @mewhhaha/baba. Do not edit by hand.
 export interface TextDocument {
@@ -1802,76 +1329,129 @@ export function generateWorkbenchBundle(
     name?: string;
     rootRule?: string;
     metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
   } = {},
-): Record<string, string> {
+): GeneratedBundle {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const name = options.name ?? "grammar";
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
   const metadata = options.metadata ?? {};
-  validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  validateTreeSitterMetadataSemantics(grammar, rootRuleName, metadata);
-  validateTreeSitterQueryMetadata(grammar, metadata);
-  validateWorkbenchMetadataSemantics(grammar, metadata);
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+    validateTreeSitterMetadataSemantics(grammar, rootRuleName, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateWorkbenchMetadataSemantics(grammar, metadata);
+  }
 
   const treeSitter = generateTreeSitterGrammar(grammar, {
     name,
     rootRule: rootRuleName,
     metadata,
+    skipValidation: true,
   });
-  const queries = generateWorkbenchQueries(grammar, { metadata });
+  const spec = createLexicalSpec(grammar, { skipValidation: true });
+  const queries = generateWorkbenchQueries(grammar, {
+    metadata,
+    skipValidation: true,
+  });
   const sample = generateGrammarSample(grammar, rootRuleName);
 
-  return {
-    "lexical.json": generateLexicalManifest(grammar),
-    "tokenizer.ts": generateTokenizerSource(grammar),
-    "grammar.js": treeSitter,
-    "tree-sitter.json": generateTreeSitterConfigSource(name, metadata),
-    "package.json": generateTreeSitterPackageSource(name, metadata),
-    "queries/highlights.scm": queries["highlights.scm"],
-    "queries/locals.scm": queries["locals.scm"],
-    "queries/folds.scm": queries["folds.scm"],
-    "queries/indents.scm": queries["indents.scm"],
-    "queries/tags.scm": queries["tags.scm"],
-    "queries/rainbows.scm": queries["rainbows.scm"],
-    "queries/injections.scm": queries["injections.scm"],
-    "editor/helix/languages.toml": generateHelixLanguageSource(name, metadata),
-    "editor/nvim/README.md": generateNvimReadmeSource(name),
-    "editor/vscode/package.json": generateVsCodePackageSource(name, metadata),
-    "editor/vscode/language-configuration.json":
+  return generatedBundle("workbench", [
+    ["lexical.json", generateLexicalManifest(grammar, { spec })],
+    [
+      "tokenizer.ts",
+      generateTokenizerSource(grammar, { spec, skipValidation: true }),
+    ],
+    ["grammar.js", treeSitter],
+    ["tree-sitter.json", generateTreeSitterConfigSource(name, metadata)],
+    ["package.json", generateTreeSitterPackageSource(name, metadata)],
+    ["queries/highlights.scm", queries["highlights.scm"]],
+    ["queries/locals.scm", queries["locals.scm"]],
+    ["queries/folds.scm", queries["folds.scm"]],
+    ["queries/indents.scm", queries["indents.scm"]],
+    ["queries/tags.scm", queries["tags.scm"]],
+    ["queries/rainbows.scm", queries["rainbows.scm"]],
+    ["queries/injections.scm", queries["injections.scm"]],
+    [
+      "editor/helix/languages.toml",
+      generateHelixLanguageSource(name, metadata),
+    ],
+    ["editor/nvim/README.md", generateNvimReadmeSource(name)],
+    ["editor/vscode/package.json", generateVsCodePackageSource(name, metadata)],
+    [
+      "editor/vscode/language-configuration.json",
       generateVsCodeLanguageConfigurationSource(metadata),
-    "editor/vscode/syntaxes/README.md": generateVsCodeSyntaxReadmeSource(name),
-    "ast/types.ts": generateAstTypesSource(grammar, { metadata }),
-    "ast/visitor.ts": generateAstVisitorSource(grammar, { metadata }),
-    "tests/corpus/basic.txt": generateCorpusTestSource(sample),
-    "tests/tokenizer_test.ts": generateTokenizerSmokeTestSource(sample),
-    "lsp/server.ts": generateLspScaffoldSource(grammar, { metadata }),
-    "lsp/README.md": generateLspReadmeSource(name),
-    "formatter/format.ts": generateFormatterScaffoldSource(grammar, {
-      metadata,
-    }),
-    "formatter/README.md": generateFormatterReadmeSource(name),
-  };
+    ],
+    [
+      "editor/vscode/syntaxes/README.md",
+      generateVsCodeSyntaxReadmeSource(name),
+    ],
+    [
+      "ast/types.ts",
+      generateAstTypesSource(grammar, { metadata, skipValidation: true }),
+    ],
+    [
+      "ast/visitor.ts",
+      generateAstVisitorSource(grammar, { metadata, skipValidation: true }),
+    ],
+    ["tests/corpus/basic.txt", generateCorpusTestSource(sample)],
+    ["tests/tokenizer_test.ts", generateTokenizerSmokeTestSource(sample)],
+    [
+      "lsp/server.ts",
+      generateLspScaffoldSource(grammar, { metadata, skipValidation: true }),
+    ],
+    ["lsp/README.md", generateLspReadmeSource(name)],
+    [
+      "formatter/format.ts",
+      generateFormatterScaffoldSource(grammar, {
+        metadata,
+        skipValidation: true,
+      }),
+    ],
+    ["formatter/README.md", generateFormatterReadmeSource(name)],
+  ]);
 }
 
 /** Generates every tree-sitter query file used by the workbench preset. */
 export function generateWorkbenchQueries(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata } = {},
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
 ): Record<string, string> {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const metadata = options.metadata;
   return {
-    "highlights.scm": generateTreeSitterHighlightsQuery(grammar, { metadata }),
-    "locals.scm": generateTreeSitterLocalsQuery(grammar, { metadata }),
-    "folds.scm": generateTreeSitterFoldsQuery(grammar, { metadata }),
-    "indents.scm": generateTreeSitterIndentsQuery(grammar, { metadata }),
-    "tags.scm": generateTreeSitterTagsQuery(grammar, { metadata }),
-    "rainbows.scm": generateTreeSitterRainbowsQuery(grammar, { metadata }),
-    "injections.scm": generateTreeSitterInjectionsQuery(grammar, { metadata }),
+    "highlights.scm": generateTreeSitterHighlightsQuery(grammar, {
+      metadata,
+      skipValidation: options.skipValidation,
+    }),
+    "locals.scm": generateTreeSitterLocalsQuery(grammar, {
+      metadata,
+      skipValidation: options.skipValidation,
+    }),
+    "folds.scm": generateTreeSitterFoldsQuery(grammar, {
+      metadata,
+      skipValidation: options.skipValidation,
+    }),
+    "indents.scm": generateTreeSitterIndentsQuery(grammar, {
+      metadata,
+      skipValidation: options.skipValidation,
+    }),
+    "tags.scm": generateTreeSitterTagsQuery(grammar, {
+      metadata,
+      skipValidation: options.skipValidation,
+    }),
+    "rainbows.scm": generateTreeSitterRainbowsQuery(grammar, {
+      metadata,
+      skipValidation: options.skipValidation,
+    }),
+    "injections.scm": generateTreeSitterInjectionsQuery(grammar, {
+      metadata,
+      skipValidation: options.skipValidation,
+    }),
   };
 }
 
@@ -2347,6 +1927,16 @@ function validateTreeSitterMetadataSemantics(
   }
 
   validateWorkbenchMetadataSemantics(grammar, metadata);
+}
+
+/** Validates metadata semantics against a parsed grammar. */
+export function validateGenerationMetadataSemantics(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+  metadata: TreeSitterMetadata = {},
+): void {
+  validateTreeSitterMetadataSemantics(grammar, rootRuleName, metadata);
+  validateTreeSitterQueryMetadata(grammar, metadata);
 }
 
 function validateTreeSitterQueryMetadata(

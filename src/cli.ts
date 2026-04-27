@@ -4,25 +4,30 @@
  * @module
  */
 
+import type { GeneratedBundle, GeneratePreset } from "./ast.ts";
 import {
-  generateLexicalManifest,
-  generateTokenizerSource,
-  generateTreeSitterGrammar,
-  generateTreeSitterInjectionsQuery,
-  generateTreeSitterRainbowsQuery,
-  generateWorkbenchBundle,
-  generateWorkbenchQueries,
-  parseTreeSitterMetadata,
-} from "./generate.ts";
-import { EbnfError, formatEbnfError, parseEbnf } from "./parser.ts";
+  treeSitterGrammarFile,
+  treeSitterQueryFiles,
+  treeSitterQueryOutputName,
+} from "./bundle.ts";
+import {
+  BabaError,
+  formatDiagnostic,
+  generate,
+  generateInitBundle,
+  parseMetadata,
+} from "./mod.ts";
 
 interface Options {
+  command: "generate" | "init";
   input?: string;
+  initDir?: string;
   outDir?: string;
-  treeSitterMeta?: string;
+  metadataPath?: string;
   treeSitterOut?: string;
   name: string;
-  preset: "core" | "workbench";
+  preset: GeneratePreset;
+  listFiles: boolean;
   help: boolean;
 }
 
@@ -30,8 +35,8 @@ if (import.meta.main) {
   try {
     await main(Deno.args);
   } catch (error) {
-    if (error instanceof EbnfError) {
-      console.error(formatEbnfError(error));
+    if (error instanceof BabaError) {
+      console.error(formatDiagnostic(error));
       Deno.exit(1);
     }
     throw error;
@@ -45,67 +50,64 @@ export async function main(args: string[]): Promise<void> {
     console.log(helpText());
     return;
   }
+
+  if (options.command === "init") {
+    await initProject(options);
+    return;
+  }
+
   if (!options.input) {
-    throw new Error("Missing grammar input. Run with --help for usage.");
+    throw new BabaError({
+      code: "CLI_MISSING_INPUT",
+      message: "Missing grammar input. Run with --help for usage.",
+    });
   }
 
   const source = await Deno.readTextFile(options.input);
-  const grammar = parseEbnf(source);
-  const manifest = generateLexicalManifest(grammar);
-  const tokenizer = generateTokenizerSource(grammar);
-  const metadata = options.treeSitterMeta
-    ? parseTreeSitterMetadata(await Deno.readTextFile(options.treeSitterMeta))
+  const metadata = options.metadataPath
+    ? parseMetadata(await Deno.readTextFile(options.metadataPath))
     : undefined;
-  const treeSitter = generateTreeSitterGrammar(grammar, {
+  const bundle = generate(source, {
     name: options.name,
     metadata,
+    preset: options.preset,
   });
-  const rainbows = generateTreeSitterRainbowsQuery(grammar, { metadata });
-  const injections = generateTreeSitterInjectionsQuery(grammar, { metadata });
-  const workbench = options.preset === "workbench"
-    ? generateWorkbenchBundle(grammar, { name: options.name, metadata })
-    : undefined;
+
+  if (options.listFiles) {
+    console.log(bundle.files.map((file) => file.path).join("\n"));
+    return;
+  }
 
   if (!options.outDir) {
-    console.log(manifest.trimEnd());
+    const lexical = bundle.files.find((file) => file.path === "lexical.json");
+    if (lexical) console.log(lexical.content.trimEnd());
   }
 
   if (options.outDir) {
-    if (workbench) {
-      await writeBundle(options.outDir, workbench);
-    } else {
-      await Deno.mkdir(options.outDir, { recursive: true });
-      await Deno.writeTextFile(`${options.outDir}/lexical.json`, manifest);
-      await Deno.writeTextFile(`${options.outDir}/tokenizer.ts`, tokenizer);
-      await Deno.writeTextFile(`${options.outDir}/grammar.js`, treeSitter);
-      await writeOptionalTextFile(`${options.outDir}/rainbows.scm`, rainbows);
-      await writeOptionalTextFile(
-        `${options.outDir}/injections.scm`,
-        injections,
-      );
-    }
+    await writeBundle(options.outDir, bundle);
   }
 
   if (options.treeSitterOut) {
-    const queryFiles = options.preset === "workbench"
-      ? generateWorkbenchQueries(grammar, { metadata })
-      : {
-        "rainbows.scm": rainbows,
-        "injections.scm": injections,
-      };
-    await writeTreeSitterOutput(
-      options.treeSitterOut,
-      treeSitter,
-      queryFiles,
-      options.preset === "workbench",
-    );
+    await writeTreeSitterOutput(options.treeSitterOut, bundle);
   }
 }
 
 function parseArgs(args: string[]): Options {
-  const options: Options = { name: "grammar", preset: "core", help: false };
+  const options: Options = {
+    command: "generate",
+    name: "grammar",
+    preset: "core",
+    listFiles: false,
+    help: false,
+  };
 
-  for (let i = 0; i < args.length; i++) {
+  let i = 0;
+  if (args[0] === "generate" || args[0] === "init") {
+    options.command = args[0];
+    i = 1;
+  }
+
+  for (; i < args.length; i++) {
     const arg = args[i];
     switch (arg) {
       case "-h":
@@ -114,43 +116,92 @@ function parseArgs(args: string[]): Options {
         break;
       case "--out": {
         const outDir = args[++i];
-        if (!outDir) throw new Error("Expected directory after --out");
+        if (!outDir) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected directory after --out",
+          });
+        }
         options.outDir = outDir;
         break;
       }
       case "--name": {
         const name = args[++i];
-        if (!name) throw new Error("Expected language name after --name");
+        if (!name) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected language name after --name",
+          });
+        }
         options.name = name;
         break;
       }
       case "--ts-meta": {
-        const treeSitterMeta = args[++i];
-        if (!treeSitterMeta) {
-          throw new Error("Expected metadata path after --ts-meta");
+        const metadataPath = args[++i];
+        if (!metadataPath) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected metadata path after --ts-meta",
+          });
         }
-        options.treeSitterMeta = treeSitterMeta;
+        options.metadataPath = metadataPath;
         break;
       }
       case "--ts-out": {
         const treeSitterOut = args[++i];
-        if (!treeSitterOut) throw new Error("Expected path after --ts-out");
+        if (!treeSitterOut) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected path after --ts-out",
+          });
+        }
         options.treeSitterOut = treeSitterOut;
         break;
       }
       case "--preset": {
         const preset = args[++i];
-        if (!preset) throw new Error("Expected preset after --preset");
+        if (!preset) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected preset after --preset",
+          });
+        }
         if (preset !== "core" && preset !== "workbench") {
-          throw new Error(`Unknown preset '${preset}'`);
+          throw new BabaError({
+            code: "INVALID_PRESET",
+            message: `Unknown preset '${preset}'`,
+          });
         }
         options.preset = preset;
         break;
       }
+      case "--list-files":
+        options.listFiles = true;
+        break;
       default:
-        if (arg.startsWith("-")) throw new Error(`Unknown option '${arg}'`);
-        if (options.input) throw new Error(`Unexpected extra input '${arg}'`);
-        options.input = arg;
+        if (arg.startsWith("-")) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: `Unknown option '${arg}'`,
+          });
+        }
+        if (options.command === "init") {
+          if (options.initDir) {
+            throw new BabaError({
+              code: "CLI_BAD_ARGS",
+              message: `Unexpected extra input '${arg}'`,
+            });
+          }
+          options.initDir = arg;
+        } else {
+          if (options.input) {
+            throw new BabaError({
+              code: "CLI_BAD_ARGS",
+              message: `Unexpected extra input '${arg}'`,
+            });
+          }
+          options.input = arg;
+        }
     }
   }
 
@@ -161,19 +212,84 @@ function helpText(): string {
   return `baba - generate language scaffolding from EBNF
 
 Usage:
-  deno run --allow-read --allow-write src/cli.ts <grammar.ebnf> --out generated
-
-Outputs:
-  lexical.json   Keyword and symbol manifest
-  tokenizer.ts   Standalone generated TypeScript tokenizer
-  grammar.js     Generated tree-sitter grammar
-  rainbows.scm   Generated tree-sitter rainbow-bracket query when metadata enables it
-  injections.scm Generated tree-sitter injection query when metadata enables it
+  baba <grammar.ebnf> --out generated
+  baba generate <grammar.ebnf> --out generated
+  baba init <dir>
 
 Options:
   --preset      Generation preset: core or workbench. Defaults to core
-  --ts-meta      JSON metadata for tree-sitter-specific conflicts, precedence, fields, aliases, node shaping, and queries
-  --ts-out       Additional output path for the production tree-sitter grammar`;
+  --ts-meta     JSON metadata for tree-sitter/editor/AST/formatter/LSP generation
+  --ts-out      Additional output path for tree-sitter grammar and queries
+  --list-files  Print generated file paths without writing output files`;
+}
+
+async function initProject(options: Options): Promise<void> {
+  const dir = options.initDir;
+  if (!dir) {
+    throw new BabaError({
+      code: "CLI_MISSING_INPUT",
+      message: "Missing init directory. Run with --help for usage.",
+    });
+  }
+  const bundle = generateInitBundle({
+    name: options.name === "grammar" ? undefined : options.name,
+    dirName: dir,
+  });
+  if (options.listFiles) {
+    console.log(bundle.files.map((file) => file.path).join("\n"));
+    return;
+  }
+  await writeBundle(dir, bundle);
+}
+
+async function writeBundle(
+  outDir: string,
+  bundle: GeneratedBundle,
+): Promise<void> {
+  await Deno.mkdir(outDir, { recursive: true });
+  for (const file of bundle.files) {
+    const path = `${outDir}/${file.path}`;
+    const parent = parentDir(path);
+    if (parent) await Deno.mkdir(parent, { recursive: true });
+    await Deno.writeTextFile(path, file.content);
+  }
+  for (const cleanupPath of bundle.cleanupPaths ?? []) {
+    await removeIfExists(`${outDir}/${cleanupPath}`);
+  }
+}
+
+async function writeTreeSitterOutput(
+  treeSitterOut: string,
+  bundle: GeneratedBundle,
+): Promise<void> {
+  const grammar = treeSitterGrammarFile(bundle);
+  if (!grammar) return;
+
+  const parent = parentDir(treeSitterOut);
+  if (parent) await Deno.mkdir(parent, { recursive: true });
+  await Deno.writeTextFile(treeSitterOut, grammar.content);
+  if (!parent) return;
+
+  const queries = treeSitterQueryFiles(bundle);
+  const queryDir = `${parent}/queries`;
+  if (bundle.preset === "workbench" || queries.some((file) => file.content)) {
+    await Deno.mkdir(queryDir, { recursive: true });
+  }
+  for (const file of queries) {
+    const name = treeSitterQueryOutputName(file);
+    const path = `${queryDir}/${name}`;
+    if (bundle.preset === "workbench") {
+      await Deno.writeTextFile(path, file.content);
+    } else if (file.content) {
+      await Deno.writeTextFile(path, file.content);
+    } else {
+      await removeIfExists(path);
+    }
+  }
+  for (const cleanupPath of bundle.cleanupPaths ?? []) {
+    if (!cleanupPath.endsWith(".scm")) continue;
+    await removeIfExists(`${queryDir}/${cleanupPath}`);
+  }
 }
 
 function parentDir(path: string): string | null {
@@ -181,56 +297,6 @@ function parentDir(path: string): string | null {
   const slash = normalized.lastIndexOf("/");
   if (slash === -1) return null;
   return normalized.slice(0, slash) || ".";
-}
-
-async function writeTreeSitterOutput(
-  treeSitterOut: string,
-  grammar: string,
-  queries: Record<string, string>,
-  writeEmptyQueries: boolean,
-): Promise<void> {
-  const parent = parentDir(treeSitterOut);
-  if (parent) await Deno.mkdir(parent, { recursive: true });
-  await Deno.writeTextFile(treeSitterOut, grammar);
-  if (!parent) return;
-
-  const queryDir = `${parent}/queries`;
-  const queryEntries = Object.entries(queries);
-  if (writeEmptyQueries || queryEntries.some(([, content]) => content)) {
-    await Deno.mkdir(queryDir, { recursive: true });
-  }
-  for (const [name, content] of queryEntries) {
-    const path = `${queryDir}/${name}`;
-    if (writeEmptyQueries) {
-      await Deno.writeTextFile(path, content);
-    } else {
-      await writeOptionalTextFile(path, content);
-    }
-  }
-}
-
-async function writeBundle(
-  outDir: string,
-  bundle: Record<string, string>,
-): Promise<void> {
-  await Deno.mkdir(outDir, { recursive: true });
-  for (const [relativePath, content] of Object.entries(bundle)) {
-    const path = `${outDir}/${relativePath}`;
-    const parent = parentDir(path);
-    if (parent) await Deno.mkdir(parent, { recursive: true });
-    await Deno.writeTextFile(path, content);
-  }
-}
-
-async function writeOptionalTextFile(
-  path: string,
-  content: string,
-): Promise<void> {
-  if (content) {
-    await Deno.writeTextFile(path, content);
-    return;
-  }
-  await removeIfExists(path);
 }
 
 async function removeIfExists(path: string): Promise<void> {

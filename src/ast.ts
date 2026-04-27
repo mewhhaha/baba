@@ -78,8 +78,8 @@ export interface LexicalTokenSpec {
   pattern: string;
 }
 
-/** Optional tree-sitter generation metadata. */
-export interface TreeSitterMetadata {
+/** Optional metadata for parser, editor, AST, formatter, and LSP generation. */
+export interface BabaMetadata {
   /** Language package/editor identity metadata. */
   language?: WorkbenchLanguageMetadata;
   /** Extra tokens or rules allowed between tree-sitter tokens. */
@@ -102,6 +102,66 @@ export interface TreeSitterMetadata {
   lsp?: WorkbenchLspMetadata;
   /** Per-rule tree-sitter shaping metadata. */
   rules?: Record<string, TreeSitterRuleMetadata>;
+}
+
+/** @deprecated Use `BabaMetadata`. */
+export type TreeSitterMetadata = BabaMetadata;
+
+/** A structured baba diagnostic. */
+export interface Diagnostic {
+  /** Stable machine-readable diagnostic code. */
+  code: string;
+  /** Human-readable diagnostic message. */
+  message: string;
+  /** Optional EBNF source span. */
+  span?: SourceSpan;
+  /** Optional metadata object path. */
+  path?: string;
+  /** Optional source line for span diagnostics. */
+  sourceLine?: string;
+}
+
+/** Generation preset. */
+export type GeneratePreset = "core" | "workbench";
+
+/** Options for the stable high-level `generate` API. */
+export interface GenerateOptions {
+  /** Language/tree-sitter grammar name. */
+  name?: string;
+  /** Root grammar rule. Defaults to the first rule. */
+  rootRule?: string;
+  /** Generation preset. Defaults to `core`. */
+  preset?: GeneratePreset;
+  /** Optional generation metadata. */
+  metadata?: BabaMetadata;
+}
+
+/** One generated file. */
+export interface GeneratedFile {
+  /** POSIX-style relative output path. */
+  path: string;
+  /** File contents. */
+  content: string;
+  /** File category. */
+  kind: "source" | "query" | "config" | "test" | "docs";
+}
+
+/** Generated file bundle. */
+export interface GeneratedBundle {
+  /** Generation preset used for this bundle. */
+  preset: GeneratePreset;
+  /** Deterministically sorted generated files. */
+  files: GeneratedFile[];
+  /** Relative paths the writer should remove when absent from this bundle. */
+  cleanupPaths?: string[];
+}
+
+/** Options for generating a starter baba project scaffold. */
+export interface GenerateInitOptions {
+  /** Language/package name. Defaults to `dirName` or `language`. */
+  name?: string;
+  /** Directory name used to derive the default language/package name. */
+  dirName?: string;
 }
 
 /** Language identity metadata used by workbench scaffolds. */

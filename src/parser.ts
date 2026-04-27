@@ -5,6 +5,7 @@ import type {
   EbnfTokenDeclaration,
   SourceSpan,
 } from "./ast.ts";
+import { BabaError } from "./errors.ts";
 
 type TokenKind = "identifier" | "literal" | "regex" | "symbol" | "eof";
 
@@ -15,21 +16,27 @@ interface Token {
 }
 
 /** Syntax error raised while parsing EBNF source. */
-export class EbnfError extends Error {
+export class EbnfError extends BabaError {
   /** One-based source line where the error starts. */
   readonly line: number;
   /** One-based source column where the error starts. */
   readonly column: number;
-  /** Full source line containing the error. */
-  readonly sourceLine: string;
 
   /** Creates a parse error with source context. */
-  constructor(message: string, readonly span: SourceSpan, source: string) {
-    super(`${message} at ${span.line}:${span.column}`);
+  constructor(
+    message: string,
+    override readonly span: SourceSpan,
+    source: string,
+  ) {
+    super({
+      code: "EBNF_PARSE_ERROR",
+      message: `${message} at ${span.line}:${span.column}`,
+      span,
+      sourceLine: getSourceLine(source, span.start),
+    });
     this.name = "EbnfError";
     this.line = span.line;
     this.column = span.column;
-    this.sourceLine = getSourceLine(source, span.start);
   }
 
   /** Zero-based inclusive source offset where the error starts. */

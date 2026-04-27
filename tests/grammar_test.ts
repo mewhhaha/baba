@@ -1,4 +1,11 @@
 import {
+  generate,
+  generateInitBundle,
+  parseGrammar,
+  parseMetadata,
+  validateGrammar,
+} from "../src/mod.ts";
+import {
   createLexicalSpec,
   formatEbnfError,
   generateAstTypesSource,
@@ -19,7 +26,8 @@ import {
   parseEbnf,
   parseTreeSitterMetadata,
   validateEbnfGrammar,
-} from "../src/mod.ts";
+} from "../src/advanced.ts";
+import { BabaError, formatDiagnostic } from "../src/errors.ts";
 import { EbnfError } from "../src/parser.ts";
 import { main } from "../src/cli.ts";
 
@@ -41,6 +49,16 @@ interface GeneratedToken {
   kind: string;
   text: string;
   span: { start: number; end: number };
+}
+
+interface GeneratedBundleLike {
+  files: Array<{ path: string; content: string }>;
+}
+
+function fileMap(bundle: GeneratedBundleLike): Record<string, string> {
+  return Object.fromEntries(
+    bundle.files.map((file) => [file.path, file.content]),
+  );
 }
 
 function assertEquals<T>(actual: T, expected: T, message?: string): void {
@@ -547,6 +565,149 @@ Deno.test("workbench query generators emit metadata and defaults", () => {
   assertEquals(queries["rainbows.scm"].length > 0, true);
 });
 
+Deno.test("stable API parses validates and generates deterministic bundles", () => {
+  const source = `module = "fn" ident ;`;
+  const grammar = parseGrammar(source);
+  assertEquals(validateGrammar(grammar).length, 0);
+  const metadata = parseMetadata(JSON.stringify({
+    queries: {
+      highlights: [{ literal: "fn", capture: "keyword.function" }],
+    },
+  }));
+
+  const core = generate(grammar, { name: "tiny", metadata });
+  assertEquals(core.preset, "core");
+  assertEquals(
+    core.files.map((file) => file.path).join(","),
+    "grammar.js,lexical.json,tokenizer.ts",
+  );
+  assertEquals(
+    core.cleanupPaths?.join(","),
+    "injections.scm,rainbows.scm",
+  );
+  assertEquals(
+    core.files.map((file) => file.path).join(","),
+    [...core.files].sort((left, right) => left.path.localeCompare(right.path))
+      .map((file) => file.path)
+      .join(","),
+  );
+
+  const workbench = generate(source, {
+    name: "tiny",
+    metadata,
+    preset: "workbench",
+  });
+  assertEquals(workbench.preset, "workbench");
+  assertIncludes(
+    workbench.files.map((file) => `${file.kind}:${file.path}`).join("\n"),
+    "query:queries/highlights.scm",
+  );
+
+  const diagnostics = validateGrammar(parseGrammar(`module = missing ;`));
+  assertEquals(diagnostics.length, 1);
+  assertIncludes(diagnostics[0].message, "Unknown rule reference");
+});
+
+Deno.test("stable diagnostics use BabaError and formatting", () => {
+  let error: unknown;
+  try {
+    parseGrammar(`module = "unterminated`);
+  } catch (caught) {
+    error = caught;
+  }
+  assert(error instanceof BabaError);
+  assertEquals(error.code, "EBNF_PARSE_ERROR");
+  assertIncludes(formatDiagnostic(error), "EBNF_PARSE_ERROR");
+
+  let metadataError: unknown;
+  try {
+    parseMetadata(`[]`);
+  } catch (caught) {
+    metadataError = caught;
+  }
+  assert(metadataError instanceof BabaError);
+  assertEquals(metadataError.code, "METADATA_SHAPE_ERROR");
+  assertEquals(metadataError.path, "metadata");
+
+  let jsonError: unknown;
+  try {
+    parseMetadata(`{`);
+  } catch (caught) {
+    jsonError = caught;
+  }
+  assert(jsonError instanceof BabaError);
+  assertEquals(jsonError.code, "METADATA_JSON_ERROR");
+  assertEquals(jsonError.path, "metadata");
+
+  let nestedMetadataError: unknown;
+  try {
+    parseMetadata(JSON.stringify({
+      queries: { highlights: { node: "x", capture: "keyword" } },
+    }));
+  } catch (caught) {
+    nestedMetadataError = caught;
+  }
+  assert(nestedMetadataError instanceof BabaError);
+  assertEquals(nestedMetadataError.code, "METADATA_SHAPE_ERROR");
+  assertEquals(nestedMetadataError.path, "metadata.queries.highlights");
+
+  let semanticMetadataError: unknown;
+  try {
+    generate(`module = "fn" ident ;`, {
+      metadata: parseMetadata(JSON.stringify({
+        queries: { highlights: [{ node: "missing", capture: "keyword" }] },
+      })),
+    });
+  } catch (caught) {
+    semanticMetadataError = caught;
+  }
+  assert(semanticMetadataError instanceof BabaError);
+  assertEquals(semanticMetadataError.code, "METADATA_SEMANTIC_ERROR");
+});
+
+Deno.test("init bundle is generated through the stable API", () => {
+  const bundle = generateInitBundle({ name: "tiny" });
+  const files = fileMap(bundle);
+  assertEquals(bundle.preset, "workbench");
+  assertEquals(
+    bundle.files.map((file) => file.path).join(","),
+    "baba.json,grammar.ebnf,README.md,samples/main.tiny",
+  );
+  assertIncludes(files["grammar.ebnf"], "module = function+");
+  assertIncludes(files["baba.json"], "source.tiny");
+  assertIncludes(files["samples/main.tiny"], "fn main");
+});
+
+Deno.test("root and advanced entrypoints expose intended APIs", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const rootPath = `${dir}/root.ts`;
+    await Deno.writeTextFile(
+      rootPath,
+      `import { generate, generateInitBundle, parseGrammar, parseMetadata, validateGrammar } from "${Deno.cwd()}/src/mod.ts";
+const grammar = parseGrammar('module = "fn" ident ;');
+const metadata = parseMetadata("{}");
+const diagnostics = validateGrammar(grammar);
+const bundle = generate(grammar, { metadata });
+const init = generateInitBundle({ name: "tiny" });
+console.log(diagnostics.length, bundle.files.length, init.files.length);
+`,
+    );
+    const advancedPath = `${dir}/advanced.ts`;
+    await Deno.writeTextFile(
+      advancedPath,
+      `import type { TreeSitterMetadata } from "${Deno.cwd()}/src/advanced.ts";
+import { generateTokenizerSource, parseTreeSitterMetadata } from "${Deno.cwd()}/src/advanced.ts";
+const metadata: TreeSitterMetadata = parseTreeSitterMetadata("{}");
+console.log(generateTokenizerSource('module = "fn" ident ;').length, metadata);
+`,
+    );
+    await denoCheck([rootPath, advancedPath]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("workbench bundle emits stable scaffold and type-checks generated sources", async () => {
   const dir = await Deno.makeTempDir();
   try {
@@ -588,19 +749,21 @@ Deno.test("workbench bundle emits stable scaffold and type-checks generated sour
       name: "tiny",
       metadata,
     });
+    const files = fileMap(bundle);
 
-    assertIncludes(bundle["tree-sitter.json"], '"scope": "source.tiny"');
-    assertIncludes(bundle["package.json"], '"tree-sitter"');
-    assertIncludes(bundle["queries/highlights.scm"], '"fn" @keyword');
-    assertEquals(bundle["queries/locals.scm"], "(ident) @local.definition\n");
-    assertIncludes(bundle["editor/helix/languages.toml"], 'name = "tiny"');
-    assertIncludes(bundle["ast/types.ts"], "export type AstNode");
-    assertIncludes(bundle["ast/visitor.ts"], "projectNode");
-    assertIncludes(bundle["formatter/format.ts"], "formatNode");
-    assertIncludes(bundle["lsp/server.ts"], "LanguageServerState");
-    assertIncludes(bundle["tests/corpus/basic.txt"], "fn example");
+    assertEquals(bundle.preset, "workbench");
+    assertIncludes(files["tree-sitter.json"], '"scope": "source.tiny"');
+    assertIncludes(files["package.json"], '"tree-sitter"');
+    assertIncludes(files["queries/highlights.scm"], '"fn" @keyword');
+    assertEquals(files["queries/locals.scm"], "(ident) @local.definition\n");
+    assertIncludes(files["editor/helix/languages.toml"], 'name = "tiny"');
+    assertIncludes(files["ast/types.ts"], "export type AstNode");
+    assertIncludes(files["ast/visitor.ts"], "projectNode");
+    assertIncludes(files["formatter/format.ts"], "formatNode");
+    assertIncludes(files["lsp/server.ts"], "LanguageServerState");
+    assertIncludes(files["tests/corpus/basic.txt"], "fn example");
 
-    for (const [path, content] of Object.entries(bundle)) {
+    for (const { path, content } of bundle.files) {
       const slash = path.lastIndexOf("/");
       if (slash !== -1) {
         await Deno.mkdir(`${dir}/${path.slice(0, slash)}`, {
@@ -1107,6 +1270,25 @@ Deno.test("cli writes requested output destinations", async () => {
       "export default grammar({",
     );
 
+    const generateOutDir = `${dir}/generate-subcommand`;
+    await main(["generate", grammarPath, "--out", generateOutDir]);
+    assertIncludes(
+      await Deno.readTextFile(`${generateOutDir}/grammar.js`),
+      "export default grammar({",
+    );
+
+    const listLogs = await captureConsoleLog(() =>
+      main([
+        "generate",
+        grammarPath,
+        "--preset",
+        "workbench",
+        "--list-files",
+      ])
+    );
+    assertIncludes(listLogs.join("\n"), "queries/highlights.scm");
+    await assertMissing(`${dir}/queries/highlights.scm`);
+
     const outDir = `${dir}/bundle`;
     await main([grammarPath, "--out", outDir]);
     assertIncludes(await Deno.readTextFile(`${outDir}/lexical.json`), '"fn"');
@@ -1220,6 +1402,21 @@ Deno.test("cli writes requested output destinations", async () => {
         `${dir}/workbench-tree-sitter/queries/locals.scm`,
       ),
       "",
+    );
+
+    const initDir = `${dir}/starter`;
+    await main(["init", initDir, "--name", "tiny"]);
+    assertIncludes(
+      await Deno.readTextFile(`${initDir}/grammar.ebnf`),
+      "module",
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${initDir}/baba.json`),
+      "source.tiny",
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${initDir}/samples/main.tiny`),
+      "fn main",
     );
   } finally {
     await Deno.remove(dir, { recursive: true });

@@ -1,9 +1,10 @@
 {
   "name": "@mewhhaha/baba",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "exports": {
     ".": "./src/mod.ts",
+    "./advanced": "./src/advanced.ts",
     "./cli": "./src/cli.ts"
   },
   "publish": {
@@ -16,7 +17,7 @@
   },
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-run",
-    "check": "deno check src/mod.ts src/cli.ts tests/grammar_test.ts",
+    "check": "deno check src/mod.ts src/advanced.ts src/cli.ts tests/grammar_test.ts",
     "publish:dry-run": "deno publish --dry-run"
   }
 }

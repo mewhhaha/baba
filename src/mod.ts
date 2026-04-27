@@ -1,53 +1,45 @@
 /**
- * EBNF parser and generator tools for building language scaffolding.
+ * baba turns a compact EBNF grammar into language tooling.
+ *
+ * The stable API is intentionally small:
+ *
+ * ```ts
+ * import { generate, parseGrammar, parseMetadata } from "jsr:@mewhhaha/baba";
+ *
+ * const grammar = parseGrammar(await Deno.readTextFile("grammar.ebnf"));
+ * const metadata = parseMetadata(await Deno.readTextFile("baba.json"));
+ * const bundle = generate(grammar, {
+ *   name: "tiny",
+ *   metadata,
+ *   preset: "workbench",
+ * });
+ * ```
+ *
+ * Use `jsr:@mewhhaha/baba/advanced` for lower-level generator entrypoints.
  *
  * @module
  */
 
 export type {
+  BabaMetadata,
+  Diagnostic,
   EbnfExpression,
   EbnfGrammar,
   EbnfRule,
   EbnfTokenDeclaration,
-  LexicalSpec,
-  LexicalTokenSpec,
+  GeneratedBundle,
+  GeneratedFile,
+  GenerateInitOptions,
+  GenerateOptions,
+  GeneratePreset,
   SourceSpan,
-  TreeSitterCaptureMetadata,
-  TreeSitterExtra,
-  TreeSitterInjectionMetadata,
-  TreeSitterMetadata,
-  TreeSitterPathMetadata,
-  TreeSitterQueriesMetadata,
-  TreeSitterRainbowsMetadata,
-  TreeSitterRuleMetadata,
-  TreeSitterRuleToken,
-  TreeSitterRuleWrap,
-  WorkbenchAstMetadata,
-  WorkbenchAstNodeMetadata,
-  WorkbenchFormatterMetadata,
-  WorkbenchLanguageMetadata,
-  WorkbenchLspMetadata,
 } from "./ast.ts";
 export {
-  collectTerminals,
-  createLexicalSpec,
-  generateAstTypesSource,
-  generateAstVisitorSource,
-  generateFormatterScaffoldSource,
-  generateLexicalManifest,
-  generateLspScaffoldSource,
-  generateTokenizerSource,
-  generateTreeSitterFoldsQuery,
-  generateTreeSitterGrammar,
-  generateTreeSitterHighlightsQuery,
-  generateTreeSitterIndentsQuery,
-  generateTreeSitterInjectionsQuery,
-  generateTreeSitterLocalsQuery,
-  generateTreeSitterRainbowsQuery,
-  generateTreeSitterTagsQuery,
-  generateWorkbenchBundle,
-  generateWorkbenchQueries,
-  parseTreeSitterMetadata,
-  validateEbnfGrammar,
-} from "./generate.ts";
-export { EbnfError, formatEbnfError, parseEbnf } from "./parser.ts";
+  BabaError,
+  formatDiagnostic,
+  generate,
+  generateInitBundle,
+  parseGrammar,
+  parseMetadata,
+  validateGrammar,
+} from "./api.ts";

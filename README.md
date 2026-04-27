@@ -75,6 +75,15 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --preset workbench
 ```
 
+You can also use explicit subcommands:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts generate grammar.ebnf \
+  --out generated
+
+deno run --allow-read --allow-write src/cli.ts init tiny
+```
+
 That keeps the core files and adds:
 
 ```text
@@ -137,60 +146,66 @@ After publishing, import the public API from JSR:
 
 ```ts
 import {
-  EbnfError,
-  formatEbnfError,
-  generateLexicalManifest,
-  generateTokenizerSource,
-  generateTreeSitterGrammar,
-  generateWorkbenchBundle,
-  parseEbnf,
-  parseTreeSitterMetadata,
-  validateEbnfGrammar,
+  BabaError,
+  formatDiagnostic,
+  generate,
+  generateInitBundle,
+  parseGrammar,
+  parseMetadata,
+  validateGrammar,
 } from "jsr:@mewhhaha/baba";
 
 const source = await Deno.readTextFile("grammar.ebnf");
 
 try {
-  const grammar = parseEbnf(source);
-  validateEbnfGrammar(grammar, { rootRule: "module" });
+  const grammar = parseGrammar(source);
+  const metadata = parseMetadata(
+    await Deno.readTextFile("tree-sitter-meta.json"),
+  );
+  const diagnostics = validateGrammar(grammar, { rootRule: "module" });
+  if (diagnostics.length > 0) {
+    throw new BabaError(diagnostics[0]);
+  }
 
-  const tokenizer = generateTokenizerSource(grammar);
-  const manifest = generateLexicalManifest(grammar);
-  const treeSitter = generateTreeSitterGrammar(grammar, {
+  const bundle = generate(grammar, {
     name: "tiny",
     rootRule: "module",
-  });
-  const workbench = generateWorkbenchBundle(grammar, {
-    name: "tiny",
-    rootRule: "module",
+    metadata,
+    preset: "workbench",
   });
 
-  await Deno.writeTextFile("generated/tokenizer.ts", tokenizer);
-  await Deno.writeTextFile("generated/lexical.json", manifest);
-  await Deno.writeTextFile("generated/grammar.js", treeSitter);
-  console.log(Object.keys(workbench));
+  for (const file of bundle.files) {
+    await Deno.writeTextFile(`generated/${file.path}`, file.content);
+  }
+  for (const stalePath of bundle.cleanupPaths ?? []) {
+    await Deno.remove(`generated/${stalePath}`).catch(() => {});
+  }
 } catch (error) {
-  if (error instanceof EbnfError) {
-    console.error(formatEbnfError(error));
+  if (error instanceof BabaError) {
+    console.error(formatDiagnostic(error));
   } else {
     throw error;
   }
 }
 ```
 
+Use `generateInitBundle()` when you want to create the same starter project that
+`baba init` writes, but through your own file-system adapter.
+
 Inside this repository, use `./src/mod.ts` instead of the JSR specifier.
 
-Parse tree-sitter metadata separately:
+Granular APIs live under `/advanced`:
 
 ```ts
-const metadata = parseTreeSitterMetadata(
-  await Deno.readTextFile("tree-sitter-meta.json"),
-);
+import {
+  generateTokenizerSource,
+  generateTreeSitterGrammar,
+  parseTreeSitterMetadata,
+} from "jsr:@mewhhaha/baba/advanced";
 
-const treeSitter = generateTreeSitterGrammar(source, {
-  name: "tiny",
-  metadata,
-});
+const metadata = parseTreeSitterMetadata("{}");
+const tokenizer = generateTokenizerSource(source);
+const grammar = generateTreeSitterGrammar(source, { name: "tiny", metadata });
 ```
 
 ## EBNF Dialect
@@ -275,8 +290,8 @@ module = "unterminated
 
 ## Tree-Sitter Metadata
 
-Metadata is optional JSON passed through `--ts-meta` or
-`parseTreeSitterMetadata`. Use it for tree-sitter concerns that do not belong in
+Metadata is optional JSON passed through `--ts-meta` or `parseMetadata`. Use it
+for tree-sitter, editor, AST, formatter, and LSP concerns that do not belong in
 the EBNF:
 
 ```json
@@ -379,3 +394,6 @@ bumped:
 ```sh
 deno publish
 ```
+
+In JSR package settings, set the overview/readme source to `README.md` if you
+want the package page to show this guide instead of the shorter module docs.
