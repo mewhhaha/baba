@@ -12,6 +12,7 @@ import {
   generateAstVisitorSource,
   generateFormatterScaffoldSource,
   generateLspScaffoldSource,
+  generateParserSource,
   generateTokenizerSource,
   generateTreeSitterFoldsQuery,
   generateTreeSitterGrammar,
@@ -224,6 +225,88 @@ Deno.test("generates tokenizer and tree-sitter starter sources", () => {
     !treeSitter.includes("module.exports"),
     "Expected tree-sitter output to be ESM-only",
   );
+});
+
+Deno.test("generated parser parses and projects deterministic grammars", async () => {
+  const source = `
+    token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    token int = /[0-9]+/ ;
+    module = function+ ;
+    function = [ "export" ] "fn" ident "(" params? ")" block ;
+    params = param % "," ;
+    param = ident ":" ident ;
+    block = "{" statement* "}" ;
+    statement = "let" ident "=" int ";" ;
+  `;
+  const dir = await Deno.makeTempDir();
+  await Deno.writeTextFile(
+    `${dir}/tokenizer.ts`,
+    generateTokenizerSource(source),
+  );
+  await Deno.writeTextFile(`${dir}/parser.ts`, generateParserSource(source));
+  await Deno.writeTextFile(
+    `${dir}/parser_test.ts`,
+    `import { parse, projectParseNode } from "./parser.ts";
+const result = parse("export fn add(a: i32,b: i32){ let answer = 42; }");
+if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+if (result.tree?.kind !== "rule" || result.tree.name !== "module") throw new Error("missing module tree");
+if (result.tree.span.start !== 0) throw new Error("missing root span");
+if (!result.tree.children.some((child) => child.kind === "rule" && child.name === "function")) throw new Error("missing function child");
+const functionNode = result.tree.children.find((child) => child.kind === "rule" && child.name === "function");
+if (!functionNode || !("children" in functionNode)) throw new Error("missing function node");
+if (!functionNode.children.some((child) => child.kind === "literal" && child.value === "fn")) throw new Error("missing literal node");
+if (!functionNode.children.some((child) => child.kind === "token" && child.name === "ident" && child.text === "add")) throw new Error("missing token node");
+if (result.ast?.kind !== "module") throw new Error("missing ast");
+if (projectParseNode(functionNode)?.kind !== "function") throw new Error("missing projected function ast");
+const invalid = parse("fn add(");
+if (invalid.ok || invalid.diagnostics.length === 0) throw new Error("expected invalid input diagnostics");
+`,
+  );
+  await denoCheck([`${dir}/parser_test.ts`]);
+  const command = new Deno.Command(Deno.execPath(), {
+    args: ["run", `${dir}/parser_test.ts`],
+  });
+  const output = await command.output();
+  if (!output.success) {
+    const decoder = new TextDecoder();
+    throw new Error(
+      `${decoder.decode(output.stdout)}${decoder.decode(output.stderr)}`,
+    );
+  }
+});
+
+Deno.test("generated parser supports layout tokens", async () => {
+  const source = `
+    module = block ;
+    block = "do" newline indent statement+ dedent ;
+    statement = ident newline ;
+  `;
+  const dir = await Deno.makeTempDir();
+  await Deno.writeTextFile(
+    `${dir}/tokenizer.ts`,
+    generateTokenizerSource(source),
+  );
+  await Deno.writeTextFile(`${dir}/parser.ts`, generateParserSource(source));
+  await Deno.writeTextFile(
+    `${dir}/layout_test.ts`,
+    `import { parse } from "./parser.ts";
+const result = parse("do\\n  alpha\\n  beta\\n");
+if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+if (!result.tokens.some((token) => token.kind === "indent")) throw new Error("missing indent");
+if (!result.tokens.some((token) => token.kind === "dedent")) throw new Error("missing dedent");
+`,
+  );
+  await denoCheck([`${dir}/layout_test.ts`]);
+  const command = new Deno.Command(Deno.execPath(), {
+    args: ["run", `${dir}/layout_test.ts`],
+  });
+  const output = await command.output();
+  if (!output.success) {
+    const decoder = new TextDecoder();
+    throw new Error(
+      `${decoder.decode(output.stdout)}${decoder.decode(output.stderr)}`,
+    );
+  }
 });
 
 Deno.test("tree-sitter keeps root rule addressable by other rules", () => {
@@ -579,7 +662,7 @@ Deno.test("stable API parses validates and generates deterministic bundles", () 
   assertEquals(core.preset, "core");
   assertEquals(
     core.files.map((file) => file.path).join(","),
-    "grammar.js,lexical.json,tokenizer.ts",
+    "grammar.js,lexical.json,parser.ts,tokenizer.ts",
   );
   assertEquals(
     core.cleanupPaths?.join(","),
@@ -1073,6 +1156,29 @@ Deno.test("validates grammar semantics before generation", () => {
   assertThrowsIncludes(
     () => parseEbnf(`token bad = /(/ ; module = bad ;`),
     "Invalid regex literal",
+  );
+});
+
+Deno.test("parser generation rejects nondeterministic grammars", () => {
+  assertThrowsIncludes(
+    () => generateParserSource(`expr = expr "+" ident | ident ;`),
+    "Left-recursive parser rule cycle",
+  );
+  assertThrowsIncludes(
+    () =>
+      generateParserSource(`
+        module = item ;
+        item = module | ident ;
+      `),
+    "Left-recursive parser rule cycle",
+  );
+  assertThrowsIncludes(
+    () => generateParserSource(`module = ( ident? )* ;`),
+    "Nullable repetition",
+  );
+  assertThrowsIncludes(
+    () => generateParserSource(`module = "let" ident | "let" int ;`),
+    "Ambiguous predictive choice",
   );
 });
 

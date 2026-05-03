@@ -44,6 +44,7 @@ export {
   generateFormatterScaffoldSource,
   generateLexicalManifest,
   generateLspScaffoldSource,
+  generateParserSource,
   generateTokenizerSource,
   generateTreeSitterFoldsQuery,
   generateTreeSitterGrammar,

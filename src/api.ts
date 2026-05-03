@@ -8,6 +8,7 @@ import type {
 import { generatedBundle } from "./bundle.ts";
 import { createGenerationContext } from "./context.ts";
 import {
+  generateParserSource,
   generateTokenizerSource,
   generateTreeSitterGrammar,
   generateTreeSitterInjectionsQuery,
@@ -80,6 +81,13 @@ export function generate(
     files.push([
       "lexical.json",
       `${JSON.stringify(context.lexicalSpec, null, 2)}\n`,
+    ]);
+    files.push([
+      "parser.ts",
+      generateParserSource(context.grammar, {
+        rootRule: context.rootRuleName,
+        skipValidation: true,
+      }),
     ]);
     files.push([
       "tokenizer.ts",

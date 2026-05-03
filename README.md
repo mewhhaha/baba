@@ -13,6 +13,7 @@ scaffolding from it:
 
 - `lexical.json`: sorted keyword, symbol, token, and skip manifest
 - `tokenizer.ts`: standalone TypeScript tokenizer
+- `parser.ts`: standalone TypeScript recursive-descent parser scaffold
 - `grammar.js`: ESM tree-sitter grammar
 - `rainbows.scm`: optional tree-sitter rainbow-bracket query
 - `injections.scm`: optional tree-sitter injection query
@@ -62,6 +63,7 @@ That writes:
 generated/
   lexical.json
   tokenizer.ts
+  parser.ts
   grammar.js
 ```
 
@@ -105,6 +107,17 @@ import { lex } from "./generated/tokenizer.ts";
 
 const tokens = lex(`fn add(a: i32) { let n = 1; }`);
 console.log(tokens.map((token) => [token.kind, token.text]));
+```
+
+Use the generated parser when you want a TypeScript-only scaffold without
+tree-sitter:
+
+```ts
+import { parse } from "./generated/parser.ts";
+
+const result = parse(`fn add(a: i32) { let n = 1; }`);
+if (!result.ok) console.error(result.diagnostics);
+else console.log(result.tree, result.ast);
 ```
 
 Generate only the lexical manifest to stdout:
@@ -198,6 +211,7 @@ Granular APIs live under `/advanced`:
 
 ```ts
 import {
+  generateParserSource,
   generateTokenizerSource,
   generateTreeSitterGrammar,
   parseTreeSitterMetadata,
@@ -205,6 +219,7 @@ import {
 
 const metadata = parseTreeSitterMetadata("{}");
 const tokenizer = generateTokenizerSource(source);
+const parser = generateParserSource(source);
 const grammar = generateTreeSitterGrammar(source, { name: "tiny", metadata });
 ```
 
@@ -278,6 +293,8 @@ baba validates grammar semantics before generation:
 - unknown rule refs fail
 - unknown root rules fail
 - token regexes must compile and must not match the empty string
+- standalone parser generation rejects left recursion, nullable repetition, and
+  overlapping predictive choices
 - metadata JSON is parsed and validated strictly
 
 Parse errors include source locations:
