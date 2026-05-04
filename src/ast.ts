@@ -186,6 +186,8 @@ export interface TreeSitterQueriesMetadata {
   indents?: TreeSitterCaptureMetadata[];
   /** Tag capture query entries. */
   tags?: TreeSitterCaptureMetadata[];
+  /** Textobject capture query entries. */
+  textobjects?: TreeSitterCaptureMetadata[];
   /** Rainbow bracket query settings. */
   rainbows?: TreeSitterRainbowsMetadata;
   /** Injection query settings. */

@@ -1630,6 +1630,22 @@ export function generateTreeSitterTagsQuery(
   return renderCaptureQuery(metadata.queries?.tags ?? []);
 }
 
+/** Generates a metadata-driven tree-sitter textobjects query. */
+export function generateTreeSitterTextobjectsQuery(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+): string {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
+  return renderCaptureQuery(metadata.queries?.textobjects ?? []);
+}
+
 /** Generates TypeScript AST facade types for tree-sitter nodes. */
 export function generateAstTypesSource(
   sourceOrGrammar: string | EbnfGrammar,
@@ -1943,6 +1959,7 @@ export function generateWorkbenchBundle(
     ["queries/folds.scm", queries["folds.scm"]],
     ["queries/indents.scm", queries["indents.scm"]],
     ["queries/tags.scm", queries["tags.scm"]],
+    ["queries/textobjects.scm", queries["textobjects.scm"]],
     ["queries/rainbows.scm", queries["rainbows.scm"]],
     ["queries/injections.scm", queries["injections.scm"]],
     [
@@ -2012,6 +2029,10 @@ export function generateWorkbenchQueries(
       skipValidation: options.skipValidation,
     }),
     "tags.scm": generateTreeSitterTagsQuery(grammar, {
+      metadata,
+      skipValidation: options.skipValidation,
+    }),
+    "textobjects.scm": generateTreeSitterTextobjectsQuery(grammar, {
       metadata,
       skipValidation: options.skipValidation,
     }),
@@ -2524,6 +2545,7 @@ function validateTreeSitterQueryMetadata(
   validateCaptureMetadata(grammar, metadata, queries.folds, "fold");
   validateCaptureMetadata(grammar, metadata, queries.indents, "indent");
   validateCaptureMetadata(grammar, metadata, queries.tags, "tag");
+  validateCaptureMetadata(grammar, metadata, queries.textobjects, "textobject");
 }
 
 function validateCaptureMetadata(

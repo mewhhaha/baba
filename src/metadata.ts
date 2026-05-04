@@ -165,6 +165,7 @@ function parseQueriesMetadata(
     "folds",
     "indents",
     "tags",
+    "textobjects",
     "rainbows",
     "injections",
   ]);
@@ -187,6 +188,12 @@ function parseQueriesMetadata(
   }
   if (hasKey(object, "tags")) {
     queries.tags = parseCaptureArray(object.tags, `${path}.tags`);
+  }
+  if (hasKey(object, "textobjects")) {
+    queries.textobjects = parseCaptureArray(
+      object.textobjects,
+      `${path}.textobjects`,
+    );
   }
   if (hasKey(object, "rainbows")) {
     queries.rainbows = parseRainbowsMetadata(

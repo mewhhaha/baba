@@ -22,6 +22,7 @@ import {
   generateTreeSitterLocalsQuery,
   generateTreeSitterRainbowsQuery,
   generateTreeSitterTagsQuery,
+  generateTreeSitterTextobjectsQuery,
   generateWorkbenchBundle,
   generateWorkbenchQueries,
   parseEbnf,
@@ -618,6 +619,7 @@ Deno.test("workbench query generators emit metadata and defaults", () => {
       folds: [{ node: "block", capture: "fold" }],
       indents: [{ literal: "{", capture: "indent.begin" }],
       tags: [{ node: "function", capture: "tag.definition" }],
+      textobjects: [{ node: "function", capture: "function.outer" }],
     },
   }));
 
@@ -642,9 +644,14 @@ Deno.test("workbench query generators emit metadata and defaults", () => {
     generateTreeSitterTagsQuery(source, { metadata }),
     "(function) @tag.definition",
   );
+  assertIncludes(
+    generateTreeSitterTextobjectsQuery(source, { metadata }),
+    "(function) @function.outer",
+  );
 
   const queries = generateWorkbenchQueries(source, { metadata });
   assertIncludes(queries["highlights.scm"], "@keyword.function");
+  assertIncludes(queries["textobjects.scm"], "(function) @function.outer");
   assertEquals(queries["rainbows.scm"].length > 0, true);
 });
 
@@ -655,6 +662,7 @@ Deno.test("stable API parses validates and generates deterministic bundles", () 
   const metadata = parseMetadata(JSON.stringify({
     queries: {
       highlights: [{ literal: "fn", capture: "keyword.function" }],
+      textobjects: [{ node: "module", capture: "module.outer" }],
     },
   }));
 
@@ -662,7 +670,11 @@ Deno.test("stable API parses validates and generates deterministic bundles", () 
   assertEquals(core.preset, "core");
   assertEquals(
     core.files.map((file) => file.path).join(","),
-    "grammar.js,lexical.json,parser.ts,tokenizer.ts",
+    "grammar.js,lexical.json,parser.ts,textobjects.scm,tokenizer.ts",
+  );
+  assertIncludes(
+    core.files.find((file) => file.path === "textobjects.scm")?.content ?? "",
+    "(module) @module.outer",
   );
   assertEquals(
     core.cleanupPaths?.join(","),
@@ -684,6 +696,16 @@ Deno.test("stable API parses validates and generates deterministic bundles", () 
   assertIncludes(
     workbench.files.map((file) => `${file.kind}:${file.path}`).join("\n"),
     "query:queries/highlights.scm",
+  );
+  assertIncludes(
+    workbench.files.map((file) => `${file.kind}:${file.path}`).join("\n"),
+    "query:queries/textobjects.scm",
+  );
+
+  const cleanupCore = generate(grammar, { name: "tiny" });
+  assertEquals(
+    cleanupCore.cleanupPaths?.join(","),
+    "injections.scm,rainbows.scm,textobjects.scm",
   );
 
   const diagnostics = validateGrammar(parseGrammar(`module = missing ;`));
@@ -780,9 +802,9 @@ console.log(diagnostics.length, bundle.files.length, init.files.length);
     await Deno.writeTextFile(
       advancedPath,
       `import type { TreeSitterMetadata } from "${Deno.cwd()}/src/advanced.ts";
-import { generateTokenizerSource, parseTreeSitterMetadata } from "${Deno.cwd()}/src/advanced.ts";
+import { generateTokenizerSource, generateTreeSitterTextobjectsQuery, parseTreeSitterMetadata } from "${Deno.cwd()}/src/advanced.ts";
 const metadata: TreeSitterMetadata = parseTreeSitterMetadata("{}");
-console.log(generateTokenizerSource('module = "fn" ident ;').length, metadata);
+console.log(generateTokenizerSource('module = "fn" ident ;').length, generateTreeSitterTextobjectsQuery('module = "fn" ident ;').length, metadata);
 `,
     );
     await denoCheck([rootPath, advancedPath]);
@@ -1286,6 +1308,22 @@ Deno.test("tree-sitter metadata parser rejects invalid shapes", () => {
       })),
     "Expected metadata.queries.highlights to be array",
   );
+  const textobjectMetadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      textobjects: [{ node: "function", capture: "function.outer" }],
+    },
+  }));
+  assertEquals(
+    textobjectMetadata.queries?.textobjects?.[0].capture,
+    "function.outer",
+  );
+  assertThrowsIncludes(
+    () =>
+      parseTreeSitterMetadata(JSON.stringify({
+        queries: { textobjects: { node: "x", capture: "function.outer" } },
+      })),
+    "Expected metadata.queries.textobjects to be array",
+  );
   assertThrowsIncludes(
     () =>
       parseTreeSitterMetadata(JSON.stringify({
@@ -1299,10 +1337,21 @@ Deno.test("tree-sitter metadata parser rejects invalid shapes", () => {
     () =>
       parseTreeSitterMetadata(JSON.stringify({
         queries: {
-          highlights: [{ node: "x", capture: "bad capture" }],
+          textobjects: [{ node: "x", capture: "bad capture" }],
         },
       })),
-    "Invalid metadata.queries.highlights[0].capture",
+    "Invalid metadata.queries.textobjects[0].capture",
+  );
+  assertThrowsIncludes(
+    () =>
+      generateTreeSitterTextobjectsQuery(`module = "fn" ident ;`, {
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          queries: {
+            textobjects: [{ node: "missing", capture: "function.outer" }],
+          },
+        })),
+      }),
+    "Unknown textobject capture node 'missing'",
   );
   assertThrowsIncludes(
     () =>
@@ -1361,6 +1410,7 @@ Deno.test("cli writes requested output destinations", async () => {
         queries: {
           rainbows: { scopes: ["module"] },
           injections: [{ node: "ident", language: "wgsl" }],
+          textobjects: [{ node: "module", capture: "module.outer" }],
         },
       }),
     );
@@ -1393,6 +1443,7 @@ Deno.test("cli writes requested output destinations", async () => {
       ])
     );
     assertIncludes(listLogs.join("\n"), "queries/highlights.scm");
+    assertIncludes(listLogs.join("\n"), "queries/textobjects.scm");
     await assertMissing(`${dir}/queries/highlights.scm`);
 
     const outDir = `${dir}/bundle`;
@@ -1440,6 +1491,10 @@ Deno.test("cli writes requested output destinations", async () => {
       "@injection.content",
     );
     assertIncludes(
+      await Deno.readTextFile(`${staleOutDir}/textobjects.scm`),
+      "(module) @module.outer",
+    );
+    assertIncludes(
       await Deno.readTextFile(`${dir}/stale-tree-sitter/queries/rainbows.scm`),
       "@rainbow.scope",
     );
@@ -1448,6 +1503,12 @@ Deno.test("cli writes requested output destinations", async () => {
         `${dir}/stale-tree-sitter/queries/injections.scm`,
       ),
       "@injection.content",
+    );
+    assertIncludes(
+      await Deno.readTextFile(
+        `${dir}/stale-tree-sitter/queries/textobjects.scm`,
+      ),
+      "(module) @module.outer",
     );
 
     await main([
@@ -1459,8 +1520,10 @@ Deno.test("cli writes requested output destinations", async () => {
     ]);
     await assertMissing(`${staleOutDir}/rainbows.scm`);
     await assertMissing(`${staleOutDir}/injections.scm`);
+    await assertMissing(`${staleOutDir}/textobjects.scm`);
     await assertMissing(`${dir}/stale-tree-sitter/queries/rainbows.scm`);
     await assertMissing(`${dir}/stale-tree-sitter/queries/injections.scm`);
+    await assertMissing(`${dir}/stale-tree-sitter/queries/textobjects.scm`);
 
     const workbenchOutDir = `${dir}/workbench`;
     const workbenchTreeSitterOut = `${dir}/workbench-tree-sitter/grammar.js`;
@@ -1486,6 +1549,10 @@ Deno.test("cli writes requested output destinations", async () => {
       "",
     );
     assertIncludes(
+      await Deno.readTextFile(`${workbenchOutDir}/queries/textobjects.scm`),
+      "(module) @module.outer",
+    );
+    assertIncludes(
       await Deno.readTextFile(`${workbenchOutDir}/tree-sitter.json`),
       '"name": "tiny"',
     );
@@ -1508,6 +1575,12 @@ Deno.test("cli writes requested output destinations", async () => {
         `${dir}/workbench-tree-sitter/queries/locals.scm`,
       ),
       "",
+    );
+    assertIncludes(
+      await Deno.readTextFile(
+        `${dir}/workbench-tree-sitter/queries/textobjects.scm`,
+      ),
+      "(module) @module.outer",
     );
 
     const initDir = `${dir}/starter`;

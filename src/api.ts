@@ -13,6 +13,7 @@ import {
   generateTreeSitterGrammar,
   generateTreeSitterInjectionsQuery,
   generateTreeSitterRainbowsQuery,
+  generateTreeSitterTextobjectsQuery,
   generateWorkbenchBundle,
   validateEbnfGrammar,
 } from "./generate.ts";
@@ -108,6 +109,12 @@ export function generate(
     });
     if (rainbows) files.push(["rainbows.scm", rainbows]);
     else cleanupPaths.push("rainbows.scm");
+    const textobjects = generateTreeSitterTextobjectsQuery(context.grammar, {
+      metadata: context.metadata,
+      skipValidation: true,
+    });
+    if (textobjects) files.push(["textobjects.scm", textobjects]);
+    else cleanupPaths.push("textobjects.scm");
     return generatedBundle("core", files, cleanupPaths);
   } catch (error) {
     throw toBabaError(error, "GENERATION_ERROR");

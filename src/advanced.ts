@@ -54,6 +54,7 @@ export {
   generateTreeSitterLocalsQuery,
   generateTreeSitterRainbowsQuery,
   generateTreeSitterTagsQuery,
+  generateTreeSitterTextobjectsQuery,
   generateWorkbenchBundle,
   generateWorkbenchQueries,
   validateEbnfGrammar,
