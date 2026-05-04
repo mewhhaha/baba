@@ -143,6 +143,39 @@ async function denoCheck(paths: string[]): Promise<void> {
   }
 }
 
+async function runCommand(
+  commandName: string,
+  args: string[],
+  cwd?: string,
+  env?: Record<string, string>,
+): Promise<void> {
+  const command = new Deno.Command(commandName, { args, cwd, env });
+  const output = await command.output();
+  if (!output.success) {
+    const decoder = new TextDecoder();
+    throw new Error(
+      `${commandName} ${args.join(" ")} failed\n${
+        decoder.decode(output.stdout)
+      }${decoder.decode(output.stderr)}`,
+    );
+  }
+}
+
+async function writeGeneratedBundle(
+  dir: string,
+  bundle: GeneratedBundleLike,
+): Promise<void> {
+  for (const { path, content } of bundle.files) {
+    const slash = path.lastIndexOf("/");
+    if (slash !== -1) {
+      await Deno.mkdir(`${dir}/${path.slice(0, slash)}`, {
+        recursive: true,
+      });
+    }
+    await Deno.writeTextFile(`${dir}/${path}`, content);
+  }
+}
+
 Deno.test("parses EBNF rules and derives lexical terminals", () => {
   const grammar = parseEbnf(`
     module = { function } ;
@@ -676,6 +709,79 @@ Deno.test("highlight generation suppresses default literals wrapped by named nod
   const highlights = generateTreeSitterHighlightsQuery(source, { metadata });
   assertIncludes(highlights, "(Visibility) @keyword");
   assertNotIncludes(highlights, '"pub" @keyword');
+});
+
+Deno.test("highlight defaults only reference exposed tree-sitter nodes", () => {
+  const source = `
+    token ident = /[a-z]+/ ;
+    module = "fn" ident ;
+  `;
+
+  const highlights = generateTreeSitterHighlightsQuery(source);
+  assertIncludes(highlights, "(ident) @variable");
+  assertNotIncludes(highlights, "(string) @string");
+  assertNotIncludes(highlights, "(char) @string.special");
+  assertNotIncludes(highlights, "(int) @number");
+});
+
+Deno.test("generated workbench tree-sitter queries compile", async () => {
+  const source = `
+    token ident = /[a-z]+/ ;
+    module = Visibility function block ;
+    Visibility = "pub" ;
+    function = "fn" ident "(" ")" block ;
+    block = "{" "}" ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: [{ node: "Visibility", capture: "keyword" }],
+      tags: [{ node: "function", capture: "name.definition.function" }],
+      textobjects: [{ node: "function", capture: "function.outer" }],
+      rainbows: {
+        scopes: ["function", "block"],
+        brackets: ["(", ")", "{", "}"],
+      },
+    },
+  }));
+  const dir = await Deno.makeTempDir();
+  const bundle = generateWorkbenchBundle(source, {
+    name: "tiny",
+    metadata,
+  });
+  const files = fileMap(bundle);
+
+  assertIncludes(files["README.md"], "queries/highlights.scm");
+  assertIncludes(files["README.md"], "metadata.queries.textobjects");
+  assertIncludes(files["queries/highlights.scm"], "(Visibility) @keyword");
+  assertNotIncludes(files["queries/highlights.scm"], '"pub" @keyword');
+  assertNotIncludes(files["queries/highlights.scm"], "(string) @string");
+
+  await writeGeneratedBundle(dir, bundle);
+  await Deno.mkdir(`${dir}/cache`, { recursive: true });
+  await Deno.writeTextFile(`${dir}/sample.tiny`, "pub fn example() {}\n");
+  await runCommand("tree-sitter", ["generate"], dir);
+  for (
+    const query of [
+      "highlights.scm",
+      "textobjects.scm",
+      "tags.scm",
+      "rainbows.scm",
+    ]
+  ) {
+    await runCommand(
+      "tree-sitter",
+      [
+        "query",
+        "--quiet",
+        "--grammar-path",
+        dir,
+        `queries/${query}`,
+        "sample.tiny",
+      ],
+      dir,
+      { XDG_CACHE_HOME: `${dir}/cache` },
+    );
+  }
 });
 
 Deno.test("stable API parses validates and generates deterministic bundles", () => {
