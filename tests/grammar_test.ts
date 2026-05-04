@@ -47,6 +47,13 @@ function assertIncludes(actual: string, expected: string): void {
   );
 }
 
+function assertNotIncludes(actual: string, expected: string): void {
+  assert(
+    !actual.includes(expected),
+    `Expected ${JSON.stringify(actual)} not to include ${expected}`,
+  );
+}
+
 interface GeneratedToken {
   kind: string;
   text: string;
@@ -653,6 +660,22 @@ Deno.test("workbench query generators emit metadata and defaults", () => {
   assertIncludes(queries["highlights.scm"], "@keyword.function");
   assertIncludes(queries["textobjects.scm"], "(function) @function.outer");
   assertEquals(queries["rainbows.scm"].length > 0, true);
+});
+
+Deno.test("highlight generation suppresses default literals wrapped by named nodes", () => {
+  const source = `
+    module = Visibility ;
+    Visibility = "pub" ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: [{ node: "Visibility", capture: "keyword" }],
+    },
+  }));
+
+  const highlights = generateTreeSitterHighlightsQuery(source, { metadata });
+  assertIncludes(highlights, "(Visibility) @keyword");
+  assertNotIncludes(highlights, '"pub" @keyword');
 });
 
 Deno.test("stable API parses validates and generates deterministic bundles", () => {

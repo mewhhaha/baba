@@ -2072,6 +2072,7 @@ function defaultHighlightQueryEntries(
 ): string[] {
   const lines: string[] = [];
   const terminals = collectTerminals(grammar);
+  const namedLiteralTerminals = collectNamedLiteralRuleTerminals(grammar);
   const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
     grammar,
     metadata,
@@ -2086,6 +2087,7 @@ function defaultHighlightQueryEntries(
   };
 
   for (const terminal of terminals) {
+    if (namedLiteralTerminals.has(terminal)) continue;
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(terminal)) {
       pushLiteral(terminal, "keyword");
     }
@@ -2094,6 +2096,7 @@ function defaultHighlightQueryEntries(
   const bracketLiterals = new Set(["(", ")", "[", "]", "{", "}"]);
   const delimiterLiterals = new Set([",", ";", ":", "."]);
   for (const terminal of terminals) {
+    if (namedLiteralTerminals.has(terminal)) continue;
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(terminal)) continue;
     if (bracketLiterals.has(terminal)) {
       pushLiteral(terminal, "punctuation.bracket");
@@ -2125,6 +2128,37 @@ function defaultHighlightQueryEntries(
   }
 
   return lines;
+}
+
+function collectNamedLiteralRuleTerminals(grammar: EbnfGrammar): Set<string> {
+  const terminals = new Set<string>();
+  for (const rule of grammar.rules) {
+    collectLiteralOnlyExpressionTerminals(rule.expression, terminals);
+  }
+  return terminals;
+}
+
+function collectLiteralOnlyExpressionTerminals(
+  expression: EbnfExpression,
+  terminals: Set<string>,
+): boolean {
+  switch (expression.kind) {
+    case "literal":
+      terminals.add(expression.value);
+      return true;
+    case "choice": {
+      const optionTerminals = new Set<string>();
+      for (const option of expression.options) {
+        if (!collectLiteralOnlyExpressionTerminals(option, optionTerminals)) {
+          return false;
+        }
+      }
+      for (const terminal of optionTerminals) terminals.add(terminal);
+      return true;
+    }
+    default:
+      return false;
+  }
 }
 
 function generateTreeSitterConfigSource(
