@@ -711,6 +711,23 @@ Deno.test("highlight generation suppresses default literals wrapped by named nod
   assertNotIncludes(highlights, '"pub" @keyword');
 });
 
+Deno.test("highlight literal metadata targets named single-literal wrappers", () => {
+  const source = `
+    token Ident = /[a-z]+/ ;
+    Primary = ForkBuiltin | Ident ;
+    ForkBuiltin = "fork" ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: [{ literal: "fork", capture: "keyword.operator" }],
+    },
+  }));
+
+  const highlights = generateTreeSitterHighlightsQuery(source, { metadata });
+  assertIncludes(highlights, "(ForkBuiltin) @keyword.operator");
+  assertNotIncludes(highlights, '"fork" @keyword.operator');
+});
+
 Deno.test("highlight defaults only reference exposed tree-sitter nodes", () => {
   const source = `
     token ident = /[a-z]+/ ;
@@ -727,14 +744,19 @@ Deno.test("highlight defaults only reference exposed tree-sitter nodes", () => {
 Deno.test("generated workbench tree-sitter queries compile", async () => {
   const source = `
     token ident = /[a-z]+/ ;
-    module = Visibility function block ;
+    module = Visibility function block Primary ;
     Visibility = "pub" ;
+    Primary = ForkBuiltin | ident ;
+    ForkBuiltin = "fork" ;
     function = "fn" ident "(" ")" block ;
     block = "{" "}" ;
   `;
   const metadata = parseTreeSitterMetadata(JSON.stringify({
     queries: {
-      highlights: [{ node: "Visibility", capture: "keyword" }],
+      highlights: [
+        { node: "Visibility", capture: "keyword" },
+        { literal: "fork", capture: "keyword.operator" },
+      ],
       tags: [{ node: "function", capture: "name.definition.function" }],
       textobjects: [{ node: "function", capture: "function.outer" }],
       rainbows: {
@@ -753,12 +775,20 @@ Deno.test("generated workbench tree-sitter queries compile", async () => {
   assertIncludes(files["README.md"], "queries/highlights.scm");
   assertIncludes(files["README.md"], "metadata.queries.textobjects");
   assertIncludes(files["queries/highlights.scm"], "(Visibility) @keyword");
+  assertIncludes(
+    files["queries/highlights.scm"],
+    "(ForkBuiltin) @keyword.operator",
+  );
   assertNotIncludes(files["queries/highlights.scm"], '"pub" @keyword');
+  assertNotIncludes(
+    files["queries/highlights.scm"],
+    '"fork" @keyword.operator',
+  );
   assertNotIncludes(files["queries/highlights.scm"], "(string) @string");
 
   await writeGeneratedBundle(dir, bundle);
   await Deno.mkdir(`${dir}/cache`, { recursive: true });
-  await Deno.writeTextFile(`${dir}/sample.tiny`, "pub fn example() {}\n");
+  await Deno.writeTextFile(`${dir}/sample.tiny`, "pub fn example() {} fork\n");
   await runCommand("tree-sitter", ["generate"], dir);
   for (
     const query of [

@@ -1557,7 +1557,10 @@ export function generateTreeSitterHighlightsQuery(
     validateTreeSitterQueryMetadata(grammar, metadata);
   }
 
-  const explicit = metadata.queries?.highlights ?? [];
+  const explicit = resolveHighlightCaptureSelectors(
+    metadata.queries?.highlights ?? [],
+    grammar,
+  );
   const explicitSelectors = new Set(explicit.map(captureSelectorKey));
   const lines = [
     ...renderCaptureQueryEntries(explicit),
@@ -2066,6 +2069,22 @@ function captureSelectorKey(capture: TreeSitterCaptureMetadata): string {
   return capture.node ? `node:${capture.node}` : `literal:${capture.literal}`;
 }
 
+function resolveHighlightCaptureSelectors(
+  captures: TreeSitterCaptureMetadata[],
+  grammar: EbnfGrammar,
+): TreeSitterCaptureMetadata[] {
+  const anonymousLiterals = collectAnonymousLiteralTerminals(grammar);
+  const singleLiteralRules = collectSingleLiteralRules(grammar);
+  return captures.map((capture) => {
+    if (!capture.literal || anonymousLiterals.has(capture.literal)) {
+      return capture;
+    }
+    const wrapper = singleLiteralRules.get(capture.literal);
+    if (!wrapper) return capture;
+    return { node: wrapper, capture: capture.capture };
+  });
+}
+
 function defaultHighlightQueryEntries(
   grammar: EbnfGrammar,
   metadata: TreeSitterMetadata,
@@ -2238,6 +2257,57 @@ function collectLiteralOnlyExpressionTerminals(
     }
     default:
       return false;
+  }
+}
+
+function collectSingleLiteralRules(grammar: EbnfGrammar): Map<string, string> {
+  const rules = new Map<string, string>();
+  for (const rule of grammar.rules) {
+    if (rule.expression.kind === "literal") {
+      rules.set(rule.expression.value, rule.name);
+    }
+  }
+  return rules;
+}
+
+function collectAnonymousLiteralTerminals(grammar: EbnfGrammar): Set<string> {
+  const terminals = new Set<string>();
+  for (const rule of grammar.rules) {
+    if (rule.expression.kind === "literal") continue;
+    collectLiteralTerminals(rule.expression, terminals);
+  }
+  return terminals;
+}
+
+function collectLiteralTerminals(
+  expression: EbnfExpression,
+  terminals: Set<string>,
+): void {
+  switch (expression.kind) {
+    case "literal":
+      terminals.add(expression.value);
+      return;
+    case "sequence":
+      for (const item of expression.items) {
+        collectLiteralTerminals(item, terminals);
+      }
+      return;
+    case "choice":
+      for (const option of expression.options) {
+        collectLiteralTerminals(option, terminals);
+      }
+      return;
+    case "optional":
+    case "repeat":
+    case "repeat1":
+      collectLiteralTerminals(expression.expression, terminals);
+      return;
+    case "separated":
+      collectLiteralTerminals(expression.item, terminals);
+      collectLiteralTerminals(expression.separator, terminals);
+      return;
+    case "ref":
+      return;
   }
 }
 
