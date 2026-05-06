@@ -1562,6 +1562,7 @@ export function generateTreeSitterHighlightsQuery(
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata);
+    warnUncoveredSuppressedHighlightContexts(grammar, metadata);
   }
 
   const explicit = resolveHighlightCaptureSelectors(
@@ -2823,11 +2824,37 @@ function validateTreeSitterQueryMetadata(
     queries.highlights?.defaults?.suppress,
     "highlight default suppression",
   );
+  validateHighlightCoverageIgnoreMetadata(grammar, metadata);
   validateCaptureMetadata(grammar, metadata, queries.locals, "locals");
   validateCaptureMetadata(grammar, metadata, queries.folds, "fold");
   validateCaptureMetadata(grammar, metadata, queries.indents, "indent");
   validateCaptureMetadata(grammar, metadata, queries.tags, "tag");
   validateCaptureMetadata(grammar, metadata, queries.textobjects, "textobject");
+}
+
+function validateHighlightCoverageIgnoreMetadata(
+  grammar: EbnfGrammar,
+  metadata: TreeSitterMetadata,
+): void {
+  const ignore = metadata.queries?.highlights?.defaults?.ignore;
+  if (!ignore) return;
+  validateCaptureSelectorsMetadata(
+    grammar,
+    metadata,
+    ignore,
+    "highlight coverage ignore",
+  );
+  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+    grammar,
+    metadata,
+  );
+  for (const entry of ignore) {
+    if (!knownNodes.has(entry.parent)) {
+      throw new Error(
+        `Unknown highlight coverage ignore parent '${entry.parent}'`,
+      );
+    }
+  }
 }
 
 function validateCaptureMetadata(
@@ -2877,6 +2904,178 @@ function validateCaptureSelectorsMetadata(
       throw new Error(`Unknown ${context} literal '${selector.literal}'`);
     }
   }
+}
+
+function warnUncoveredSuppressedHighlightContexts(
+  grammar: EbnfGrammar,
+  metadata: TreeSitterMetadata,
+): void {
+  const suppress = metadata.queries?.highlights?.defaults?.suppress ?? [];
+  if (suppress.length === 0) return;
+
+  const highlights = metadata.queries?.highlights?.entries ?? [];
+  const globalCaptures = new Set<string>();
+  const rawPatterns: string[] = [];
+  for (const entry of highlights) {
+    if (isRawQueryEntry(entry)) {
+      rawPatterns.push(entry.pattern);
+    } else {
+      globalCaptures.add(captureSelectorKey(entry));
+    }
+  }
+
+  const ignoredContexts = new Set(
+    (metadata.queries?.highlights?.defaults?.ignore ?? []).map((ignore) =>
+      `${ignore.parent}:${captureSelectorKey(ignore)}`
+    ),
+  );
+
+  const contexts = collectSuppressedHighlightContexts(grammar, suppress);
+  for (const context of contexts) {
+    const selectorKey = captureSelectorKey(context.selector);
+    if (globalCaptures.has(selectorKey)) continue;
+    if (ignoredContexts.has(`${context.parent}:${selectorKey}`)) continue;
+    if (
+      rawPatterns.some((pattern) =>
+        rawHighlightPatternCapturesContext(
+          pattern,
+          context.parent,
+          context.selector,
+        )
+      )
+    ) {
+      continue;
+    }
+    const child = context.selector.node ??
+      JSON.stringify(context.selector.literal);
+    console.warn(
+      `highlight metadata suppresses ${child}, but ${child} appears under ${context.parent} with no explicit highlight capture.`,
+    );
+  }
+}
+
+function collectSuppressedHighlightContexts(
+  grammar: EbnfGrammar,
+  suppress: TreeSitterCaptureSelectorMetadata[],
+): Array<{ parent: string; selector: TreeSitterCaptureSelectorMetadata }> {
+  const suppressedNodes = new Map(
+    suppress.filter((selector) => selector.node).map((selector) => [
+      selector.node,
+      selector,
+    ]),
+  );
+  const suppressedLiterals = new Map(
+    suppress.filter((selector) => selector.literal).map((selector) => [
+      selector.literal,
+      selector,
+    ]),
+  );
+  const contexts: Array<
+    { parent: string; selector: TreeSitterCaptureSelectorMetadata }
+  > = [];
+  const seen = new Set<string>();
+  for (const rule of grammar.rules) {
+    collectSuppressedHighlightContextsInto(
+      rule.expression,
+      rule.name,
+      suppressedNodes,
+      suppressedLiterals,
+      contexts,
+      seen,
+    );
+  }
+  return contexts.sort((left, right) =>
+    left.parent.localeCompare(right.parent) ||
+    captureSelectorKey(left.selector).localeCompare(
+      captureSelectorKey(right.selector),
+    )
+  );
+}
+
+function collectSuppressedHighlightContextsInto(
+  expression: EbnfExpression,
+  parent: string,
+  suppressedNodes: Map<string | undefined, TreeSitterCaptureSelectorMetadata>,
+  suppressedLiterals: Map<
+    string | undefined,
+    TreeSitterCaptureSelectorMetadata
+  >,
+  contexts: Array<
+    { parent: string; selector: TreeSitterCaptureSelectorMetadata }
+  >,
+  seen: Set<string>,
+): void {
+  if (expression.kind === "ref") {
+    const selector = suppressedNodes.get(expression.name);
+    if (selector) {
+      pushSuppressedHighlightContext(parent, selector, contexts, seen);
+    }
+    return;
+  }
+  if (expression.kind === "literal") {
+    const selector = suppressedLiterals.get(expression.value);
+    if (selector) {
+      pushSuppressedHighlightContext(parent, selector, contexts, seen);
+    }
+    return;
+  }
+  for (const child of expressionChildren(expression)) {
+    collectSuppressedHighlightContextsInto(
+      child,
+      parent,
+      suppressedNodes,
+      suppressedLiterals,
+      contexts,
+      seen,
+    );
+  }
+}
+
+function pushSuppressedHighlightContext(
+  parent: string,
+  selector: TreeSitterCaptureSelectorMetadata,
+  contexts: Array<
+    { parent: string; selector: TreeSitterCaptureSelectorMetadata }
+  >,
+  seen: Set<string>,
+): void {
+  const key = `${parent}:${captureSelectorKey(selector)}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  contexts.push({ parent, selector });
+}
+
+function expressionChildren(expression: EbnfExpression): EbnfExpression[] {
+  switch (expression.kind) {
+    case "sequence":
+      return expression.items;
+    case "choice":
+      return expression.options;
+    case "optional":
+    case "repeat":
+    case "repeat1":
+      return [expression.expression];
+    case "separated":
+      return [expression.item, expression.separator];
+    case "ref":
+    case "literal":
+      return [];
+  }
+}
+
+function rawHighlightPatternCapturesContext(
+  pattern: string,
+  parent: string,
+  selector: TreeSitterCaptureSelectorMetadata,
+): boolean {
+  const child = selector.node
+    ? `(${selector.node})`
+    : JSON.stringify(selector.literal);
+  const parentIndex = pattern.indexOf(`(${parent}`);
+  if (parentIndex === -1) return false;
+  const childIndex = pattern.indexOf(child, parentIndex);
+  if (childIndex === -1) return false;
+  return /@\w[\w.-]*/.test(pattern.slice(childIndex + child.length));
 }
 
 function validateWorkbenchMetadataSemantics(

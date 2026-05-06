@@ -207,6 +207,7 @@ export interface TreeSitterCaptureQueryMetadata {
 
 export interface TreeSitterHighlightDefaultsMetadata {
   suppress?: TreeSitterCaptureSelectorMetadata[];
+  ignore?: TreeSitterHighlightCoverageIgnoreMetadata[];
 }
 
 export interface TreeSitterRawQueryMetadata {
@@ -219,6 +220,12 @@ export interface TreeSitterCaptureSelectorMetadata {
   node?: string;
   /** Literal terminal to select. Mutually exclusive with `node`. */
   literal?: string;
+}
+
+export interface TreeSitterHighlightCoverageIgnoreMetadata
+  extends TreeSitterCaptureSelectorMetadata {
+  /** Parent syntax node where the uncovered suppressed node is intentional. */
+  parent: string;
 }
 
 /** A metadata-driven tree-sitter query capture. */

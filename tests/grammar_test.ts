@@ -54,6 +54,19 @@ function assertNotIncludes(actual: string, expected: string): void {
   );
 }
 
+function captureWarnings(action: () => unknown): string[] {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) =>
+    warnings.push(args.map(String).join(" "));
+  try {
+    action();
+  } finally {
+    console.warn = originalWarn;
+  }
+  return warnings;
+}
+
 interface GeneratedToken {
   kind: string;
   text: string;
@@ -766,6 +779,81 @@ Deno.test("query metadata emits raw patterns and suppresses highlight defaults",
   const textobjects = generateTreeSitterTextobjectsQuery(source, { metadata });
   assertIncludes(textobjects, "(module) @module.outer");
   assertIncludes(textobjects, '"fn" @keyword.function');
+});
+
+Deno.test("highlight generation warns when suppressed nodes lack context captures", () => {
+  const source = `
+    token PascalIdent = /[A-Z][A-Za-z]*/ ;
+    TypeExpr = PascalIdent ;
+    BlockProofConstDecl = "const" PascalIdent "=" TypeExpr ";" ;
+    module = BlockProofConstDecl ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: {
+        defaults: { suppress: [{ node: "PascalIdent" }] },
+      },
+    },
+  }));
+
+  const warnings = captureWarnings(() =>
+    generateTreeSitterHighlightsQuery(source, { metadata })
+  );
+
+  assertEquals(warnings.length, 2);
+  assertEquals(
+    warnings.join("\n"),
+    [
+      "highlight metadata suppresses PascalIdent, but PascalIdent appears under BlockProofConstDecl with no explicit highlight capture.",
+      "highlight metadata suppresses PascalIdent, but PascalIdent appears under TypeExpr with no explicit highlight capture.",
+    ].join("\n"),
+  );
+});
+
+Deno.test("highlight generation accepts explicit raw captures for suppressed contexts", () => {
+  const source = `
+    token PascalIdent = /[A-Z][A-Za-z]*/ ;
+    BlockProofConstDecl = "const" PascalIdent "=" PascalIdent ";" ;
+    module = BlockProofConstDecl ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: {
+        patterns: ["(BlockProofConstDecl (PascalIdent) @type)"],
+        defaults: { suppress: [{ node: "PascalIdent" }] },
+      },
+    },
+  }));
+
+  const warnings = captureWarnings(() =>
+    generateTreeSitterHighlightsQuery(source, { metadata })
+  );
+
+  assertEquals(warnings.length, 0);
+});
+
+Deno.test("highlight generation accepts ignored suppressed contexts", () => {
+  const source = `
+    token PascalIdent = /[A-Z][A-Za-z]*/ ;
+    BlockProofConstDecl = "const" PascalIdent "=" PascalIdent ";" ;
+    module = BlockProofConstDecl ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: {
+        defaults: {
+          suppress: [{ node: "PascalIdent" }],
+          ignore: [{ node: "PascalIdent", parent: "BlockProofConstDecl" }],
+        },
+      },
+    },
+  }));
+
+  const warnings = captureWarnings(() =>
+    generateTreeSitterHighlightsQuery(source, { metadata })
+  );
+
+  assertEquals(warnings.length, 0);
 });
 
 Deno.test("rainbow and injection metadata emit raw query patterns", () => {

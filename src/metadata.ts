@@ -241,7 +241,7 @@ function parseHighlightCaptureQuery(
   }
   if (hasKey(object, "defaults")) {
     const defaults = expectObject(object.defaults, `${path}.defaults`);
-    assertKnownKeys(defaults, `${path}.defaults`, ["suppress"]);
+    assertKnownKeys(defaults, `${path}.defaults`, ["suppress", "ignore"]);
     metadata.defaults = {};
     if (hasKey(defaults, "suppress")) {
       metadata.defaults.suppress = expectArray(
@@ -253,6 +253,35 @@ function parseHighlightCaptureQuery(
           `${path}.defaults.suppress[${index}]`,
         )
       );
+    }
+    if (hasKey(defaults, "ignore")) {
+      metadata.defaults.ignore = expectArray(
+        defaults.ignore,
+        `${path}.defaults.ignore`,
+      ).map((ignore, index) => {
+        const ignoreObject = expectObject(
+          ignore,
+          `${path}.defaults.ignore[${index}]`,
+        );
+        assertKnownKeys(ignoreObject, `${path}.defaults.ignore[${index}]`, [
+          "node",
+          "literal",
+          "parent",
+        ]);
+        const selector = parseCaptureSelectorMetadata(
+          hasKey(ignoreObject, "node")
+            ? { node: ignoreObject.node }
+            : { literal: ignoreObject.literal },
+          `${path}.defaults.ignore[${index}]`,
+        );
+        return {
+          ...selector,
+          parent: expectString(
+            ignoreObject.parent,
+            `${path}.defaults.ignore[${index}].parent`,
+          ),
+        };
+      });
     }
   }
   return metadata;

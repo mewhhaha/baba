@@ -342,7 +342,8 @@ the EBNF:
         { "node": "function", "capture": "function" }
       ],
       "defaults": {
-        "suppress": [{ "node": "ident" }]
+        "suppress": [{ "node": "ident" }],
+        "ignore": [{ "node": "ident", "parent": "type_reference" }]
       }
     },
     "locals": {
@@ -396,7 +397,11 @@ Capture query files accept either the original array form or an object with
 validated by Tree-sitter query compilation, not parsed by Baba. Highlight
 entries render before generated defaults, and
 `queries.highlights.defaults.suppress` disables default captures for selected
-nodes or literals.
+nodes or literals. Suppressed nodes and literals are checked against their
+grammar parent contexts; Baba warns when a suppressed item appears in a context
+without an explicit highlight capture. Add a raw highlight pattern or a
+`queries.highlights.defaults.ignore` entry with `node` or `literal` plus
+`parent` to silence an intentional omission.
 
 Generated tokenizers and the Tree-sitter `line_comment` builtin skip only
 `language.comment`, defaulting to `//`. A grammar that wants `#` comments should
