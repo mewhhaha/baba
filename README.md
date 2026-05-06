@@ -335,13 +335,21 @@ the EBNF:
     }
   },
   "queries": {
-    "highlights": [
-      { "literal": "fn", "capture": "keyword.function" },
-      { "node": "function", "capture": "function" }
-    ],
-    "locals": [
-      { "node": "ident", "capture": "local.definition" }
-    ],
+    "highlights": {
+      "patterns": ["(function (ident) @function)"],
+      "entries": [
+        { "literal": "fn", "capture": "keyword.function" },
+        { "node": "function", "capture": "function" }
+      ],
+      "defaults": {
+        "suppress": [{ "node": "ident" }]
+      }
+    },
+    "locals": {
+      "entries": [
+        { "node": "ident", "capture": "local.definition" }
+      ]
+    },
     "folds": [
       { "node": "block", "capture": "fold" }
     ],
@@ -353,10 +361,14 @@ the EBNF:
     ],
     "rainbows": {
       "scopes": ["function", "block"],
-      "brackets": ["(", "{", "["]
+      "brackets": ["(", "{", "["],
+      "patterns": ["(template) @rainbow.scope"]
     },
     "injections": [
-      { "node": "wgsl_content", "language": "wgsl" }
+      { "node": "wgsl_content", "language": "wgsl" },
+      {
+        "pattern": "((shader_body) @injection.content (#set! injection.language \"wgsl\"))"
+      }
     ]
   },
   "ast": {
@@ -378,6 +390,18 @@ the EBNF:
   }
 }
 ```
+
+Capture query files accept either the original array form or an object with
+`patterns` and `entries`. Raw `pattern` strings are emitted verbatim and are
+validated by Tree-sitter query compilation, not parsed by Baba. Highlight
+entries render before generated defaults, and
+`queries.highlights.defaults.suppress` disables default captures for selected
+nodes or literals.
+
+Generated tokenizers and the Tree-sitter `line_comment` builtin skip only
+`language.comment`, defaulting to `//`. A grammar that wants `#` comments should
+set `"comment": "#"`; otherwise tokens like `#Tag` remain available to normal
+token matching.
 
 ## Development
 

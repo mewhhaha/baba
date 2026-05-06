@@ -1,7 +1,11 @@
 import type {
   TreeSitterCaptureMetadata,
+  TreeSitterCaptureQueryEntry,
+  TreeSitterCaptureQueryMetadata,
+  TreeSitterCaptureSelectorMetadata,
   TreeSitterExtra,
   TreeSitterInjectionMetadata,
+  TreeSitterInjectionQueryEntry,
   TreeSitterMetadata,
   TreeSitterPathMetadata,
   TreeSitterRainbowsMetadata,
@@ -172,25 +176,28 @@ function parseQueriesMetadata(
 
   const queries: NonNullable<TreeSitterMetadata["queries"]> = {};
   if (hasKey(object, "highlights")) {
-    queries.highlights = parseCaptureArray(
+    queries.highlights = parseHighlightCaptureQuery(
       object.highlights,
       `${path}.highlights`,
     );
   }
   if (hasKey(object, "locals")) {
-    queries.locals = parseCaptureArray(object.locals, `${path}.locals`);
+    queries.locals = parseCaptureQueryEntries(object.locals, `${path}.locals`);
   }
   if (hasKey(object, "folds")) {
-    queries.folds = parseCaptureArray(object.folds, `${path}.folds`);
+    queries.folds = parseCaptureQueryEntries(object.folds, `${path}.folds`);
   }
   if (hasKey(object, "indents")) {
-    queries.indents = parseCaptureArray(object.indents, `${path}.indents`);
+    queries.indents = parseCaptureQueryEntries(
+      object.indents,
+      `${path}.indents`,
+    );
   }
   if (hasKey(object, "tags")) {
-    queries.tags = parseCaptureArray(object.tags, `${path}.tags`);
+    queries.tags = parseCaptureQueryEntries(object.tags, `${path}.tags`);
   }
   if (hasKey(object, "textobjects")) {
-    queries.textobjects = parseCaptureArray(
+    queries.textobjects = parseCaptureQueryEntries(
       object.textobjects,
       `${path}.textobjects`,
     );
@@ -202,19 +209,83 @@ function parseQueriesMetadata(
     );
   }
   if (hasKey(object, "injections")) {
-    queries.injections = expectArray(object.injections, `${path}.injections`)
-      .map((injection, index) =>
-        parseInjectionMetadata(injection, `${path}.injections[${index}]`)
-      );
+    queries.injections = parseInjectionQueryEntries(
+      object.injections,
+      `${path}.injections`,
+    );
   }
   return queries;
 }
 
-function parseCaptureArray(
+function parseHighlightCaptureQuery(
   value: unknown,
   path: string,
-): TreeSitterCaptureMetadata[] {
-  return expectArray(value, path).map((capture, index) =>
+): TreeSitterCaptureQueryMetadata {
+  if (Array.isArray(value)) {
+    return { entries: parseCaptureQueryArray(value, path) };
+  }
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["patterns", "entries", "defaults"]);
+  const metadata: TreeSitterCaptureQueryMetadata = { entries: [] };
+  if (hasKey(object, "patterns")) {
+    metadata.entries.push(
+      ...expectStringArray(object.patterns, `${path}.patterns`).map((
+        pattern,
+      ) => ({ pattern })),
+    );
+  }
+  if (hasKey(object, "entries")) {
+    metadata.entries.push(
+      ...parseCaptureQueryEntries(object.entries, `${path}.entries`),
+    );
+  }
+  if (hasKey(object, "defaults")) {
+    const defaults = expectObject(object.defaults, `${path}.defaults`);
+    assertKnownKeys(defaults, `${path}.defaults`, ["suppress"]);
+    metadata.defaults = {};
+    if (hasKey(defaults, "suppress")) {
+      metadata.defaults.suppress = expectArray(
+        defaults.suppress,
+        `${path}.defaults.suppress`,
+      ).map((selector, index) =>
+        parseCaptureSelectorMetadata(
+          selector,
+          `${path}.defaults.suppress[${index}]`,
+        )
+      );
+    }
+  }
+  return metadata;
+}
+
+function parseCaptureQueryEntries(
+  value: unknown,
+  path: string,
+): TreeSitterCaptureQueryEntry[] {
+  if (Array.isArray(value)) return parseCaptureQueryArray(value, path);
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["patterns", "entries"]);
+  const entries: TreeSitterCaptureQueryEntry[] = [];
+  if (hasKey(object, "patterns")) {
+    entries.push(
+      ...expectStringArray(object.patterns, `${path}.patterns`).map((
+        pattern,
+      ) => ({ pattern })),
+    );
+  }
+  if (hasKey(object, "entries")) {
+    entries.push(
+      ...parseCaptureQueryEntries(object.entries, `${path}.entries`),
+    );
+  }
+  return entries;
+}
+
+function parseCaptureQueryArray(
+  value: unknown[],
+  path: string,
+): TreeSitterCaptureQueryEntry[] {
+  return value.map((capture, index) =>
     parseCaptureMetadata(capture, `${path}[${index}]`)
   );
 }
@@ -222,9 +293,21 @@ function parseCaptureArray(
 function parseCaptureMetadata(
   value: unknown,
   path: string,
-): TreeSitterCaptureMetadata {
+): TreeSitterCaptureQueryEntry {
   const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["node", "literal", "capture"]);
+  assertKnownKeys(object, path, ["node", "literal", "capture", "pattern"]);
+
+  if (hasKey(object, "pattern")) {
+    if (
+      hasKey(object, "node") || hasKey(object, "literal") ||
+      hasKey(object, "capture")
+    ) {
+      throwMetadataShape(
+        `Expected ${path} raw pattern to omit node, literal, and capture`,
+      );
+    }
+    return { pattern: expectString(object.pattern, `${path}.pattern`) };
+  }
 
   const hasNode = hasKey(object, "node");
   const hasLiteral = hasKey(object, "literal");
@@ -243,12 +326,30 @@ function parseCaptureMetadata(
     : { literal: expectString(object.literal, `${path}.literal`), capture };
 }
 
+function parseCaptureSelectorMetadata(
+  value: unknown,
+  path: string,
+): TreeSitterCaptureSelectorMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["node", "literal"]);
+  const hasNode = hasKey(object, "node");
+  const hasLiteral = hasKey(object, "literal");
+  if (hasNode === hasLiteral) {
+    throwMetadataShape(
+      `Expected ${path} to specify exactly one of node or literal`,
+    );
+  }
+  return hasNode
+    ? { node: expectString(object.node, `${path}.node`) }
+    : { literal: expectString(object.literal, `${path}.literal`) };
+}
+
 function parseRainbowsMetadata(
   value: unknown,
   path: string,
 ): TreeSitterRainbowsMetadata {
   const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["scopes", "brackets"]);
+  assertKnownKeys(object, path, ["scopes", "brackets", "patterns"]);
 
   const rainbows: TreeSitterRainbowsMetadata = {};
   if (hasKey(object, "scopes")) {
@@ -257,7 +358,25 @@ function parseRainbowsMetadata(
   if (hasKey(object, "brackets")) {
     rainbows.brackets = expectStringArray(object.brackets, `${path}.brackets`);
   }
+  if (hasKey(object, "patterns")) {
+    rainbows.patterns = expectStringArray(object.patterns, `${path}.patterns`);
+  }
   return rainbows;
+}
+
+function parseInjectionQueryEntries(
+  value: unknown,
+  path: string,
+): TreeSitterInjectionQueryEntry[] {
+  return expectArray(value, path).map((injection, index) => {
+    const entryPath = `${path}[${index}]`;
+    const object = expectObject(injection, entryPath);
+    if (hasKey(object, "pattern")) {
+      assertKnownKeys(object, entryPath, ["pattern"]);
+      return { pattern: expectString(object.pattern, `${entryPath}.pattern`) };
+    }
+    return parseInjectionMetadata(injection, entryPath);
+  });
 }
 
 function parseInjectionMetadata(

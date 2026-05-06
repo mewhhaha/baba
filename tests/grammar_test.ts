@@ -741,6 +741,60 @@ Deno.test("highlight defaults only reference exposed tree-sitter nodes", () => {
   assertNotIncludes(highlights, "(int) @number");
 });
 
+Deno.test("query metadata emits raw patterns and suppresses highlight defaults", () => {
+  const source = `
+    token Ident = /[A-Za-z]+/ ;
+    module = "fn" Ident ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: {
+        patterns: ["(module (Ident) @function)"],
+        defaults: { suppress: [{ node: "Ident" }] },
+      },
+      textobjects: {
+        patterns: ["(module) @module.outer"],
+        entries: [{ literal: "fn", capture: "keyword.function" }],
+      },
+    },
+  }));
+
+  const highlights = generateTreeSitterHighlightsQuery(source, { metadata });
+  assertIncludes(highlights, "(module (Ident) @function)");
+  assertNotIncludes(highlights, "(Ident) @constant");
+
+  const textobjects = generateTreeSitterTextobjectsQuery(source, { metadata });
+  assertIncludes(textobjects, "(module) @module.outer");
+  assertIncludes(textobjects, '"fn" @keyword.function');
+});
+
+Deno.test("rainbow and injection metadata emit raw query patterns", () => {
+  const source = `
+    token content = /[a-z]+/ ;
+    module = content ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      rainbows: { patterns: ["(module) @rainbow.scope"] },
+      injections: [
+        {
+          pattern:
+            '((content) @injection.content (#set! injection.language "wgsl"))',
+        },
+      ],
+    },
+  }));
+
+  assertIncludes(
+    generateTreeSitterRainbowsQuery(source, { metadata }),
+    "(module) @rainbow.scope",
+  );
+  assertIncludes(
+    generateTreeSitterInjectionsQuery(source, { metadata }),
+    "((content) @injection.content",
+  );
+});
+
 Deno.test("generated workbench tree-sitter queries compile", async () => {
   const source = `
     token ident = /[a-z]+/ ;
@@ -753,10 +807,14 @@ Deno.test("generated workbench tree-sitter queries compile", async () => {
   `;
   const metadata = parseTreeSitterMetadata(JSON.stringify({
     queries: {
-      highlights: [
-        { node: "Visibility", capture: "keyword" },
-        { literal: "fork", capture: "keyword.operator" },
-      ],
+      highlights: {
+        entries: [
+          { node: "Visibility", capture: "keyword" },
+          { literal: "fork", capture: "keyword.operator" },
+          { pattern: "(function (ident) @function)" },
+        ],
+        defaults: { suppress: [{ node: "ident" }] },
+      },
       tags: [{ node: "function", capture: "name.definition.function" }],
       textobjects: [{ node: "function", capture: "function.outer" }],
       rainbows: {
@@ -785,6 +843,11 @@ Deno.test("generated workbench tree-sitter queries compile", async () => {
     '"fork" @keyword.operator',
   );
   assertNotIncludes(files["queries/highlights.scm"], "(string) @string");
+  assertIncludes(
+    files["queries/highlights.scm"],
+    "(function (ident) @function)",
+  );
+  assertNotIncludes(files["queries/highlights.scm"], "(ident) @variable");
 
   await writeGeneratedBundle(dir, bundle);
   await Deno.mkdir(`${dir}/cache`, { recursive: true });
@@ -1401,6 +1464,29 @@ Deno.test("layout tokenizer treats fenced blocks as one token", async () => {
   }
 });
 
+Deno.test("generated tokenizer preserves hash-prefixed tokens by default", async () => {
+  const source = `
+    token HashTag = /#[A-Za-z]+/ ;
+    module = HashTag ;
+  `;
+  const tokenizer = generateTokenizerSource(source);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    const tokenizerPath = `${dir}/tokenizer.ts`;
+    await Deno.writeTextFile(tokenizerPath, tokenizer);
+    const module = await import(`file://${tokenizerPath}?${Date.now()}`) as {
+      lex(source: string): GeneratedToken[];
+    };
+
+    const tokens = module.lex("#Tag");
+    assertEquals(tokens.map((token) => token.kind).join(","), "HashTag,eof");
+    assertEquals(tokens[0].text, "#Tag");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("tree-sitter metadata parser rejects invalid shapes", () => {
   assertThrowsIncludes(
     () => parseTreeSitterMetadata("{"),
@@ -1465,24 +1551,28 @@ Deno.test("tree-sitter metadata parser rejects invalid shapes", () => {
       parseTreeSitterMetadata(JSON.stringify({
         queries: { highlights: { node: "x", capture: "keyword" } },
       })),
-    "Expected metadata.queries.highlights to be array",
+    "Unknown metadata.queries.highlights key 'node'",
   );
   const textobjectMetadata = parseTreeSitterMetadata(JSON.stringify({
     queries: {
       textobjects: [{ node: "function", capture: "function.outer" }],
     },
   }));
+  const textobject = textobjectMetadata.queries?.textobjects?.[0];
+  assert(textobject && "capture" in textobject);
   assertEquals(
-    textobjectMetadata.queries?.textobjects?.[0].capture,
+    textobject.capture,
     "function.outer",
   );
-  assertThrowsIncludes(
-    () =>
-      parseTreeSitterMetadata(JSON.stringify({
-        queries: { textobjects: { node: "x", capture: "function.outer" } },
-      })),
-    "Expected metadata.queries.textobjects to be array",
-  );
+  const objectTextobjectMetadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      textobjects: {
+        patterns: ["(function) @function.outer"],
+        entries: [{ node: "ident", capture: "function.inner" }],
+      },
+    },
+  }));
+  assertEquals(objectTextobjectMetadata.queries?.textobjects?.length, 2);
   assertThrowsIncludes(
     () =>
       parseTreeSitterMetadata(JSON.stringify({

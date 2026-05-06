@@ -177,25 +177,53 @@ export interface WorkbenchLanguageMetadata {
 /** Query generation metadata. */
 export interface TreeSitterQueriesMetadata {
   /** Highlight capture query entries. */
-  highlights?: TreeSitterCaptureMetadata[];
+  highlights?: TreeSitterCaptureQueryMetadata;
   /** Locals capture query entries. */
-  locals?: TreeSitterCaptureMetadata[];
+  locals?: TreeSitterCaptureQueryEntries;
   /** Fold capture query entries. */
-  folds?: TreeSitterCaptureMetadata[];
+  folds?: TreeSitterCaptureQueryEntries;
   /** Indentation capture query entries. */
-  indents?: TreeSitterCaptureMetadata[];
+  indents?: TreeSitterCaptureQueryEntries;
   /** Tag capture query entries. */
-  tags?: TreeSitterCaptureMetadata[];
+  tags?: TreeSitterCaptureQueryEntries;
   /** Textobject capture query entries. */
-  textobjects?: TreeSitterCaptureMetadata[];
+  textobjects?: TreeSitterCaptureQueryEntries;
   /** Rainbow bracket query settings. */
   rainbows?: TreeSitterRainbowsMetadata;
   /** Injection query settings. */
-  injections?: TreeSitterInjectionMetadata[];
+  injections?: TreeSitterInjectionQueryEntry[];
+}
+
+export type TreeSitterCaptureQueryEntries = TreeSitterCaptureQueryEntry[];
+
+export type TreeSitterCaptureQueryEntry =
+  | TreeSitterCaptureMetadata
+  | TreeSitterRawQueryMetadata;
+
+export interface TreeSitterCaptureQueryMetadata {
+  entries: TreeSitterCaptureQueryEntry[];
+  defaults?: TreeSitterHighlightDefaultsMetadata;
+}
+
+export interface TreeSitterHighlightDefaultsMetadata {
+  suppress?: TreeSitterCaptureSelectorMetadata[];
+}
+
+export interface TreeSitterRawQueryMetadata {
+  /** Raw tree-sitter query pattern emitted verbatim. */
+  pattern: string;
+}
+
+export interface TreeSitterCaptureSelectorMetadata {
+  /** Node name to select. Mutually exclusive with `literal`. */
+  node?: string;
+  /** Literal terminal to select. Mutually exclusive with `node`. */
+  literal?: string;
 }
 
 /** A metadata-driven tree-sitter query capture. */
-export interface TreeSitterCaptureMetadata {
+export interface TreeSitterCaptureMetadata
+  extends TreeSitterCaptureSelectorMetadata {
   /** Node name to capture. Mutually exclusive with `literal`. */
   node?: string;
   /** Literal terminal to capture. Mutually exclusive with `node`. */
@@ -210,7 +238,13 @@ export interface TreeSitterRainbowsMetadata {
   scopes?: string[];
   /** Literal bracket tokens that should receive the rainbow bracket capture. */
   brackets?: string[];
+  /** Raw tree-sitter query patterns emitted before generated rainbows. */
+  patterns?: string[];
 }
+
+export type TreeSitterInjectionQueryEntry =
+  | TreeSitterInjectionMetadata
+  | TreeSitterRawQueryMetadata;
 
 /** Injection query settings for one embedded-language node. */
 export interface TreeSitterInjectionMetadata {
