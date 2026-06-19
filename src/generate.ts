@@ -22,7 +22,7 @@ const reservedTokenDeclarationNames = new Set(["source_file"]);
 /** Validates grammar-level semantics before generation. */
 export function validateEbnfGrammar(
   grammar: EbnfGrammar,
-  options: { rootRule?: string } = {},
+  options: { rootRule?: string; externals?: readonly string[] } = {},
 ): void {
   const errors = collectGrammarDiagnostics(grammar, options).filter(
     (diagnostic) => diagnostic.severity === "error",
@@ -35,7 +35,7 @@ export function validateEbnfGrammar(
 /** Collects grammar-level semantic diagnostics without stopping at first error. */
 export function collectGrammarDiagnostics(
   grammar: EbnfGrammar,
-  options: { rootRule?: string } = {},
+  options: { rootRule?: string; externals?: readonly string[] } = {},
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   if (grammar.rules.length === 0) {
@@ -50,6 +50,33 @@ export function collectGrammarDiagnostics(
 
   const declaredNames = new Set<string>();
   const tokenNames = new Set<string>();
+  const externalNames = new Set(options.externals ?? []);
+  const seenExternalNames = new Set<string>();
+  for (const external of options.externals ?? []) {
+    if (seenExternalNames.has(external)) {
+      diagnostics.push({
+        code: "DUPLICATE_DECLARATION",
+        severity: "error",
+        message: `Duplicate declaration '${external}'`,
+      });
+    }
+    seenExternalNames.add(external);
+    if (!isValidSymbolName(external)) {
+      diagnostics.push({
+        code: "INVALID_EXTERNAL_TOKEN",
+        severity: "error",
+        message: `Invalid external token name '${external}'`,
+      });
+    }
+    if (reservedTokenDeclarationNames.has(external)) {
+      diagnostics.push({
+        code: "RESERVED_GENERATED_NAME",
+        severity: "error",
+        message: `External token '${external}' uses reserved generated name`,
+      });
+    }
+    declaredNames.add(external);
+  }
   for (const token of grammar.tokens) {
     if (reservedTokenDeclarationNames.has(token.name)) {
       diagnostics.push({
@@ -134,7 +161,8 @@ export function collectGrammarDiagnostics(
       const name = ref.name;
       if (
         ruleNames.has(name) ||
-        tokenNames.has(name)
+        tokenNames.has(name) ||
+        externalNames.has(name)
       ) return;
       diagnostics.push({
         code: "UNKNOWN_RULE_REFERENCE",
@@ -176,7 +204,68 @@ export function collectTerminals(grammar: EbnfGrammar): string[] {
 export function validateTreeSitterBackendCapabilities(
   grammar: EbnfGrammar,
 ): void {
-  void grammar;
+  for (const token of grammar.tokens) {
+    const unsupported = findUnsupportedTreeSitterRegexConstruct(token.pattern);
+    if (!unsupported) continue;
+    throw new Error(
+      `${
+        token.kind === "skip" ? "Skip" : "Token"
+      } '${token.name}' uses ${unsupported}, which is unsupported by Tree-sitter regex tokens`,
+    );
+  }
+}
+
+function findUnsupportedTreeSitterRegexConstruct(
+  pattern: string,
+): string | undefined {
+  let escaped = false;
+  let inClass = false;
+  for (let index = 0; index < pattern.length; index++) {
+    const char = pattern[index];
+    if (escaped) {
+      if (!inClass && /^[1-9]$/.test(char)) return "backreferences";
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "[" && !inClass) {
+      inClass = true;
+      continue;
+    }
+    if (char === "]" && inClass) {
+      inClass = false;
+      continue;
+    }
+    if (inClass) continue;
+
+    if (char === "(" && pattern[index + 1] === "?") {
+      const operator = pattern.slice(index + 2, index + 4);
+      if (
+        pattern[index + 2] === "=" ||
+        pattern[index + 2] === "!" ||
+        operator === "<=" ||
+        operator === "<!"
+      ) {
+        return "lookaround assertions";
+      }
+      if (/^<[_A-Za-z]/.test(pattern.slice(index + 2))) {
+        return "named capture groups";
+      }
+    }
+    if (
+      (char === "*" || char === "+" || char === "?") &&
+      pattern[index + 1] === "?"
+    ) {
+      return "lazy quantifiers";
+    }
+    if (char === "}" && pattern[index + 1] === "?") {
+      return "lazy quantifiers";
+    }
+  }
+  return undefined;
 }
 
 export { parseTreeSitterMetadata } from "./metadata.ts";
@@ -197,7 +286,10 @@ export function generateTreeSitterGrammar(
   const name = options.name ?? "waesm";
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
   if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: options.metadata?.externals,
+    });
   }
   validateTreeSitterBackendCapabilities(grammar);
   const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
@@ -213,16 +305,15 @@ export function generateTreeSitterGrammar(
 
   const metadata = options.metadata ?? {};
   const context = createRenderContext(grammar, rootRuleName, metadata);
-  const sourceFileMeta = metadata.rules?.source_file ??
-    metadata.rules?.[rootRuleName];
+  const rootRefExpression = sourceFileExpression(grammar, rootRuleName);
   const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
   const reachableRefs = collectReachableRefs(grammar, reachableRules);
   const ruleLines = [
     `    source_file: $ => ${
       renderRuleExpression(
         "source_file",
-        rootRule.expression,
-        sourceFileMeta,
+        rootRefExpression,
+        metadata.rules?.source_file,
         context,
       )
     },`,
@@ -275,6 +366,13 @@ export function generateTreeSitterGrammar(
     headerLines.push(`  word: $ => $.${metadata.word},`, "");
   }
 
+  if (metadata.externals?.length) {
+    headerLines.push(
+      `  externals: $ => ${renderRuleRefArray(metadata.externals)},`,
+      "",
+    );
+  }
+
   if (metadata.supertypes?.length) {
     headerLines.push(
       `  supertypes: $ => ${renderRuleRefArray(metadata.supertypes)},`,
@@ -313,10 +411,13 @@ export function generateTreeSitterRainbowsQuery(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -359,10 +460,13 @@ export function generateTreeSitterInjectionsQuery(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -398,10 +502,13 @@ export function generateTreeSitterHighlightsQuery(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -423,7 +530,6 @@ export function generateTreeSitterHighlightsQuery(
     ...renderCaptureQueryEntries(explicit),
     ...defaultHighlightQueryEntries(
       grammar,
-      metadata,
       explicitSelectors,
       rootRuleName,
     ),
@@ -444,10 +550,13 @@ export function collectTreeSitterHighlightDiagnostics(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -471,10 +580,13 @@ export function generateTreeSitterLocalsQuery(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -494,10 +606,13 @@ export function generateTreeSitterFoldsQuery(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -517,10 +632,13 @@ export function generateTreeSitterIndentsQuery(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -540,10 +658,13 @@ export function generateTreeSitterTagsQuery(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -563,10 +684,13 @@ export function generateTreeSitterTextobjectsQuery(
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
   const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, {
+      rootRule: rootRuleName,
+      externals: metadata.externals,
+    });
+  }
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
@@ -687,7 +811,6 @@ function isCaptureMetadata(
 
 function defaultHighlightQueryEntries(
   grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata,
   explicitSelectors: Set<string>,
   rootRuleName: string,
 ): string[] {
@@ -698,17 +821,6 @@ function defaultHighlightQueryEntries(
     grammar,
     reachableRules,
   );
-  const exposedNodes = collectExposedTreeSitterNodeNames(
-    grammar,
-    metadata,
-    rootRuleName,
-  );
-  const pushNode = (node: string, capture: string) => {
-    if (!exposedNodes.has(node) || explicitSelectors.has(`node:${node}`)) {
-      return;
-    }
-    lines.push(`(${node}) @${capture}`);
-  };
   const pushLiteral = (literal: string, capture: string) => {
     if (explicitSelectors.has(`literal:${literal}`)) return;
     lines.push(`${JSON.stringify(literal)} @${capture}`);
@@ -735,72 +847,22 @@ function defaultHighlightQueryEntries(
     }
   }
 
-  for (const token of grammar.tokens) {
-    if (token.kind !== "token") continue;
-    const lowerName = token.name.toLowerCase();
-    const capture = lowerName.includes("ident")
-      ? "variable"
-      : lowerName.includes("int") || lowerName.includes("number")
-      ? "number"
-      : lowerName.includes("string")
-      ? "string"
-      : lowerName.includes("comment")
-      ? "comment"
-      : "constant";
-    pushNode(token.name, capture);
-  }
-
   return lines;
-}
-
-function collectExposedTreeSitterNodeNames(
-  grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata,
-  rootRuleName: string,
-): Set<string> {
-  const names = new Set<string>(["source_file"]);
-  const rulesByName = new Map(grammar.rules.map((rule) => [rule.name, rule]));
-  const tokensByName = new Map(
-    grammar.tokens.map((token) => [token.name, token]),
-  );
-  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
-  const queue = [rootRuleName];
-
-  for (let index = 0; index < queue.length; index++) {
-    const name = queue[index];
-    if (names.has(name)) continue;
-    names.add(name);
-
-    const rule = rulesByName.get(name);
-    if (rule) {
-      for (const ref of collectExpressionRefs(rule.expression)) {
-        if (!names.has(ref)) queue.push(ref);
-      }
-      continue;
-    }
-
-    if (tokensByName.has(name)) {
-      names.add(name);
-    }
-  }
-
-  for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
-    if (ruleName !== "source_file" && !reachableRules.has(ruleName)) {
-      continue;
-    }
-    for (const pathMeta of Object.values(ruleMeta.paths ?? {})) {
-      if (pathMeta.alias_node) names.add(pathMeta.alias_node);
-      if (pathMeta.alias_ref) names.add(pathMeta.alias_ref);
-    }
-  }
-
-  return names;
 }
 
 function collectExpressionRefs(expression: EbnfExpression): string[] {
   const refs: string[] = [];
   collectExpressionRefsInto(expression, refs);
   return refs;
+}
+
+function sourceFileExpression(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+): EbnfExpression {
+  const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
+  if (!rootRule) throw new Error(`Unknown root rule '${rootRuleName}'`);
+  return { kind: "ref", name: rootRuleName, span: rootRule.span };
 }
 
 function collectReachableRuleNames(
@@ -840,6 +902,9 @@ function collectExpressionRefsInto(
   refs: string[],
 ): void {
   switch (expression.kind) {
+    case "field":
+      collectExpressionRefsInto(expression.expression, refs);
+      return;
     case "ref":
       refs.push(expression.name);
       return;
@@ -896,6 +961,11 @@ function collectLiteralOnlyExpressionTerminals(
   terminals: Set<string>,
 ): boolean {
   switch (expression.kind) {
+    case "field":
+      return collectLiteralOnlyExpressionTerminals(
+        expression.expression,
+        terminals,
+      );
     case "literal":
       terminals.add(expression.value);
       return true;
@@ -946,6 +1016,9 @@ function collectLiteralTerminals(
   terminals: Set<string>,
 ): void {
   switch (expression.kind) {
+    case "field":
+      collectLiteralTerminals(expression.expression, terminals);
+      return;
     case "literal":
       terminals.add(expression.value);
       return;
@@ -980,6 +1053,11 @@ function validateTreeSitterMetadataSemantics(
 ): void {
   if (!metadata) return;
   const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
+  const symbolSets = collectGeneratedSymbolSets(
+    grammar,
+    metadata,
+    rootRuleName,
+  );
   const knownRules = collectGeneratedTreeSitterNodeNames(
     grammar,
     {},
@@ -996,7 +1074,9 @@ function validateTreeSitterMetadataSemantics(
     for (const [path, pathMeta] of Object.entries(ruleMeta.paths ?? {})) {
       const aliasName = pathMeta.alias_node;
       if (!aliasName) continue;
-      if (knownRules.has(aliasName)) {
+      if (
+        knownRules.has(aliasName) || metadata.externals?.includes(aliasName)
+      ) {
         throw new Error(
           `Rule '${ruleName}' path '${path}' alias_node '${aliasName}' conflicts with existing rule`,
         );
@@ -1011,30 +1091,48 @@ function validateTreeSitterMetadataSemantics(
     }
   }
 
-  if (metadata.word) validateRuleRef(metadata.word, knownRules, "word");
-  for (const extra of metadata.extras ?? []) validateExtra(extra, knownRules);
+  for (const external of metadata.externals ?? []) {
+    if (!isValidSymbolName(external)) {
+      throw new Error(`Invalid external token name '${external}'`);
+    }
+    if (knownRules.has(external)) {
+      throw new Error(
+        `External token '${external}' conflicts with existing rule`,
+      );
+    }
+  }
+
+  if (metadata.word) {
+    validateRuleRef(
+      metadata.word,
+      new Set([...symbolSets.tokens, ...symbolSets.externals]),
+      "word token",
+    );
+  }
+  for (const extra of metadata.extras ?? []) {
+    validateExtra(extra, symbolSets.extraRules);
+  }
   for (const name of metadata.supertypes ?? []) {
-    validateRuleRef(name, knownRules, "supertype");
+    validateRuleRef(name, symbolSets.parserRules, "supertype");
   }
   for (const name of metadata.inline ?? []) {
-    validateRuleRef(name, knownRules, "inline");
+    validateRuleRef(name, symbolSets.parserRules, "inline");
   }
   for (const conflict of metadata.conflicts ?? []) {
-    for (const name of conflict) validateRuleRef(name, knownRules, "conflict");
+    for (const name of conflict) {
+      validateRuleRef(name, symbolSets.parserRules, "conflict");
+    }
   }
 
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
     if (ruleMeta.wrap) validateWrap(ruleMeta.wrap, ruleName);
     const expression = ruleName === "source_file"
-      ? grammar.rules.find((rule) => rule.name === rootRuleName)?.expression
+      ? sourceFileExpression(grammar, rootRuleName)
       : grammar.rules.find((rule) => rule.name === ruleName)?.expression;
     if (!expression) {
       throw new Error(`Missing grammar rule '${ruleName}' for metadata`);
     }
-    for (const path of collectRulePaths(ruleMeta)) {
-      validateFieldPath(expression, path, ruleName);
-    }
-    validateRuleMetadata(ruleMeta, expression, ruleName);
+    validateRuleMetadata(ruleMeta, expression, ruleName, metadata.version);
   }
 }
 
@@ -1234,11 +1332,8 @@ function uncoveredSuppressedHighlightDiagnostics(
 
   const highlights = metadata.queries?.highlights?.entries ?? [];
   const globalCaptures = new Set<string>();
-  const rawPatterns: string[] = [];
   for (const entry of highlights) {
-    if (isRawQueryEntry(entry)) {
-      rawPatterns.push(entry.pattern);
-    } else {
+    if (!isRawQueryEntry(entry)) {
       globalCaptures.add(captureSelectorKey(entry));
     }
   }
@@ -1259,17 +1354,6 @@ function uncoveredSuppressedHighlightDiagnostics(
     const selectorKey = captureSelectorKey(context.selector);
     if (globalCaptures.has(selectorKey)) continue;
     if (ignoredContexts.has(`${context.parent}:${selectorKey}`)) continue;
-    if (
-      rawPatterns.some((pattern) =>
-        rawHighlightPatternCapturesContext(
-          pattern,
-          context.parent,
-          context.selector,
-        )
-      )
-    ) {
-      continue;
-    }
     const child = context.selector.node ??
       JSON.stringify(context.selector.literal);
     diagnostics.push({
@@ -1379,6 +1463,8 @@ function pushSuppressedHighlightContext(
 
 function expressionChildren(expression: EbnfExpression): EbnfExpression[] {
   switch (expression.kind) {
+    case "field":
+      return [expression.expression];
     case "sequence":
       return expression.items;
     case "choice":
@@ -1393,21 +1479,6 @@ function expressionChildren(expression: EbnfExpression): EbnfExpression[] {
     case "literal":
       return [];
   }
-}
-
-function rawHighlightPatternCapturesContext(
-  pattern: string,
-  parent: string,
-  selector: TreeSitterCaptureSelectorMetadata,
-): boolean {
-  const child = selector.node
-    ? `(${selector.node})`
-    : JSON.stringify(selector.literal);
-  const parentIndex = pattern.indexOf(`(${parent}`);
-  if (parentIndex === -1) return false;
-  const childIndex = pattern.indexOf(child, parentIndex);
-  if (childIndex === -1) return false;
-  return /@\w[\w.-]*/.test(pattern.slice(childIndex + child.length));
 }
 
 function validateTreeSitterRainbowsMetadata(
@@ -1471,18 +1542,19 @@ function collectGeneratedTreeSitterNodeNames(
   metadata: TreeSitterMetadata,
   rootRuleName: string,
 ): Set<string> {
+  const symbolSets = collectGeneratedSymbolSets(
+    grammar,
+    metadata,
+    rootRuleName,
+  );
+  const names = new Set<string>([
+    "source_file",
+    ...symbolSets.parserRules,
+    ...symbolSets.tokens,
+    ...symbolSets.skips,
+    ...symbolSets.externals,
+  ]);
   const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
-  const reachableRefs = collectReachableRefs(grammar, reachableRules);
-  const names = new Set<string>(["source_file"]);
-
-  for (const rule of grammar.rules) {
-    if (reachableRules.has(rule.name)) names.add(rule.name);
-  }
-  for (const token of grammar.tokens) {
-    if (token.kind === "skip" || reachableRefs.has(token.name)) {
-      names.add(token.name);
-    }
-  }
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
     if (ruleName !== "source_file" && !reachableRules.has(ruleName)) {
       continue;
@@ -1493,6 +1565,39 @@ function collectGeneratedTreeSitterNodeNames(
     }
   }
   return names;
+}
+
+function collectGeneratedSymbolSets(
+  grammar: EbnfGrammar,
+  metadata: TreeSitterMetadata,
+  rootRuleName: string,
+): {
+  parserRules: Set<string>;
+  tokens: Set<string>;
+  skips: Set<string>;
+  externals: Set<string>;
+  extraRules: Set<string>;
+} {
+  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
+  const reachableRefs = collectReachableRefs(grammar, reachableRules);
+  const parserRules = new Set(reachableRules);
+  const tokens = new Set<string>();
+  const skips = new Set<string>();
+  const externals = new Set(metadata.externals ?? []);
+  for (const token of grammar.tokens) {
+    if (token.kind === "skip") {
+      skips.add(token.name);
+      continue;
+    }
+    if (reachableRefs.has(token.name)) tokens.add(token.name);
+  }
+  const extraRules = new Set([
+    ...parserRules,
+    ...tokens,
+    ...skips,
+    ...externals,
+  ]);
+  return { parserRules, tokens, skips, externals, extraRules };
 }
 
 function collectDefaultRainbowBrackets(
@@ -1534,11 +1639,94 @@ function validateWrap(wrap: TreeSitterRuleWrap, ruleName: string): void {
   }
 }
 
-function validateFieldPath(
+function resolveMetadataPathSelector(
   expression: EbnfExpression,
-  path: string,
+  selector: string,
   ruleName: string,
+  metadataVersion?: TreeSitterMetadata["version"],
+): string {
+  if (selector === "") return "";
+  if (isLegacyNumericPath(selector)) {
+    if (metadataVersion === 1) {
+      throw new Error(
+        `Rule '${ruleName}' path '${selector}' uses legacy numeric metadata; use a named EBNF field`,
+      );
+    }
+    parsePathSegments(selector, ruleName);
+    return selector;
+  }
+
+  const namedFieldPaths = collectNamedFieldPaths(expression);
+  const matches = namedFieldPaths.get(selector) ?? [];
+  if (matches.length === 0) {
+    throw new Error(
+      `Unknown field selector '${selector}' on rule '${ruleName}'`,
+    );
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Field selector '${selector}' is ambiguous on rule '${ruleName}'`,
+    );
+  }
+  return matches[0];
+}
+
+function collectNamedFieldPaths(
+  expression: EbnfExpression,
+): Map<string, string[]> {
+  const paths = new Map<string, string[]>();
+  collectNamedFieldPathsInto(expression, [], paths);
+  return paths;
+}
+
+function collectNamedFieldPathsInto(
+  expression: EbnfExpression,
+  path: number[],
+  paths: Map<string, string[]>,
 ): void {
+  switch (expression.kind) {
+    case "field": {
+      const childPath = [...path, 0];
+      const current = paths.get(expression.name) ?? [];
+      current.push(pathKey(childPath));
+      paths.set(expression.name, current);
+      collectNamedFieldPathsInto(expression.expression, childPath, paths);
+      return;
+    }
+    case "sequence":
+      expression.items.forEach((item, index) =>
+        collectNamedFieldPathsInto(item, [...path, index], paths)
+      );
+      return;
+    case "choice":
+      expression.options.forEach((option, index) =>
+        collectNamedFieldPathsInto(option, [...path, index], paths)
+      );
+      return;
+    case "optional":
+    case "repeat":
+    case "repeat1":
+      collectNamedFieldPathsInto(expression.expression, [...path, 0], paths);
+      return;
+    case "separated":
+      collectNamedFieldPathsInto(expression.item, [...path, 0], paths);
+      collectNamedFieldPathsInto(expression.separator, [...path, 1], paths);
+      return;
+    case "ref":
+    case "literal":
+      return;
+  }
+}
+
+function isLegacyNumericPath(selector: string): boolean {
+  return selector.split(".").every((segment) =>
+    /^(0|[1-9][0-9]*)$/.test(
+      segment,
+    )
+  );
+}
+
+function parsePathSegments(path: string, ruleName: string): number[] {
   const segments = path.length === 0 ? [] : path.split(".").map((segment) => {
     const index = Number(segment);
     if (!Number.isInteger(index) || index < 0) {
@@ -1546,62 +1734,7 @@ function validateFieldPath(
     }
     return index;
   });
-  walkFieldPath(expression, segments, path, ruleName);
-}
-
-function walkFieldPath(
-  expression: EbnfExpression,
-  segments: number[],
-  path: string,
-  ruleName: string,
-): void {
-  if (segments.length === 0) return;
-  const [head, ...rest] = segments;
-  switch (expression.kind) {
-    case "sequence":
-      if (head >= expression.items.length) {
-        throw new Error(
-          `Field path '${path}' is out of bounds on rule '${ruleName}'`,
-        );
-      }
-      walkFieldPath(expression.items[head], rest, path, ruleName);
-      return;
-    case "choice":
-      if (head >= expression.options.length) {
-        throw new Error(
-          `Field path '${path}' is out of bounds on rule '${ruleName}'`,
-        );
-      }
-      walkFieldPath(expression.options[head], rest, path, ruleName);
-      return;
-    case "optional":
-    case "repeat":
-    case "repeat1":
-      if (head !== 0) {
-        throw new Error(
-          `Field path '${path}' is out of bounds on rule '${ruleName}'`,
-        );
-      }
-      walkFieldPath(expression.expression, rest, path, ruleName);
-      return;
-    case "separated":
-      if (head === 0) {
-        walkFieldPath(expression.item, rest, path, ruleName);
-        return;
-      }
-      if (head === 1) {
-        walkFieldPath(expression.separator, rest, path, ruleName);
-        return;
-      }
-      throw new Error(
-        `Field path '${path}' is out of bounds on rule '${ruleName}'`,
-      );
-    case "ref":
-    case "literal":
-      throw new Error(
-        `Field path '${path}' descends through a leaf on rule '${ruleName}'`,
-      );
-  }
+  return segments;
 }
 
 function resolveExpressionAtPath(
@@ -1609,13 +1742,7 @@ function resolveExpressionAtPath(
   path: string,
   ruleName: string,
 ): EbnfExpression {
-  const segments = path.length === 0 ? [] : path.split(".").map((segment) => {
-    const index = Number(segment);
-    if (!Number.isInteger(index) || index < 0) {
-      throw new Error(`Invalid field path '${path}' on rule '${ruleName}'`);
-    }
-    return index;
-  });
+  const segments = parsePathSegments(path, ruleName);
   return walkResolvedPath(expression, segments, path, ruleName);
 }
 
@@ -1628,6 +1755,13 @@ function walkResolvedPath(
   if (segments.length === 0) return expression;
   const [head, ...rest] = segments;
   switch (expression.kind) {
+    case "field":
+      if (head !== 0) {
+        throw new Error(
+          `Field path '${path}' is out of bounds on rule '${ruleName}'`,
+        );
+      }
+      return walkResolvedPath(expression.expression, rest, path, ruleName);
     case "sequence":
       if (head >= expression.items.length) {
         throw new Error(
@@ -1677,7 +1811,12 @@ function renderRuleExpression(
   inlineStack = new Set<string>(),
 ): string {
   const normalized = context?.normalizedRules.get(ruleName) ??
-    normalizeRuleMetadata(metadata);
+    normalizeRuleMetadata(
+      metadata,
+      expression,
+      ruleName,
+      context?.metadata.version,
+    );
   const renderContext = context ?? {
     metadata: {},
     normalizedRules: new Map([[ruleName, normalized]]),
@@ -1738,6 +1877,17 @@ function renderRawExpression(
 ): string {
   const pathMeta = metadata.paths.get(pathKey(path));
   switch (expression.kind) {
+    case "field":
+      return `field(${JSON.stringify(expression.name)}, ${
+        renderExpression(
+          ruleName,
+          expression.expression,
+          [...path, 0],
+          metadata,
+          context,
+          inlineStack,
+        )
+      })`;
     case "ref":
       return renderRefExpression(
         ruleName,
@@ -1955,20 +2105,62 @@ interface RenderContext {
 
 function normalizeRuleMetadata(
   metadata?: TreeSitterRuleMetadata,
+  expression?: EbnfExpression,
+  ruleName?: string,
+  metadataVersion?: TreeSitterMetadata["version"],
 ): NormalizedRuleMetadata {
   const paths = new Map<string, TreeSitterPathMetadata>();
   if (!metadata) return { paths };
 
   for (const [path, field] of Object.entries(metadata.fields ?? {})) {
-    paths.set(path, { ...(paths.get(path) ?? {}), field });
+    const resolvedPath = expression && ruleName
+      ? resolveMetadataPathSelector(
+        expression,
+        path,
+        ruleName,
+        metadataVersion,
+      )
+      : path;
+    mergePathMetadata(paths, resolvedPath, { field }, ruleName ?? "<unknown>");
   }
   if (metadata.wrap) {
-    paths.set("", { ...(paths.get("") ?? {}), wrap: metadata.wrap });
+    mergePathMetadata(
+      paths,
+      "",
+      { wrap: metadata.wrap },
+      ruleName ?? "<unknown>",
+    );
   }
   for (const [path, pathMeta] of Object.entries(metadata.paths ?? {})) {
-    paths.set(path, { ...(paths.get(path) ?? {}), ...pathMeta });
+    const resolvedPath = expression && ruleName
+      ? resolveMetadataPathSelector(
+        expression,
+        path,
+        ruleName,
+        metadataVersion,
+      )
+      : path;
+    mergePathMetadata(paths, resolvedPath, pathMeta, ruleName ?? "<unknown>");
   }
   return { paths, token: metadata.token };
+}
+
+function mergePathMetadata(
+  paths: Map<string, TreeSitterPathMetadata>,
+  path: string,
+  incoming: TreeSitterPathMetadata,
+  ruleName: string,
+): void {
+  const existing = paths.get(path) ?? {};
+  if (
+    existing.field && incoming.field &&
+    existing.field !== incoming.field
+  ) {
+    throw new Error(
+      `Conflicting field metadata on rule '${ruleName}' path '${path}'`,
+    );
+  }
+  paths.set(path, { ...existing, ...incoming });
 }
 
 function createRenderContext(
@@ -1982,18 +2174,33 @@ function createRenderContext(
   }
   ruleExpressions.set(
     "source_file",
-    grammar.rules.find((rule) => rule.name === rootRuleName)!.expression,
+    sourceFileExpression(grammar, rootRuleName),
   );
 
   const normalizedRules = new Map<string, NormalizedRuleMetadata>();
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
-    normalizedRules.set(ruleName, normalizeRuleMetadata(ruleMeta));
+    const expression = ruleExpressions.get(ruleName);
+    normalizedRules.set(
+      ruleName,
+      normalizeRuleMetadata(
+        ruleMeta,
+        expression,
+        ruleName,
+        metadata.version,
+      ),
+    );
   }
   if (!normalizedRules.has("source_file")) {
-    const sourceFileMeta = metadata.rules?.source_file ??
-      metadata.rules?.[rootRuleName];
-    if (sourceFileMeta) {
-      normalizedRules.set("source_file", normalizeRuleMetadata(sourceFileMeta));
+    if (metadata.rules?.source_file) {
+      normalizedRules.set(
+        "source_file",
+        normalizeRuleMetadata(
+          metadata.rules.source_file,
+          ruleExpressions.get("source_file"),
+          "source_file",
+          metadata.version,
+        ),
+      );
     }
   }
 
@@ -2008,20 +2215,21 @@ function collectInlineRules(metadata: TreeSitterMetadata): string[] {
   return [...inline];
 }
 
-function collectRulePaths(metadata: TreeSitterRuleMetadata): string[] {
-  return [
-    ...new Set([
-      ...Object.keys(metadata.fields ?? {}),
-      ...Object.keys(metadata.paths ?? {}),
-    ]),
-  ];
-}
-
 function validateRuleMetadata(
   metadata: TreeSitterRuleMetadata,
   expression: EbnfExpression,
   ruleName: string,
+  metadataVersion?: TreeSitterMetadata["version"],
 ): void {
+  if (
+    metadataVersion === 1 &&
+    metadata.fields &&
+    Object.keys(metadata.fields).length > 0
+  ) {
+    throw new Error(
+      `Rule '${ruleName}' uses legacy fields metadata; use named EBNF fields`,
+    );
+  }
   if (metadata.token) {
     if (expression.kind !== "literal") {
       throw new Error(
@@ -2038,35 +2246,33 @@ function validateRuleMetadata(
       );
     }
   }
-  const fieldPaths = metadata.fields ?? {};
-  for (const [path, pathMeta] of Object.entries(metadata.paths ?? {})) {
+  const normalized = normalizeRuleMetadata(
+    metadata,
+    expression,
+    ruleName,
+    metadataVersion,
+  );
+  for (const [path, pathMeta] of normalized.paths) {
     const target = resolveExpressionAtPath(expression, path, ruleName);
     if (pathMeta.wrap) {
       validateWrap(pathMeta.wrap, `${ruleName}.${path || "<root>"}`);
     }
-    if (pathMeta.alias_ref && !isValidAliasName(pathMeta.alias_ref)) {
+    if (pathMeta.alias_ref && !isValidSymbolName(pathMeta.alias_ref)) {
       throw new Error(
         `Invalid alias '${pathMeta.alias_ref}' on rule '${ruleName}'`,
       );
     }
-    if (pathMeta.alias_node && !isValidAliasName(pathMeta.alias_node)) {
+    if (pathMeta.alias_node && !isValidSymbolName(pathMeta.alias_node)) {
       throw new Error(
         `Invalid alias '${pathMeta.alias_node}' on rule '${ruleName}'`,
       );
     }
-    const fieldName = fieldPaths[path];
-    if (fieldName && pathMeta.field && fieldName !== pathMeta.field) {
-      throw new Error(
-        `Conflicting field metadata on rule '${ruleName}' path '${path}'`,
-      );
-    }
-    const mergedField = pathMeta.field ?? fieldName;
     if (pathMeta.alias_ref && pathMeta.alias_node) {
       throw new Error(
         `Rule '${ruleName}' path '${path}' cannot use both alias_ref and alias_node`,
       );
     }
-    if (pathMeta.hidden_path && mergedField) {
+    if (pathMeta.hidden_path && pathMeta.field) {
       throw new Error(
         `Rule '${ruleName}' path '${path}' cannot be both hidden and fielded`,
       );
@@ -2097,7 +2303,7 @@ function validateRuleMetadata(
   }
 }
 
-function isValidAliasName(name: string): boolean {
+function isValidSymbolName(name: string): boolean {
   return /^[_A-Za-z$][_A-Za-z0-9$]*$/.test(name);
 }
 
@@ -2115,6 +2321,9 @@ function pathKey(path: number[]): string {
 
 function visit(expression: EbnfExpression, terminals: Set<string>): void {
   switch (expression.kind) {
+    case "field":
+      visit(expression.expression, terminals);
+      return;
     case "literal":
       terminals.add(expression.value);
       return;
@@ -2143,6 +2352,9 @@ function visitRefExpressions(
   callback: (ref: Extract<EbnfExpression, { kind: "ref" }>) => void,
 ): void {
   switch (expression.kind) {
+    case "field":
+      visitRefExpressions(expression.expression, callback);
+      return;
     case "ref":
       callback(expression);
       return;

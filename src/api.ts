@@ -38,9 +38,12 @@ export function parseMetadata(source: string): BabaMetadata {
 /** Validates a grammar and returns diagnostics instead of throwing. */
 export function validateGrammar(
   grammar: EbnfGrammar,
-  options: { rootRule?: string } = {},
+  options: { rootRule?: string; metadata?: BabaMetadata } = {},
 ): Diagnostic[] {
-  return collectGrammarDiagnostics(grammar, options);
+  return collectGrammarDiagnostics(grammar, {
+    rootRule: options.rootRule,
+    externals: options.metadata?.externals,
+  });
 }
 
 /** Generates a deterministic bundle from EBNF source or a parsed grammar. */

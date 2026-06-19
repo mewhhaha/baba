@@ -1,7 +1,7 @@
 import type { BabaMetadata, EbnfGrammar, GenerateOptions } from "./ast.ts";
 import { BabaError, toBabaError } from "./errors.ts";
 import {
-  validateEbnfGrammar,
+  collectGrammarDiagnostics,
   validateTreeSitterBackendCapabilities,
   validateTreeSitterGenerationMetadataSemantics,
 } from "./generate.ts";
@@ -26,10 +26,15 @@ export function createGenerationContext(
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
   const metadata = options.metadata ?? {};
-  try {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  } catch (error) {
-    throw toBabaError(error, "GRAMMAR_VALIDATION_ERROR");
+  const grammarDiagnostics = collectGrammarDiagnostics(grammar, {
+    rootRule: rootRuleName,
+    externals: metadata.externals,
+  });
+  const grammarError = grammarDiagnostics.find((diagnostic) =>
+    diagnostic.severity === "error"
+  );
+  if (grammarError) {
+    throw new BabaError(grammarError);
   }
   try {
     validateTreeSitterGenerationMetadataSemantics(

@@ -6,15 +6,17 @@ import {
   generateTreeSitterQueries,
 } from "./generate.ts";
 
-const treeSitterQueryPaths = [
-  "queries/highlights.scm",
-  "queries/locals.scm",
-  "queries/folds.scm",
-  "queries/indents.scm",
-  "queries/tags.scm",
-  "queries/textobjects.scm",
-  "queries/rainbows.scm",
-  "queries/injections.scm",
+const treeSitterQueryOutputs: Array<
+  readonly [outputPath: string, queryName: string]
+> = [
+  ["queries/generated-highlights.scm", "highlights.scm"],
+  ["queries/generated-locals.scm", "locals.scm"],
+  ["queries/generated-folds.scm", "folds.scm"],
+  ["queries/generated-indents.scm", "indents.scm"],
+  ["queries/generated-tags.scm", "tags.scm"],
+  ["queries/generated-textobjects.scm", "textobjects.scm"],
+  ["queries/generated-rainbows.scm", "rainbows.scm"],
+  ["queries/generated-injections.scm", "injections.scm"],
 ];
 
 /** Builds the Tree-sitter compiler output bundle. */
@@ -35,9 +37,9 @@ export function generateCoreBundle(
     metadata: context.metadata,
     skipValidation: true,
   });
-  for (const path of treeSitterQueryPaths) {
-    const name = path.slice("queries/".length);
-    files.push([path, queries[name]]);
+  for (const [path, name] of treeSitterQueryOutputs) {
+    const content = queries[name];
+    if (content.length > 0) files.push([path, content]);
   }
   return generatedBundle(files);
 }

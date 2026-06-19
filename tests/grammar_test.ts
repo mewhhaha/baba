@@ -123,13 +123,30 @@ async function denoCheck(path: string): Promise<void> {
   }
 }
 
+async function runCommand(
+  commandName: string,
+  args: string[],
+  cwd?: string,
+  env?: Record<string, string>,
+): Promise<{ stdout: string; stderr: string }> {
+  const command = new Deno.Command(commandName, { args, cwd, env });
+  const output = await command.output();
+  const decoder = new TextDecoder();
+  const stdout = decoder.decode(output.stdout);
+  const stderr = decoder.decode(output.stderr);
+  if (!output.success) {
+    throw new Error(`${stdout}${stderr}`);
+  }
+  return { stdout, stderr };
+}
+
 const explicitGrammar = `
   token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
   token integer = /[0-9]+/ ;
   skip whitespace = /[ \\t\\r\\n]+/ ;
 
-  module = "fn" ident "(" ")" block ;
-  block = "{" integer "}" ;
+  module = "fn" name:ident "(" ")" body:block ;
+  block = "{" value:integer "}" ;
 `;
 
 Deno.test("parses and validates explicit token grammars", () => {
@@ -137,6 +154,11 @@ Deno.test("parses and validates explicit token grammars", () => {
 
   assertEquals(grammar.tokens.length, 3);
   assertEquals(grammar.rules.length, 2);
+  const module = grammar.rules.find((rule) => rule.name === "module");
+  assert(module?.expression.kind === "sequence");
+  const name = module.expression.items[1];
+  assert(name.kind === "field");
+  assertEquals(name.name, "name");
   assertEquals(validateGrammar(grammar).length, 0);
 });
 
@@ -186,14 +208,16 @@ Deno.test("generates Tree-sitter grammar and query bundle only", () => {
 
   assertEquals(
     bundle.files.map((file) => file.path).join(","),
-    "grammar.js,queries/folds.scm,queries/highlights.scm,queries/indents.scm,queries/injections.scm,queries/locals.scm,queries/rainbows.scm,queries/tags.scm,queries/textobjects.scm",
+    "grammar.js,queries/generated-highlights.scm,queries/generated-rainbows.scm",
   );
   assertIncludes(
     bundle.files.find((file) => file.path === "grammar.js")?.content ?? "",
     "export default grammar({",
   );
   assertIncludes(
-    bundle.files.find((file) => file.path === "queries/highlights.scm")
+    bundle.files.find((file) =>
+      file.path === "queries/generated-highlights.scm"
+    )
       ?.content ?? "",
     '"fn" @keyword',
   );
@@ -203,12 +227,48 @@ Deno.test("generates Tree-sitter grammar and query bundle only", () => {
 Deno.test("Tree-sitter grammar lowering uses explicit declarations only", () => {
   const grammar = generateTreeSitterGrammar(explicitGrammar, { name: "tiny" });
 
+  assertIncludes(grammar, "source_file: $ => $.module,");
+  assertIncludes(grammar, "module: $ => seq(");
+  assertIncludes(grammar, 'field("name", $.ident)');
+  assertIncludes(grammar, 'field("body", $.block)');
   assertIncludes(grammar, "ident: $ => token(/[A-Za-z_][A-Za-z0-9_]*/),");
   assertIncludes(grammar, "integer: $ => token(/[0-9]+/),");
   assertIncludes(grammar, "whitespace: $ => /[ \\t\\r\\n]+/,");
   assertNotIncludes(grammar, "line_comment:");
   assertNotIncludes(grammar, "fenced_text:");
   assertNotIncludes(grammar, "number: $ =>");
+});
+
+Deno.test("external tokens are explicit metadata", () => {
+  const source = `
+    token ident = /[a-z]+/ ;
+    module = INDENT ident DEDENT ;
+  `;
+  assertThrowsIncludes(
+    () => generate(source),
+    "Unknown rule reference 'INDENT'",
+  );
+
+  const metadata = parseMetadata(JSON.stringify({
+    version: 1,
+    externals: ["INDENT", "DEDENT"],
+  }));
+  const grammar = generateTreeSitterGrammar(source, { metadata });
+
+  assertEquals(validateGrammar(parseGrammar(source), { metadata }).length, 0);
+  assertIncludes(grammar, "externals: $ => [$.INDENT, $.DEDENT],");
+  assertIncludes(grammar, "module: $ => seq($.INDENT, $.ident, $.DEDENT)");
+});
+
+Deno.test("Tree-sitter backend rejects unsupported regex constructs", () => {
+  assertThrowsIncludes(
+    () =>
+      generate(`
+        token bad = /a(?=b)/ ;
+        module = bad ;
+      `),
+    "unsupported by Tree-sitter regex tokens",
+  );
 });
 
 Deno.test("root reachability omits dead rules and warns", () => {
@@ -223,7 +283,9 @@ Deno.test("root reachability omits dead rules and warns", () => {
   const grammar = bundle.files.find((file) => file.path === "grammar.js")
     ?.content ?? "";
   const highlights =
-    bundle.files.find((file) => file.path === "queries/highlights.scm")
+    bundle.files.find((file) =>
+      file.path === "queries/generated-highlights.scm"
+    )
       ?.content ?? "";
 
   assertIncludes(grammar, "module: $ => $.ident");
@@ -253,12 +315,13 @@ Deno.test("metadata is Tree-sitter-only", () => {
 
 Deno.test("metadata drives Tree-sitter shaping and queries", () => {
   const metadata = parseTreeSitterMetadata(JSON.stringify({
+    version: 1,
     word: "ident",
     extras: [{ kind: "rule", name: "whitespace" }],
     rules: {
       module: {
         paths: {
-          "1": { field: "name" },
+          name: { alias_ref: "function_name" },
         },
       },
     },
@@ -268,7 +331,7 @@ Deno.test("metadata drives Tree-sitter shaping and queries", () => {
         defaults: { suppress: [{ node: "ident" }] },
       },
       locals: [{ node: "ident", capture: "local.definition" }],
-      injections: [{ node: "block", language: "wgsl" }],
+      injections: [{ node: "block", language: "javascript" }],
     },
   }));
 
@@ -277,7 +340,7 @@ Deno.test("metadata drives Tree-sitter shaping and queries", () => {
     metadata,
   });
   assertIncludes(grammar, "word: $ => $.ident");
-  assertIncludes(grammar, 'field("name", $.ident)');
+  assertIncludes(grammar, 'field("name", alias($.ident, $.function_name))');
 
   const queries = generateTreeSitterQueries(explicitGrammar, { metadata });
   assertIncludes(queries["highlights.scm"], "(ident) @function");
@@ -285,7 +348,27 @@ Deno.test("metadata drives Tree-sitter shaping and queries", () => {
   assertIncludes(queries["injections.scm"], "(#set! injection.language");
 });
 
-Deno.test("highlight defaults are rooted and explicit-token based", () => {
+Deno.test("versioned metadata rejects legacy numeric paths", () => {
+  assertThrowsIncludes(
+    () =>
+      generateTreeSitterGrammar(explicitGrammar, {
+        name: "tiny",
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          version: 1,
+          rules: {
+            module: {
+              paths: {
+                "1": { alias_ref: "name" },
+              },
+            },
+          },
+        })),
+      }),
+    "uses legacy numeric metadata",
+  );
+});
+
+Deno.test("highlight defaults are rooted and do not infer token semantics", () => {
   const source = `
     token ident = /[a-z]+/ ;
     token Ghost = /ghost/ ;
@@ -297,7 +380,7 @@ Deno.test("highlight defaults are rooted and explicit-token based", () => {
   });
 
   assertIncludes(highlights, '"fn" @keyword');
-  assertIncludes(highlights, "(ident) @variable");
+  assertNotIncludes(highlights, "(ident) @variable");
   assertNotIncludes(highlights, '"unused" @keyword');
   assertNotIncludes(highlights, "(Ghost) @constant");
 });
@@ -350,6 +433,100 @@ Deno.test("query metadata must target the selected root graph", () => {
   );
 });
 
+Deno.test("generated Tree-sitter artifacts compile, parse, and query", async () => {
+  const treeSitterVersion = await runCommand("tree-sitter", ["--version"])
+    .then((output) => output.stdout.trim())
+    .catch(() => "");
+  if (!treeSitterVersion) {
+    throw new Error("tree-sitter executable is required for integration tests");
+  }
+
+  const source = `
+    token ident = /[a-z]+/ ;
+    token integer = /[0-9]+/ ;
+    skip whitespace = /[ \\t\\n]+/ ;
+
+    module = function+ ;
+    function = "fn" name:ident "(" ")" body:block ;
+    block = "{" "let" binding:ident "=" value:integer ";" "}" ;
+  `;
+  const metadata = parseMetadata(JSON.stringify({
+    version: 1,
+    word: "ident",
+    queries: {
+      highlights: {
+        patterns: ["(function (ident) @function)"],
+        entries: [
+          { node: "integer", capture: "number" },
+          { literal: "let", capture: "keyword" },
+        ],
+      },
+      locals: [{ node: "ident", capture: "local.definition" }],
+      folds: [{ node: "block", capture: "fold" }],
+      tags: [{ node: "function", capture: "tag.definition" }],
+      textobjects: [{ node: "function", capture: "function.outer" }],
+      rainbows: { scopes: ["block"] },
+      injections: [{ node: "block", language: "javascript" }],
+    },
+  }));
+  const dir = await Deno.makeTempDir();
+  try {
+    const bundle = generate(source, { name: "tiny", metadata });
+    await applyBundle(bundle, { root: dir });
+    await Deno.writeTextFile(
+      `${dir}/sample.tiny`,
+      "fn main() { let answer = 42; }\n",
+    );
+
+    const env = {
+      HOME: `${dir}/home`,
+      XDG_CACHE_HOME: `${dir}/cache`,
+    };
+    await runCommand("tree-sitter", ["generate"], dir, env);
+    await runCommand(
+      "tree-sitter",
+      ["build", "-o", `${dir}/parser.so`],
+      dir,
+      env,
+    );
+    const parse = await runCommand(
+      "tree-sitter",
+      [
+        "parse",
+        "--lib-path",
+        `${dir}/parser.so`,
+        "--lang-name",
+        "tiny",
+        `${dir}/sample.tiny`,
+      ],
+      dir,
+      env,
+    );
+    assertIncludes(parse.stdout, "(module");
+    assertNotIncludes(parse.stdout, "ERROR");
+
+    for (const file of bundle.files.filter((file) => file.kind === "query")) {
+      await runCommand(
+        "tree-sitter",
+        [
+          "query",
+          "--quiet",
+          "--lib-path",
+          `${dir}/parser.so`,
+          "--lang-name",
+          "tiny",
+          `${dir}/${file.path}`,
+          `${dir}/sample.tiny`,
+        ],
+        dir,
+        env,
+      );
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("safe bundle apply writes nested files and refuses user edits", async () => {
   const dir = await Deno.makeTempDir();
   try {
@@ -361,7 +538,7 @@ Deno.test("safe bundle apply writes nested files and refuses user edits", async 
       "export default grammar",
     );
     assertIncludes(
-      await Deno.readTextFile(`${dir}/queries/highlights.scm`),
+      await Deno.readTextFile(`${dir}/queries/generated-highlights.scm`),
       '"fn" @keyword',
     );
     await Deno.writeTextFile(
@@ -371,6 +548,25 @@ Deno.test("safe bundle apply writes nested files and refuses user edits", async 
     await assertRejectsIncludes(
       () => applyBundle(bundle, { root: dir }),
       "Refusing to overwrite modified or unowned file 'grammar.js'",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("safe bundle apply rejects paths outside the root", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    await assertRejectsIncludes(
+      () =>
+        applyBundle({
+          files: [{
+            path: "../outside.txt",
+            content: "escape",
+            kind: "source",
+          }],
+        }, { root: dir }),
+      "Refusing unsafe generated path '../outside.txt'",
     );
   } finally {
     await Deno.remove(dir, { recursive: true });
@@ -395,7 +591,7 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
       logs = await captureConsoleLog(() => main([grammarPath, "--list-files"]));
     });
     assertIncludes(logs.join("\n"), "grammar.js");
-    assertIncludes(logs.join("\n"), "queries/highlights.scm");
+    assertIncludes(logs.join("\n"), "queries/generated-highlights.scm");
 
     let errors: string[] = [];
     await captureConsoleLog(async () => {
@@ -410,7 +606,58 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
       main([grammarPath, "--out", outDir, "--name", "tiny"])
     );
     assertIncludes(await Deno.readTextFile(`${outDir}/grammar.js`), "tiny");
+    assertIncludes(
+      await Deno.readTextFile(`${outDir}/grammar.js`),
+      "source_file: $ => $.module",
+    );
     await assertMissing(`${outDir}/tree-sitter.json`);
+
+    const rootedGrammarPath = `${dir}/rooted.ebnf`;
+    await Deno.writeTextFile(
+      rootedGrammarPath,
+      `
+        dead = missing ;
+        module = "ok" ;
+      `,
+    );
+    const rootedOutDir = `${dir}/rooted`;
+    await captureConsoleError(() =>
+      main([rootedGrammarPath, "--root", "module", "--out", rootedOutDir])
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${rootedOutDir}/grammar.js`),
+      "source_file: $ => $.module",
+    );
+
+    const invalidGrammarPath = `${dir}/invalid.ebnf`;
+    await Deno.writeTextFile(
+      invalidGrammarPath,
+      `
+        token dup = /a*/ ;
+        token dup = /b/ ;
+        module = missing other ;
+      `,
+    );
+    const command = new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-read",
+        `${Deno.cwd()}/src/cli.ts`,
+        invalidGrammarPath,
+        "--diagnostic-format",
+        "json",
+      ],
+    });
+    const output = await command.output();
+    assertEquals(output.success, false);
+    const diagnostics = JSON.parse(
+      new TextDecoder().decode(output.stderr),
+    ) as Array<{ code: string }>;
+    assertEquals(
+      diagnostics.map((diagnostic) => diagnostic.code).join(","),
+      "INVALID_TOKEN_REGEX,DUPLICATE_DECLARATION,UNKNOWN_RULE_REFERENCE,UNKNOWN_RULE_REFERENCE",
+    );
+
     await assertRejectsIncludes(
       () => main(["init", outDir]),
       "'init' was removed in baba 1.0",

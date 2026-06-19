@@ -44,6 +44,12 @@ export interface EbnfRule {
 
 /** An EBNF expression node. */
 export type EbnfExpression =
+  | {
+    kind: "field";
+    name: string;
+    expression: EbnfExpression;
+    span: SourceSpan;
+  }
   | { kind: "ref"; name: string; span: SourceSpan }
   | { kind: "literal"; value: string; span: SourceSpan }
   | { kind: "sequence"; items: EbnfExpression[]; span: SourceSpan }
@@ -60,6 +66,10 @@ export type EbnfExpression =
 
 /** Optional metadata for Tree-sitter generation and query emission. */
 export interface BabaMetadata {
+  /** Metadata schema version. Omit for legacy callers; when present, must be 1. */
+  version?: 1;
+  /** External token names supplied by a user-owned Tree-sitter scanner. */
+  externals?: string[];
   /** Extra tokens or rules allowed between tree-sitter tokens. */
   extras?: TreeSitterExtra[];
   /** Word rule used by tree-sitter. */
@@ -221,13 +231,13 @@ export type TreeSitterExtra =
 
 /** Per-rule tree-sitter shaping metadata. */
 export interface TreeSitterRuleMetadata {
-  /** Expression path to field-name mapping. */
+  /** @deprecated Use named EBNF fields instead. */
   fields?: Record<string, string>;
   /** Token wrapper for the rendered rule. */
   token?: TreeSitterRuleToken;
   /** Precedence wrapper for the rendered rule. */
   wrap?: TreeSitterRuleWrap;
-  /** Nested expression path rewrites. */
+  /** Root, named-field, or unversioned legacy numeric path rewrites. */
   paths?: Record<string, TreeSitterPathMetadata>;
 }
 

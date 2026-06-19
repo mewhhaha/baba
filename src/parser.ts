@@ -196,7 +196,7 @@ function lexEbnf(source: string, lines: number[]): Token[] {
       continue;
     }
 
-    if ("=;|{}[]()?*+%".includes(char)) {
+    if ("=;|{}[]()?*+%:".includes(char)) {
       tokens.push({
         kind: "symbol",
         text: char,
@@ -303,7 +303,7 @@ class Parser {
   private parseSequence(): EbnfExpression {
     const items: EbnfExpression[] = [];
     while (this.isExpressionStart()) {
-      items.push(this.parseSeparator());
+      items.push(this.parseField());
     }
 
     if (items.length === 0) {
@@ -316,6 +316,21 @@ class Parser {
       items,
       span: this.expressionSpan(items[0], items[items.length - 1]),
     };
+  }
+
+  private parseField(): EbnfExpression {
+    if (this.checkKind("identifier") && this.checkNextText(":")) {
+      const name = this.advance();
+      this.expectText(":");
+      const expression = this.parseSeparator();
+      return {
+        kind: "field",
+        name: name.text,
+        expression,
+        span: this.span(name.span.start, expression.span.end),
+      };
+    }
+    return this.parseSeparator();
   }
 
   private parseSeparator(): EbnfExpression {
@@ -445,6 +460,10 @@ class Parser {
 
   private checkText(text: string): boolean {
     return this.peek().text === text;
+  }
+
+  private checkNextText(text: string): boolean {
+    return this.tokens[this.#current + 1]?.text === text;
   }
 
   private advance(): Token {

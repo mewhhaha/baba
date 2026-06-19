@@ -26,6 +26,11 @@ async function writeGeneratedFiles(
 ): Promise<void> {
   await Deno.mkdir(rootDir, { recursive: true });
   const previous = await readManifest(rootDir);
+  for (const file of files) validateBundlePath(file.path);
+  for (const cleanupPath of cleanupPaths) validateBundlePath(cleanupPath);
+  for (const previousPath of Object.keys(previous?.files ?? {})) {
+    validateBundlePath(previousPath);
+  }
   const nextPaths = new Set(files.map((file) => file.path));
   const stalePaths = previous
     ? Object.keys(previous.files).filter((path) => !nextPaths.has(path))
@@ -84,6 +89,30 @@ async function writeGeneratedFiles(
     if (manifestTempPath) await removeIfExists(manifestTempPath);
     throw error;
   }
+}
+
+function validateBundlePath(path: string): void {
+  if (
+    path.length === 0 ||
+    path.includes("\0") ||
+    path.includes("\\") ||
+    path.startsWith("/") ||
+    /^[A-Za-z]:/.test(path)
+  ) {
+    throwInvalidBundlePath(path);
+  }
+  for (const component of path.split("/")) {
+    if (component === "" || component === "." || component === "..") {
+      throwInvalidBundlePath(path);
+    }
+  }
+}
+
+function throwInvalidBundlePath(path: string): never {
+  throw new BabaError({
+    code: "OUTPUT_INVALID_PATH",
+    message: `Refusing unsafe generated path '${path}'.`,
+  });
 }
 
 async function assertCanOverwrite(

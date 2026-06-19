@@ -10,7 +10,9 @@ import {
   BabaError,
   formatDiagnostic,
   generate,
+  parseGrammar,
   parseMetadata,
+  validateGrammar,
 } from "./mod.ts";
 
 interface Options {
@@ -18,17 +20,35 @@ interface Options {
   outDir?: string;
   metadataPath?: string;
   name: string;
+  rootRule?: string;
   listFiles: boolean;
   diagnosticFormat: "text" | "json";
   help: boolean;
+}
+
+class CliDiagnosticsError extends Error {
+  constructor(
+    readonly diagnostics: Diagnostic[],
+    readonly diagnosticFormat: Options["diagnosticFormat"],
+  ) {
+    super("CLI diagnostics contain errors");
+    this.name = "CliDiagnosticsError";
+  }
 }
 
 if (import.meta.main) {
   try {
     await main(Deno.args);
   } catch (error) {
+    if (error instanceof CliDiagnosticsError) {
+      emitDiagnostics(error.diagnostics, error.diagnosticFormat);
+      Deno.exit(1);
+    }
     if (error instanceof BabaError) {
-      console.error(formatDiagnostic(error));
+      emitDiagnostics(
+        [error.toDiagnostic()],
+        diagnosticFormatFromArgs(Deno.args),
+      );
       Deno.exit(1);
     }
     throw error;
@@ -53,9 +73,23 @@ export async function main(args: string[]): Promise<void> {
   const metadata = options.metadataPath
     ? parseMetadata(await Deno.readTextFile(options.metadataPath))
     : undefined;
-  const bundle = generate(source, {
+  const grammar = parseGrammar(source);
+  const grammarDiagnostics = validateGrammar(grammar, {
+    rootRule: options.rootRule,
+    metadata,
+  });
+  if (
+    grammarDiagnostics.some((diagnostic) => diagnostic.severity === "error")
+  ) {
+    throw new CliDiagnosticsError(
+      grammarDiagnostics,
+      options.diagnosticFormat,
+    );
+  }
+  const bundle = generate(grammar, {
     name: options.name,
     metadata,
+    rootRule: options.rootRule,
   });
   emitDiagnostics(bundle.diagnostics ?? [], options.diagnosticFormat);
 
@@ -106,6 +140,17 @@ function parseArgs(args: string[]): Options {
           });
         }
         options.name = name;
+        break;
+      }
+      case "--root": {
+        const rootRule = args[++i];
+        if (!rootRule) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected rule name after --root",
+          });
+        }
+        options.rootRule = rootRule;
         break;
       }
       case "--metadata":
@@ -178,11 +223,20 @@ Usage:
 
 Options:
   --name        Tree-sitter grammar name. Defaults to grammar
+  --root        Root grammar rule. Defaults to the first grammar rule
   --metadata    JSON metadata for Tree-sitter shaping and query generation
   --meta        Alias for --metadata
   --ts-meta     Deprecated alias for --metadata
   --diagnostic-format  Diagnostic output format: text or json. Defaults to text
   --list-files  Print generated file paths without writing output files`;
+}
+
+function diagnosticFormatFromArgs(
+  args: readonly string[],
+): Options["diagnosticFormat"] {
+  const index = args.indexOf("--diagnostic-format");
+  if (index === -1) return "text";
+  return args[index + 1] === "json" ? "json" : "text";
 }
 
 function emitDiagnostics(

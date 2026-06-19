@@ -41,6 +41,8 @@ function parseTreeSitterMetadataObject(
 ): TreeSitterMetadata {
   const object = expectObject(value, path);
   assertKnownKeys(object, path, [
+    "version",
+    "externals",
     "extras",
     "word",
     "supertypes",
@@ -51,6 +53,19 @@ function parseTreeSitterMetadataObject(
   ]);
 
   const metadata: TreeSitterMetadata = {};
+  if (hasKey(object, "version")) {
+    const version = expectInteger(object.version, `${path}.version`);
+    if (version !== 1) {
+      throwMetadataShape(`Unsupported ${path}.version ${version}`);
+    }
+    metadata.version = 1;
+  }
+  if (hasKey(object, "externals")) {
+    metadata.externals = expectStringArray(
+      object.externals,
+      `${path}.externals`,
+    );
+  }
   if (hasKey(object, "extras")) {
     metadata.extras = expectArray(object.extras, `${path}.extras`).map((
       extra,

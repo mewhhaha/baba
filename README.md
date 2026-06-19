@@ -7,14 +7,14 @@ Version 1.0 is intentionally narrow:
 - parse explicit EBNF with `token` and `skip` declarations;
 - validate grammar and Tree-sitter metadata;
 - generate `grammar.js`;
-- generate Tree-sitter query files under `queries/`;
+- generate non-empty Tree-sitter query fragments under `queries/generated-*`;
 - apply generated bundles with manifest-based ownership protection.
 
 It does not generate a TypeScript parser, tokenizer runtime, formatter, LSP,
 editor extension project, package metadata, or language-specific scanner syntax.
 If a language needs comments, strings, numbers, layout, fenced blocks, or
-embedded WGSL, declare those tokens/rules explicitly or provide a Tree-sitter
-scanner outside baba.
+embedded languages, declare those tokens/rules explicitly. Scanner-produced
+symbols must be declared with `externals` metadata and implemented outside baba.
 
 ## Quick Start
 
@@ -51,16 +51,14 @@ That writes:
 generated/
   grammar.js
   queries/
-    highlights.scm
-    locals.scm
-    folds.scm
-    indents.scm
-    tags.scm
-    textobjects.scm
-    rainbows.scm
-    injections.scm
+    generated-highlights.scm
+    generated-rainbows.scm
   .baba-manifest.json
 ```
+
+Only query files with content are written. Regenerating through `applyBundle()`
+removes previously owned generated query fragments that become empty. Ordinary
+`queries/*.scm` files are user-owned and are never written by baba.
 
 List outputs without writing:
 
@@ -74,6 +72,7 @@ Pass Tree-sitter metadata:
 deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --out generated \
   --name tiny \
+  --root module \
   --metadata baba.json
 ```
 
@@ -93,10 +92,14 @@ import {
 
 const grammar = parseGrammar(await Deno.readTextFile("grammar.ebnf"));
 const metadata = parseMetadata(await Deno.readTextFile("baba.json"));
-const diagnostics = validateGrammar(grammar);
+const diagnostics = validateGrammar(grammar, { rootRule: "module", metadata });
 
 if (diagnostics.length === 0) {
-  const bundle = generate(grammar, { name: "tiny", metadata });
+  const bundle = generate(grammar, {
+    name: "tiny",
+    rootRule: "module",
+    metadata,
+  });
   for (const diagnostic of bundle.diagnostics ?? []) {
     console.warn(diagnostic.code, diagnostic.message);
   }
@@ -136,6 +139,7 @@ Expressions support:
 - repeat: `item*` or `{ item }`
 - one-or-more: `item+`
 - separated list: `item % ","`
+- named field: `name:item`
 - grouping: `( item | other )`
 
 There are no implicit token builtins. Names such as `ident`, `string`, `number`,
@@ -149,14 +153,24 @@ reported as `UNREACHABLE_RULE` warnings.
 
 Metadata is Tree-sitter-specific JSON:
 
+```ebnf
+token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token embedded_source = /[^}]+/ ;
+skip whitespace = /[ \t\r\n]+/ ;
+
+module = "fn" name:ident body:block ;
+block = "{" embedded_source "}" ;
+```
+
 ```json
 {
+  "version": 1,
   "word": "ident",
   "extras": [{ "kind": "rule", "name": "whitespace" }],
   "rules": {
     "module": {
       "paths": {
-        "1": { "field": "name" }
+        "name": { "alias_ref": "function_name" }
       }
     }
   },
@@ -166,13 +180,20 @@ Metadata is Tree-sitter-specific JSON:
       "defaults": { "suppress": [{ "node": "ident" }] }
     },
     "locals": [{ "node": "ident", "capture": "local.definition" }],
-    "injections": [{ "node": "shader_body", "language": "wgsl" }]
+    "injections": [{ "node": "embedded_source", "language": "<language>" }]
   }
 }
 ```
 
+EBNF fields generate Tree-sitter fields directly. Versioned metadata may use
+those field names as selectors for additional shaping, such as aliases or
+precedence wrappers. Numeric expression paths are accepted only for unversioned
+legacy metadata.
+
 Supported top-level keys:
 
+- `version`
+- `externals`
 - `extras`
 - `word`
 - `supertypes`
@@ -183,6 +204,24 @@ Supported top-level keys:
 
 Metadata does not contain formatter, LSP, editor, package, license, author, or
 binding configuration.
+
+External scanner symbols are declared in metadata:
+
+```json
+{
+  "version": 1,
+  "externals": ["INDENT", "DEDENT", "NEWLINE"]
+}
+```
+
+The generated `grammar.js` declares those symbols in `externals`; the scanner
+implementation remains user-owned.
+
+## Stability
+
+The versioned metadata schema is `version: 1`. It uses explicit EBNF fields
+rather than positional expression paths, so grammar edits do not silently
+retarget field metadata.
 
 ## Removed In 1.0
 
