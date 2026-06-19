@@ -1,20 +1,26 @@
 # baba
 
-`baba` compiles explicit EBNF grammars into deterministic Tree-sitter artifacts.
+`baba` compiles an explicit EBNF language specification into predictable syntax
+infrastructure: a Tree-sitter grammar and queries, plus an optional standalone
+TypeScript lexer, parser, and typed concrete syntax tree.
 
-Version 1.0 is intentionally narrow:
+Version 1.1 is still intentionally narrow:
 
 - parse explicit EBNF with `token` and `skip` declarations;
 - validate grammar and Tree-sitter metadata;
 - generate `grammar.js`;
 - generate non-empty Tree-sitter query fragments under `queries/generated-*`;
+- optionally generate a self-contained TypeScript lexer, LR(1) parser, and CST
+  under `typescript/`;
 - apply generated bundles with manifest-based ownership protection.
 
-It does not generate a TypeScript parser, tokenizer runtime, formatter, LSP,
-editor extension project, package metadata, or language-specific scanner syntax.
-If a language needs comments, strings, numbers, layout, fenced blocks, or
-embedded languages, declare those tokens/rules explicitly. Scanner-produced
-symbols must be declared with `externals` metadata and implemented outside baba.
+It does not generate semantic analysis, name resolution, type checking,
+lowering, code generation, formatter policy, LSP behavior, editor extension
+projects, package metadata, or language-specific scanner syntax. If a language
+needs comments, strings, numbers, layout, fenced blocks, or embedded languages,
+declare those tokens/rules explicitly. Scanner-produced symbols must be declared
+with `externals` metadata and implemented outside baba; the TypeScript target
+reports reachable external tokens as unsupported.
 
 ## Quick Start
 
@@ -37,6 +43,22 @@ deno run --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --name tiny
 ```
 
+Generate the standalone TypeScript lexer/parser target:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated \
+  --target typescript
+```
+
+Generate both targets:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated \
+  --target all
+```
+
 From this repository:
 
 ```sh
@@ -53,6 +75,11 @@ generated/
   queries/
     generated-highlights.scm
     generated-rainbows.scm
+  typescript/
+    syntax.ts
+    lexer.ts
+    parser.ts
+    mod.ts
   .baba-manifest.json
 ```
 
@@ -222,20 +249,6 @@ implementation remains user-owned.
 The versioned metadata schema is `version: 1`. It uses explicit EBNF fields
 rather than positional expression paths, so grammar edits do not silently
 retarget field metadata.
-
-## Removed In 1.0
-
-The following pre-1.0 surfaces were removed:
-
-- `workbench` preset;
-- TypeScript tokenizer/parser generation;
-- implicit token builtins;
-- `fenced_text` and `fenced_template`;
-- implicit `//` comment handling;
-- layout tokens as builtins;
-- formatter, LSP, AST facade, and editor scaffold generators;
-- generated `tree-sitter.json`, `package.json`, and fabricated project metadata;
-- CLI `init`, `--backend`, `--preset`, and `--ts-out`.
 
 ## Development
 

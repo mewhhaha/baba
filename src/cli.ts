@@ -4,23 +4,24 @@
  * @module
  */
 
-import type { Diagnostic } from "./ast.ts";
+import type { Diagnostic, GenerateTarget } from "./ast.ts";
 import {
   applyBundle,
   BabaError,
+  compile,
   formatDiagnostic,
-  generate,
   parseGrammar,
   parseMetadata,
-  validateGrammar,
 } from "./mod.ts";
 
 interface Options {
+  command: "check" | "generate";
   input?: string;
   outDir?: string;
   metadataPath?: string;
   name: string;
   rootRule?: string;
+  targets: GenerateTarget[];
   listFiles: boolean;
   diagnosticFormat: "text" | "json";
   help: boolean;
@@ -28,7 +29,7 @@ interface Options {
 
 class CliDiagnosticsError extends Error {
   constructor(
-    readonly diagnostics: Diagnostic[],
+    readonly diagnostics: readonly Diagnostic[],
     readonly diagnosticFormat: Options["diagnosticFormat"],
   ) {
     super("CLI diagnostics contain errors");
@@ -74,29 +75,24 @@ export async function main(args: string[]): Promise<void> {
     ? parseMetadata(await Deno.readTextFile(options.metadataPath))
     : undefined;
   const grammar = parseGrammar(source);
-  const grammarDiagnostics = validateGrammar(grammar, {
-    rootRule: options.rootRule,
-    metadata,
-  });
-  if (
-    grammarDiagnostics.some((diagnostic) => diagnostic.severity === "error")
-  ) {
-    throw new CliDiagnosticsError(
-      grammarDiagnostics,
-      options.diagnosticFormat,
-    );
-  }
-  const bundle = generate(grammar, {
+  const result = compile(grammar, {
     name: options.name,
-    metadata,
     rootRule: options.rootRule,
+    metadata,
+    targets: options.targets.length ? options.targets : undefined,
   });
-  emitDiagnostics(bundle.diagnostics ?? [], options.diagnosticFormat);
+  if (hasErrors(result.diagnostics)) {
+    throw new CliDiagnosticsError(result.diagnostics, options.diagnosticFormat);
+  }
+  emitDiagnostics(result.diagnostics, options.diagnosticFormat);
+  const bundle = result.bundle;
+  if (!bundle) return;
 
   if (options.listFiles) {
     console.log(bundle.files.map((file) => file.path).join("\n"));
     return;
   }
+  if (options.command === "check") return;
   if (!options.outDir) {
     console.log(bundle.files.map((file) => file.path).join("\n"));
     return;
@@ -106,13 +102,19 @@ export async function main(args: string[]): Promise<void> {
 
 function parseArgs(args: string[]): Options {
   const options: Options = {
+    command: "generate",
     name: "grammar",
+    targets: [],
     listFiles: false,
     diagnosticFormat: "text",
     help: false,
   };
 
-  let i = args[0] === "generate" ? 1 : 0;
+  let i = 0;
+  if (args[0] === "generate" || args[0] === "check") {
+    options.command = args[0];
+    i = 1;
+  }
   for (; i < args.length; i++) {
     const arg = args[i];
     switch (arg) {
@@ -151,6 +153,17 @@ function parseArgs(args: string[]): Options {
           });
         }
         options.rootRule = rootRule;
+        break;
+      }
+      case "--target": {
+        const target = args[++i];
+        if (!target) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected target after --target",
+          });
+        }
+        addTarget(options, target);
         break;
       }
       case "--metadata":
@@ -193,7 +206,7 @@ function parseArgs(args: string[]): Options {
         throw new BabaError({
           code: "REMOVED_CLI_OPTION",
           message:
-            `'${arg}' was removed in baba 1.0. Baba now compiles explicit EBNF to Tree-sitter artifacts only.`,
+            `'${arg}' was removed in baba 1.0. Use --target tree-sitter, --target typescript, or --target all.`,
         });
       default:
         if (arg.startsWith("-")) {
@@ -215,15 +228,17 @@ function parseArgs(args: string[]): Options {
 }
 
 function helpText(): string {
-  return `baba - compile explicit EBNF to Tree-sitter artifacts
+  return `baba - compile explicit EBNF to syntax infrastructure
 
 Usage:
   baba <grammar.ebnf> --out generated
+  baba check <grammar.ebnf>
   baba generate <grammar.ebnf> --out generated
 
 Options:
-  --name        Tree-sitter grammar name. Defaults to grammar
+  --name        Grammar/target name. Defaults to grammar
   --root        Root grammar rule. Defaults to the first grammar rule
+  --target      Output target: tree-sitter, typescript, or all. May repeat
   --metadata    JSON metadata for Tree-sitter shaping and query generation
   --meta        Alias for --metadata
   --ts-meta     Deprecated alias for --metadata
@@ -237,6 +252,29 @@ function diagnosticFormatFromArgs(
   const index = args.indexOf("--diagnostic-format");
   if (index === -1) return "text";
   return args[index + 1] === "json" ? "json" : "text";
+}
+
+function addTarget(options: Options, target: string): void {
+  const targets: GenerateTarget[] = target === "all"
+    ? ["tree-sitter", "typescript"]
+    : target === "tree-sitter" || target === "typescript"
+    ? [target]
+    : [];
+  if (targets.length === 0) {
+    throw new BabaError({
+      code: "CLI_BAD_ARGS",
+      message: `Unknown target '${target}'`,
+    });
+  }
+  for (const value of targets) {
+    if (!options.targets.includes(value)) options.targets.push(value);
+  }
+}
+
+function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
+  return diagnostics.some((diagnostic) =>
+    (diagnostic.severity ?? "error") === "error"
+  );
 }
 
 function emitDiagnostics(

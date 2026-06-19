@@ -107,6 +107,19 @@ export interface Diagnostic {
   sourceLine?: string;
 }
 
+/** Output target selected for a generation run. */
+export type GenerateTarget = "tree-sitter" | "typescript";
+
+/** Options for the standalone TypeScript lexer/parser target. */
+export interface TypeScriptTargetOptions {
+  /** Relative directory inside the generated bundle. Defaults to `typescript`. */
+  directory?: string;
+  /** Preserve skip-token matches as trivia tokens. Defaults to true. */
+  preserveTrivia?: boolean;
+  /** Maximum canonical LR(1) state count. Defaults to 20,000. */
+  parserStateLimit?: number;
+}
+
 /** Options for the stable high-level `generate` API. */
 export interface GenerateOptions {
   /** Language/tree-sitter grammar name. */
@@ -115,6 +128,33 @@ export interface GenerateOptions {
   rootRule?: string;
   /** Optional generation metadata. */
   metadata?: BabaMetadata;
+  /** Output targets. Defaults to ["tree-sitter"]. */
+  targets?: readonly GenerateTarget[];
+  /** Standalone TypeScript target options. */
+  typescript?: TypeScriptTargetOptions;
+}
+
+/** Options for the nonthrowing compiler API. */
+export interface CompileOptions extends GenerateOptions {}
+
+/** Nonthrowing compiler result. */
+export interface CompileResult {
+  /** All diagnostics collected while analyzing and planning targets. */
+  diagnostics: readonly Diagnostic[];
+  /** Present only when no error diagnostics were produced. */
+  bundle?: GeneratedBundle;
+}
+
+/** Options for grammar and target validation without output generation. */
+export interface ValidateOptions {
+  /** Root grammar rule. Defaults to the first rule. */
+  rootRule?: string;
+  /** Optional generation metadata. */
+  metadata?: BabaMetadata;
+  /** Output targets to validate. Defaults to ["tree-sitter"]. */
+  targets?: readonly GenerateTarget[];
+  /** Standalone TypeScript target options. */
+  typescript?: TypeScriptTargetOptions;
 }
 
 /** One generated file. */

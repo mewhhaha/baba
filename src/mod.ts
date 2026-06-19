@@ -15,6 +15,8 @@
 
 export type {
   BabaMetadata,
+  CompileOptions,
+  CompileResult,
   Diagnostic,
   EbnfExpression,
   EbnfGrammar,
@@ -23,11 +25,15 @@ export type {
   GeneratedBundle,
   GeneratedFile,
   GenerateOptions,
+  GenerateTarget,
   SourceSpan,
+  TypeScriptTargetOptions,
+  ValidateOptions,
 } from "./ast.ts";
 export {
   applyBundle,
   BabaError,
+  compile,
   formatDiagnostic,
   generate,
   parseGrammar,

@@ -9,6 +9,8 @@
 
 export type {
   BabaMetadata,
+  CompileOptions,
+  CompileResult,
   EbnfExpression,
   EbnfGrammar,
   EbnfRule,
@@ -16,6 +18,7 @@ export type {
   GeneratedBundle,
   GeneratedFile,
   GenerateOptions,
+  GenerateTarget,
   SourceSpan,
   TreeSitterCaptureMetadata,
   TreeSitterExtra,
@@ -29,7 +32,21 @@ export type {
   TreeSitterRuleMetadata,
   TreeSitterRuleToken,
   TreeSitterRuleWrap,
+  TypeScriptTargetOptions,
+  ValidateOptions,
 } from "./ast.ts";
+export { analyzeGrammar } from "./compiler/analyze.ts";
+export type {
+  AnalyzedExpression,
+  AnalyzedGrammar,
+  AnalyzedLiteral,
+  AnalyzedRule,
+  AnalyzedToken,
+  LiteralId,
+  ResolvedReference,
+  RuleId,
+  TokenId,
+} from "./compiler/ir.ts";
 export {
   collectGrammarDiagnostics,
   collectReachabilityDiagnostics,

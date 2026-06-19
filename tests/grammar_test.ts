@@ -1,6 +1,7 @@
 import {
   applyBundle,
   BabaError,
+  compile,
   formatDiagnostic,
   generate,
   parseGrammar,
@@ -222,6 +223,338 @@ Deno.test("generates Tree-sitter grammar and query bundle only", () => {
     '"fn" @keyword',
   );
   assertEquals(bundle.cleanupPaths, undefined);
+});
+
+Deno.test("generates standalone TypeScript lexer and parser", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    token INTEGER = /[0-9]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    skip LINE_COMMENT = /\\/\\/[^\\n]*/ ;
+
+    module = statement* ;
+    statement = "let" name:IDENT "=" value:INTEGER ";" ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+  assertEquals(
+    result.bundle.files.map((file) => file.path).join(","),
+    "typescript/lexer.ts,typescript/mod.ts,typescript/parser.ts,typescript/syntax.ts",
+  );
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const lexed = mod.lex("let x = 42; // ok");
+    assertEquals(
+      lexed.tokens
+        .filter((token: { channel: string }) => token.channel !== "trivia")
+        .map((token: { type: string; literal?: string; kind?: string }) =>
+          token.type === "literal" ? token.literal : token.kind ?? token.type
+        )
+        .join(","),
+      "let,IDENT,=,INTEGER,;,eof",
+    );
+    assert(
+      lexed.tokens.some((token: { kind?: string; channel: string }) =>
+        token.kind === "LINE_COMMENT" && token.channel === "trivia"
+      ),
+    );
+
+    const parsed = mod.parse("let x = 42;");
+    assertEquals(parsed.ok, true);
+    const statement = parsed.root.children[0];
+    assertEquals(statement.fields.name.text, "x");
+    assertEquals(statement.fields.value.text, "42");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser target supports left-recursive arithmetic", async () => {
+  const source = `
+    token INTEGER = /[0-9]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = expr ;
+    expr = additive ;
+    additive =
+        left:additive op:("+" | "-") right:multiplicative
+      | multiplicative
+    ;
+    multiplicative =
+        left:multiplicative op:("*" | "/") right:primary
+      | primary
+    ;
+    primary = INTEGER | "(" expr ")" ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("1 + 2 * 3");
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.children[0].name, "expr");
+    const additive = parsed.root.children[0].children[0];
+    assertEquals(additive.name, "additive");
+    assertEquals(additive.fields.op.literal, "+");
+    assertEquals(additive.fields.right.name, "multiplicative");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript lexer uses maximal munch for literals and identifiers", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = "if" IDENT ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const tokenKinds = (source: string) =>
+      mod.lex(source).tokens
+        .filter((token: { channel: string }) => token.channel !== "trivia")
+        .map((token: { type: string; literal?: string; kind?: string }) =>
+          token.type === "literal" ? token.literal : token.kind ?? token.type
+        )
+        .join(",");
+    assertEquals(tokenKinds("if value"), "if,IDENT,eof");
+    assertEquals(tokenKinds("iffy"), "IDENT,eof");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser derives optional separated-list fields", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    call = callee:IDENT "(" args:(expr % ",")? ")" ;
+    expr = IDENT ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    assertEquals(mod.parse("f()").root.fields.args, null);
+    const parsed = mod.parse("f(a, b)");
+    assertEquals(parsed.root.fields.args.length, 2);
+    assertEquals(parsed.root.fields.args[0].name, "expr");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser ignores trivia in parseTokens and rejects unknown tokens", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = "if" name:IDENT ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const lexed = mod.lex("if value");
+    const parsed = mod.parseTokens(lexed.source, lexed.tokens);
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.fields.name.text, "value");
+
+    const unknown = mod.parseTokens("if value", [
+      ...lexed.tokens.slice(0, -1),
+      {
+        type: "literal",
+        literal: "missing",
+        text: "missing",
+        span: { start: 8, end: 15 },
+        channel: "main",
+      },
+      lexed.tokens.at(-1),
+    ]);
+    assertEquals(unknown.ok, false);
+    assertEquals(unknown.diagnostics[0].code, "PARSE_LEXICAL_ERROR");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript target supports literal-only grammars and deterministic output", async () => {
+  const result = compile(`module = "ok" ;`, { targets: ["typescript"] });
+  const repeated = compile(`module = "ok" ;`, { targets: ["typescript"] });
+  assert(result.bundle);
+  assert(repeated.bundle);
+  assertEquals(
+    result.bundle.files.map((file) => file.content).join("\n---\n"),
+    repeated.bundle.files.map((file) => file.content).join("\n---\n"),
+  );
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("ok");
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.name, "module");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript syntax emitter avoids rule node type name collisions", async () => {
+  const source = `
+    module = lower:foo upper:Foo ;
+    foo = "a" ;
+    Foo = "b" ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assert(result.bundle);
+  const syntax =
+    result.bundle.files.find((file) => file.path === "typescript/syntax.ts")
+      ?.content ?? "";
+  assertIncludes(syntax, "export interface FooNode ");
+  assertIncludes(syntax, "export interface FooNode2 ");
+  assertIncludes(syntax, "lower: FooNode;");
+  assertIncludes(syntax, "upper: FooNode2;");
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("ab");
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.fields.lower.name, "foo");
+    assertEquals(parsed.root.fields.upper.name, "Foo");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript lexer can consume trivia without preserving tokens", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = left:IDENT right:IDENT ;
+  `;
+  const result = compile(source, {
+    targets: ["typescript"],
+    typescript: { preserveTrivia: false },
+  });
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const lexed = mod.lex("a b");
+    assertEquals(
+      lexed.tokens.map((token: { kind?: string; type: string }) =>
+        token.kind ?? token.type
+      ).join(","),
+      "IDENT,IDENT,eof",
+    );
+    const parsed = mod.parse("a b");
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.fields.right.text, "b");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript target rejects unsafe options and zero-length literals", () => {
+  const source = `module = "" ;`;
+  const emptyLiteral = compile(source, { targets: ["typescript"] });
+  assertEquals(emptyLiteral.bundle, undefined);
+  assertEquals(emptyLiteral.diagnostics[0].code, "TS_LEXER_GENERATION_ERROR");
+
+  const invalidDirectory = compile(`module = "ok" ;`, {
+    targets: ["typescript"],
+    typescript: { directory: "../typescript" },
+  });
+  assertEquals(invalidDirectory.bundle, undefined);
+  assertEquals(
+    invalidDirectory.diagnostics.map((diagnostic) => diagnostic.code).join(","),
+    "TS_LEXER_GENERATION_ERROR",
+  );
+
+  const invalidStateLimit = compile(`module = "ok" ;`, {
+    targets: ["typescript"],
+    typescript: { parserStateLimit: 0 },
+  });
+  assertEquals(invalidStateLimit.bundle, undefined);
+  assertEquals(invalidStateLimit.diagnostics[0].code, "TS_PARSER_STATE_LIMIT");
+});
+
+Deno.test("TypeScript target diagnoses conflicts without blocking Tree-sitter", () => {
+  const source = `
+    token IDENT = /[a-z]+/ ;
+    skip WS = /[ \\t\\n]+/ ;
+    module = expr ;
+    expr = expr expr | IDENT ;
+  `;
+  const typescript = compile(source, { targets: ["typescript"] });
+  assertEquals(typescript.bundle, undefined);
+  assert(
+    typescript.diagnostics.some((diagnostic) =>
+      diagnostic.code === "TS_PARSER_REDUCE_REDUCE_CONFLICT" ||
+      diagnostic.code === "TS_PARSER_SHIFT_REDUCE_CONFLICT"
+    ),
+  );
+
+  const treeSitter = compile(source, { targets: ["tree-sitter"] });
+  assert(treeSitter.bundle);
+  assertEquals(
+    treeSitter.bundle.files.some((file) => file.path === "grammar.js"),
+    true,
+  );
+});
+
+Deno.test("TypeScript target reports unsupported reachable external tokens", () => {
+  const source = `
+    token IDENT = /[a-z]+/ ;
+    module = INDENT IDENT ;
+  `;
+  const metadata = parseMetadata(JSON.stringify({
+    version: 1,
+    externals: ["INDENT"],
+  }));
+  const typescript = compile(source, { targets: ["typescript"], metadata });
+  assertEquals(
+    typescript.diagnostics.map((diagnostic) => diagnostic.code).join(","),
+    "TS_EXTERNAL_TOKENS_UNSUPPORTED",
+  );
+  assertEquals(typescript.bundle, undefined);
+
+  const treeSitter = compile(source, { targets: ["tree-sitter"], metadata });
+  assert(treeSitter.bundle);
 });
 
 Deno.test("Tree-sitter grammar lowering uses explicit declarations only", () => {
@@ -611,6 +944,40 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
       "source_file: $ => $.module",
     );
     await assertMissing(`${outDir}/tree-sitter.json`);
+
+    let targetLogs: string[] = [];
+    await captureConsoleError(async () => {
+      targetLogs = await captureConsoleLog(() =>
+        main([
+          "check",
+          grammarPath,
+          "--target",
+          "typescript",
+          "--list-files",
+        ])
+      );
+    });
+    assertIncludes(targetLogs.join("\n"), "typescript/mod.ts");
+
+    const allOutDir = `${dir}/all`;
+    await captureConsoleError(() =>
+      main([
+        "generate",
+        grammarPath,
+        "--target",
+        "all",
+        "--out",
+        allOutDir,
+      ])
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${allOutDir}/grammar.js`),
+      "grammar",
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${allOutDir}/typescript/mod.ts`),
+      "parseTokens",
+    );
 
     const rootedGrammarPath = `${dir}/rooted.ebnf`;
     await Deno.writeTextFile(

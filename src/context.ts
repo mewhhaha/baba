@@ -26,6 +26,7 @@ export function createGenerationContext(
     : sourceOrGrammar;
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
   const metadata = options.metadata ?? {};
+  const targets = options.targets ?? ["tree-sitter"];
   const grammarDiagnostics = collectGrammarDiagnostics(grammar, {
     rootRule: rootRuleName,
     externals: metadata.externals,
@@ -36,19 +37,21 @@ export function createGenerationContext(
   if (grammarError) {
     throw new BabaError(grammarError);
   }
-  try {
-    validateTreeSitterGenerationMetadataSemantics(
-      grammar,
-      rootRuleName,
-      metadata,
-    );
-  } catch (error) {
-    throw toBabaError(error, "METADATA_SEMANTIC_ERROR");
-  }
-  try {
-    validateTreeSitterBackendCapabilities(grammar);
-  } catch (error) {
-    throw toBabaError(error, "BACKEND_CAPABILITY_ERROR");
+  if (targets.includes("tree-sitter")) {
+    try {
+      validateTreeSitterGenerationMetadataSemantics(
+        grammar,
+        rootRuleName,
+        metadata,
+      );
+    } catch (error) {
+      throw toBabaError(error, "METADATA_SEMANTIC_ERROR");
+    }
+    try {
+      validateTreeSitterBackendCapabilities(grammar);
+    } catch (error) {
+      throw toBabaError(error, "BACKEND_CAPABILITY_ERROR");
+    }
   }
 
   return {
