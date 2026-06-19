@@ -8,6 +8,7 @@ import type {
 import { generatedBundle } from "./bundle.ts";
 import { createGenerationContext } from "./context.ts";
 import {
+  collectTreeSitterHighlightDiagnostics,
   generateParserSource,
   generateTokenizerSource,
   generateTreeSitterGrammar,
@@ -61,61 +62,94 @@ export function generate(
   try {
     const context = createGenerationContext(sourceOrGrammar, options);
     if (context.preset === "workbench") {
-      return generateWorkbenchBundle(context.grammar, {
+      const bundle = generateWorkbenchBundle(context.grammar, {
         name: context.name,
         rootRule: context.rootRuleName,
         metadata: context.metadata,
         skipValidation: true,
       });
+      return {
+        ...bundle,
+        diagnostics: collectTreeSitterHighlightDiagnostics(context.grammar, {
+          rootRule: context.rootRuleName,
+          metadata: context.metadata,
+          skipValidation: true,
+        }),
+      };
     }
     const files: Array<readonly [string, string]> = [];
     const cleanupPaths: string[] = [];
-    files.push([
-      "grammar.js",
-      generateTreeSitterGrammar(context.grammar, {
-        name: context.name,
+    const diagnostics = context.backends.includes("tree-sitter")
+      ? collectTreeSitterHighlightDiagnostics(context.grammar, {
         rootRule: context.rootRuleName,
         metadata: context.metadata,
         skipValidation: true,
-      }),
-    ]);
-    files.push([
-      "lexical.json",
-      `${JSON.stringify(context.lexicalSpec, null, 2)}\n`,
-    ]);
-    files.push([
-      "parser.ts",
-      generateParserSource(context.grammar, {
-        rootRule: context.rootRuleName,
+      })
+      : [];
+    if (context.backends.includes("tree-sitter")) {
+      files.push([
+        "grammar.js",
+        generateTreeSitterGrammar(context.grammar, {
+          name: context.name,
+          rootRule: context.rootRuleName,
+          metadata: context.metadata,
+          skipValidation: true,
+        }),
+      ]);
+      const injections = generateTreeSitterInjectionsQuery(context.grammar, {
+        metadata: context.metadata,
         skipValidation: true,
-      }),
-    ]);
-    files.push([
-      "tokenizer.ts",
-      generateTokenizerSource(context.grammar, {
-        spec: context.lexicalSpec,
+      });
+      if (injections) files.push(["injections.scm", injections]);
+      else cleanupPaths.push("injections.scm");
+      const rainbows = generateTreeSitterRainbowsQuery(context.grammar, {
+        metadata: context.metadata,
         skipValidation: true,
-      }),
-    ]);
-    const injections = generateTreeSitterInjectionsQuery(context.grammar, {
-      metadata: context.metadata,
-      skipValidation: true,
-    });
-    if (injections) files.push(["injections.scm", injections]);
-    else cleanupPaths.push("injections.scm");
-    const rainbows = generateTreeSitterRainbowsQuery(context.grammar, {
-      metadata: context.metadata,
-      skipValidation: true,
-    });
-    if (rainbows) files.push(["rainbows.scm", rainbows]);
-    else cleanupPaths.push("rainbows.scm");
-    const textobjects = generateTreeSitterTextobjectsQuery(context.grammar, {
-      metadata: context.metadata,
-      skipValidation: true,
-    });
-    if (textobjects) files.push(["textobjects.scm", textobjects]);
-    else cleanupPaths.push("textobjects.scm");
-    return generatedBundle("core", files, cleanupPaths);
+      });
+      if (rainbows) files.push(["rainbows.scm", rainbows]);
+      else cleanupPaths.push("rainbows.scm");
+      const textobjects = generateTreeSitterTextobjectsQuery(context.grammar, {
+        metadata: context.metadata,
+        skipValidation: true,
+      });
+      if (textobjects) files.push(["textobjects.scm", textobjects]);
+      else cleanupPaths.push("textobjects.scm");
+    } else {
+      cleanupPaths.push(
+        "grammar.js",
+        "injections.scm",
+        "rainbows.scm",
+        "textobjects.scm",
+      );
+    }
+    if (context.backends.includes("typescript-ll1")) {
+      files.push([
+        "lexical.json",
+        `${JSON.stringify(context.lexicalSpec, null, 2)}\n`,
+      ]);
+      files.push([
+        "parser.ts",
+        generateParserSource(context.grammar, {
+          rootRule: context.rootRuleName,
+          skipValidation: true,
+        }),
+      ]);
+      files.push([
+        "tokenizer.ts",
+        generateTokenizerSource(context.grammar, {
+          spec: context.lexicalSpec,
+          skipValidation: true,
+        }),
+      ]);
+    } else {
+      cleanupPaths.push("lexical.json", "parser.ts", "tokenizer.ts");
+    }
+    const bundle = generatedBundle("core", files, cleanupPaths);
+    return {
+      ...bundle,
+      backends: context.backends,
+      diagnostics: diagnostics.length ? diagnostics : undefined,
+    };
   } catch (error) {
     throw toBabaError(error, "GENERATION_ERROR");
   }

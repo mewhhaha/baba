@@ -113,6 +113,10 @@ export interface Diagnostic {
   code: string;
   /** Human-readable diagnostic message. */
   message: string;
+  /** Diagnostic severity. Defaults to error for thrown diagnostics. */
+  severity?: "error" | "warning" | "information";
+  /** Backend that produced the diagnostic, when backend-specific. */
+  backend?: GenerateBackend | string;
   /** Optional EBNF source span. */
   span?: SourceSpan;
   /** Optional metadata object path. */
@@ -124,6 +128,9 @@ export interface Diagnostic {
 /** Generation preset. */
 export type GeneratePreset = "core" | "workbench";
 
+/** Independently selectable generation backends. */
+export type GenerateBackend = "tree-sitter" | "typescript-ll1";
+
 /** Options for the stable high-level `generate` API. */
 export interface GenerateOptions {
   /** Language/tree-sitter grammar name. */
@@ -132,6 +139,8 @@ export interface GenerateOptions {
   rootRule?: string;
   /** Generation preset. Defaults to `core`. */
   preset?: GeneratePreset;
+  /** Core preset backends to emit. Defaults to both backends. */
+  backends?: readonly GenerateBackend[];
   /** Optional generation metadata. */
   metadata?: BabaMetadata;
 }
@@ -150,10 +159,14 @@ export interface GeneratedFile {
 export interface GeneratedBundle {
   /** Generation preset used for this bundle. */
   preset: GeneratePreset;
+  /** Backends emitted by this bundle, when backend selection applies. */
+  backends?: GenerateBackend[];
   /** Deterministically sorted generated files. */
   files: GeneratedFile[];
   /** Relative paths the writer should remove when absent from this bundle. */
   cleanupPaths?: string[];
+  /** Non-fatal diagnostics produced while generating the bundle. */
+  diagnostics?: Diagnostic[];
 }
 
 /** Options for generating a starter baba project scaffold. */

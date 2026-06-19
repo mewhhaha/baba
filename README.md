@@ -8,8 +8,8 @@ The name comes from:
 Grammar -> Gramma -> Grandma -> Baba
 ```
 
-baba keeps a grammar as the source of truth, then generates practical parser
-scaffolding from it:
+baba keeps a grammar as the source of truth, then generates practical syntax
+artifacts from selected backends:
 
 - `lexical.json`: sorted keyword, symbol, token, and skip manifest
 - `tokenizer.ts`: standalone TypeScript tokenizer
@@ -23,6 +23,10 @@ scaffolding from it:
 Tree-sitter-specific concerns such as conflicts, precedence, supertypes, extras,
 field names, aliases, and query shaping live in optional JSON metadata, so the
 grammar stays readable.
+
+Core generation supports independent backends. Request `tree-sitter` when you
+only need Tree-sitter artifacts, or `typescript-ll1` when you need the
+standalone predictive parser subset.
 
 ## Quick Start
 
@@ -126,13 +130,21 @@ Generate only the lexical manifest to stdout:
 deno run --allow-read src/cli.ts grammar.ebnf
 ```
 
-Generate a tree-sitter grammar at a specific path while still printing the
-lexical manifest:
+Generate a Tree-sitter grammar at a specific path without building the
+TypeScript parser backend:
 
 ```sh
 deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --name tiny \
   --ts-out tree-sitter-tiny/grammar.js
+```
+
+Select core backends explicitly:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated \
+  --backend tree-sitter
 ```
 
 Generate both the local bundle and a tree-sitter output copy:
@@ -143,6 +155,11 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --name tiny \
   --ts-out tree-sitter-tiny/grammar.js
 ```
+
+Generated output directories receive a `.baba-manifest.json` ownership file. On
+later runs, Baba refuses to overwrite or remove files that are modified since
+the last generation or were not previously owned by Baba. Delete or move an
+unowned file before regenerating that path.
 
 Pass tree-sitter metadata when needed:
 
@@ -184,8 +201,12 @@ try {
     name: "tiny",
     rootRule: "module",
     metadata,
-    preset: "workbench",
+    backends: ["tree-sitter"],
   });
+
+  for (const diagnostic of bundle.diagnostics ?? []) {
+    console.warn(`${diagnostic.code}: ${diagnostic.message}`);
+  }
 
   for (const file of bundle.files) {
     await Deno.writeTextFile(`generated/${file.path}`, file.content);
@@ -281,7 +302,13 @@ Current builtin refs include:
 
 Layout tokens are enabled when a grammar references `newline`, `indent`, or
 `dedent`. Fenced blocks are scanned atomically, so indentation inside fenced
-content is ignored.
+content is ignored. The standalone TypeScript tokenizer/parser supports
+`dedent`; the Tree-sitter backend rejects `dedent` until an external scanner
+layout model is configured.
+
+Language-specific fenced content such as WGSL is not a core builtin. Model it
+with `fenced_text`, a declared token, or a project-specific backend/plugin
+layer, then attach injections through metadata.
 
 ## Validation And Diagnostics
 
@@ -366,7 +393,7 @@ the EBNF:
       "patterns": ["(template) @rainbow.scope"]
     },
     "injections": [
-      { "node": "wgsl_content", "language": "wgsl" },
+      { "node": "fenced_text_content", "language": "wgsl" },
       {
         "pattern": "((shader_body) @injection.content (#set! injection.language \"wgsl\"))"
       }
@@ -398,8 +425,9 @@ validated by Tree-sitter query compilation, not parsed by Baba. Highlight
 entries render before generated defaults, and
 `queries.highlights.defaults.suppress` disables default captures for selected
 nodes or literals. Suppressed nodes and literals are checked against their
-grammar parent contexts; Baba warns when a suppressed item appears in a context
-without an explicit highlight capture. Add a raw highlight pattern or a
+grammar parent contexts; Baba returns a `QUERY_UNCAPTURED_CONTEXT` warning
+diagnostic when a suppressed item appears in a context without an explicit
+highlight capture. Add a raw highlight pattern or a
 `queries.highlights.defaults.ignore` entry with `node` or `literal` plus
 `parent` to silence an intentional omission.
 
@@ -419,7 +447,7 @@ deno task test
 Check public entrypoints:
 
 ```sh
-deno check src/mod.ts src/cli.ts tests/grammar_test.ts
+deno task check
 ```
 
 Lint:
@@ -443,3 +471,10 @@ deno publish
 
 In JSR package settings, set the overview/readme source to `README.md` if you
 want the package page to show this guide instead of the shorter module docs.
+
+## Release Notes
+
+See [CHANGELOG.md](./CHANGELOG.md). The `0.4.0` release is a correctness release
+with breaking pre-1.0 changes: WGSL-specific builtins were removed from core,
+Tree-sitter `dedent` lowering was replaced with an explicit capability error,
+and `--ts-out` now avoids the TypeScript parser backend unless requested.

@@ -1,4 +1,5 @@
 import type {
+  Diagnostic,
   EbnfExpression,
   EbnfGrammar,
   EbnfRule,
@@ -29,6 +30,7 @@ const lexicalBuiltins = new Set([
   "indent",
   "int",
   "newline",
+  "number",
   "string",
 ]);
 const treeSitterBuiltins = new Set([
@@ -46,11 +48,8 @@ const treeSitterBuiltins = new Set([
   "line_comment",
   "line_end",
   "line_indent",
+  "number",
   "string",
-  "wgsl_block",
-  "wgsl_open",
-  "wgsl_content",
-  "wgsl_close",
 ]);
 const reservedGrammarRuleNames = new Set([
   "source_file",
@@ -457,7 +456,7 @@ export function generateParserSource(
   if (!options.skipValidation) {
     validateEbnfGrammar(grammar, { rootRule: rootRuleName });
   }
-  validateParserGrammar(grammar, rootRuleName);
+  if (!options.skipValidation) validateParserGrammar(grammar, rootRuleName);
   const rules = grammar.rules.map((rule) =>
     `  ${JSON.stringify(rule.name)}: ${
       renderParserExpression(rule.expression)
@@ -571,7 +570,18 @@ class Parser {
         return nodes;
       }
       case "choice":
-        for (const option of expression.options) if (this.canStart(option)) return this.matchExpression(option);
+        for (const option of expression.options) {
+          if (!this.canStart(option)) continue;
+          const mark = this.current;
+          const diagnosticMark = this.diagnostics.length;
+          try {
+            return this.matchExpression(option);
+          } catch (error) {
+            if (!(error instanceof ParseFailure)) throw error;
+            this.current = mark;
+            this.diagnostics.length = diagnosticMark;
+          }
+        }
         this.fail(\`Expected \${describeExpected(expression)}, found '\${this.peek().text}'\`);
       case "optional":
         return this.canStart(expression.expression) ? this.matchExpression(expression.expression) : [];
@@ -932,6 +942,8 @@ function builtinTreeSitterRuleLines(
     ident: "    ident: $ => /[A-Za-z_][A-Za-z0-9_]*/,",
     int:
       "    int: $ => token(choice(/[0-9](?:_?[0-9])*/, /0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*/, /0[bB][01](?:_?[01])*/)),",
+    number:
+      "    number: $ => token(choice(/[0-9](?:_?[0-9])*/, /0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*/, /0[bB][01](?:_?[01])*/)),",
     char:
       "    char: $ => token(seq(\"'\", choice(/[^'\\\\\\n\\r]/, /\\\\[0nrt'\\\\]/, /\\\\x[0-9A-Fa-f]{2}/, /\\\\u\\{[0-9A-Fa-f]+\\}/), \"'\")),",
     string:
@@ -955,12 +967,6 @@ function builtinTreeSitterRuleLines(
       "    fenced_template_content: $ => repeat1(choice(token.immediate(/[^`]+/), token.immediate(/`[^`]/), token.immediate(/``[^`]/))),",
     fenced_template_close:
       '    fenced_template_close: $ => token.immediate("```"),',
-    wgsl_block:
-      "    wgsl_block: $ => choice(seq($.wgsl_open, $.wgsl_close), seq($.wgsl_open, $.wgsl_content, $.wgsl_close)),",
-    wgsl_open: '    wgsl_open: $ => token("```wgsl"),',
-    wgsl_content:
-      "    wgsl_content: $ => repeat1(choice(token.immediate(/[^`]+/), token.immediate(/`[^`]/), token.immediate(/``[^`]/))),",
-    wgsl_close: '    wgsl_close: $ => token.immediate("```"),',
   };
   return Object.entries(builtins)
     .filter(([name]) => !declaredTokens.has(name))
@@ -1111,7 +1117,7 @@ function renderParserExpression(expression: EbnfExpression): string {
   }
 }
 
-function validateParserGrammar(
+export function validateParserGrammar(
   grammar: EbnfGrammar,
   rootRuleName: string,
 ): void {
@@ -1133,6 +1139,19 @@ function validateParserGrammar(
     }
     validateNoNullableRepeat(rule.expression, rules, rule.name);
     validatePredictiveChoices(rule.expression, rules, rule.name);
+  }
+}
+
+/** Validates capability limits specific to the tree-sitter backend. */
+export function validateTreeSitterBackendCapabilities(
+  grammar: EbnfGrammar,
+): void {
+  for (const rule of grammar.rules) {
+    if (hasRef(rule.expression, "dedent")) {
+      throw new Error(
+        "Tree-sitter backend does not support the indentation stack required by 'dedent'. Select the typescript-ll1 backend or model layout with a Tree-sitter external scanner.",
+      );
+    }
   }
 }
 
@@ -1384,6 +1403,7 @@ export function generateTreeSitterGrammar(
   if (!options.skipValidation) {
     validateEbnfGrammar(grammar, { rootRule: rootRuleName });
   }
+  validateTreeSitterBackendCapabilities(grammar);
   const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
   if (!rootRule) throw new Error(`Unknown root rule '${rootRuleName}'`);
 
@@ -1553,16 +1573,22 @@ export function generateTreeSitterInjectionsQuery(
 /** Generates a tree-sitter highlight query. */
 export function generateTreeSitterHighlightsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata);
-    warnUncoveredSuppressedHighlightContexts(grammar, metadata);
   }
 
   const explicit = resolveHighlightCaptureSelectors(
@@ -1579,9 +1605,41 @@ export function generateTreeSitterHighlightsQuery(
   }
   const lines = [
     ...renderCaptureQueryEntries(explicit),
-    ...defaultHighlightQueryEntries(grammar, metadata, explicitSelectors),
+    ...defaultHighlightQueryEntries(
+      grammar,
+      metadata,
+      explicitSelectors,
+      rootRuleName,
+    ),
   ];
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+}
+
+/** Collects non-fatal diagnostics for generated tree-sitter highlight queries. */
+export function collectTreeSitterHighlightDiagnostics(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
+): Diagnostic[] {
+  const grammar = typeof sourceOrGrammar === "string"
+    ? parseEbnf(sourceOrGrammar)
+    : sourceOrGrammar;
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
+  const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata);
+  }
+  return uncoveredSuppressedHighlightDiagnostics(
+    grammar,
+    metadata,
+    rootRuleName,
+  );
 }
 
 /** Generates a metadata-driven tree-sitter locals query. */
@@ -1951,6 +2009,7 @@ export function generateWorkbenchBundle(
   });
   const spec = createLexicalSpec(grammar, { skipValidation: true });
   const queries = generateWorkbenchQueries(grammar, {
+    rootRule: rootRuleName,
     metadata,
     skipValidation: true,
   });
@@ -2028,7 +2087,11 @@ export function generateWorkbenchBundle(
 /** Generates every tree-sitter query file used by the workbench preset. */
 export function generateWorkbenchQueries(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
 ): Record<string, string> {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
@@ -2036,6 +2099,7 @@ export function generateWorkbenchQueries(
   const metadata = options.metadata;
   return {
     "highlights.scm": generateTreeSitterHighlightsQuery(grammar, {
+      rootRule: options.rootRule,
       metadata,
       skipValidation: options.skipValidation,
     }),
@@ -2124,6 +2188,7 @@ function defaultHighlightQueryEntries(
   grammar: EbnfGrammar,
   metadata: TreeSitterMetadata,
   explicitSelectors: Set<string>,
+  rootRuleName: string,
 ): string[] {
   const lines: string[] = [];
   const terminals = collectTerminals(grammar);
@@ -2131,6 +2196,7 @@ function defaultHighlightQueryEntries(
   const exposedNodes = collectExposedTreeSitterNodeNames(
     grammar,
     metadata,
+    rootRuleName,
   );
   const pushNode = (node: string, capture: string) => {
     if (!exposedNodes.has(node) || explicitSelectors.has(`node:${node}`)) {
@@ -2190,13 +2256,14 @@ function defaultHighlightQueryEntries(
 function collectExposedTreeSitterNodeNames(
   grammar: EbnfGrammar,
   metadata: TreeSitterMetadata,
+  rootRuleName: string,
 ): Set<string> {
   const names = new Set<string>(["source_file"]);
   const rulesByName = new Map(grammar.rules.map((rule) => [rule.name, rule]));
   const tokensByName = new Map(
     grammar.tokens.map((token) => [token.name, token]),
   );
-  const queue = grammar.rules[0] ? [grammar.rules[0].name] : [];
+  const queue = [rootRuleName];
 
   for (let index = 0; index < queue.length; index++) {
     const name = queue[index];
@@ -2230,6 +2297,26 @@ function collectExpressionRefs(expression: EbnfExpression): string[] {
   const refs: string[] = [];
   collectExpressionRefsInto(expression, refs);
   return refs;
+}
+
+function collectReachableRuleNames(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+): Set<string> {
+  const rulesByName = new Map(grammar.rules.map((rule) => [rule.name, rule]));
+  const reachable = new Set<string>();
+  const queue = [rootRuleName];
+  for (let index = 0; index < queue.length; index++) {
+    const name = queue[index];
+    if (reachable.has(name)) continue;
+    const rule = rulesByName.get(name);
+    if (!rule) continue;
+    reachable.add(name);
+    for (const ref of collectExpressionRefs(rule.expression)) {
+      if (rulesByName.has(ref) && !reachable.has(ref)) queue.push(ref);
+    }
+  }
+  return reachable;
 }
 
 function collectExpressionRefsInto(
@@ -2906,12 +2993,13 @@ function validateCaptureSelectorsMetadata(
   }
 }
 
-function warnUncoveredSuppressedHighlightContexts(
+function uncoveredSuppressedHighlightDiagnostics(
   grammar: EbnfGrammar,
   metadata: TreeSitterMetadata,
-): void {
+  rootRuleName: string,
+): Diagnostic[] {
   const suppress = metadata.queries?.highlights?.defaults?.suppress ?? [];
-  if (suppress.length === 0) return;
+  if (suppress.length === 0) return [];
 
   const highlights = metadata.queries?.highlights?.entries ?? [];
   const globalCaptures = new Set<string>();
@@ -2930,7 +3018,12 @@ function warnUncoveredSuppressedHighlightContexts(
     ),
   );
 
-  const contexts = collectSuppressedHighlightContexts(grammar, suppress);
+  const diagnostics: Diagnostic[] = [];
+  const contexts = collectSuppressedHighlightContexts(
+    grammar,
+    suppress,
+    rootRuleName,
+  );
   for (const context of contexts) {
     const selectorKey = captureSelectorKey(context.selector);
     if (globalCaptures.has(selectorKey)) continue;
@@ -2948,15 +3041,21 @@ function warnUncoveredSuppressedHighlightContexts(
     }
     const child = context.selector.node ??
       JSON.stringify(context.selector.literal);
-    console.warn(
-      `highlight metadata suppresses ${child}, but ${child} appears under ${context.parent} with no explicit highlight capture.`,
-    );
+    diagnostics.push({
+      code: "QUERY_UNCAPTURED_CONTEXT",
+      severity: "warning",
+      backend: "tree-sitter",
+      message:
+        `highlight metadata suppresses ${child}, but ${child} appears under ${context.parent} with no explicit highlight capture.`,
+    });
   }
+  return diagnostics;
 }
 
 function collectSuppressedHighlightContexts(
   grammar: EbnfGrammar,
   suppress: TreeSitterCaptureSelectorMetadata[],
+  rootRuleName: string,
 ): Array<{ parent: string; selector: TreeSitterCaptureSelectorMetadata }> {
   const suppressedNodes = new Map(
     suppress.filter((selector) => selector.node).map((selector) => [
@@ -2974,7 +3073,9 @@ function collectSuppressedHighlightContexts(
     { parent: string; selector: TreeSitterCaptureSelectorMetadata }
   > = [];
   const seen = new Set<string>();
+  const reachable = collectReachableRuleNames(grammar, rootRuleName);
   for (const rule of grammar.rules) {
+    if (!reachable.has(rule.name)) continue;
     collectSuppressedHighlightContextsInto(
       rule.expression,
       rule.name,
@@ -3632,7 +3733,11 @@ function resolveRenderableRef(
 function renderRuleRef(name: string): string {
   if (name === "newline") return "$.line_end";
   if (name === "indent") return "$.line_indent";
-  if (name === "dedent") return "optional($.line_indent)";
+  if (name === "dedent") {
+    throw new Error(
+      "Tree-sitter backend does not support the indentation stack required by 'dedent'",
+    );
+  }
   return lexicalBuiltins.has(name) ? `$.${name}` : `$.${name}`;
 }
 
@@ -3885,6 +3990,14 @@ function visitRefs(
       visitRefs(expression.separator, callback);
       return;
   }
+}
+
+function hasRef(expression: EbnfExpression, name: string): boolean {
+  let found = false;
+  visitRefs(expression, (ref) => {
+    if (ref === name) found = true;
+  });
+  return found;
 }
 
 function usesLayoutTokens(grammar: EbnfGrammar): boolean {

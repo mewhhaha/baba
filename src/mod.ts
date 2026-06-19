@@ -11,7 +11,7 @@
  * const bundle = generate(grammar, {
  *   name: "tiny",
  *   metadata,
- *   preset: "workbench",
+ *   backends: ["tree-sitter"],
  * });
  * ```
  *
@@ -27,6 +27,7 @@ export type {
   EbnfGrammar,
   EbnfRule,
   EbnfTokenDeclaration,
+  GenerateBackend,
   GeneratedBundle,
   GeneratedFile,
   GenerateInitOptions,

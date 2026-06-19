@@ -12,6 +12,7 @@ export type {
   EbnfGrammar,
   EbnfRule,
   EbnfTokenDeclaration,
+  GenerateBackend,
   GeneratedBundle,
   GeneratedFile,
   GenerateOptions,
@@ -38,6 +39,7 @@ export type {
 } from "./ast.ts";
 export {
   collectTerminals,
+  collectTreeSitterHighlightDiagnostics,
   createLexicalSpec,
   generateAstTypesSource,
   generateAstVisitorSource,
@@ -59,6 +61,8 @@ export {
   generateWorkbenchQueries,
   validateEbnfGrammar,
   validateGenerationMetadataSemantics,
+  validateParserGrammar,
+  validateTreeSitterBackendCapabilities,
 } from "./generate.ts";
 export { parseTreeSitterMetadata } from "./metadata.ts";
 export { EbnfError, formatEbnfError, parseEbnf } from "./parser.ts";

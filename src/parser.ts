@@ -52,7 +52,9 @@ export class EbnfError extends BabaError {
 
 /** Parses EBNF source into a span-rich grammar AST. */
 export function parseEbnf(source: string): EbnfGrammar {
-  return new Parser(source, lexEbnf(source)).parseGrammar();
+  const lineStarts = createLineStarts(source);
+  return new Parser(source, lexEbnf(source, lineStarts), lineStarts)
+    .parseGrammar();
 }
 
 /** Formats an EBNF parse error with source line and caret marker. */
@@ -64,9 +66,8 @@ export function formatEbnfError(error: EbnfError): string {
   return `${error.message}\n${error.sourceLine}\n${marker}`;
 }
 
-function lexEbnf(source: string): Token[] {
+function lexEbnf(source: string, lines: number[]): Token[] {
   const tokens: Token[] = [];
-  const lines = createLineStarts(source);
   let i = 0;
 
   while (i < source.length) {
@@ -226,6 +227,7 @@ class Parser {
   constructor(
     private readonly source: string,
     private readonly tokens: Token[],
+    private readonly lineStarts: number[],
   ) {}
 
   parseGrammar(): EbnfGrammar {
@@ -481,7 +483,7 @@ class Parser {
   }
 
   private span(start: number, end: number): SourceSpan {
-    return spanAt(createLineStarts(this.source), start, end);
+    return spanAt(this.lineStarts, start, end);
   }
 }
 

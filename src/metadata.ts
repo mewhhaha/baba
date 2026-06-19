@@ -1,5 +1,4 @@
 import type {
-  TreeSitterCaptureMetadata,
   TreeSitterCaptureQueryEntry,
   TreeSitterCaptureQueryMetadata,
   TreeSitterCaptureSelectorMetadata,

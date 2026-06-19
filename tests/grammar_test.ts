@@ -6,6 +6,7 @@ import {
   validateGrammar,
 } from "../src/mod.ts";
 import {
+  collectTreeSitterHighlightDiagnostics,
   createLexicalSpec,
   formatEbnfError,
   generateAstTypesSource,
@@ -363,6 +364,17 @@ if (!result.tokens.some((token) => token.kind === "dedent")) throw new Error("mi
   }
 });
 
+Deno.test("tree-sitter rejects dedent instead of lowering it to whitespace", () => {
+  assertThrowsIncludes(
+    () =>
+      generateTreeSitterGrammar(`
+        module = block ;
+        block = "do" newline indent ident newline dedent ;
+      `),
+    "Tree-sitter backend does not support the indentation stack required by 'dedent'",
+  );
+});
+
 Deno.test("tree-sitter keeps root rule addressable by other rules", () => {
   const source = `
     module = expr ;
@@ -399,13 +411,15 @@ Deno.test("postfix operators and separated lists generate tree-sitter rules", ()
   );
 });
 
-Deno.test("builtins for int char and string literals generate stable tokenizer and tree-sitter rules", () => {
+Deno.test("builtins for numbers chars and strings generate stable tokenizer and tree-sitter rules", () => {
   const source = `
     module = value ;
-    value = int | char | string ;
+    value = int | number | char | string ;
   `;
 
+  validateEbnfGrammar(parseEbnf(source));
   const tokenizer = generateTokenizerSource(source);
+  assertIncludes(tokenizer, 'return { kind: "number"');
   assertIncludes(tokenizer, '| "char"');
   assertIncludes(tokenizer, '| "string"');
   assertIncludes(tokenizer, 'return { kind: "char"');
@@ -422,6 +436,10 @@ Deno.test("builtins for int char and string literals generate stable tokenizer a
   assertIncludes(
     treeSitter,
     "int: $ => token(choice(/[0-9](?:_?[0-9])*/, /0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*/, /0[bB][01](?:_?[01])*/)),",
+  );
+  assertIncludes(
+    treeSitter,
+    "number: $ => token(choice(/[0-9](?:_?[0-9])*/, /0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*/, /0[bB][01](?:_?[01])*/)),",
   );
   assertIncludes(
     treeSitter,
@@ -620,38 +638,34 @@ Deno.test("tree-sitter metadata can generate rainbow queries", () => {
   assertIncludes(rainbows, "@rainbow.bracket");
 });
 
-Deno.test("WGSL builtin emits open, content, and close nodes for injections", () => {
+Deno.test("WGSL is not a generic builtin", () => {
   const source = `
     module = shader_decl ;
     shader_decl = "shader" ident "=" wgsl_block "." ;
   `;
 
-  const treeSitter = generateTreeSitterGrammar(source, { name: "tiny" });
-  assertIncludes(
-    treeSitter,
-    "wgsl_block: $ => choice(seq($.wgsl_open, $.wgsl_close), seq($.wgsl_open, $.wgsl_content, $.wgsl_close))",
+  assertThrowsIncludes(
+    () => generateTreeSitterGrammar(source, { name: "tiny" }),
+    "Unknown rule reference 'wgsl_block'",
   );
-  assertIncludes(treeSitter, 'wgsl_open: $ => token("```wgsl")');
-  assertIncludes(treeSitter, "wgsl_content: $ => repeat1(choice(");
-  assertIncludes(treeSitter, 'wgsl_close: $ => token.immediate("```")');
 });
 
 Deno.test("tree-sitter metadata can generate injection queries", () => {
   const source = `
     module = shader_decl ;
-    shader_decl = "shader" ident "=" wgsl_block "." ;
+    shader_decl = "shader" ident "=" fenced_text "." ;
   `;
 
   const metadata = parseTreeSitterMetadata(JSON.stringify({
     queries: {
       injections: [
-        { node: "wgsl_content", language: "wgsl" },
+        { node: "fenced_text_content", language: "wgsl" },
       ],
     },
   }));
 
   const injections = generateTreeSitterInjectionsQuery(source, { metadata });
-  assertIncludes(injections, "((wgsl_content) @injection.content");
+  assertIncludes(injections, "((fenced_text_content) @injection.content");
   assertIncludes(injections, '(#set! injection.language "wgsl"))');
 });
 
@@ -754,6 +768,22 @@ Deno.test("highlight defaults only reference exposed tree-sitter nodes", () => {
   assertNotIncludes(highlights, "(int) @number");
 });
 
+Deno.test("highlight defaults start from the selected root rule", () => {
+  const source = `
+    unused = string ;
+    module = "fn" ident ;
+  `;
+
+  const defaultHighlights = generateTreeSitterHighlightsQuery(source);
+  assertIncludes(defaultHighlights, "(string) @string");
+
+  const rootedHighlights = generateTreeSitterHighlightsQuery(source, {
+    rootRule: "module",
+  });
+  assertIncludes(rootedHighlights, "(ident) @variable");
+  assertNotIncludes(rootedHighlights, "(string) @string");
+});
+
 Deno.test("query metadata emits raw patterns and suppresses highlight defaults", () => {
   const source = `
     token Ident = /[A-Za-z]+/ ;
@@ -781,7 +811,7 @@ Deno.test("query metadata emits raw patterns and suppresses highlight defaults",
   assertIncludes(textobjects, '"fn" @keyword.function');
 });
 
-Deno.test("highlight generation warns when suppressed nodes lack context captures", () => {
+Deno.test("highlight generation returns diagnostics when suppressed nodes lack context captures", () => {
   const source = `
     token PascalIdent = /[A-Z][A-Za-z]*/ ;
     TypeExpr = PascalIdent ;
@@ -796,13 +826,20 @@ Deno.test("highlight generation warns when suppressed nodes lack context capture
     },
   }));
 
-  const warnings = captureWarnings(() =>
-    generateTreeSitterHighlightsQuery(source, { metadata })
+  const warnings = collectTreeSitterHighlightDiagnostics(source, {
+    rootRule: "module",
+    metadata,
+  });
+  const consoleWarnings = captureWarnings(() =>
+    generateTreeSitterHighlightsQuery(source, { rootRule: "module", metadata })
   );
 
   assertEquals(warnings.length, 2);
+  assertEquals(consoleWarnings.length, 0);
+  assertEquals(warnings[0].code, "QUERY_UNCAPTURED_CONTEXT");
+  assertEquals(warnings[0].severity, "warning");
   assertEquals(
-    warnings.join("\n"),
+    warnings.map((warning) => warning.message).join("\n"),
     [
       "highlight metadata suppresses PascalIdent, but PascalIdent appears under BlockProofConstDecl with no explicit highlight capture.",
       "highlight metadata suppresses PascalIdent, but PascalIdent appears under TypeExpr with no explicit highlight capture.",
@@ -825,9 +862,7 @@ Deno.test("highlight generation accepts explicit raw captures for suppressed con
     },
   }));
 
-  const warnings = captureWarnings(() =>
-    generateTreeSitterHighlightsQuery(source, { metadata })
-  );
+  const warnings = collectTreeSitterHighlightDiagnostics(source, { metadata });
 
   assertEquals(warnings.length, 0);
 });
@@ -849,9 +884,7 @@ Deno.test("highlight generation accepts ignored suppressed contexts", () => {
     },
   }));
 
-  const warnings = captureWarnings(() =>
-    generateTreeSitterHighlightsQuery(source, { metadata })
-  );
+  const warnings = collectTreeSitterHighlightDiagnostics(source, { metadata });
 
   assertEquals(warnings.length, 0);
 });
@@ -1016,6 +1049,34 @@ Deno.test("stable API parses validates and generates deterministic bundles", () 
   assertEquals(
     cleanupCore.cleanupPaths?.join(","),
     "injections.scm,rainbows.scm,textobjects.scm",
+  );
+
+  const treeSitterOnly = generate(
+    `expr = expr "+" ident | ident ;`,
+    { name: "tiny", rootRule: "expr", backends: ["tree-sitter"] },
+  );
+  assertEquals(treeSitterOnly.backends?.join(","), "tree-sitter");
+  assertEquals(
+    treeSitterOnly.files.map((file) => file.path).join(","),
+    "grammar.js",
+  );
+  assertEquals(
+    treeSitterOnly.cleanupPaths?.join(","),
+    "injections.scm,lexical.json,parser.ts,rainbows.scm,textobjects.scm,tokenizer.ts",
+  );
+  assertThrowsIncludes(
+    () => generate(`expr = expr "+" ident | ident ;`, { rootRule: "expr" }),
+    "Left-recursive parser rule cycle",
+  );
+
+  const parserOnly = generate(grammar, {
+    name: "tiny",
+    backends: ["typescript-ll1"],
+  });
+  assertEquals(parserOnly.backends?.join(","), "typescript-ll1");
+  assertEquals(
+    parserOnly.files.map((file) => file.path).join(","),
+    "lexical.json,parser.ts,tokenizer.ts",
   );
 
   const diagnostics = validateGrammar(parseGrammar(`module = missing ;`));
@@ -1211,10 +1272,9 @@ Deno.test("workbench bundle emits stable scaffold and type-checks generated sour
 
 Deno.test("fenced text and template builtins generate tokenizer and tree-sitter rules", () => {
   const source = `
-    module = text_block | template_block | shader_decl ;
+    module = text_block | template_block ;
     text_block = fenced_text ;
     template_block = fenced_template ;
-    shader_decl = "shader" ident "=" wgsl_block "." ;
   `;
 
   const tokenizer = generateTokenizerSource(source);
@@ -1514,6 +1574,49 @@ Deno.test("parser generation rejects nondeterministic grammars", () => {
   );
 });
 
+Deno.test("generated parser can backtrack choices when validation is skipped", async () => {
+  const source = `
+    token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    module = "let" ident ":" ident | "let" ident ;
+  `;
+
+  assertThrowsIncludes(
+    () => generateParserSource(source),
+    "Ambiguous predictive choice",
+  );
+
+  const dir = await Deno.makeTempDir();
+  await Deno.writeTextFile(
+    `${dir}/tokenizer.ts`,
+    generateTokenizerSource(source),
+  );
+  await Deno.writeTextFile(
+    `${dir}/parser.ts`,
+    generateParserSource(source, { skipValidation: true }),
+  );
+  await Deno.writeTextFile(
+    `${dir}/parser_test.ts`,
+    `import { parse } from "./parser.ts";
+const result = parse("let value");
+if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+if (result.tree?.children.length !== 2) throw new Error("expected shorter alternative");
+const invalid = parse("let value:");
+if (invalid.ok || invalid.diagnostics.length === 0) throw new Error("expected invalid input diagnostics");
+`,
+  );
+  await denoCheck([`${dir}/parser_test.ts`]);
+  const command = new Deno.Command(Deno.execPath(), {
+    args: ["run", `${dir}/parser_test.ts`],
+  });
+  const output = await command.output();
+  if (!output.success) {
+    const decoder = new TextDecoder();
+    throw new Error(
+      `${decoder.decode(output.stdout)}${decoder.decode(output.stderr)}`,
+    );
+  }
+});
+
 Deno.test("layout tokenizer treats fenced blocks as one token", async () => {
   const tokenizer = generateTokenizerSource(`
     module = block ;
@@ -1756,12 +1859,12 @@ Deno.test("cli writes requested output destinations", async () => {
     const logs = await captureConsoleLog(() =>
       main([grammarPath, "--ts-out", tsOnlyOut])
     );
-    assertEquals(logs.length, 1);
-    assertIncludes(logs[0], '"keywords"');
+    assertEquals(logs.length, 0);
     assertIncludes(
       await Deno.readTextFile(tsOnlyOut),
       "export default grammar({",
     );
+    await assertMissing(`${dir}/ts-only/parser.ts`);
 
     const generateOutDir = `${dir}/generate-subcommand`;
     await main(["generate", grammarPath, "--out", generateOutDir]);
@@ -1793,6 +1896,26 @@ Deno.test("cli writes requested output destinations", async () => {
     assertIncludes(
       await Deno.readTextFile(`${outDir}/grammar.js`),
       "export default grammar({",
+    );
+
+    const treeSitterOnlyOutDir = `${dir}/tree-sitter-only`;
+    await main([
+      grammarPath,
+      "--out",
+      treeSitterOnlyOutDir,
+      "--backend",
+      "tree-sitter",
+    ]);
+    assertIncludes(
+      await Deno.readTextFile(`${treeSitterOnlyOutDir}/grammar.js`),
+      "export default grammar({",
+    );
+    await assertMissing(`${treeSitterOnlyOutDir}/parser.ts`);
+
+    await Deno.writeTextFile(`${outDir}/parser.ts`, "user edit\n");
+    await assertRejectsIncludes(
+      () => main([grammarPath, "--out", outDir]),
+      "Refusing to overwrite modified or unowned file 'parser.ts'",
     );
 
     const duplicateTreeSitterOut = `${dir}/duplicate/tree-sitter/grammar.js`;
@@ -1951,5 +2074,9 @@ Deno.test("cli reports argument errors", async () => {
   await assertRejectsIncludes(
     () => main(["--preset", "huge"]),
     "Unknown preset 'huge'",
+  );
+  await assertRejectsIncludes(
+    () => main(["--backend", "bad", "grammar.ebnf"]),
+    "Unknown backend 'bad'",
   );
 });

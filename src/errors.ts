@@ -3,6 +3,8 @@ import type { Diagnostic, SourceSpan } from "./ast.ts";
 /** Structured baba error used by the stable public API and CLI. */
 export class BabaError extends Error {
   readonly code: string;
+  readonly severity?: Diagnostic["severity"];
+  readonly backend?: Diagnostic["backend"];
   readonly span?: SourceSpan;
   readonly path?: string;
   readonly sourceLine?: string;
@@ -12,6 +14,8 @@ export class BabaError extends Error {
     super(diagnostic.message);
     this.name = "BabaError";
     this.code = diagnostic.code;
+    this.severity = diagnostic.severity;
+    this.backend = diagnostic.backend;
     this.span = diagnostic.span;
     this.path = diagnostic.path;
     this.sourceLine = diagnostic.sourceLine;
@@ -23,6 +27,8 @@ export class BabaError extends Error {
     return {
       code: this.code,
       message: this.message,
+      severity: this.severity,
+      backend: this.backend,
       span: this.span,
       path: this.path,
       sourceLine: this.sourceLine,
