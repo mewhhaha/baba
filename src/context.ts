@@ -1,20 +1,9 @@
-import type {
-  BabaMetadata,
-  EbnfGrammar,
-  GenerateBackend,
-  GenerateOptions,
-  GeneratePreset,
-  LexicalSpec,
-} from "./ast.ts";
+import type { BabaMetadata, EbnfGrammar, GenerateOptions } from "./ast.ts";
 import { BabaError, toBabaError } from "./errors.ts";
 import {
-  collectTerminals,
-  createLexicalSpec,
   validateEbnfGrammar,
-  validateParserGrammar,
   validateTreeSitterBackendCapabilities,
   validateTreeSitterGenerationMetadataSemantics,
-  validateWorkbenchGenerationMetadataSemantics,
 } from "./generate.ts";
 import { parseEbnf } from "./parser.ts";
 
@@ -23,11 +12,7 @@ export interface GenerationContext {
   readonly grammar: EbnfGrammar;
   readonly name: string;
   readonly rootRuleName: string;
-  readonly preset: GeneratePreset;
-  readonly backends: GenerateBackend[];
   readonly metadata: BabaMetadata;
-  readonly lexicalSpec: LexicalSpec;
-  readonly terminals: string[];
 }
 
 /** Parses, validates, and derives generation state once. */
@@ -35,24 +20,10 @@ export function createGenerationContext(
   sourceOrGrammar: string | EbnfGrammar,
   options: GenerateOptions = {},
 ): GenerationContext {
+  assertRemovedOptions(options);
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  const preset = options.preset ?? "core";
-  if (preset !== "core" && preset !== "workbench") {
-    throw new BabaError({
-      code: "INVALID_PRESET",
-      message: `Unknown preset '${preset}'`,
-    });
-  }
-  const backends = normalizeBackends(options.backends);
-  if (preset === "workbench" && options.backends !== undefined) {
-    throw new BabaError({
-      code: "INVALID_BACKENDS",
-      message: "Backend selection is only supported by the core preset",
-    });
-  }
-
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
   const metadata = options.metadata ?? {};
   try {
@@ -60,34 +31,17 @@ export function createGenerationContext(
   } catch (error) {
     throw toBabaError(error, "GRAMMAR_VALIDATION_ERROR");
   }
-  if (preset === "workbench") {
-    try {
-      validateWorkbenchGenerationMetadataSemantics(
-        grammar,
-        rootRuleName,
-        metadata,
-      );
-    } catch (error) {
-      throw toBabaError(error, "METADATA_SEMANTIC_ERROR");
-    }
-  } else if (backends.includes("tree-sitter")) {
-    try {
-      validateTreeSitterGenerationMetadataSemantics(
-        grammar,
-        rootRuleName,
-        metadata,
-      );
-    } catch (error) {
-      throw toBabaError(error, "METADATA_SEMANTIC_ERROR");
-    }
+  try {
+    validateTreeSitterGenerationMetadataSemantics(
+      grammar,
+      rootRuleName,
+      metadata,
+    );
+  } catch (error) {
+    throw toBabaError(error, "METADATA_SEMANTIC_ERROR");
   }
   try {
-    if (preset === "workbench" || backends.includes("tree-sitter")) {
-      validateTreeSitterBackendCapabilities(grammar);
-    }
-    if (preset === "workbench" || backends.includes("typescript-ll1")) {
-      validateParserGrammar(grammar, rootRuleName);
-    }
+    validateTreeSitterBackendCapabilities(grammar);
   } catch (error) {
     throw toBabaError(error, "BACKEND_CAPABILITY_ERROR");
   }
@@ -96,33 +50,26 @@ export function createGenerationContext(
     grammar,
     name: options.name ?? "grammar",
     rootRuleName,
-    preset,
-    backends,
     metadata,
-    lexicalSpec: createLexicalSpec(grammar, { skipValidation: true }),
-    terminals: collectTerminals(grammar),
   };
 }
 
-function normalizeBackends(
-  requested: readonly GenerateBackend[] | undefined,
-): GenerateBackend[] {
-  const backends = requested ?? ["tree-sitter"];
-  const seen = new Set<GenerateBackend>();
-  for (const backend of backends) {
-    if (backend !== "tree-sitter" && backend !== "typescript-ll1") {
-      throw new BabaError({
-        code: "INVALID_BACKEND",
-        message: `Unknown backend '${backend}'`,
-      });
-    }
-    seen.add(backend);
-  }
-  if (seen.size === 0) {
+function assertRemovedOptions(options: GenerateOptions): void {
+  const legacy = options as GenerateOptions & {
+    preset?: unknown;
+    backends?: unknown;
+  };
+  if (legacy.preset !== undefined) {
     throw new BabaError({
-      code: "INVALID_BACKENDS",
-      message: "Expected at least one backend",
+      code: "REMOVED_OPTION",
+      message: "The workbench preset was removed in baba 1.0.",
     });
   }
-  return [...seen];
+  if (legacy.backends !== undefined) {
+    throw new BabaError({
+      code: "REMOVED_OPTION",
+      message:
+        "Backend selection was removed in baba 1.0; baba now emits Tree-sitter artifacts only.",
+    });
+  }
 }

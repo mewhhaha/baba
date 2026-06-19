@@ -2,10 +2,6 @@ import type {
   Diagnostic,
   EbnfExpression,
   EbnfGrammar,
-  EbnfRule,
-  GeneratedBundle,
-  LexicalSpec,
-  LexicalTokenSpec,
   TreeSitterCaptureMetadata,
   TreeSitterCaptureQueryEntry,
   TreeSitterCaptureSelectorMetadata,
@@ -18,255 +14,58 @@ import type {
   TreeSitterRuleToken,
   TreeSitterRuleWrap,
 } from "./ast.ts";
-import { generatedBundle } from "./bundle.ts";
 import { parseEbnf } from "./parser.ts";
 
-const lexicalBuiltins = new Set([
-  "char",
-  "dedent",
-  "fenced_template",
-  "fenced_text",
-  "ident",
-  "indent",
-  "int",
-  "newline",
-  "number",
-  "string",
-]);
-const treeSitterBuiltins = new Set([
-  "char",
-  "fenced_template",
-  "fenced_template_close",
-  "fenced_template_content",
-  "fenced_template_open",
-  "fenced_text",
-  "fenced_text_close",
-  "fenced_text_content",
-  "fenced_text_open",
-  "ident",
-  "int",
-  "line_comment",
-  "line_end",
-  "line_indent",
-  "number",
-  "string",
-]);
-const reservedGrammarRuleNames = new Set([
-  "source_file",
-  ...lexicalBuiltins,
-  ...treeSitterBuiltins,
-]);
-const reservedTokenDeclarationNames = new Set([
-  "source_file",
-  "identifier",
-  "keyword",
-  "number",
-  "symbol",
-  "eof",
-  "newline",
-  "indent",
-  "dedent",
-]);
-
-const literalTokenizerHelpers = `
-function scanNumericLiteral(source: string, start: number): number {
-  if (
-    source[start] === "0" &&
-    (source[start + 1] === "x" || source[start + 1] === "X")
-  ) {
-    return scanDigits(source, start + 2, isHexDigit, "Expected hex digit after '0x'");
-  }
-  if (
-    source[start] === "0" &&
-    (source[start + 1] === "b" || source[start + 1] === "B")
-  ) {
-    return scanDigits(source, start + 2, isBinaryDigit, "Expected binary digit after '0b'");
-  }
-  return scanDigits(source, start, isDigit, "Expected digit");
-}
-
-function scanDigits(
-  source: string,
-  start: number,
-  isAllowed: (char: string) => boolean,
-  missingMessage: string,
-): number {
-  let i = start;
-  if (i >= source.length || !isAllowed(source[i])) {
-    throw new Error(\`\${missingMessage} at \${start}..\${start + 1}\`);
-  }
-  i++;
-  while (i < source.length) {
-    const char = source[i];
-    if (isAllowed(char)) {
-      i++;
-      continue;
-    }
-    if (char === "_") {
-      const next = source[i + 1];
-      if (!next || !isAllowed(next)) {
-        throw new Error(\`Invalid numeric separator at \${i}..\${i + 1}\`);
-      }
-      i += 2;
-      continue;
-    }
-    break;
-  }
-  return i;
-}
-
-function scanCharLiteral(source: string, start: number): number {
-  let i = start + 1;
-  if (i >= source.length) {
-    throw new Error(\`Unterminated character literal at \${start}..\${source.length}\`);
-  }
-
-  if (source[i] === "\\\\") {
-    i++;
-    const escape = source[i];
-    if (!escape) {
-      throw new Error(\`Unterminated character literal at \${start}..\${source.length}\`);
-    }
-    if (escape === "x") {
-      if (!isHexDigit(source[i + 1] ?? "") || !isHexDigit(source[i + 2] ?? "")) {
-        throw new Error(\`Expected two hex digits after \\\\x at \${i}..\${i + 1}\`);
-      }
-      i += 3;
-    } else if (escape === "u") {
-      if (source[i + 1] !== "{") {
-        throw new Error(\`Expected '{' after \\\\u at \${i}..\${i + 1}\`);
-      }
-      let j = i + 2;
-      if (!isHexDigit(source[j] ?? "")) {
-        throw new Error(\`Expected hex digit after \\\\u{ at \${j}..\${j + 1}\`);
-      }
-      while (isHexDigit(source[j] ?? "")) j++;
-      if (source[j] !== "}") {
-        throw new Error(\`Expected '}' to close Unicode escape at \${j}..\${j + 1}\`);
-      }
-      i = j + 1;
-    } else if (!isSimpleCharEscape(escape)) {
-      throw new Error(\`Unknown character escape '\\\\\${escape}' at \${i - 1}..\${i + 1}\`);
-    } else {
-      i++;
-    }
-  } else {
-    const char = source[i];
-    if (char === "'" || char === "\\n" || char === "\\r") {
-      throw new Error(\`Invalid character literal at \${start}..\${i + 1}\`);
-    }
-    const codePoint = source.codePointAt(i);
-    if (codePoint === undefined) {
-      throw new Error(\`Unterminated character literal at \${start}..\${source.length}\`);
-    }
-    i += codePoint > 0xffff ? 2 : 1;
-  }
-
-  if (source[i] !== "'") {
-    throw new Error(\`Character literal must contain exactly one character at \${start}..\${i}\`);
-  }
-  return i + 1;
-}
-
-function scanStringLiteral(source: string, start: number): number {
-  let i = start + 1;
-  while (i < source.length) {
-    const char = source[i];
-    if (char === "\\"") return i + 1;
-    if (char === "\\n" || char === "\\r") {
-      throw new Error(\`Unterminated string literal at \${start}..\${i + 1}\`);
-    }
-    if (char === "\\\\") {
-      i++;
-      const escape = source[i];
-      if (!escape) {
-        throw new Error(\`Unterminated string literal at \${start}..\${source.length}\`);
-      }
-      if (escape === "x") {
-        if (!isHexDigit(source[i + 1] ?? "") || !isHexDigit(source[i + 2] ?? "")) {
-          throw new Error(\`Expected two hex digits after \\\\x at \${i}..\${i + 1}\`);
-        }
-        i += 3;
-        continue;
-      }
-      if (escape === "u") {
-        if (source[i + 1] !== "{") {
-          throw new Error(\`Expected '{' after \\\\u at \${i}..\${i + 1}\`);
-        }
-        let j = i + 2;
-        if (!isHexDigit(source[j] ?? "")) {
-          throw new Error(\`Expected hex digit after \\\\u{ at \${j}..\${j + 1}\`);
-        }
-        while (isHexDigit(source[j] ?? "")) j++;
-        if (source[j] !== "}") {
-          throw new Error(\`Expected '}' to close Unicode escape at \${j}..\${j + 1}\`);
-        }
-        i = j + 1;
-        continue;
-      }
-      if (!isSimpleStringEscape(escape)) {
-        throw new Error(\`Unknown string escape '\\\\\${escape}' at \${i - 1}..\${i + 1}\`);
-      }
-      i++;
-      continue;
-    }
-    const codePoint = source.codePointAt(i);
-    if (codePoint === undefined) {
-      throw new Error(\`Unterminated string literal at \${start}..\${source.length}\`);
-    }
-    i += codePoint > 0xffff ? 2 : 1;
-  }
-  throw new Error(\`Unterminated string literal at \${start}..\${source.length}\`);
-}
-
-function isDigit(char: string): boolean {
-  return char >= "0" && char <= "9";
-}
-
-function isHexDigit(char: string): boolean {
-  return isDigit(char) || (char >= "a" && char <= "f") || (char >= "A" && char <= "F");
-}
-
-function isBinaryDigit(char: string): boolean {
-  return char === "0" || char === "1";
-}
-
-function isSimpleCharEscape(char: string): boolean {
-  return char === "0" ||
-    char === "n" ||
-    char === "r" ||
-    char === "t" ||
-    char === "'" ||
-    char === "\\\\";
-}
-
-function isSimpleStringEscape(char: string): boolean {
-  return char === "0" ||
-    char === "n" ||
-    char === "r" ||
-    char === "t" ||
-    char === "\\"" ||
-    char === "\\\\";
-}
-`;
+const reservedGrammarRuleNames = new Set(["source_file"]);
+const reservedTokenDeclarationNames = new Set(["source_file"]);
 
 /** Validates grammar-level semantics before generation. */
 export function validateEbnfGrammar(
   grammar: EbnfGrammar,
   options: { rootRule?: string } = {},
 ): void {
+  const errors = collectGrammarDiagnostics(grammar, options).filter(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (errors.length > 0) {
+    throw new Error(errors[0].message);
+  }
+}
+
+/** Collects grammar-level semantic diagnostics without stopping at first error. */
+export function collectGrammarDiagnostics(
+  grammar: EbnfGrammar,
+  options: { rootRule?: string } = {},
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
   if (grammar.rules.length === 0) {
-    throw new Error("Expected at least one grammar rule");
+    diagnostics.push({
+      code: "GRAMMAR_EMPTY",
+      severity: "error",
+      message: "Expected at least one grammar rule",
+      span: grammar.span,
+    });
+    return diagnostics;
   }
 
   const declaredNames = new Set<string>();
   const tokenNames = new Set<string>();
   for (const token of grammar.tokens) {
     if (reservedTokenDeclarationNames.has(token.name)) {
-      throw new Error(`Token '${token.name}' uses reserved generated name`);
+      diagnostics.push({
+        code: "RESERVED_GENERATED_NAME",
+        severity: "error",
+        message: `Token '${token.name}' uses reserved generated name`,
+        span: token.span,
+      });
     }
     if (declaredNames.has(token.name)) {
-      throw new Error(`Duplicate declaration '${token.name}'`);
+      diagnostics.push({
+        code: "DUPLICATE_DECLARATION",
+        severity: "error",
+        message: `Duplicate declaration '${token.name}'`,
+        span: token.span,
+      });
     }
     try {
       const regex = new RegExp(token.pattern);
@@ -275,7 +74,12 @@ export function validateEbnfGrammar(
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Invalid regex for token '${token.name}': ${message}`);
+      diagnostics.push({
+        code: "INVALID_TOKEN_REGEX",
+        severity: "error",
+        message: `Invalid regex for token '${token.name}': ${message}`,
+        span: token.span,
+      });
     }
     declaredNames.add(token.name);
     tokenNames.add(token.name);
@@ -284,69 +88,81 @@ export function validateEbnfGrammar(
   const ruleNames = new Set<string>();
   for (const rule of grammar.rules) {
     if (reservedGrammarRuleNames.has(rule.name)) {
-      throw new Error(`Rule '${rule.name}' uses reserved builtin name`);
+      diagnostics.push({
+        code: "RESERVED_GENERATED_NAME",
+        severity: "error",
+        message: `Rule '${rule.name}' uses reserved generated name`,
+        span: rule.span,
+      });
     }
     if (ruleNames.has(rule.name)) {
-      throw new Error(`Duplicate rule '${rule.name}'`);
+      diagnostics.push({
+        code: "DUPLICATE_RULE",
+        severity: "error",
+        message: `Duplicate rule '${rule.name}'`,
+        span: rule.span,
+      });
     }
     if (declaredNames.has(rule.name)) {
-      throw new Error(`Duplicate declaration '${rule.name}'`);
+      diagnostics.push({
+        code: "DUPLICATE_DECLARATION",
+        severity: "error",
+        message: `Duplicate declaration '${rule.name}'`,
+        span: rule.span,
+      });
     }
     declaredNames.add(rule.name);
     ruleNames.add(rule.name);
   }
 
   if (options.rootRule && !ruleNames.has(options.rootRule)) {
-    throw new Error(`Unknown root rule '${options.rootRule}'`);
+    diagnostics.push({
+      code: "UNKNOWN_ROOT_RULE",
+      severity: "error",
+      message: `Unknown root rule '${options.rootRule}'`,
+    });
+    return diagnostics;
   }
 
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name;
+  const reachableRuleNames = rootRuleName
+    ? collectReachableRuleNames(grammar, rootRuleName)
+    : new Set<string>();
   for (const rule of grammar.rules) {
-    visitRefs(rule.expression, (name) => {
+    if (!reachableRuleNames.has(rule.name)) continue;
+    visitRefExpressions(rule.expression, (ref) => {
+      const name = ref.name;
       if (
         ruleNames.has(name) ||
-        tokenNames.has(name) ||
-        reservedGrammarRuleNames.has(name)
+        tokenNames.has(name)
       ) return;
-      throw new Error(
-        `Unknown rule reference '${name}' in rule '${rule.name}'`,
-      );
+      diagnostics.push({
+        code: "UNKNOWN_RULE_REFERENCE",
+        severity: "error",
+        message: `Unknown rule reference '${name}' in rule '${rule.name}'`,
+        span: ref.span,
+      });
     });
   }
+  return diagnostics;
 }
 
-/** Builds the lexical specification used by generated tokenizers. */
-export function createLexicalSpec(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: { skipValidation?: boolean } = {},
-): LexicalSpec {
-  const grammar = typeof sourceOrGrammar === "string"
-    ? parseEbnf(sourceOrGrammar)
-    : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
-  const terminals = collectTerminals(grammar);
-  const keywords: string[] = [];
-  const symbols: string[] = [];
-
-  for (const terminal of terminals) {
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(terminal)) {
-      keywords.push(terminal);
-    } else {
-      symbols.push(terminal);
-    }
-  }
-
-  return {
-    keywords: keywords.sort(),
-    symbols: symbols.sort((left, right) =>
-      right.length - left.length || left.localeCompare(right)
-    ),
-    tokens: grammar.tokens
-      .filter((token) => token.kind === "token")
-      .map((token) => ({ name: token.name, pattern: token.pattern })),
-    skips: grammar.tokens
-      .filter((token) => token.kind === "skip")
-      .map((token) => ({ name: token.name, pattern: token.pattern })),
-  };
+/** Collects warnings for declarations omitted from the selected root graph. */
+export function collectReachabilityDiagnostics(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+): Diagnostic[] {
+  const reachable = collectReachableRuleNames(grammar, rootRuleName);
+  return grammar.rules
+    .filter((rule) => !reachable.has(rule.name))
+    .map((rule): Diagnostic => ({
+      code: "UNREACHABLE_RULE",
+      severity: "warning",
+      backend: "tree-sitter",
+      message:
+        `Rule '${rule.name}' is unreachable from root rule '${rootRuleName}' and was omitted from generated outputs.`,
+      span: rule.span,
+    }));
 }
 
 /** Collects literal terminal strings referenced by grammar rules. */
@@ -356,1031 +172,11 @@ export function collectTerminals(grammar: EbnfGrammar): string[] {
   return [...terminals].sort();
 }
 
-/** Generates a formatted JSON manifest for lexical terminals. */
-export function generateLexicalManifest(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: { spec?: LexicalSpec; skipValidation?: boolean } = {},
-): string {
-  const spec = options.spec ??
-    createLexicalSpec(sourceOrGrammar, {
-      skipValidation: options.skipValidation,
-    });
-  return `${JSON.stringify(spec, null, 2)}\n`;
-}
-
-/** Generates standalone TypeScript source for a tokenizer. */
-export function generateTokenizerSource(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: {
-    exportName?: string;
-    spec?: LexicalSpec;
-    skipValidation?: boolean;
-    metadata?: TreeSitterMetadata;
-  } = {},
-): string {
-  const grammar = typeof sourceOrGrammar === "string"
-    ? parseEbnf(sourceOrGrammar)
-    : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
-  const spec = options.spec ??
-    createLexicalSpec(grammar, { skipValidation: options.skipValidation });
-  const exportName = options.exportName ?? "lex";
-  const lineComment = languageComment(options.metadata ?? {});
-  if (usesLayoutTokens(grammar)) {
-    return generateLayoutTokenizerSource(spec, exportName, lineComment);
-  }
-  return `// Generated by @mewhhaha/baba. Do not edit by hand.
-export type TokenKind = ${formatTokenKindUnion(tokenKindsForSpec(spec, false))};
-
-export interface Token {
-  kind: TokenKind;
-  text: string;
-  span: { start: number; end: number };
-}
-
-const keywords = new Set<string>(${formatStringArray(spec.keywords)});
-const symbols: string[] = ${formatStringArray(spec.symbols)};
-const skipPatterns: Array<{ kind: string; pattern: RegExp }> = ${
-    formatPatternArray(spec.skips)
-  };
-const tokenPatterns: Array<{ kind: string; pattern: RegExp }> = ${
-    formatPatternArray(spec.tokens)
-  };
-const lineComment = ${JSON.stringify(lineComment)};
-
-export function ${exportName}(source: string): Token[] {
-  const tokens: Token[] = [];
-  let i = 0;
-
-  while (i < source.length) {
-    const skipped = scanSkip(source, i);
-    if (skipped > i) {
-      i = skipped;
-      continue;
-    }
-
-    const char = source[i];
-    if (char === " " || char === "\\t" || char === "\\n" || char === "\\r") {
-      i++;
-      continue;
-    }
-
-    if (lineComment && source.startsWith(lineComment, i)) {
-      i += lineComment.length;
-      while (i < source.length && source[i] !== "\\n") i++;
-      continue;
-    }
-
-    const token = scanToken(source, i);
-    tokens.push(token);
-    i = token.span.end;
-  }
-
-  tokens.push({ kind: "eof", text: "<eof>", span: { start: source.length, end: source.length } });
-  return tokens;
-}
-
-${generatedTokenScannerHelpers()}
-`;
-}
-
-/** Generates standalone TypeScript source for a deterministic parser scaffold. */
-export function generateParserSource(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: { rootRule?: string; skipValidation?: boolean } = {},
-): string {
-  const grammar = typeof sourceOrGrammar === "string"
-    ? parseEbnf(sourceOrGrammar)
-    : sourceOrGrammar;
-  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  if (!options.skipValidation) {
-    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-  }
-  if (!options.skipValidation) validateParserGrammar(grammar, rootRuleName);
-  const rules = grammar.rules.map((rule) =>
-    `  ${JSON.stringify(rule.name)}: ${
-      renderParserExpression(rule.expression)
-    },`
-  ).join("\n");
-  const astUnion = grammar.rules.map((rule) => astTypeName(rule.name)).join(
-    " | ",
-  ) || "never";
-  const astInterfaces = grammar.rules.map((rule) =>
-    `export interface ${astTypeName(rule.name)} {
-  kind: ${JSON.stringify(rule.name)};
-  type: ${JSON.stringify(rule.name)};
-  node: RuleParseNode;
-  children: AstNode[];
-}`
-  ).join("\n\n");
-  const projectCases = grammar.rules.map((rule) =>
-    `    case ${JSON.stringify(rule.name)}:
-      return {
-        kind: ${JSON.stringify(rule.name)},
-        type: ${JSON.stringify(rule.name)},
-        node,
-        children: node.children.map(projectParseNode).filter((child): child is AstNode => child !== null),
-      };`
-  ).join("\n");
-
-  return `// Generated by @mewhhaha/baba. Do not edit by hand.
-import { lex } from "./tokenizer.ts";
-import type { Token } from "./tokenizer.ts";
-
-export type ParseNode = RuleParseNode | TokenParseNode | LiteralParseNode;
-export interface RuleParseNode { kind: "rule"; name: string; span: { start: number; end: number }; children: ParseNode[]; }
-export interface TokenParseNode { kind: "token"; name: string; text: string; span: { start: number; end: number }; token: Token; }
-export interface LiteralParseNode { kind: "literal"; value: string; text: string; span: { start: number; end: number }; token: Token; }
-export interface ParseDiagnostic { message: string; span?: { start: number; end: number }; token?: Token; }
-export interface ParseResult { ok: boolean; tree: RuleParseNode | null; ast: AstNode | null; diagnostics: ParseDiagnostic[]; tokens: Token[]; }
-
-export type AstNode = ${astUnion};
-
-${astInterfaces}
-
-type Expression =
-  | { kind: "ref"; name: string }
-  | { kind: "literal"; value: string }
-  | { kind: "sequence"; items: Expression[] }
-  | { kind: "choice"; options: Expression[] }
-  | { kind: "optional"; expression: Expression }
-  | { kind: "repeat"; expression: Expression }
-  | { kind: "repeat1"; expression: Expression }
-  | { kind: "separated"; item: Expression; separator: Expression };
-
-const rules: Record<string, Expression> = {
-${rules}
-};
-const rootRuleName = ${JSON.stringify(rootRuleName)};
-const ruleNames = new Set(Object.keys(rules));
-
-export function parse(source: string): ParseResult {
-  let tokens: Token[] = [];
-  try {
-    tokens = lex(source);
-    const parser = new Parser(tokens);
-    let tree: RuleParseNode | null = null;
-    try {
-      tree = parser.parseRule(rootRuleName);
-      parser.expectEof();
-    } catch (error) {
-      if (!(error instanceof ParseFailure)) throw error;
-    }
-    const diagnostics = parser.diagnostics;
-    return { ok: diagnostics.length === 0, tree: diagnostics.length === 0 ? tree : null, ast: diagnostics.length === 0 && tree ? projectParseNode(tree) : null, diagnostics, tokens };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, tree: null, ast: null, diagnostics: [{ message }], tokens };
-  }
-}
-
-export function projectParseNode(node: ParseNode): AstNode | null {
-  if (node.kind !== "rule") return null;
-  switch (node.name) {
-${projectCases}
-    default:
-      return null;
-  }
-}
-
-class Parser {
-  readonly diagnostics: ParseDiagnostic[] = [];
-  private current = 0;
-  constructor(private readonly tokens: Token[]) {}
-  parseRule(name: string): RuleParseNode {
-    const expression = rules[name];
-    if (!expression) throw new Error(\`Unknown parser rule '\${name}'\`);
-    const start = this.peek().span.start;
-    const children = this.matchExpression(expression);
-    const end = children.length ? children[children.length - 1].span.end : start;
-    return { kind: "rule", name, span: { start, end }, children };
-  }
-  expectEof(): void {
-    if (this.peek().kind !== "eof") this.fail(\`Expected end of input, found '\${this.peek().text}'\`);
-  }
-  private matchExpression(expression: Expression): ParseNode[] {
-    switch (expression.kind) {
-      case "ref":
-        return [this.matchRef(expression.name)];
-      case "literal":
-        return [this.matchLiteral(expression.value)];
-      case "sequence": {
-        const nodes: ParseNode[] = [];
-        for (const item of expression.items) nodes.push(...this.matchExpression(item));
-        return nodes;
-      }
-      case "choice":
-        for (const option of expression.options) {
-          if (!this.canStart(option)) continue;
-          const mark = this.current;
-          const diagnosticMark = this.diagnostics.length;
-          try {
-            return this.matchExpression(option);
-          } catch (error) {
-            if (!(error instanceof ParseFailure)) throw error;
-            this.current = mark;
-            this.diagnostics.length = diagnosticMark;
-          }
-        }
-        this.fail(\`Expected \${describeExpected(expression)}, found '\${this.peek().text}'\`);
-      case "optional":
-        return this.canStart(expression.expression) ? this.matchExpression(expression.expression) : [];
-      case "repeat": {
-        const nodes: ParseNode[] = [];
-        while (this.canStart(expression.expression)) nodes.push(...this.matchExpression(expression.expression));
-        return nodes;
-      }
-      case "repeat1": {
-        const nodes = this.matchExpression(expression.expression);
-        while (this.canStart(expression.expression)) nodes.push(...this.matchExpression(expression.expression));
-        return nodes;
-      }
-      case "separated": {
-        const nodes = this.matchExpression(expression.item);
-        while (this.canStart(expression.separator)) {
-          const mark = this.current;
-          const separator = this.matchExpression(expression.separator);
-          if (!this.canStart(expression.item)) {
-            this.current = mark;
-            break;
-          }
-          nodes.push(...separator, ...this.matchExpression(expression.item));
-        }
-        return nodes;
-      }
-    }
-  }
-  private matchRef(name: string): ParseNode {
-    if (ruleNames.has(name)) return this.parseRule(name);
-    const token = this.peek();
-    if (matchesTokenRef(name, token)) {
-      this.current++;
-      return { kind: "token", name, text: token.text, span: token.span, token };
-    }
-    this.fail(\`Expected \${name}, found '\${token.text}'\`);
-  }
-  private matchLiteral(value: string): ParseNode {
-    const token = this.peek();
-    if ((token.kind === "keyword" || token.kind === "symbol") && token.text === value) {
-      this.current++;
-      return { kind: "literal", value, text: token.text, span: token.span, token };
-    }
-    this.fail(\`Expected '\${value}', found '\${token.text}'\`);
-  }
-  private canStart(expression: Expression): boolean {
-    switch (expression.kind) {
-      case "literal":
-        return (this.peek().kind === "keyword" || this.peek().kind === "symbol") && this.peek().text === expression.value;
-      case "ref":
-        return ruleNames.has(expression.name) ? this.canStart(rules[expression.name]) : matchesTokenRef(expression.name, this.peek());
-      case "sequence":
-        for (const item of expression.items) {
-          if (this.canStart(item)) return true;
-          if (!expressionNullable(item)) return false;
-        }
-        return true;
-      case "choice":
-        return expression.options.some((option) => this.canStart(option));
-      case "optional":
-      case "repeat":
-        return this.canStart(expression.expression);
-      case "repeat1":
-        return this.canStart(expression.expression);
-      case "separated":
-        return this.canStart(expression.item);
-    }
-  }
-  private peek(): Token {
-    return this.tokens[this.current] ?? this.tokens[this.tokens.length - 1];
-  }
-  private fail(message: string): never {
-    const token = this.peek();
-    this.diagnostics.push({ message, span: token.span, token });
-    throw new ParseFailure(message);
-  }
-}
-
-class ParseFailure extends Error {}
-
-function matchesTokenRef(name: string, token: Token): boolean {
-  const kind = token.kind as string;
-  switch (name) {
-    case "ident":
-      return kind === "ident" || kind === "identifier";
-    case "int":
-    case "number":
-      return kind === "int" || kind === "number";
-    case "char":
-    case "string":
-    case "fenced_text":
-    case "fenced_template":
-    case "newline":
-    case "indent":
-    case "dedent":
-      return kind === name;
-    default:
-      return kind === name;
-  }
-}
-
-function describeExpected(expression: Expression): string {
-  switch (expression.kind) {
-    case "literal":
-      return \`'\${expression.value}'\`;
-    case "ref":
-      return expression.name;
-    case "choice":
-      return expression.options.map(describeExpected).join(" or ");
-    case "sequence":
-      return expression.items.length ? describeExpected(expression.items[0]) : "empty";
-    case "optional":
-    case "repeat":
-    case "repeat1":
-      return describeExpected(expression.expression);
-    case "separated":
-      return describeExpected(expression.item);
-  }
-}
-
-function expressionNullable(expression: Expression): boolean {
-  switch (expression.kind) {
-    case "literal":
-      return false;
-    case "ref":
-      return ruleNames.has(expression.name) ? expressionNullable(rules[expression.name]) : false;
-    case "sequence":
-      return expression.items.every(expressionNullable);
-    case "choice":
-      return expression.options.some(expressionNullable);
-    case "optional":
-    case "repeat":
-      return true;
-    case "repeat1":
-      return expressionNullable(expression.expression);
-    case "separated":
-      return expressionNullable(expression.item);
-  }
-}
-`;
-}
-
-function generateLayoutTokenizerSource(
-  spec: LexicalSpec,
-  exportName: string,
-  lineComment: string,
-): string {
-  return `// Generated by @mewhhaha/baba. Do not edit by hand.
-export type TokenKind =
-${
-    tokenKindsForSpec(spec, true).map((kind) => `  | ${JSON.stringify(kind)}`)
-      .join("\n")
-  }
-  | "newline"
-  | "indent"
-  | "dedent"
-  | "eof";
-
-export interface Token {
-  kind: TokenKind;
-  text: string;
-  span: { start: number; end: number };
-}
-
-const keywords = new Set<string>(${formatStringArray(spec.keywords)});
-const symbols: string[] = ${formatStringArray(spec.symbols)};
-const skipPatterns: Array<{ kind: string; pattern: RegExp }> = ${
-    formatPatternArray(spec.skips)
-  };
-const tokenPatterns: Array<{ kind: string; pattern: RegExp }> = ${
-    formatPatternArray(spec.tokens)
-  };
-const lineComment = ${JSON.stringify(lineComment)};
-
-export function ${exportName}(source: string): Token[] {
-  const tokens: Token[] = [];
-  const indentStack = [0];
-  let i = 0;
-  let atLineStart = true;
-  let needsFinalNewline = false;
-
-  while (i < source.length) {
-    if (atLineStart) {
-      const lineEnd = findLineEnd(source, i);
-      const contentEnd = i + stripComment(source.slice(i, lineEnd));
-      const line = source.slice(i, contentEnd);
-
-      if (line.trim().length === 0) {
-        i = skipLineEnding(source, lineEnd);
-        continue;
-      }
-
-      const indent = countIndent(source, i, contentEnd);
-      const previousIndent = indentStack.at(-1) ?? 0;
-      if (indent > previousIndent) {
-        indentStack.push(indent);
-        tokens.push({
-          kind: "indent",
-          text: "<indent>",
-          span: { start: i, end: i + indent },
-        });
-      } else if (indent < previousIndent) {
-        while (indent < (indentStack.at(-1) ?? 0)) {
-          indentStack.pop();
-          tokens.push({
-            kind: "dedent",
-            text: "<dedent>",
-            span: { start: i, end: i + indent },
-          });
-        }
-        if (indent !== (indentStack.at(-1) ?? 0)) {
-          throw new Error(
-            \`Indentation does not match any outer block at \${i}..\${i + indent}\`,
-          );
-        }
-      }
-
-      i += indent;
-      atLineStart = false;
-      needsFinalNewline = true;
-      continue;
-    }
-
-    const char = source[i];
-    if (char === "\\n" || char === "\\r") {
-      const end = char === "\\r" && source[i + 1] === "\\n" ? i + 2 : i + 1;
-      tokens.push({
-        kind: "newline",
-        text: "<newline>",
-        span: { start: i, end },
-      });
-      i = end;
-      atLineStart = true;
-      needsFinalNewline = false;
-      continue;
-    }
-
-    if (char === " " || char === "\\t") {
-      i++;
-      continue;
-    }
-
-    const skipped = scanSkip(source, i);
-    if (skipped > i) {
-      i = skipped;
-      continue;
-    }
-
-    if (lineComment && source.startsWith(lineComment, i)) {
-      i += lineComment.length;
-      while (i < source.length && source[i] !== "\\n" && source[i] !== "\\r") i++;
-      continue;
-    }
-
-    const token = scanToken(source, i);
-    tokens.push(token);
-    i = token.span.end;
-  }
-
-  if (needsFinalNewline) {
-    tokens.push({
-      kind: "newline",
-      text: "<newline>",
-      span: { start: source.length, end: source.length },
-    });
-  }
-
-  while (indentStack.length > 1) {
-    indentStack.pop();
-    tokens.push({
-      kind: "dedent",
-      text: "<dedent>",
-      span: { start: source.length, end: source.length },
-    });
-  }
-
-  tokens.push({ kind: "eof", text: "<eof>", span: { start: source.length, end: source.length } });
-  return tokens;
-}
-
-function findLineEnd(source: string, start: number): number {
-  let i = start;
-  while (i < source.length && source[i] !== "\\n" && source[i] !== "\\r") i++;
-  return i;
-}
-
-function skipLineEnding(source: string, lineEnd: number): number {
-  if (source[lineEnd] === "\\r" && source[lineEnd + 1] === "\\n") return lineEnd + 2;
-  if (source[lineEnd] === "\\r" || source[lineEnd] === "\\n") return lineEnd + 1;
-  return lineEnd;
-}
-
-function stripComment(line: string): number {
-  if (!lineComment) return line.length;
-  const comment = line.indexOf(lineComment);
-  return comment === -1 ? line.length : comment;
-}
-
-function countIndent(source: string, start: number, end: number): number {
-  let i = start;
-  while (i < end) {
-    const char = source[i];
-    if (char === " ") {
-      i++;
-      continue;
-    }
-    if (char === "\\t") {
-      throw new Error(\`Tabs are not allowed for indentation at \${i}..\${i + 1}\`);
-    }
-    break;
-  }
-  return i - start;
-}
-
-${generatedTokenScannerHelpers()}
-`;
-}
-
-const scannedTokenKinds = [
-  "identifier",
-  "number",
-  "char",
-  "string",
-  "fenced_text",
-  "fenced_template",
-  "keyword",
-  "symbol",
-];
-const baseTokenKinds = [...scannedTokenKinds, "eof"];
-const layoutTokenKinds = scannedTokenKinds;
-
-function tokenKindsForSpec(spec: LexicalSpec, layout: boolean): string[] {
-  const base = layout ? layoutTokenKinds : baseTokenKinds;
-  return [...new Set([...base, ...spec.tokens.map((token) => token.name)])];
-}
-
-function formatTokenKindUnion(kinds: string[]): string {
-  return kinds.map((kind) => JSON.stringify(kind)).join(" | ");
-}
-
-function formatPatternArray(tokens: LexicalTokenSpec[]): string {
-  if (tokens.length === 0) return "[]";
-  const items = tokens.map((token) =>
-    `  { kind: ${JSON.stringify(token.name)}, pattern: new RegExp(${
-      JSON.stringify(token.pattern)
-    }, "y") },`
-  ).join("\n");
-  return `[\n${items}\n]`;
-}
-
-function builtinTreeSitterRuleLines(
-  grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata = {},
-): string[] {
-  const declaredTokens = new Set(grammar.tokens.map((token) => token.name));
-  const comment = languageComment(metadata);
-  const builtins: Record<string, string> = {
-    ident: "    ident: $ => /[A-Za-z_][A-Za-z0-9_]*/,",
-    int:
-      "    int: $ => token(choice(/[0-9](?:_?[0-9])*/, /0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*/, /0[bB][01](?:_?[01])*/)),",
-    number:
-      "    number: $ => token(choice(/[0-9](?:_?[0-9])*/, /0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*/, /0[bB][01](?:_?[01])*/)),",
-    char:
-      "    char: $ => token(seq(\"'\", choice(/[^'\\\\\\n\\r]/, /\\\\[0nrt'\\\\]/, /\\\\x[0-9A-Fa-f]{2}/, /\\\\u\\{[0-9A-Fa-f]+\\}/), \"'\")),",
-    string:
-      "    string: $ => token(seq('\"', repeat(choice(/[^\"\\\\\\n\\r]/, /\\\\[0nrt\"\\\\]/, /\\\\x[0-9A-Fa-f]{2}/, /\\\\u\\{[0-9A-Fa-f]+\\}/)), '\"')),",
-    line_end: "    line_end: $ => /\\r?\\n/,",
-    line_indent: "    line_indent: $ => /[ ]+/,",
-    line_comment: `    line_comment: $ => token(seq(${
-      JSON.stringify(comment)
-    }, /[^\\n]*/)),`,
-    fenced_text:
-      "    fenced_text: $ => choice(seq($.fenced_text_open, $.fenced_text_close), seq($.fenced_text_open, $.fenced_text_content, $.fenced_text_close)),",
-    fenced_text_open: '    fenced_text_open: $ => token("```"),',
-    fenced_text_content:
-      "    fenced_text_content: $ => repeat1(choice(token.immediate(/[^`]+/), token.immediate(/`[^`]/), token.immediate(/``[^`]/))),",
-    fenced_text_close: '    fenced_text_close: $ => token.immediate("```"),',
-    fenced_template:
-      "    fenced_template: $ => choice(seq($.fenced_template_open, $.fenced_template_close), seq($.fenced_template_open, $.fenced_template_content, $.fenced_template_close)),",
-    fenced_template_open:
-      '    fenced_template_open: $ => token("```template"),',
-    fenced_template_content:
-      "    fenced_template_content: $ => repeat1(choice(token.immediate(/[^`]+/), token.immediate(/`[^`]/), token.immediate(/``[^`]/))),",
-    fenced_template_close:
-      '    fenced_template_close: $ => token.immediate("```"),',
-  };
-  return Object.entries(builtins)
-    .filter(([name]) => !declaredTokens.has(name))
-    .map(([, line]) => line);
-}
-
-function generatedTokenScannerHelpers(): string {
-  return `function scanToken(source: string, start: number): Token {
-  if (source.startsWith("\`\`\`template", start)) {
-    const endFence = source.indexOf("\`\`\`", start + "\`\`\`template".length);
-    if (endFence === -1) {
-      throw new Error(\`Unterminated template block at \${start}..\${source.length}\`);
-    }
-    const end = endFence + 3;
-    return { kind: "fenced_template", text: source.slice(start, end), span: { start, end } };
-  }
-
-  if (source.startsWith("\`\`\`", start)) {
-    const endFence = source.indexOf("\`\`\`", start + "\`\`\`".length);
-    if (endFence === -1) {
-      throw new Error(\`Unterminated text block at \${start}..\${source.length}\`);
-    }
-    const end = endFence + 3;
-    return { kind: "fenced_text", text: source.slice(start, end), span: { start, end } };
-  }
-
-  const char = source[start];
-  const symbol = symbols.find((candidate) => source.startsWith(candidate, start));
-  if (symbol) {
-    const end = start + symbol.length;
-    return { kind: "symbol", text: symbol, span: { start, end } };
-  }
-
-  const keyword = matchKeyword(source, start);
-  if (keyword) {
-    return { kind: "keyword", text: keyword, span: { start, end: start + keyword.length } };
-  }
-
-  const declared = scanDeclaredToken(source, start);
-  if (declared) return declared;
-
-  if (char >= "0" && char <= "9") {
-    const end = scanNumericLiteral(source, start);
-    return { kind: "number", text: source.slice(start, end), span: { start, end } };
-  }
-
-  if (char === "'") {
-    const end = scanCharLiteral(source, start);
-    return { kind: "char", text: source.slice(start, end), span: { start, end } };
-  }
-
-  if (char === "\\"") {
-    const end = scanStringLiteral(source, start);
-    return { kind: "string", text: source.slice(start, end), span: { start, end } };
-  }
-
-  if (isIdentStart(char)) {
-    let end = start + 1;
-    while (end < source.length && isIdentPart(source[end])) end++;
-    const text = source.slice(start, end);
-    return {
-      kind: keywords.has(text) ? "keyword" : "identifier",
-      text,
-      span: { start, end },
-    };
-  }
-
-  throw new Error(\`Unexpected character '\${char}' at \${start}..\${start + 1}\`);
-}
-
-function scanSkip(source: string, start: number): number {
-  for (const { pattern } of skipPatterns) {
-    const match = matchPattern(pattern, source, start);
-    if (match) return match.end;
-  }
-  return start;
-}
-
-function matchKeyword(source: string, start: number): string | null {
-  for (const keyword of keywords) {
-    if (!source.startsWith(keyword, start)) continue;
-    const next = source[start + keyword.length];
-    if (next !== undefined && isIdentPart(next)) continue;
-    return keyword;
-  }
-  return null;
-}
-
-function scanDeclaredToken(source: string, start: number): Token | null {
-  for (const { kind, pattern } of tokenPatterns) {
-    const match = matchPattern(pattern, source, start);
-    if (match) {
-      return { kind: kind as TokenKind, text: match.text, span: { start, end: match.end } };
-    }
-  }
-  return null;
-}
-
-function matchPattern(pattern: RegExp, source: string, start: number): { text: string; end: number } | null {
-  pattern.lastIndex = start;
-  const match = pattern.exec(source);
-  if (!match || match.index !== start || match[0].length === 0) return null;
-  return { text: match[0], end: start + match[0].length };
-}
-
-${literalTokenizerHelpers}
-
-function isIdentStart(char: string): boolean {
-  return (char >= "a" && char <= "z") || (char >= "A" && char <= "Z") || char === "_";
-}
-
-function isIdentPart(char: string): boolean {
-  return isIdentStart(char) || (char >= "0" && char <= "9");
-}
-`;
-}
-
-function renderParserExpression(expression: EbnfExpression): string {
-  switch (expression.kind) {
-    case "ref":
-      return `{ kind: "ref", name: ${JSON.stringify(expression.name)} }`;
-    case "literal":
-      return `{ kind: "literal", value: ${JSON.stringify(expression.value)} }`;
-    case "sequence":
-      return `{ kind: "sequence", items: [${
-        expression.items.map(renderParserExpression).join(", ")
-      }] }`;
-    case "choice":
-      return `{ kind: "choice", options: [${
-        expression.options.map(renderParserExpression).join(", ")
-      }] }`;
-    case "optional":
-      return `{ kind: "optional", expression: ${
-        renderParserExpression(expression.expression)
-      } }`;
-    case "repeat":
-      return `{ kind: "repeat", expression: ${
-        renderParserExpression(expression.expression)
-      } }`;
-    case "repeat1":
-      return `{ kind: "repeat1", expression: ${
-        renderParserExpression(expression.expression)
-      } }`;
-    case "separated":
-      return `{ kind: "separated", item: ${
-        renderParserExpression(expression.item)
-      }, separator: ${renderParserExpression(expression.separator)} }`;
-  }
-}
-
-export function validateParserGrammar(
-  grammar: EbnfGrammar,
-  rootRuleName: string,
-): void {
-  const rules = new Map(grammar.rules.map((rule) => [rule.name, rule]));
-  if (!rules.has(rootRuleName)) {
-    throw new Error(`Unknown root rule '${rootRuleName}'`);
-  }
-  for (const rule of grammar.rules) {
-    const cycle = leftRecursivePath(
-      rule.name,
-      rule.expression,
-      rules,
-      [rule.name],
-    );
-    if (cycle) {
-      throw new Error(
-        `Left-recursive parser rule cycle: ${cycle.join(" -> ")}`,
-      );
-    }
-    validateNoNullableRepeat(rule.expression, rules, rule.name);
-    validatePredictiveChoices(rule.expression, rules, rule.name);
-  }
-}
-
 /** Validates capability limits specific to the tree-sitter backend. */
 export function validateTreeSitterBackendCapabilities(
   grammar: EbnfGrammar,
 ): void {
-  for (const rule of grammar.rules) {
-    if (hasRef(rule.expression, "dedent")) {
-      throw new Error(
-        "Tree-sitter backend does not support the indentation stack required by 'dedent'. Select the typescript-ll1 backend or model layout with a Tree-sitter external scanner.",
-      );
-    }
-  }
-}
-
-function leftRecursivePath(
-  origin: string,
-  expression: EbnfExpression,
-  rules: Map<string, EbnfRule>,
-  path: string[],
-): string[] | null {
-  for (const name of leadingRefs(expression, rules)) {
-    if (name === origin) return [...path, name];
-    if (path.includes(name)) continue;
-    const rule = rules.get(name);
-    if (!rule) continue;
-    const cycle = leftRecursivePath(origin, rule.expression, rules, [
-      ...path,
-      name,
-    ]);
-    if (cycle) return cycle;
-  }
-  return null;
-}
-
-function leadingRefs(
-  expression: EbnfExpression,
-  rules: Map<string, EbnfRule>,
-): string[] {
-  switch (expression.kind) {
-    case "ref":
-      return rules.has(expression.name) ? [expression.name] : [];
-    case "literal":
-      return [];
-    case "choice":
-      return [
-        ...new Set(
-          expression.options.flatMap((option) => leadingRefs(option, rules)),
-        ),
-      ];
-    case "sequence": {
-      const refs: string[] = [];
-      for (const item of expression.items) {
-        refs.push(...leadingRefs(item, rules));
-        if (!isNullable(item, rules, new Set())) break;
-      }
-      return [...new Set(refs)];
-    }
-    case "optional":
-    case "repeat":
-    case "repeat1":
-      return leadingRefs(expression.expression, rules);
-    case "separated":
-      return leadingRefs(expression.item, rules);
-  }
-}
-
-function validateNoNullableRepeat(
-  expression: EbnfExpression,
-  rules: Map<string, EbnfRule>,
-  ruleName: string,
-): void {
-  switch (expression.kind) {
-    case "repeat":
-    case "repeat1":
-      if (isNullable(expression.expression, rules, new Set())) {
-        throw new Error(
-          `Nullable repetition in rule '${ruleName}' can match empty input`,
-        );
-      }
-      validateNoNullableRepeat(expression.expression, rules, ruleName);
-      return;
-    case "optional":
-      validateNoNullableRepeat(expression.expression, rules, ruleName);
-      return;
-    case "sequence":
-      for (const item of expression.items) {
-        validateNoNullableRepeat(item, rules, ruleName);
-      }
-      return;
-    case "choice":
-      for (const option of expression.options) {
-        validateNoNullableRepeat(option, rules, ruleName);
-      }
-      return;
-    case "separated":
-      validateNoNullableRepeat(expression.item, rules, ruleName);
-      validateNoNullableRepeat(expression.separator, rules, ruleName);
-      return;
-    case "ref":
-    case "literal":
-      return;
-  }
-}
-
-function validatePredictiveChoices(
-  expression: EbnfExpression,
-  rules: Map<string, EbnfRule>,
-  ruleName: string,
-): void {
-  if (expression.kind === "choice") {
-    const seen = new Set<string>();
-    for (const option of expression.options) {
-      const starts = firstSet(option, rules, new Set());
-      if (starts.has("<empty>")) {
-        throw new Error(`Ambiguous nullable choice in rule '${ruleName}'`);
-      }
-      for (const start of starts) {
-        if (seen.has(start)) {
-          throw new Error(
-            `Ambiguous predictive choice in rule '${ruleName}' overlaps on ${start}`,
-          );
-        }
-        seen.add(start);
-      }
-    }
-  }
-  switch (expression.kind) {
-    case "sequence":
-      for (const item of expression.items) {
-        validatePredictiveChoices(item, rules, ruleName);
-      }
-      return;
-    case "choice":
-      for (const option of expression.options) {
-        validatePredictiveChoices(option, rules, ruleName);
-      }
-      return;
-    case "optional":
-    case "repeat":
-    case "repeat1":
-      validatePredictiveChoices(expression.expression, rules, ruleName);
-      return;
-    case "separated":
-      validatePredictiveChoices(expression.item, rules, ruleName);
-      validatePredictiveChoices(expression.separator, rules, ruleName);
-      return;
-    case "ref":
-    case "literal":
-      return;
-  }
-}
-
-function isNullable(
-  expression: EbnfExpression,
-  rules: Map<string, EbnfRule>,
-  visiting: Set<string>,
-): boolean {
-  switch (expression.kind) {
-    case "literal":
-      return false;
-    case "ref": {
-      const rule = rules.get(expression.name);
-      if (!rule || visiting.has(rule.name)) return false;
-      visiting.add(rule.name);
-      const nullable = isNullable(rule.expression, rules, visiting);
-      visiting.delete(rule.name);
-      return nullable;
-    }
-    case "sequence":
-      return expression.items.every((item) =>
-        isNullable(item, rules, visiting)
-      );
-    case "choice":
-      return expression.options.some((option) =>
-        isNullable(option, rules, visiting)
-      );
-    case "optional":
-    case "repeat":
-      return true;
-    case "repeat1":
-      return isNullable(expression.expression, rules, visiting);
-    case "separated":
-      return isNullable(expression.item, rules, visiting);
-  }
-}
-
-function firstSet(
-  expression: EbnfExpression,
-  rules: Map<string, EbnfRule>,
-  visiting: Set<string>,
-): Set<string> {
-  switch (expression.kind) {
-    case "literal":
-      return new Set([`literal:${expression.value}`]);
-    case "ref": {
-      const rule = rules.get(expression.name);
-      if (!rule) {
-        return new Set([`token:${parserTokenRefName(expression.name)}`]);
-      }
-      if (visiting.has(rule.name)) return new Set();
-      visiting.add(rule.name);
-      const starts = firstSet(rule.expression, rules, visiting);
-      visiting.delete(rule.name);
-      return starts;
-    }
-    case "sequence": {
-      const starts = new Set<string>();
-      for (const item of expression.items) {
-        const itemStarts = firstSet(item, rules, visiting);
-        for (const start of itemStarts) {
-          if (start !== "<empty>") starts.add(start);
-        }
-        if (!isNullable(item, rules, new Set())) return starts;
-      }
-      starts.add("<empty>");
-      return starts;
-    }
-    case "choice":
-      return new Set(
-        expression.options.flatMap((
-          option,
-        ) => [...firstSet(option, rules, visiting)]),
-      );
-    case "optional":
-    case "repeat": {
-      const starts = firstSet(expression.expression, rules, visiting);
-      starts.add("<empty>");
-      return starts;
-    }
-    case "repeat1":
-      return firstSet(expression.expression, rules, visiting);
-    case "separated":
-      return firstSet(expression.item, rules, visiting);
-  }
-}
-
-function parserTokenRefName(name: string): string {
-  if (name === "ident") return "identifier";
-  if (name === "int") return "number";
-  return name;
+  void grammar;
 }
 
 export { parseTreeSitterMetadata } from "./metadata.ts";
@@ -1419,6 +215,8 @@ export function generateTreeSitterGrammar(
   const context = createRenderContext(grammar, rootRuleName, metadata);
   const sourceFileMeta = metadata.rules?.source_file ??
     metadata.rules?.[rootRuleName];
+  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
+  const reachableRefs = collectReachableRefs(grammar, reachableRules);
   const ruleLines = [
     `    source_file: $ => ${
       renderRuleExpression(
@@ -1429,6 +227,7 @@ export function generateTreeSitterGrammar(
       )
     },`,
     ...grammar.rules
+      .filter((rule) => reachableRules.has(rule.name))
       .map((rule) => {
         const rendered = renderRuleExpression(
           rule.name,
@@ -1438,7 +237,9 @@ export function generateTreeSitterGrammar(
         );
         return `    ${formatRuleKey(rule.name)}: $ => ${rendered},`;
       }),
-    ...grammar.tokens.map((token) => {
+    ...grammar.tokens.filter((token) =>
+      token.kind === "skip" || reachableRefs.has(token.name)
+    ).map((token) => {
       const rendered = token.kind === "token"
         ? `token(${formatRegexLiteral(token.pattern)})`
         : formatRegexLiteral(token.pattern);
@@ -1447,7 +248,6 @@ export function generateTreeSitterGrammar(
     ...[...context.helperRules.entries()].map(([name, rendered]) =>
       `    ${formatRuleKey(name)}: $ => ${rendered},`
     ),
-    ...builtinTreeSitterRuleLines(grammar, metadata),
   ];
 
   const headerLines = [
@@ -1518,7 +318,7 @@ export function generateTreeSitterRainbowsQuery(
   }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
 
   const rainbow = metadata.queries?.rainbows;
@@ -1549,15 +349,22 @@ export function generateTreeSitterRainbowsQuery(
 /** Generates an optional tree-sitter injection query. */
 export function generateTreeSitterInjectionsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
 
   const injections = metadata.queries?.injections ?? [];
@@ -1596,7 +403,7 @@ export function generateTreeSitterHighlightsQuery(
   }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
 
   const explicit = resolveHighlightCaptureSelectors(
@@ -1642,7 +449,7 @@ export function collectTreeSitterHighlightDiagnostics(
   }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
   return uncoveredSuppressedHighlightDiagnostics(
     grammar,
@@ -1654,15 +461,22 @@ export function collectTreeSitterHighlightDiagnostics(
 /** Generates a metadata-driven tree-sitter locals query. */
 export function generateTreeSitterLocalsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
   return renderCaptureQuery(metadata.queries?.locals ?? []);
 }
@@ -1670,15 +484,22 @@ export function generateTreeSitterLocalsQuery(
 /** Generates a metadata-driven tree-sitter folds query. */
 export function generateTreeSitterFoldsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
   return renderCaptureQuery(metadata.queries?.folds ?? []);
 }
@@ -1686,15 +507,22 @@ export function generateTreeSitterFoldsQuery(
 /** Generates a metadata-driven tree-sitter indentation query. */
 export function generateTreeSitterIndentsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
   return renderCaptureQuery(metadata.queries?.indents ?? []);
 }
@@ -1702,15 +530,22 @@ export function generateTreeSitterIndentsQuery(
 /** Generates a metadata-driven tree-sitter tags query. */
 export function generateTreeSitterTagsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
   return renderCaptureQuery(metadata.queries?.tags ?? []);
 }
@@ -1718,383 +553,28 @@ export function generateTreeSitterTagsQuery(
 /** Generates a metadata-driven tree-sitter textobjects query. */
 export function generateTreeSitterTextobjectsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
-): string {
-  const grammar = typeof sourceOrGrammar === "string"
-    ? parseEbnf(sourceOrGrammar)
-    : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
-  const metadata = options.metadata ?? {};
-  if (!options.skipValidation) {
-    validateTreeSitterQueryMetadata(grammar, metadata);
-  }
-  return renderCaptureQuery(metadata.queries?.textobjects ?? []);
-}
-
-/** Generates TypeScript AST facade types for tree-sitter nodes. */
-export function generateAstTypesSource(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
-): string {
-  const grammar = typeof sourceOrGrammar === "string"
-    ? parseEbnf(sourceOrGrammar)
-    : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
-  const metadata = options.metadata ?? {};
-  if (!options.skipValidation) {
-    validateWorkbenchMetadataSemantics(grammar, metadata);
-  }
-
-  const nodeTypes = grammar.rules.map((rule) => astTypeName(rule.name));
-  const union = nodeTypes.length ? nodeTypes.join(" | ") : "never";
-  const interfaces = grammar.rules.map((rule) => {
-    const astNode = metadata.ast?.nodes?.[rule.name];
-    const kind = astNode?.kind ?? rule.name;
-    const fields = astFieldsForNode(rule.name, metadata);
-    const fieldType = fields.length === 0
-      ? "Record<string, never>"
-      : `{\n${
-        fields.map((field) =>
-          `    ${quoteProperty(field.name)}: SyntaxNodeLike | null;`
-        ).join("\n")
-      }\n  }`;
-    return `export interface ${astTypeName(rule.name)} {
-  kind: ${JSON.stringify(kind)};
-  type: ${JSON.stringify(rule.name)};
-  node: SyntaxNodeLike;
-  fields: ${fieldType};
-}`;
-  });
-
-  return `// Generated by @mewhhaha/baba. Do not edit by hand.
-export interface SyntaxNodeLike {
-  type: string;
-  text: string;
-  namedChildren?: readonly SyntaxNodeLike[];
-  childForFieldName?(name: string): SyntaxNodeLike | null;
-}
-
-export type AstNode = ${union};
-
-${interfaces.join("\n\n")}
-`;
-}
-
-/** Generates TypeScript visitor helpers for generated AST facade types. */
-export function generateAstVisitorSource(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
-): string {
-  const grammar = typeof sourceOrGrammar === "string"
-    ? parseEbnf(sourceOrGrammar)
-    : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
-  const metadata = options.metadata ?? {};
-  if (!options.skipValidation) {
-    validateWorkbenchMetadataSemantics(grammar, metadata);
-  }
-
-  const imports = [
-    "AstNode",
-    "SyntaxNodeLike",
-    ...grammar.rules.map((rule) => astTypeName(rule.name)),
-  ];
-  const visitorMethods = grammar.rules.map((rule) => {
-    const kind = metadata.ast?.nodes?.[rule.name]?.kind ?? rule.name;
-    return `  ${quoteProperty(kind)}?: (node: ${astTypeName(rule.name)}) => R;`;
-  });
-  const projectCases = grammar.rules.map((rule) => {
-    const fields = astFieldsForNode(rule.name, metadata);
-    const renderedFields = fields.length === 0
-      ? "{}"
-      : `{\n${
-        fields.map((field) =>
-          `        ${quoteProperty(field.name)}: readField(node, ${
-            JSON.stringify(field.treeField)
-          }),`
-        ).join("\n")
-      }\n      }`;
-    return `    case ${JSON.stringify(rule.name)}:
-      return {
-        kind: ${
-      JSON.stringify(metadata.ast?.nodes?.[rule.name]?.kind ?? rule.name)
-    },
-        type: ${JSON.stringify(rule.name)},
-        node,
-        fields: ${renderedFields},
-      };`;
-  });
-
-  return `// Generated by @mewhhaha/baba. Do not edit by hand.
-import type { ${imports.join(", ")} } from "./types.ts";
-
-export interface AstVisitor<R = void> {
-${visitorMethods.join("\n")}
-  unknown?: (node: SyntaxNodeLike) => R;
-}
-
-export function projectNode(node: SyntaxNodeLike): AstNode | null {
-  switch (node.type) {
-${projectCases.join("\n")}
-    default:
-      return null;
-  }
-}
-
-export function visitAstNode<R>(
-  node: AstNode,
-  visitor: AstVisitor<R>,
-): R | undefined {
-  const visit = (visitor as Record<string, ((node: AstNode) => R) | undefined>)[node.kind];
-  if (visit) return visit(node);
-  return visitor.unknown?.(node.node);
-}
-
-export function walkSyntaxNode(
-  node: SyntaxNodeLike,
-  visit: (node: SyntaxNodeLike) => void,
-): void {
-  visit(node);
-  for (const child of node.namedChildren ?? []) walkSyntaxNode(child, visit);
-}
-
-function readField(node: SyntaxNodeLike, name: string): SyntaxNodeLike | null {
-  return node.childForFieldName?.(name) ?? null;
-}
-`;
-}
-
-/** Generates a conservative formatter scaffold that preserves unsupported text. */
-export function generateFormatterScaffoldSource(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
-): string {
-  const grammar = typeof sourceOrGrammar === "string"
-    ? parseEbnf(sourceOrGrammar)
-    : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
-  const metadata = options.metadata ?? {};
-  if (!options.skipValidation) {
-    validateWorkbenchMetadataSemantics(grammar, metadata);
-  }
-
-  return `// Generated by @mewhhaha/baba. Do not edit by hand.
-export interface FormatNode {
-  type: string;
-  text: string;
-  namedChildren?: readonly FormatNode[];
-}
-
-export interface FormatOptions {
-  indent?: string;
-}
-
-const blockNodes = new Set(${
-    formatStringArray(metadata.formatter?.blocks ?? [])
-  });
-const listNodes = new Set(${
-    formatStringArray(metadata.formatter?.lists ?? [])
-  });
-const spacing = new Map(${
-    JSON.stringify(Object.entries(metadata.formatter?.spacing ?? {}))
-  });
-
-export function formatNode(node: FormatNode, options: FormatOptions = {}): string {
-  const indent = options.indent ?? "  ";
-  if (blockNodes.has(node.type)) return formatBlock(node, indent);
-  if (listNodes.has(node.type)) return formatList(node, indent);
-  return node.text;
-}
-
-function formatBlock(node: FormatNode, _indent: string): string {
-  return node.text;
-}
-
-function formatList(node: FormatNode, _indent: string): string {
-  return node.text;
-}
-
-export function spacingForLiteral(literal: string): "tight" | "space" | "newline" | undefined {
-  return spacing.get(literal) as "tight" | "space" | "newline" | undefined;
-}
-`;
-}
-
-/** Generates a Deno-friendly LSP state scaffold. */
-export function generateLspScaffoldSource(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
-): string {
-  const grammar = typeof sourceOrGrammar === "string"
-    ? parseEbnf(sourceOrGrammar)
-    : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
-  const metadata = options.metadata ?? {};
-  if (!options.skipValidation) {
-    validateWorkbenchMetadataSemantics(grammar, metadata);
-  }
-
-  return `// Generated by @mewhhaha/baba. Do not edit by hand.
-export interface TextDocument {
-  uri: string;
-  version: number;
-  text: string;
-}
-
-export interface Diagnostic {
-  uri: string;
-  message: string;
-  severity: "error" | "warning" | "information";
-}
-
-export interface DocumentSymbol {
-  name: string;
-  kind: string;
-}
-
-const documentSymbolNodes = new Set(${
-    formatStringArray(metadata.lsp?.documentSymbols ?? [])
-  });
-const diagnosticNodes = new Set(${
-    formatStringArray(metadata.lsp?.diagnostics ?? [])
-  });
-
-export class LanguageServerState {
-  readonly documents = new Map<string, TextDocument>();
-
-  updateDocument(document: TextDocument): void {
-    this.documents.set(document.uri, document);
-  }
-
-  removeDocument(uri: string): void {
-    this.documents.delete(uri);
-  }
-
-  diagnostics(uri: string): Diagnostic[] {
-    const document = this.documents.get(uri);
-    if (!document) return [];
-    void diagnosticNodes;
-    return [];
-  }
-
-  documentSymbols(uri: string): DocumentSymbol[] {
-    const document = this.documents.get(uri);
-    if (!document) return [];
-    void documentSymbolNodes;
-    return [];
-  }
-}
-`;
-}
-
-/** Generates the complete opt-in workbench scaffold as path/content pairs. */
-export function generateWorkbenchBundle(
-  sourceOrGrammar: string | EbnfGrammar,
   options: {
-    name?: string;
     rootRule?: string;
     metadata?: TreeSitterMetadata;
     skipValidation?: boolean;
   } = {},
-): GeneratedBundle {
+): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  const name = options.name ?? "grammar";
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
     validateEbnfGrammar(grammar, { rootRule: rootRuleName });
-    validateTreeSitterMetadataSemantics(grammar, rootRuleName, metadata);
-    validateTreeSitterQueryMetadata(grammar, metadata);
-    validateWorkbenchMetadataSemantics(grammar, metadata);
   }
-
-  const treeSitter = generateTreeSitterGrammar(grammar, {
-    name,
-    rootRule: rootRuleName,
-    metadata,
-    skipValidation: true,
-  });
-  const spec = createLexicalSpec(grammar, { skipValidation: true });
-  const queries = generateWorkbenchQueries(grammar, {
-    rootRule: rootRuleName,
-    metadata,
-    skipValidation: true,
-  });
-  const sample = generateGrammarSample(grammar, rootRuleName);
-
-  return generatedBundle("workbench", [
-    ["lexical.json", generateLexicalManifest(grammar, { spec })],
-    [
-      "tokenizer.ts",
-      generateTokenizerSource(grammar, {
-        spec,
-        metadata,
-        skipValidation: true,
-      }),
-    ],
-    [
-      "parser.ts",
-      generateParserSource(grammar, {
-        rootRule: rootRuleName,
-        skipValidation: true,
-      }),
-    ],
-    ["grammar.js", treeSitter],
-    ["tree-sitter.json", generateTreeSitterConfigSource(name, metadata)],
-    ["package.json", generateTreeSitterPackageSource(name, metadata)],
-    ["README.md", generateWorkbenchReadmeSource(name)],
-    ["queries/highlights.scm", queries["highlights.scm"]],
-    ["queries/locals.scm", queries["locals.scm"]],
-    ["queries/folds.scm", queries["folds.scm"]],
-    ["queries/indents.scm", queries["indents.scm"]],
-    ["queries/tags.scm", queries["tags.scm"]],
-    ["queries/textobjects.scm", queries["textobjects.scm"]],
-    ["queries/rainbows.scm", queries["rainbows.scm"]],
-    ["queries/injections.scm", queries["injections.scm"]],
-    [
-      "editor/helix/languages.toml",
-      generateHelixLanguageSource(name, metadata),
-    ],
-    ["editor/nvim/README.md", generateNvimReadmeSource(name)],
-    ["editor/vscode/package.json", generateVsCodePackageSource(name, metadata)],
-    [
-      "editor/vscode/language-configuration.json",
-      generateVsCodeLanguageConfigurationSource(metadata),
-    ],
-    [
-      "editor/vscode/syntaxes/README.md",
-      generateVsCodeSyntaxReadmeSource(name),
-    ],
-    [
-      "ast/types.ts",
-      generateAstTypesSource(grammar, { metadata, skipValidation: true }),
-    ],
-    [
-      "ast/visitor.ts",
-      generateAstVisitorSource(grammar, { metadata, skipValidation: true }),
-    ],
-    ["tests/corpus/basic.txt", generateCorpusTestSource(sample)],
-    ["tests/tokenizer_test.ts", generateTokenizerSmokeTestSource(sample)],
-    [
-      "lsp/server.ts",
-      generateLspScaffoldSource(grammar, { metadata, skipValidation: true }),
-    ],
-    ["lsp/README.md", generateLspReadmeSource(name)],
-    [
-      "formatter/format.ts",
-      generateFormatterScaffoldSource(grammar, {
-        metadata,
-        skipValidation: true,
-      }),
-    ],
-    ["formatter/README.md", generateFormatterReadmeSource(name)],
-  ]);
+  const metadata = options.metadata ?? {};
+  if (!options.skipValidation) {
+    validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
+  }
+  return renderCaptureQuery(metadata.queries?.textobjects ?? []);
 }
 
-/** Generates every tree-sitter query file used by the workbench preset. */
-export function generateWorkbenchQueries(
+/** Generates every Tree-sitter query file emitted by baba. */
+export function generateTreeSitterQueries(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
@@ -2113,22 +593,27 @@ export function generateWorkbenchQueries(
       skipValidation: options.skipValidation,
     }),
     "locals.scm": generateTreeSitterLocalsQuery(grammar, {
+      rootRule: options.rootRule,
       metadata,
       skipValidation: options.skipValidation,
     }),
     "folds.scm": generateTreeSitterFoldsQuery(grammar, {
+      rootRule: options.rootRule,
       metadata,
       skipValidation: options.skipValidation,
     }),
     "indents.scm": generateTreeSitterIndentsQuery(grammar, {
+      rootRule: options.rootRule,
       metadata,
       skipValidation: options.skipValidation,
     }),
     "tags.scm": generateTreeSitterTagsQuery(grammar, {
+      rootRule: options.rootRule,
       metadata,
       skipValidation: options.skipValidation,
     }),
     "textobjects.scm": generateTreeSitterTextobjectsQuery(grammar, {
+      rootRule: options.rootRule,
       metadata,
       skipValidation: options.skipValidation,
     }),
@@ -2138,6 +623,7 @@ export function generateWorkbenchQueries(
       skipValidation: options.skipValidation,
     }),
     "injections.scm": generateTreeSitterInjectionsQuery(grammar, {
+      rootRule: options.rootRule,
       metadata,
       skipValidation: options.skipValidation,
     }),
@@ -2249,21 +735,17 @@ function defaultHighlightQueryEntries(
     }
   }
 
-  pushNode("string", "string");
-  pushNode("char", "string.special");
-  pushNode("fenced_text", "string.special");
-  pushNode("fenced_template", "string.special");
-  pushNode("int", "number");
-  pushNode("number", "number");
-  pushNode("ident", "variable");
-  pushNode("line_comment", "comment");
-
   for (const token of grammar.tokens) {
     if (token.kind !== "token") continue;
-    const capture = token.name === "ident"
+    const lowerName = token.name.toLowerCase();
+    const capture = lowerName.includes("ident")
       ? "variable"
-      : token.name === "int" || token.name === "number"
+      : lowerName.includes("int") || lowerName.includes("number")
       ? "number"
+      : lowerName.includes("string")
+      ? "string"
+      : lowerName.includes("comment")
+      ? "comment"
       : "constant";
     pushNode(token.name, capture);
   }
@@ -2297,7 +779,7 @@ function collectExposedTreeSitterNodeNames(
       continue;
     }
 
-    if (tokensByName.has(name) || treeSitterBuiltins.has(name)) {
+    if (tokensByName.has(name)) {
       names.add(name);
     }
   }
@@ -2339,6 +821,18 @@ function collectReachableRuleNames(
     }
   }
   return reachable;
+}
+
+function collectReachableRefs(
+  grammar: EbnfGrammar,
+  reachableRules: Set<string>,
+): Set<string> {
+  const refs = new Set<string>();
+  for (const rule of grammar.rules) {
+    if (!reachableRules.has(rule.name)) continue;
+    for (const ref of collectExpressionRefs(rule.expression)) refs.add(ref);
+  }
+  return refs;
 }
 
 function collectExpressionRefsInto(
@@ -2479,403 +973,26 @@ function collectLiteralTerminals(
   }
 }
 
-export function generateTreeSitterConfigSource(
-  name: string,
-  metadata: TreeSitterMetadata,
-): string {
-  return `${
-    JSON.stringify(
-      {
-        grammars: [
-          {
-            name,
-            scope: languageScope(name, metadata),
-            "file-types": languageFileTypes(name, metadata),
-            "injection-regex": name,
-          },
-        ],
-        "tree-sitter": [
-          {
-            name,
-            scope: languageScope(name, metadata),
-            "file-types": languageFileTypes(name, metadata),
-            "injection-regex": name,
-          },
-        ],
-        metadata: {
-          version: "0.0.0",
-          license: "MIT",
-          description: `${name} grammar generated by @mewhhaha/baba`,
-          authors: [{ name: "Generated by @mewhhaha/baba" }],
-        },
-        bindings: {
-          c: true,
-          go: false,
-          java: false,
-          node: false,
-          python: false,
-          rust: false,
-          swift: false,
-          zig: false,
-        },
-      },
-      null,
-      2,
-    )
-  }\n`;
-}
-
-function generateTreeSitterPackageSource(
-  name: string,
-  metadata: TreeSitterMetadata,
-): string {
-  return `${
-    JSON.stringify(
-      {
-        name: `tree-sitter-${name}`,
-        version: "0.0.0",
-        type: "module",
-        main: "grammar.js",
-        files: [
-          "grammar.js",
-          "queries",
-          "tree-sitter.json",
-        ],
-        "tree-sitter": [
-          {
-            scope: languageScope(name, metadata),
-            "file-types": languageFileTypes(name, metadata),
-          },
-        ],
-      },
-      null,
-      2,
-    )
-  }\n`;
-}
-
-function generateWorkbenchReadmeSource(name: string): string {
-  return `# ${name} generated workbench
-
-This directory was generated by @mewhhaha/baba. It contains a Tree-sitter grammar, editor query files, typed AST helpers, formatter and LSP scaffolds, and smoke tests you can extend as the language grows.
-
-## Query files
-
-- \`queries/highlights.scm\` contains metadata-driven captures plus conservative defaults for exposed keywords, punctuation, identifiers, comments, strings, and numbers.
-- \`queries/locals.scm\` contains local scope and definition captures from \`metadata.queries.locals\`.
-- \`queries/folds.scm\` contains fold captures from \`metadata.queries.folds\`.
-- \`queries/indents.scm\` contains indentation captures from \`metadata.queries.indents\`.
-- \`queries/tags.scm\` contains symbol tag captures from \`metadata.queries.tags\`.
-- \`queries/textobjects.scm\` contains textobject captures from \`metadata.queries.textobjects\`.
-- \`queries/rainbows.scm\` contains rainbow scope and bracket captures from \`metadata.queries.rainbows\` or default bracket literals.
-- \`queries/injections.scm\` contains embedded-language captures from \`metadata.queries.injections\`.
-
-Raw query patterns in metadata are emitted directly into their query files. Highlight defaults can be suppressed with \`metadata.queries.highlights.defaults.suppress\`.
-
-## Metadata keys
-
-- \`language\`: configure scope, file types, and line comment text.
-- \`queries\`: configure highlights, locals, folds, indents, tags, textobjects, rainbows, and injections.
-- \`rules\`: configure Tree-sitter fields, precedence, aliases, hidden paths, wrapping, associativity, conflicts, and token behavior.
-- \`ast\`: configure generated AST node kinds and facade fields.
-- \`formatter\`: configure formatter block nodes, list nodes, and literal spacing hints.
-- \`lsp\`: configure document symbol and diagnostic node lists.
-`;
-}
-
-function generateHelixLanguageSource(
-  name: string,
-  metadata: TreeSitterMetadata,
-): string {
-  const fileTypes = languageFileTypes(name, metadata)
-    .map((fileType) => JSON.stringify(fileType))
-    .join(", ");
-  return `[[language]]
-name = ${JSON.stringify(name)}
-scope = ${JSON.stringify(languageScope(name, metadata))}
-file-types = [${fileTypes}]
-roots = []
-comment-token = ${JSON.stringify(languageComment(metadata))}
-
-[[grammar]]
-name = ${JSON.stringify(name)}
-source = { path = "../.." }
-`;
-}
-
-function generateNvimReadmeSource(name: string): string {
-  return `# Neovim scaffold for ${name}
-
-Copy the generated \`queries/\` directory into your Neovim tree-sitter runtime path for this language.
-`;
-}
-
-function generateVsCodePackageSource(
-  name: string,
-  metadata: TreeSitterMetadata,
-): string {
-  return `${
-    JSON.stringify(
-      {
-        name: `${name}-language`,
-        displayName: `${name} language`,
-        version: "0.0.0",
-        engines: { vscode: "^1.90.0" },
-        contributes: {
-          languages: [
-            {
-              id: name,
-              aliases: [name],
-              extensions: languageFileTypes(name, metadata).map((fileType) =>
-                fileType.startsWith(".") ? fileType : `.${fileType}`
-              ),
-              configuration: "./language-configuration.json",
-            },
-          ],
-        },
-      },
-      null,
-      2,
-    )
-  }\n`;
-}
-
-function generateVsCodeLanguageConfigurationSource(
-  metadata: TreeSitterMetadata,
-): string {
-  const comment = languageComment(metadata);
-  return `${
-    JSON.stringify(
-      {
-        comments: {
-          lineComment: comment,
-        },
-        brackets: [
-          ["{", "}"],
-          ["[", "]"],
-          ["(", ")"],
-        ],
-        autoClosingPairs: [
-          { open: "{", close: "}" },
-          { open: "[", close: "]" },
-          { open: "(", close: ")" },
-          { open: '"', close: '"' },
-        ],
-      },
-      null,
-      2,
-    )
-  }\n`;
-}
-
-function generateVsCodeSyntaxReadmeSource(name: string): string {
-  return `# VS Code syntax scaffold for ${name}
-
-This directory is reserved for a TextMate grammar if you need VS Code syntax highlighting without tree-sitter support.
-`;
-}
-
-function generateCorpusTestSource(sample: string): string {
-  return `==================
-basic
-==================
-${sample}
-
----
-
-(source_file)
-`;
-}
-
-function generateTokenizerSmokeTestSource(sample: string): string {
-  return `import { lex } from "../tokenizer.ts";
-
-Deno.test("tokenizer smoke", () => {
-  const tokens = lex(${JSON.stringify(sample)});
-  if (tokens.at(-1)?.kind !== "eof") {
-    throw new Error("Expected eof token");
-  }
-});
-`;
-}
-
-function generateLspReadmeSource(name: string): string {
-  return `# ${name} LSP scaffold
-
-This is a minimal state container for a language server. Wire it to a JSON-RPC transport and a parser implementation before using it as a production LSP.
-`;
-}
-
-function generateFormatterReadmeSource(name: string): string {
-  return `# ${name} formatter scaffold
-
-The generated formatter preserves source text by default. Add node-specific formatting once the language syntax is stable.
-`;
-}
-
-function languageScope(name: string, metadata: TreeSitterMetadata): string {
-  return metadata.language?.scope ?? `source.${name}`;
-}
-
-function languageFileTypes(
-  name: string,
-  metadata: TreeSitterMetadata,
-): string[] {
-  return metadata.language?.fileTypes ?? [name];
-}
-
-function languageComment(metadata: TreeSitterMetadata): string {
-  return metadata.language?.comment ?? "//";
-}
-
-function astFieldsForNode(
-  nodeName: string,
-  metadata: TreeSitterMetadata,
-): Array<{ name: string; treeField: string }> {
-  const astFields = metadata.ast?.nodes?.[nodeName]?.fields;
-  if (astFields) {
-    return Object.entries(astFields).map(([name, treeField]) => ({
-      name,
-      treeField,
-    }));
-  }
-
-  const ruleFields = metadata.rules?.[nodeName]?.fields;
-  if (!ruleFields) return [];
-  return [...new Set(Object.values(ruleFields))].map((field) => ({
-    name: field,
-    treeField: field,
-  }));
-}
-
-function astTypeName(name: string): string {
-  return `${pascalCase(name)}AstNode`;
-}
-
-function pascalCase(name: string): string {
-  const converted = name
-    .split(/[^A-Za-z0-9]+/)
-    .filter(Boolean)
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-    .join("");
-  return /^[A-Za-z]/.test(converted) ? converted : `Node${converted}`;
-}
-
-function quoteProperty(name: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);
-}
-
-function generateGrammarSample(
-  grammar: EbnfGrammar,
-  rootRuleName: string,
-): string {
-  const root = grammar.rules.find((rule) => rule.name === rootRuleName) ??
-    grammar.rules[0];
-  const sample = sampleExpression(grammar, root.expression, new Set()).trim();
-  return sample.length === 0 ? "example" : sample;
-}
-
-function sampleExpression(
-  grammar: EbnfGrammar,
-  expression: EbnfExpression,
-  seenRules: Set<string>,
-): string {
-  switch (expression.kind) {
-    case "literal":
-      return expression.value;
-    case "ref":
-      return sampleRef(grammar, expression.name, seenRules);
-    case "sequence":
-      return joinSampleParts(
-        expression.items.map((item) =>
-          sampleExpression(grammar, item, seenRules)
-        )
-          .filter((part) => part.length > 0),
-      );
-    case "choice":
-      return expression.options.length === 0
-        ? ""
-        : sampleExpression(grammar, expression.options[0], seenRules);
-    case "optional":
-    case "repeat":
-      return "";
-    case "repeat1":
-      return sampleExpression(grammar, expression.expression, seenRules);
-    case "separated": {
-      const item = sampleExpression(grammar, expression.item, seenRules);
-      const separator = sampleExpression(
-        grammar,
-        expression.separator,
-        seenRules,
-      );
-      return joinSampleParts(
-        [item, separator, item].filter((part) => part.length > 0),
-      );
-    }
-  }
-}
-
-function sampleRef(
-  grammar: EbnfGrammar,
-  name: string,
-  seenRules: Set<string>,
-): string {
-  const token = grammar.tokens.find((candidate) => candidate.name === name);
-  if (token?.kind === "token") return sampleToken(name);
-  if (name === "ident") return "example";
-  if (name === "int" || name === "number") return "1";
-  if (name === "string") return `"text"`;
-  if (name === "char") return `'x'`;
-  if (name === "newline") return "\n";
-  if (name === "indent" || name === "dedent") return "";
-  if (name === "fenced_text") return "```text\nsample\n```";
-  if (name === "fenced_template") return "```template\nsample\n```";
-
-  if (seenRules.has(name)) return "";
-  const rule = grammar.rules.find((candidate) => candidate.name === name);
-  if (!rule) return name;
-  const nextSeen = new Set(seenRules);
-  nextSeen.add(name);
-  return sampleExpression(grammar, rule.expression, nextSeen);
-}
-
-function sampleToken(name: string): string {
-  if (name.includes("int") || name.includes("number")) return "1";
-  if (name.includes("string")) return `"text"`;
-  return "example";
-}
-
-function joinSampleParts(parts: string[]): string {
-  let output = "";
-  for (const part of parts) {
-    if (output.length === 0) {
-      output = part;
-      continue;
-    }
-    if (/^[,.;:)\]}]/.test(part) || /[(\[{]$/.test(output)) {
-      output += part;
-    } else if (part === "\n" || output.endsWith("\n")) {
-      output += part;
-    } else {
-      output += ` ${part}`;
-    }
-  }
-  return output;
-}
-
 function validateTreeSitterMetadataSemantics(
   grammar: EbnfGrammar,
   rootRuleName: string,
   metadata?: TreeSitterMetadata,
 ): void {
   if (!metadata) return;
-  const knownRules = new Set(grammar.rules.map((rule) => rule.name));
-  for (const token of grammar.tokens) knownRules.add(token.name);
-  knownRules.add("source_file");
-  for (const builtin of treeSitterBuiltins) knownRules.add(builtin);
+  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
+  const knownRules = collectGeneratedTreeSitterNodeNames(
+    grammar,
+    {},
+    rootRuleName,
+  );
 
   const seenAliasNodes = new Set<string>();
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
+    if (ruleName !== "source_file" && !reachableRules.has(ruleName)) {
+      throw new Error(
+        `Metadata rule '${ruleName}' is unreachable from root rule '${rootRuleName}'`,
+      );
+    }
     for (const [path, pathMeta] of Object.entries(ruleMeta.paths ?? {})) {
       const aliasName = pathMeta.alias_node;
       if (!aliasName) continue;
@@ -2907,9 +1024,6 @@ function validateTreeSitterMetadataSemantics(
   }
 
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
-    if (ruleName !== "source_file" && !knownRules.has(ruleName)) {
-      throw new Error(`Unknown metadata rule '${ruleName}'`);
-    }
     if (ruleMeta.wrap) validateWrap(ruleMeta.wrap, ruleName);
     const expression = ruleName === "source_file"
       ? grammar.rules.find((rule) => rule.name === rootRuleName)?.expression
@@ -2931,11 +1045,11 @@ export function validateTreeSitterGenerationMetadataSemantics(
   metadata: TreeSitterMetadata = {},
 ): void {
   validateTreeSitterMetadataSemantics(grammar, rootRuleName, metadata);
-  validateTreeSitterQueryMetadata(grammar, metadata);
+  validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
 }
 
-/** Validates workbench metadata semantics against a parsed grammar. */
-export function validateWorkbenchGenerationMetadataSemantics(
+/** Validates all generation metadata semantics against a parsed grammar. */
+export function validateGenerationMetadataSemantics(
   grammar: EbnfGrammar,
   rootRuleName: string,
   metadata: TreeSitterMetadata = {},
@@ -2945,66 +1059,98 @@ export function validateWorkbenchGenerationMetadataSemantics(
     rootRuleName,
     metadata,
   );
-  validateWorkbenchMetadataSemantics(grammar, metadata);
-}
-
-/** Validates all generation metadata semantics against a parsed grammar. */
-export function validateGenerationMetadataSemantics(
-  grammar: EbnfGrammar,
-  rootRuleName: string,
-  metadata: TreeSitterMetadata = {},
-): void {
-  validateWorkbenchGenerationMetadataSemantics(
-    grammar,
-    rootRuleName,
-    metadata,
-  );
 }
 
 function validateTreeSitterQueryMetadata(
   grammar: EbnfGrammar,
   metadata: TreeSitterMetadata,
+  rootRuleName: string,
 ): void {
   const queries = metadata.queries;
   if (!queries) return;
 
-  validateTreeSitterRainbowsMetadata(grammar, metadata, queries.rainbows);
-  validateTreeSitterInjectionsMetadata(grammar, metadata, queries.injections);
+  validateTreeSitterRainbowsMetadata(
+    grammar,
+    metadata,
+    rootRuleName,
+    queries.rainbows,
+  );
+  validateTreeSitterInjectionsMetadata(
+    grammar,
+    metadata,
+    rootRuleName,
+    queries.injections,
+  );
   validateCaptureMetadata(
     grammar,
     metadata,
+    rootRuleName,
     queries.highlights?.entries,
     "highlight",
   );
   validateCaptureSelectorsMetadata(
     grammar,
     metadata,
+    rootRuleName,
     queries.highlights?.defaults?.suppress,
     "highlight default suppression",
   );
-  validateHighlightCoverageIgnoreMetadata(grammar, metadata);
-  validateCaptureMetadata(grammar, metadata, queries.locals, "locals");
-  validateCaptureMetadata(grammar, metadata, queries.folds, "fold");
-  validateCaptureMetadata(grammar, metadata, queries.indents, "indent");
-  validateCaptureMetadata(grammar, metadata, queries.tags, "tag");
-  validateCaptureMetadata(grammar, metadata, queries.textobjects, "textobject");
+  validateHighlightCoverageIgnoreMetadata(grammar, metadata, rootRuleName);
+  validateCaptureMetadata(
+    grammar,
+    metadata,
+    rootRuleName,
+    queries.locals,
+    "locals",
+  );
+  validateCaptureMetadata(
+    grammar,
+    metadata,
+    rootRuleName,
+    queries.folds,
+    "fold",
+  );
+  validateCaptureMetadata(
+    grammar,
+    metadata,
+    rootRuleName,
+    queries.indents,
+    "indent",
+  );
+  validateCaptureMetadata(
+    grammar,
+    metadata,
+    rootRuleName,
+    queries.tags,
+    "tag",
+  );
+  validateCaptureMetadata(
+    grammar,
+    metadata,
+    rootRuleName,
+    queries.textobjects,
+    "textobject",
+  );
 }
 
 function validateHighlightCoverageIgnoreMetadata(
   grammar: EbnfGrammar,
   metadata: TreeSitterMetadata,
+  rootRuleName: string,
 ): void {
   const ignore = metadata.queries?.highlights?.defaults?.ignore;
   if (!ignore) return;
   validateCaptureSelectorsMetadata(
     grammar,
     metadata,
+    rootRuleName,
     ignore,
     "highlight coverage ignore",
   );
-  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+  const knownNodes = collectGeneratedTreeSitterNodeNames(
     grammar,
     metadata,
+    rootRuleName,
   );
   for (const entry of ignore) {
     if (!knownNodes.has(entry.parent)) {
@@ -3018,16 +1164,23 @@ function validateHighlightCoverageIgnoreMetadata(
 function validateCaptureMetadata(
   grammar: EbnfGrammar,
   fullMetadata: TreeSitterMetadata,
+  rootRuleName: string,
   metadata: TreeSitterCaptureQueryEntry[] | undefined,
   context: string,
 ): void {
   if (!metadata) return;
 
-  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+  const knownNodes = collectGeneratedTreeSitterNodeNames(
     grammar,
     fullMetadata,
+    rootRuleName,
   );
-  const terminals = new Set(collectTerminals(grammar));
+  const terminals = new Set(
+    collectReachableTerminals(
+      grammar,
+      collectReachableRuleNames(grammar, rootRuleName),
+    ),
+  );
   for (const capture of metadata) {
     if (isRawQueryEntry(capture)) continue;
     if (capture.node && !knownNodes.has(capture.node)) {
@@ -3044,16 +1197,23 @@ function validateCaptureMetadata(
 function validateCaptureSelectorsMetadata(
   grammar: EbnfGrammar,
   fullMetadata: TreeSitterMetadata,
+  rootRuleName: string,
   metadata: TreeSitterCaptureSelectorMetadata[] | undefined,
   context: string,
 ): void {
   if (!metadata) return;
 
-  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+  const knownNodes = collectGeneratedTreeSitterNodeNames(
     grammar,
     fullMetadata,
+    rootRuleName,
   );
-  const terminals = new Set(collectTerminals(grammar));
+  const terminals = new Set(
+    collectReachableTerminals(
+      grammar,
+      collectReachableRuleNames(grammar, rootRuleName),
+    ),
+  );
   for (const selector of metadata) {
     if (selector.node && !knownNodes.has(selector.node)) {
       throw new Error(`Unknown ${context} node '${selector.node}'`);
@@ -3250,82 +1410,18 @@ function rawHighlightPatternCapturesContext(
   return /@\w[\w.-]*/.test(pattern.slice(childIndex + child.length));
 }
 
-function validateWorkbenchMetadataSemantics(
-  grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata,
-): void {
-  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
-    grammar,
-    metadata,
-  );
-
-  if (metadata.language?.scope !== undefined) {
-    if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(metadata.language.scope)) {
-      throw new Error(`Invalid language scope '${metadata.language.scope}'`);
-    }
-  }
-  for (const fileType of metadata.language?.fileTypes ?? []) {
-    if (!/^[A-Za-z0-9_.+-]+$/.test(fileType)) {
-      throw new Error(`Invalid language file type '${fileType}'`);
-    }
-  }
-
-  for (const node of Object.keys(metadata.ast?.nodes ?? {})) {
-    if (!knownNodes.has(node)) throw new Error(`Unknown AST node '${node}'`);
-  }
-  for (
-    const [node, nodeMetadata] of Object.entries(
-      metadata.ast?.nodes ?? {},
-    )
-  ) {
-    if (
-      nodeMetadata.kind && !/^[A-Za-z][A-Za-z0-9_-]*$/.test(nodeMetadata.kind)
-    ) {
-      throw new Error(
-        `Invalid AST kind '${nodeMetadata.kind}' on node '${node}'`,
-      );
-    }
-  }
-
-  for (const node of metadata.formatter?.blocks ?? []) {
-    if (!knownNodes.has(node)) {
-      throw new Error(`Unknown formatter block '${node}'`);
-    }
-  }
-  for (const node of metadata.formatter?.lists ?? []) {
-    if (!knownNodes.has(node)) {
-      throw new Error(`Unknown formatter list '${node}'`);
-    }
-  }
-  const terminals = new Set(collectTerminals(grammar));
-  for (const literal of Object.keys(metadata.formatter?.spacing ?? {})) {
-    if (!terminals.has(literal)) {
-      throw new Error(`Unknown formatter spacing literal '${literal}'`);
-    }
-  }
-
-  for (const node of metadata.lsp?.documentSymbols ?? []) {
-    if (!knownNodes.has(node)) {
-      throw new Error(`Unknown LSP document symbol node '${node}'`);
-    }
-  }
-  for (const node of metadata.lsp?.diagnostics ?? []) {
-    if (!knownNodes.has(node)) {
-      throw new Error(`Unknown LSP diagnostic node '${node}'`);
-    }
-  }
-}
-
 function validateTreeSitterRainbowsMetadata(
   grammar: EbnfGrammar,
   fullMetadata: TreeSitterMetadata,
+  rootRuleName: string,
   metadata?: TreeSitterRainbowsMetadata,
 ): void {
   if (!metadata) return;
 
-  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+  const knownNodes = collectGeneratedTreeSitterNodeNames(
     grammar,
     fullMetadata,
+    rootRuleName,
   );
   for (const scope of metadata.scopes ?? []) {
     if (!knownNodes.has(scope)) {
@@ -3333,7 +1429,12 @@ function validateTreeSitterRainbowsMetadata(
     }
   }
 
-  const terminals = new Set(collectTerminals(grammar));
+  const terminals = new Set(
+    collectReachableTerminals(
+      grammar,
+      collectReachableRuleNames(grammar, rootRuleName),
+    ),
+  );
   for (const bracket of metadata.brackets ?? []) {
     if (!terminals.has(bracket)) {
       throw new Error(`Unknown rainbow bracket literal '${bracket}'`);
@@ -3344,13 +1445,15 @@ function validateTreeSitterRainbowsMetadata(
 function validateTreeSitterInjectionsMetadata(
   grammar: EbnfGrammar,
   fullMetadata: TreeSitterMetadata,
+  rootRuleName: string,
   metadata?: TreeSitterInjectionQueryEntry[],
 ): void {
   if (!metadata) return;
 
-  const knownNodes = collectKnownTreeSitterNodeNamesWithMetadata(
+  const knownNodes = collectGeneratedTreeSitterNodeNames(
     grammar,
     fullMetadata,
+    rootRuleName,
   );
   for (const injection of metadata) {
     if (isRawQueryEntry(injection)) continue;
@@ -3363,20 +1466,27 @@ function validateTreeSitterInjectionsMetadata(
   }
 }
 
-function collectKnownTreeSitterNodeNames(grammar: EbnfGrammar): Set<string> {
-  const names = new Set<string>(grammar.rules.map((rule) => rule.name));
-  for (const token of grammar.tokens) names.add(token.name);
-  names.add("source_file");
-  for (const builtin of treeSitterBuiltins) names.add(builtin);
-  return names;
-}
-
-function collectKnownTreeSitterNodeNamesWithMetadata(
+function collectGeneratedTreeSitterNodeNames(
   grammar: EbnfGrammar,
   metadata: TreeSitterMetadata,
+  rootRuleName: string,
 ): Set<string> {
-  const names = collectKnownTreeSitterNodeNames(grammar);
-  for (const ruleMeta of Object.values(metadata.rules ?? {})) {
+  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
+  const reachableRefs = collectReachableRefs(grammar, reachableRules);
+  const names = new Set<string>(["source_file"]);
+
+  for (const rule of grammar.rules) {
+    if (reachableRules.has(rule.name)) names.add(rule.name);
+  }
+  for (const token of grammar.tokens) {
+    if (token.kind === "skip" || reachableRefs.has(token.name)) {
+      names.add(token.name);
+    }
+  }
+  for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
+    if (ruleName !== "source_file" && !reachableRules.has(ruleName)) {
+      continue;
+    }
     for (const pathMeta of Object.values(ruleMeta.paths ?? {})) {
       if (pathMeta.alias_node) names.add(pathMeta.alias_node);
       if (pathMeta.alias_ref) names.add(pathMeta.alias_ref);
@@ -3796,28 +1906,13 @@ function resolveRenderableRef(
   name: string,
   context: RenderContext,
 ): EbnfExpression {
-  switch (name) {
-    case "newline":
-    case "indent":
-    case "dedent":
-      throw new Error(`Cannot inline builtin token '${name}'`);
-    default: {
-      const target = context.ruleExpressions.get(name);
-      if (!target) throw new Error(`Cannot inline unknown rule '${name}'`);
-      return target;
-    }
-  }
+  const target = context.ruleExpressions.get(name);
+  if (!target) throw new Error(`Cannot inline unknown rule '${name}'`);
+  return target;
 }
 
 function renderRuleRef(name: string): string {
-  if (name === "newline") return "$.line_end";
-  if (name === "indent") return "$.line_indent";
-  if (name === "dedent") {
-    throw new Error(
-      "Tree-sitter backend does not support the indentation stack required by 'dedent'",
-    );
-  }
-  return lexicalBuiltins.has(name) ? `$.${name}` : `$.${name}`;
+  return `$.${name}`;
 }
 
 function applyNodeAlias(
@@ -4043,73 +2138,32 @@ function visit(expression: EbnfExpression, terminals: Set<string>): void {
   }
 }
 
-function visitRefs(
+function visitRefExpressions(
   expression: EbnfExpression,
-  callback: (name: string) => void,
+  callback: (ref: Extract<EbnfExpression, { kind: "ref" }>) => void,
 ): void {
   switch (expression.kind) {
     case "ref":
-      callback(expression.name);
+      callback(expression);
       return;
     case "literal":
       return;
     case "sequence":
-      for (const item of expression.items) visitRefs(item, callback);
+      for (const item of expression.items) visitRefExpressions(item, callback);
       return;
     case "choice":
-      for (const option of expression.options) visitRefs(option, callback);
+      for (const option of expression.options) {
+        visitRefExpressions(option, callback);
+      }
       return;
     case "optional":
     case "repeat":
     case "repeat1":
-      visitRefs(expression.expression, callback);
+      visitRefExpressions(expression.expression, callback);
       return;
     case "separated":
-      visitRefs(expression.item, callback);
-      visitRefs(expression.separator, callback);
+      visitRefExpressions(expression.item, callback);
+      visitRefExpressions(expression.separator, callback);
       return;
   }
-}
-
-function hasRef(expression: EbnfExpression, name: string): boolean {
-  let found = false;
-  visitRefs(expression, (ref) => {
-    if (ref === name) found = true;
-  });
-  return found;
-}
-
-function usesLayoutTokens(grammar: EbnfGrammar): boolean {
-  for (const rule of grammar.rules) {
-    if (hasLayoutRef(rule.expression)) return true;
-  }
-  return false;
-}
-
-function hasLayoutRef(expression: EbnfExpression): boolean {
-  switch (expression.kind) {
-    case "ref":
-      return expression.name === "newline" ||
-        expression.name === "indent" ||
-        expression.name === "dedent";
-    case "literal":
-      return false;
-    case "sequence":
-      return expression.items.some(hasLayoutRef);
-    case "choice":
-      return expression.options.some(hasLayoutRef);
-    case "optional":
-    case "repeat":
-    case "repeat1":
-      return hasLayoutRef(expression.expression);
-    case "separated":
-      return hasLayoutRef(expression.item) ||
-        hasLayoutRef(expression.separator);
-  }
-}
-
-function formatStringArray(values: string[]): string {
-  if (values.length === 0) return "[]";
-  const items = values.map((value) => `  ${JSON.stringify(value)},`).join("\n");
-  return `[\n${items}\n]`;
 }

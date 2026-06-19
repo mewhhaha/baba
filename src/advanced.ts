@@ -1,5 +1,6 @@
 /**
- * Advanced baba APIs for callers that need individual generation phases.
+ * Advanced baba APIs for callers that need individual Tree-sitter compiler
+ * phases.
  *
  * Most users should import from `@mewhhaha/baba` and call `generate()`.
  *
@@ -12,17 +13,14 @@ export type {
   EbnfGrammar,
   EbnfRule,
   EbnfTokenDeclaration,
-  GenerateBackend,
   GeneratedBundle,
   GeneratedFile,
   GenerateOptions,
-  GeneratePreset,
-  LexicalSpec,
-  LexicalTokenSpec,
   SourceSpan,
   TreeSitterCaptureMetadata,
   TreeSitterExtra,
   TreeSitterInjectionMetadata,
+  TreeSitterInjectionQueryEntry,
   /** @deprecated Use `BabaMetadata`. */
   TreeSitterMetadata,
   TreeSitterPathMetadata,
@@ -31,41 +29,26 @@ export type {
   TreeSitterRuleMetadata,
   TreeSitterRuleToken,
   TreeSitterRuleWrap,
-  WorkbenchAstMetadata,
-  WorkbenchAstNodeMetadata,
-  WorkbenchFormatterMetadata,
-  WorkbenchLanguageMetadata,
-  WorkbenchLspMetadata,
 } from "./ast.ts";
 export {
+  collectGrammarDiagnostics,
+  collectReachabilityDiagnostics,
   collectTerminals,
   collectTreeSitterHighlightDiagnostics,
-  createLexicalSpec,
-  generateAstTypesSource,
-  generateAstVisitorSource,
-  generateFormatterScaffoldSource,
-  generateLexicalManifest,
-  generateLspScaffoldSource,
-  generateParserSource,
-  generateTokenizerSource,
-  generateTreeSitterConfigSource,
   generateTreeSitterFoldsQuery,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,
   generateTreeSitterIndentsQuery,
   generateTreeSitterInjectionsQuery,
   generateTreeSitterLocalsQuery,
+  generateTreeSitterQueries,
   generateTreeSitterRainbowsQuery,
   generateTreeSitterTagsQuery,
   generateTreeSitterTextobjectsQuery,
-  generateWorkbenchBundle,
-  generateWorkbenchQueries,
   validateEbnfGrammar,
   validateGenerationMetadataSemantics,
-  validateParserGrammar,
   validateTreeSitterBackendCapabilities,
   validateTreeSitterGenerationMetadataSemantics,
-  validateWorkbenchGenerationMetadataSemantics,
 } from "./generate.ts";
 export { parseTreeSitterMetadata } from "./metadata.ts";
 export { EbnfError, formatEbnfError, parseEbnf } from "./parser.ts";

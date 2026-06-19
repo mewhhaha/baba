@@ -1,4 +1,4 @@
-import type { GeneratedBundle, GeneratedFile, GeneratePreset } from "./ast.ts";
+import type { GeneratedBundle, GeneratedFile } from "./ast.ts";
 
 type BundleInput = GeneratedFile | readonly [path: string, content: string];
 
@@ -9,7 +9,6 @@ export function generatedFile(path: string, content: string): GeneratedFile {
 
 /** Creates a deterministic generated bundle. */
 export function generatedBundle(
-  preset: GeneratePreset,
   files: Iterable<BundleInput>,
   cleanupPaths: string[] = [],
 ): GeneratedBundle {
@@ -19,8 +18,8 @@ export function generatedBundle(
   normalized.sort((left, right) => left.path.localeCompare(right.path));
   const sortedCleanupPaths = [...new Set(cleanupPaths)].sort();
   return sortedCleanupPaths.length === 0
-    ? { preset, files: normalized }
-    : { preset, files: normalized, cleanupPaths: sortedCleanupPaths };
+    ? { files: normalized }
+    : { files: normalized, cleanupPaths: sortedCleanupPaths };
 }
 
 function isPathContentPair(

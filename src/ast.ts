@@ -58,30 +58,8 @@ export type EbnfExpression =
     span: SourceSpan;
   };
 
-/** Lexical terminals discovered from a grammar. */
-export interface LexicalSpec {
-  /** Literal identifier-like terminals. */
-  keywords: string[];
-  /** Literal symbolic terminals, sorted longest first for scanning. */
-  symbols: string[];
-  /** Emitted regular-expression tokens. */
-  tokens: LexicalTokenSpec[];
-  /** Consumed regular-expression tokens. */
-  skips: LexicalTokenSpec[];
-}
-
-/** A named regular-expression token used by lexical generation. */
-export interface LexicalTokenSpec {
-  /** Token name. */
-  name: string;
-  /** JavaScript regular expression source without surrounding slashes. */
-  pattern: string;
-}
-
-/** Optional metadata for parser, editor, AST, formatter, and LSP generation. */
+/** Optional metadata for Tree-sitter generation and query emission. */
 export interface BabaMetadata {
-  /** Language package/editor identity metadata. */
-  language?: WorkbenchLanguageMetadata;
   /** Extra tokens or rules allowed between tree-sitter tokens. */
   extras?: TreeSitterExtra[];
   /** Word rule used by tree-sitter. */
@@ -94,12 +72,6 @@ export interface BabaMetadata {
   inline?: string[];
   /** Query generation metadata. */
   queries?: TreeSitterQueriesMetadata;
-  /** Typed AST helper generation metadata. */
-  ast?: WorkbenchAstMetadata;
-  /** Formatter scaffold metadata. */
-  formatter?: WorkbenchFormatterMetadata;
-  /** LSP scaffold metadata. */
-  lsp?: WorkbenchLspMetadata;
   /** Per-rule tree-sitter shaping metadata. */
   rules?: Record<string, TreeSitterRuleMetadata>;
 }
@@ -116,7 +88,7 @@ export interface Diagnostic {
   /** Diagnostic severity. Defaults to error for thrown diagnostics. */
   severity?: "error" | "warning" | "information";
   /** Backend that produced the diagnostic, when backend-specific. */
-  backend?: GenerateBackend | string;
+  backend?: "tree-sitter" | string;
   /** Optional EBNF source span. */
   span?: SourceSpan;
   /** Optional metadata object path. */
@@ -125,22 +97,12 @@ export interface Diagnostic {
   sourceLine?: string;
 }
 
-/** Generation preset. */
-export type GeneratePreset = "core" | "workbench";
-
-/** Independently selectable generation backends. */
-export type GenerateBackend = "tree-sitter" | "typescript-ll1";
-
 /** Options for the stable high-level `generate` API. */
 export interface GenerateOptions {
   /** Language/tree-sitter grammar name. */
   name?: string;
   /** Root grammar rule. Defaults to the first rule. */
   rootRule?: string;
-  /** Generation preset. Defaults to `core`. */
-  preset?: GeneratePreset;
-  /** Core preset backends to emit. Defaults to `tree-sitter`. */
-  backends?: readonly GenerateBackend[];
   /** Optional generation metadata. */
   metadata?: BabaMetadata;
 }
@@ -157,34 +119,12 @@ export interface GeneratedFile {
 
 /** Generated file bundle. */
 export interface GeneratedBundle {
-  /** Generation preset used for this bundle. */
-  preset: GeneratePreset;
-  /** Backends emitted by this bundle, when backend selection applies. */
-  backends?: GenerateBackend[];
   /** Deterministically sorted generated files. */
   files: GeneratedFile[];
   /** Relative paths the writer should remove when absent from this bundle. */
   cleanupPaths?: string[];
   /** Non-fatal diagnostics produced while generating the bundle. */
   diagnostics?: Diagnostic[];
-}
-
-/** Options for generating a starter baba project scaffold. */
-export interface GenerateInitOptions {
-  /** Language/package name. Defaults to `dirName` or `language`. */
-  name?: string;
-  /** Directory name used to derive the default language/package name. */
-  dirName?: string;
-}
-
-/** Language identity metadata used by workbench scaffolds. */
-export interface WorkbenchLanguageMetadata {
-  /** Tree-sitter/editor scope, default `source.<name>`. */
-  scope?: string;
-  /** File extensions or names without a leading dot, default `[name]`. */
-  fileTypes?: string[];
-  /** Line comment token, default `//`. */
-  comment?: string;
 }
 
 /** Query generation metadata. */
@@ -316,36 +256,4 @@ export interface TreeSitterPathMetadata {
   inline_path?: boolean;
   /** Hide the node produced at this path. */
   hidden_path?: boolean;
-}
-
-/** Typed AST helper generation metadata. */
-export interface WorkbenchAstMetadata {
-  /** Rule/node-specific AST metadata keyed by tree-sitter node name. */
-  nodes?: Record<string, WorkbenchAstNodeMetadata>;
-}
-
-/** Typed AST metadata for one node. */
-export interface WorkbenchAstNodeMetadata {
-  /** Generated discriminant value, defaulting to the node name. */
-  kind?: string;
-  /** Generated field names mapped to tree-sitter field names. */
-  fields?: Record<string, string>;
-}
-
-/** Formatter scaffold metadata. */
-export interface WorkbenchFormatterMetadata {
-  /** Nodes that should be treated as blocks by the formatter scaffold. */
-  blocks?: string[];
-  /** Nodes that should be treated as lists by the formatter scaffold. */
-  lists?: string[];
-  /** Literal spacing hints keyed by terminal text. */
-  spacing?: Record<string, "tight" | "space" | "newline">;
-}
-
-/** LSP scaffold metadata. */
-export interface WorkbenchLspMetadata {
-  /** Nodes exposed as document symbols. */
-  documentSymbols?: string[];
-  /** Nodes that should be considered for parser diagnostics. */
-  diagnostics?: string[];
 }

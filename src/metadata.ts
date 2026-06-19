@@ -11,11 +11,6 @@ import type {
   TreeSitterRuleMetadata,
   TreeSitterRuleToken,
   TreeSitterRuleWrap,
-  WorkbenchAstMetadata,
-  WorkbenchAstNodeMetadata,
-  WorkbenchFormatterMetadata,
-  WorkbenchLanguageMetadata,
-  WorkbenchLspMetadata,
 } from "./ast.ts";
 import { BabaError } from "./errors.ts";
 
@@ -46,26 +41,16 @@ function parseTreeSitterMetadataObject(
 ): TreeSitterMetadata {
   const object = expectObject(value, path);
   assertKnownKeys(object, path, [
-    "language",
     "extras",
     "word",
     "supertypes",
     "conflicts",
     "inline",
     "queries",
-    "ast",
-    "formatter",
-    "lsp",
     "rules",
   ]);
 
   const metadata: TreeSitterMetadata = {};
-  if (hasKey(object, "language")) {
-    metadata.language = parseLanguageMetadata(
-      object.language,
-      `${path}.language`,
-    );
-  }
   if (hasKey(object, "extras")) {
     metadata.extras = expectArray(object.extras, `${path}.extras`).map((
       extra,
@@ -92,18 +77,6 @@ function parseTreeSitterMetadataObject(
   }
   if (hasKey(object, "queries")) {
     metadata.queries = parseQueriesMetadata(object.queries, `${path}.queries`);
-  }
-  if (hasKey(object, "ast")) {
-    metadata.ast = parseAstMetadata(object.ast, `${path}.ast`);
-  }
-  if (hasKey(object, "formatter")) {
-    metadata.formatter = parseFormatterMetadata(
-      object.formatter,
-      `${path}.formatter`,
-    );
-  }
-  if (hasKey(object, "lsp")) {
-    metadata.lsp = parseLspMetadata(object.lsp, `${path}.lsp`);
   }
   if (hasKey(object, "rules")) {
     const rulesObject = expectObject(object.rules, `${path}.rules`);
@@ -132,29 +105,6 @@ function parseTreeSitterExtra(value: unknown, path: string): TreeSitterExtra {
     return { kind, name: expectString(object.name, `${path}.name`) };
   }
   throwMetadataShape(`Invalid ${path}.kind '${kind}'`);
-}
-
-function parseLanguageMetadata(
-  value: unknown,
-  path: string,
-): WorkbenchLanguageMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["scope", "fileTypes", "comment"]);
-
-  const metadata: WorkbenchLanguageMetadata = {};
-  if (hasKey(object, "scope")) {
-    metadata.scope = expectString(object.scope, `${path}.scope`);
-  }
-  if (hasKey(object, "fileTypes")) {
-    metadata.fileTypes = expectStringArray(
-      object.fileTypes,
-      `${path}.fileTypes`,
-    );
-  }
-  if (hasKey(object, "comment")) {
-    metadata.comment = expectString(object.comment, `${path}.comment`);
-  }
-  return metadata;
 }
 
 function parseQueriesMetadata(
@@ -417,101 +367,6 @@ function parseInjectionMetadata(
     node: expectString(object.node, `${path}.node`),
     language: expectString(object.language, `${path}.language`),
   };
-}
-
-function parseAstMetadata(
-  value: unknown,
-  path: string,
-): WorkbenchAstMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["nodes"]);
-
-  const metadata: WorkbenchAstMetadata = {};
-  if (hasKey(object, "nodes")) {
-    const nodesObject = expectObject(object.nodes, `${path}.nodes`);
-    const nodes: Record<string, WorkbenchAstNodeMetadata> = {};
-    for (const [nodeName, nodeValue] of Object.entries(nodesObject)) {
-      nodes[nodeName] = parseAstNodeMetadata(
-        nodeValue,
-        `${path}.nodes.${nodeName}`,
-      );
-    }
-    metadata.nodes = nodes;
-  }
-  return metadata;
-}
-
-function parseAstNodeMetadata(
-  value: unknown,
-  path: string,
-): WorkbenchAstNodeMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["kind", "fields"]);
-
-  const metadata: WorkbenchAstNodeMetadata = {};
-  if (hasKey(object, "kind")) {
-    metadata.kind = expectString(object.kind, `${path}.kind`);
-  }
-  if (hasKey(object, "fields")) {
-    metadata.fields = expectStringRecord(object.fields, `${path}.fields`);
-  }
-  return metadata;
-}
-
-function parseFormatterMetadata(
-  value: unknown,
-  path: string,
-): WorkbenchFormatterMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["blocks", "lists", "spacing"]);
-
-  const metadata: WorkbenchFormatterMetadata = {};
-  if (hasKey(object, "blocks")) {
-    metadata.blocks = expectStringArray(object.blocks, `${path}.blocks`);
-  }
-  if (hasKey(object, "lists")) {
-    metadata.lists = expectStringArray(object.lists, `${path}.lists`);
-  }
-  if (hasKey(object, "spacing")) {
-    metadata.spacing = parseSpacingRecord(object.spacing, `${path}.spacing`);
-  }
-  return metadata;
-}
-
-function parseSpacingRecord(
-  value: unknown,
-  path: string,
-): Record<string, "tight" | "space" | "newline"> {
-  const object = expectObject(value, path);
-  const record: Record<string, "tight" | "space" | "newline"> = {};
-  for (const [key, item] of Object.entries(object)) {
-    const spacing = expectString(item, `${path}.${key}`);
-    if (spacing !== "tight" && spacing !== "space" && spacing !== "newline") {
-      throwMetadataShape(`Invalid ${path}.${key} '${spacing}'`);
-    }
-    record[key] = spacing;
-  }
-  return record;
-}
-
-function parseLspMetadata(value: unknown, path: string): WorkbenchLspMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["documentSymbols", "diagnostics"]);
-
-  const metadata: WorkbenchLspMetadata = {};
-  if (hasKey(object, "documentSymbols")) {
-    metadata.documentSymbols = expectStringArray(
-      object.documentSymbols,
-      `${path}.documentSymbols`,
-    );
-  }
-  if (hasKey(object, "diagnostics")) {
-    metadata.diagnostics = expectStringArray(
-      object.diagnostics,
-      `${path}.diagnostics`,
-    );
-  }
-  return metadata;
 }
 
 function parseRuleMetadataShape(

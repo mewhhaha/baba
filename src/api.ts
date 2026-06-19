@@ -8,14 +8,14 @@ import type {
 import { generateCoreBundle } from "./backends.ts";
 import { createGenerationContext } from "./context.ts";
 import {
+  collectGrammarDiagnostics,
+  collectReachabilityDiagnostics,
   collectTreeSitterHighlightDiagnostics,
-  generateWorkbenchBundle,
-  validateEbnfGrammar,
 } from "./generate.ts";
-import { generateInitBundle } from "./init.ts";
 import { parseTreeSitterMetadata } from "./metadata.ts";
 import { BabaError, formatDiagnostic, toBabaError } from "./errors.ts";
 import { parseEbnf } from "./parser.ts";
+export { applyBundle } from "./output.ts";
 
 /** Parses EBNF source into a grammar AST. */
 export function parseGrammar(source: string): EbnfGrammar {
@@ -40,12 +40,7 @@ export function validateGrammar(
   grammar: EbnfGrammar,
   options: { rootRule?: string } = {},
 ): Diagnostic[] {
-  try {
-    validateEbnfGrammar(grammar, options);
-    return [];
-  } catch (error) {
-    return [toBabaError(error, "GRAMMAR_VALIDATION_ERROR").toDiagnostic()];
-  }
+  return collectGrammarDiagnostics(grammar, options);
 }
 
 /** Generates a deterministic bundle from EBNF source or a parsed grammar. */
@@ -55,29 +50,14 @@ export function generate(
 ): GeneratedBundle {
   try {
     const context = createGenerationContext(sourceOrGrammar, options);
-    if (context.preset === "workbench") {
-      const bundle = generateWorkbenchBundle(context.grammar, {
-        name: context.name,
+    const diagnostics = [
+      ...collectReachabilityDiagnostics(context.grammar, context.rootRuleName),
+      ...collectTreeSitterHighlightDiagnostics(context.grammar, {
         rootRule: context.rootRuleName,
         metadata: context.metadata,
         skipValidation: true,
-      });
-      return {
-        ...bundle,
-        diagnostics: collectTreeSitterHighlightDiagnostics(context.grammar, {
-          rootRule: context.rootRuleName,
-          metadata: context.metadata,
-          skipValidation: true,
-        }),
-      };
-    }
-    const diagnostics = context.backends.includes("tree-sitter")
-      ? collectTreeSitterHighlightDiagnostics(context.grammar, {
-        rootRule: context.rootRuleName,
-        metadata: context.metadata,
-        skipValidation: true,
-      })
-      : [];
+      }),
+    ];
     const bundle = generateCoreBundle(context);
     return {
       ...bundle,
@@ -89,4 +69,3 @@ export function generate(
 }
 
 export { BabaError, formatDiagnostic };
-export { generateInitBundle };

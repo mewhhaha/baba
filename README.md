@@ -1,52 +1,35 @@
 # baba
 
-EBNF tooling for language projects.
+`baba` compiles explicit EBNF grammars into deterministic Tree-sitter artifacts.
 
-The name comes from:
+Version 1.0 is intentionally narrow:
 
-```text
-Grammar -> Gramma -> Grandma -> Baba
-```
+- parse explicit EBNF with `token` and `skip` declarations;
+- validate grammar and Tree-sitter metadata;
+- generate `grammar.js`;
+- generate Tree-sitter query files under `queries/`;
+- apply generated bundles with manifest-based ownership protection.
 
-baba keeps a grammar as the source of truth, then generates practical syntax
-artifacts from selected backends:
-
-- `grammar.js`: ESM tree-sitter grammar
-- `tree-sitter.json`: Tree-sitter grammar metadata
-- `queries/*.scm`: Tree-sitter highlights, locals, folds, indents, tags,
-  textobjects, rainbows, and injections
-- `lexical.json`: sorted keyword, symbol, token, and skip manifest
-- `tokenizer.ts`: standalone TypeScript tokenizer
-- `parser.ts`: standalone TypeScript recursive-descent parser scaffold
-- workbench scaffold: query bundle, editor config, typed AST helpers, starter
-  tests, LSP skeleton, and formatter skeleton
-
-Tree-sitter-specific concerns such as conflicts, precedence, supertypes, extras,
-field names, aliases, and query shaping live in optional JSON metadata, so the
-grammar stays readable.
-
-Core generation defaults to the Tree-sitter backend. Request `typescript-ll1`
-when you need the standalone predictive parser subset, or `all` when you want
-both backends in one output directory.
+It does not generate a TypeScript parser, tokenizer runtime, formatter, LSP,
+editor extension project, package metadata, or language-specific scanner syntax.
+If a language needs comments, strings, numbers, layout, fenced blocks, or
+embedded WGSL, declare those tokens/rules explicitly or provide a Tree-sitter
+scanner outside baba.
 
 ## Quick Start
 
-Create a grammar file:
+Create a grammar:
 
 ```ebnf
 token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
-token int = /[0-9]+/ ;
+token integer = /[0-9]+/ ;
 skip whitespace = /[ \t\r\n]+/ ;
 
-module = function+ ;
-function = "fn" ident "(" params? ")" block ;
-params = param % "," ;
-param = ident ":" ident ;
-block = "{" statement* "}" ;
-statement = "let" ident "=" int ";" ;
+module = "fn" ident "(" ")" block ;
+block = "{" integer "}" ;
 ```
 
-After publishing, run the CLI directly from JSR:
+Generate Tree-sitter artifacts:
 
 ```sh
 deno run --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
@@ -54,7 +37,7 @@ deno run --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --name tiny
 ```
 
-For local development from this repository, run the same CLI source file:
+From this repository:
 
 ```sh
 deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
@@ -67,190 +50,65 @@ That writes:
 ```text
 generated/
   grammar.js
-  tree-sitter.json
   queries/
+    highlights.scm
+    locals.scm
+    folds.scm
+    indents.scm
+    tags.scm
+    textobjects.scm
+    rainbows.scm
+    injections.scm
+  .baba-manifest.json
 ```
 
-Generate the opt-in workbench scaffold:
+List outputs without writing:
+
+```sh
+deno run --allow-read src/cli.ts grammar.ebnf --list-files
+```
+
+Pass Tree-sitter metadata:
 
 ```sh
 deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --out generated \
   --name tiny \
-  --ts-meta tree-sitter-meta.json \
-  --preset workbench
+  --metadata baba.json
 ```
 
-You can also use explicit subcommands:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts generate grammar.ebnf \
-  --out generated
-
-deno run --allow-read --allow-write src/cli.ts init tiny
-```
-
-That keeps the Tree-sitter files and adds:
-
-```text
-generated/
-  package.json
-  editor/
-  ast/
-  tests/
-  lsp/
-  formatter/
-```
-
-Generate the TypeScript tokenizer/parser backend:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --out generated-ts \
-  --name tiny \
-  --backend typescript-ll1
-```
-
-Use the generated tokenizer from a TypeScript backend output:
-
-```ts
-import { lex } from "./generated-ts/tokenizer.ts";
-
-const tokens = lex(`fn add(a: i32) { let n = 1; }`);
-console.log(tokens.map((token) => [token.kind, token.text]));
-```
-
-Use the generated parser when you want a TypeScript-only scaffold:
-
-```ts
-import { parse } from "./generated-ts/parser.ts";
-
-const result = parse(`fn add(a: i32) { let n = 1; }`);
-if (!result.ok) console.error(result.diagnostics);
-else console.log(result.tree, result.ast);
-```
-
-Generate only the lexical manifest to stdout:
-
-```sh
-deno run --allow-read src/cli.ts grammar.ebnf --backend typescript-ll1
-```
-
-Generate a Tree-sitter grammar at a specific path without building the
-TypeScript parser backend:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --name tiny \
-  --ts-out tree-sitter-tiny/grammar.js
-```
-
-Select core backends explicitly:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --out generated \
-  --backend all
-```
-
-Generate both the local bundle and a tree-sitter output copy:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --out generated \
-  --name tiny \
-  --ts-out tree-sitter-tiny/grammar.js
-```
-
-Generated output directories receive a `.baba-manifest.json` ownership file. On
-later runs, Baba refuses to overwrite or remove files that are modified since
-the last generation or were not previously owned by Baba. The generated-file
-header is informational only; ownership is determined by manifest hashes. Delete
-or move an unowned file before regenerating that path.
-
-Pass tree-sitter metadata when needed:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --out generated \
-  --name tiny \
-  --ts-meta tree-sitter-meta.json
-```
+`--meta` is an alias for `--metadata`. `--ts-meta` remains as a deprecated
+alias.
 
 ## Library API
 
-After publishing, import the public API from JSR:
-
 ```ts
 import {
-  BabaError,
-  formatDiagnostic,
+  applyBundle,
   generate,
-  generateInitBundle,
   parseGrammar,
   parseMetadata,
   validateGrammar,
 } from "jsr:@mewhhaha/baba";
 
-const source = await Deno.readTextFile("grammar.ebnf");
+const grammar = parseGrammar(await Deno.readTextFile("grammar.ebnf"));
+const metadata = parseMetadata(await Deno.readTextFile("baba.json"));
+const diagnostics = validateGrammar(grammar);
 
-try {
-  const grammar = parseGrammar(source);
-  const metadata = parseMetadata(
-    await Deno.readTextFile("tree-sitter-meta.json"),
-  );
-  const diagnostics = validateGrammar(grammar, { rootRule: "module" });
-  if (diagnostics.length > 0) {
-    throw new BabaError(diagnostics[0]);
-  }
-
-  const bundle = generate(grammar, {
-    name: "tiny",
-    rootRule: "module",
-    metadata,
-  });
-
+if (diagnostics.length === 0) {
+  const bundle = generate(grammar, { name: "tiny", metadata });
   for (const diagnostic of bundle.diagnostics ?? []) {
-    console.warn(`${diagnostic.code}: ${diagnostic.message}`);
+    console.warn(diagnostic.code, diagnostic.message);
   }
-
-  for (const file of bundle.files) {
-    await Deno.writeTextFile(`generated/${file.path}`, file.content);
-  }
-  for (const stalePath of bundle.cleanupPaths ?? []) {
-    await Deno.remove(`generated/${stalePath}`).catch(() => {});
-  }
-} catch (error) {
-  if (error instanceof BabaError) {
-    console.error(formatDiagnostic(error));
-  } else {
-    throw error;
-  }
+  await applyBundle(bundle, { root: "generated" });
 }
 ```
 
-Use `generateInitBundle()` when you want to create the same starter project that
-`baba init` writes, but through your own file-system adapter.
+`applyBundle()` writes nested files, records generated ownership in
+`.baba-manifest.json`, and refuses to overwrite or remove modified or unowned
+files.
 
-Inside this repository, use `./src/mod.ts` instead of the JSR specifier.
-
-Granular APIs live under `/advanced`:
-
-```ts
-import {
-  generateParserSource,
-  generateTokenizerSource,
-  generateTreeSitterGrammar,
-  parseTreeSitterMetadata,
-} from "jsr:@mewhhaha/baba/advanced";
-
-const metadata = parseTreeSitterMetadata("{}");
-const tokenizer = generateTokenizerSource(source);
-const parser = generateParserSource(source);
-const grammar = generateTreeSitterGrammar(source, { name: "tiny", metadata });
-```
-
-## EBNF Dialect
+## EBNF
 
 Rules use `name = expression ;`.
 
@@ -259,227 +117,93 @@ module = item+ ;
 item = function | declaration ;
 ```
 
-Expressions support sequences, choices, groups, literals, refs, optional values,
-repetition, one-or-more repetition, and separated lists.
+Terminal declarations are explicit:
 
 ```ebnf
-maybe = item? ;
-many = item* ;
-many_old_style = { item } ;
-one_or_more = item+ ;
-optional_old_style = [ item ] ;
-grouped = (item | other) ;
-list = item % "," ;
-optional_list = (item % ",")? ;
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token STRING = /"([^"\\]|\\.)*"/ ;
+skip WHITESPACE = /[ \t\r\n]+/ ;
+skip LINE_COMMENT = /\/\/[^\n]*/ ;
+
+module = "let" IDENT "=" STRING ;
 ```
 
-Terminals can be declared before rules. `token` declarations emit tokens. `skip`
-declarations are consumed by the tokenizer and become tree-sitter extras.
+Expressions support:
 
-```ebnf
-token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
-token int = /[0-9]+/ ;
-skip whitespace = /[ \t\r\n]+/ ;
+- sequence: `a b c`
+- choice: `a | b`
+- optional: `item?` or `[ item ]`
+- repeat: `item*` or `{ item }`
+- one-or-more: `item+`
+- separated list: `item % ","`
+- grouping: `( item | other )`
 
-module = ident int ;
-```
+There are no implicit token builtins. Names such as `ident`, `string`, `number`,
+`newline`, `indent`, `dedent`, `fenced_text`, and `line_comment` are ordinary
+names and must be declared before use.
 
-Regex literals use `/.../` with escaped `/` when needed. Flags are not
-supported.
+Rules unreachable from the selected root are omitted from generated outputs and
+reported as `UNREACHABLE_RULE` warnings.
 
-Undeclared builtins still work for compact grammars:
+## Metadata
 
-```ebnf
-module = ident int string ;
-```
-
-Current builtin refs include:
-
-- `ident`
-- `int`
-- `number`
-- `string`
-- `char`
-- `fenced_text`
-- `fenced_template`
-- `newline`
-- `indent`
-- `dedent`
-
-Layout tokens are enabled when a grammar references `newline`, `indent`, or
-`dedent`. Fenced blocks are scanned atomically, so indentation inside fenced
-content is ignored. The standalone TypeScript tokenizer/parser supports
-`dedent`; the Tree-sitter backend rejects `dedent` until an external scanner
-layout model is configured.
-
-Language-specific fenced content such as WGSL is not a core builtin. Model it
-with `fenced_text`, a declared token, or a project-specific backend/plugin
-layer, then attach injections through metadata.
-
-## Validation And Diagnostics
-
-baba validates grammar semantics before generation:
-
-- duplicate rule or token names fail
-- rule and token names share one namespace
-- rule names cannot collide with generated tree-sitter builtins
-- unknown rule refs fail
-- unknown root rules fail
-- token regexes must compile and must not match the empty string
-- standalone parser generation rejects left recursion, nullable repetition, and
-  overlapping predictive choices
-- metadata JSON is parsed and validated strictly
-
-Parse errors include source locations:
-
-```text
-Unterminated string literal at 1:10
-module = "unterminated
-         ^
-```
-
-## Tree-Sitter Metadata
-
-Metadata is optional JSON passed through `--ts-meta` or `parseMetadata`. Use it
-for tree-sitter, editor, AST, formatter, and LSP concerns that do not belong in
-the EBNF:
+Metadata is Tree-sitter-specific JSON:
 
 ```json
 {
-  "language": {
-    "scope": "source.tiny",
-    "fileTypes": ["tiny"],
-    "comment": "//"
-  },
-  "extras": [
-    { "kind": "regex", "value": "[ \\t\\r\\n]" },
-    { "kind": "rule", "name": "line_comment" }
-  ],
   "word": "ident",
-  "supertypes": ["expr"],
-  "conflicts": [["expr", "pattern"]],
+  "extras": [{ "kind": "rule", "name": "whitespace" }],
   "rules": {
-    "call": {
-      "fields": {
-        "0": "function",
-        "2": "arguments"
-      },
-      "wrap": { "kind": "prec", "value": 1 }
+    "module": {
+      "paths": {
+        "1": { "field": "name" }
+      }
     }
   },
   "queries": {
     "highlights": {
-      "patterns": ["(function (ident) @function)"],
-      "entries": [
-        { "literal": "fn", "capture": "keyword.function" },
-        { "node": "function", "capture": "function" }
-      ],
-      "defaults": {
-        "suppress": [{ "node": "ident" }],
-        "ignore": [{ "node": "ident", "parent": "type_reference" }]
-      }
+      "entries": [{ "node": "ident", "capture": "function" }],
+      "defaults": { "suppress": [{ "node": "ident" }] }
     },
-    "locals": {
-      "entries": [
-        { "node": "ident", "capture": "local.definition" }
-      ]
-    },
-    "folds": [
-      { "node": "block", "capture": "fold" }
-    ],
-    "indents": [
-      { "literal": "{", "capture": "indent.begin" }
-    ],
-    "tags": [
-      { "node": "function", "capture": "tag.definition" }
-    ],
-    "rainbows": {
-      "scopes": ["function", "block"],
-      "brackets": ["(", "{", "["],
-      "patterns": ["(template) @rainbow.scope"]
-    },
-    "injections": [
-      { "node": "fenced_text_content", "language": "wgsl" },
-      {
-        "pattern": "((shader_body) @injection.content (#set! injection.language \"wgsl\"))"
-      }
-    ]
-  },
-  "ast": {
-    "nodes": {
-      "function": {
-        "kind": "function",
-        "fields": { "name": "name" }
-      }
-    }
-  },
-  "formatter": {
-    "blocks": ["block"],
-    "lists": ["module"],
-    "spacing": { "(": "tight" }
-  },
-  "lsp": {
-    "documentSymbols": ["function"],
-    "diagnostics": ["module"]
+    "locals": [{ "node": "ident", "capture": "local.definition" }],
+    "injections": [{ "node": "shader_body", "language": "wgsl" }]
   }
 }
 ```
 
-Capture query files accept either the original array form or an object with
-`patterns` and `entries`. Raw `pattern` strings are emitted verbatim and are
-validated by Tree-sitter query compilation, not parsed by Baba. Highlight
-entries render before generated defaults, and
-`queries.highlights.defaults.suppress` disables default captures for selected
-nodes or literals. Suppressed nodes and literals are checked against their
-grammar parent contexts; Baba returns a `QUERY_UNCAPTURED_CONTEXT` warning
-diagnostic when a suppressed item appears in a context without an explicit
-highlight capture. Add a raw highlight pattern or a
-`queries.highlights.defaults.ignore` entry with `node` or `literal` plus
-`parent` to silence an intentional omission.
+Supported top-level keys:
 
-Generated tokenizers and the Tree-sitter `line_comment` builtin skip only
-`language.comment`, defaulting to `//`. A grammar that wants `#` comments should
-set `"comment": "#"`; otherwise tokens like `#Tag` remain available to normal
-token matching.
+- `extras`
+- `word`
+- `supertypes`
+- `conflicts`
+- `inline`
+- `rules`
+- `queries`
+
+Metadata does not contain formatter, LSP, editor, package, license, author, or
+binding configuration.
+
+## Removed In 1.0
+
+The following pre-1.0 surfaces were removed:
+
+- `workbench` preset;
+- TypeScript tokenizer/parser generation;
+- implicit token builtins;
+- `fenced_text` and `fenced_template`;
+- implicit `//` comment handling;
+- layout tokens as builtins;
+- formatter, LSP, AST facade, and editor scaffold generators;
+- generated `tree-sitter.json`, `package.json`, and fabricated project metadata;
+- CLI `init`, `--backend`, `--preset`, and `--ts-out`.
 
 ## Development
 
-Run tests:
-
 ```sh
-deno task test
-```
-
-Check public entrypoints:
-
-```sh
-deno task check
-```
-
-Lint:
-
-```sh
+deno fmt --check
 deno lint
+deno task check
+deno task test
+deno publish --dry-run --allow-dirty
 ```
-
-Check the package before publishing:
-
-```sh
-deno task publish:dry-run
-```
-
-Publish when the dry run is clean and the version in `deno.json` has been
-bumped:
-
-```sh
-deno publish
-```
-
-In JSR package settings, set the overview/readme source to `README.md` if you
-want the package page to show this guide instead of the shorter module docs.
-
-## Release Notes
-
-See [CHANGELOG.md](./CHANGELOG.md). The `0.5.0` release makes Tree-sitter the
-default backend, keeps the TypeScript LL(1) backend opt-in, tightens
-generated-file ownership, and emits CLI diagnostics.
