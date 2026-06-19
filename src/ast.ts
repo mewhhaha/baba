@@ -139,7 +139,7 @@ export interface GenerateOptions {
   rootRule?: string;
   /** Generation preset. Defaults to `core`. */
   preset?: GeneratePreset;
-  /** Core preset backends to emit. Defaults to both backends. */
+  /** Core preset backends to emit. Defaults to `tree-sitter`. */
   backends?: readonly GenerateBackend[];
   /** Optional generation metadata. */
   metadata?: BabaMetadata;

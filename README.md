@@ -11,12 +11,13 @@ Grammar -> Gramma -> Grandma -> Baba
 baba keeps a grammar as the source of truth, then generates practical syntax
 artifacts from selected backends:
 
+- `grammar.js`: ESM tree-sitter grammar
+- `tree-sitter.json`: Tree-sitter grammar metadata
+- `queries/*.scm`: Tree-sitter highlights, locals, folds, indents, tags,
+  textobjects, rainbows, and injections
 - `lexical.json`: sorted keyword, symbol, token, and skip manifest
 - `tokenizer.ts`: standalone TypeScript tokenizer
 - `parser.ts`: standalone TypeScript recursive-descent parser scaffold
-- `grammar.js`: ESM tree-sitter grammar
-- `rainbows.scm`: optional tree-sitter rainbow-bracket query
-- `injections.scm`: optional tree-sitter injection query
 - workbench scaffold: query bundle, editor config, typed AST helpers, starter
   tests, LSP skeleton, and formatter skeleton
 
@@ -24,9 +25,9 @@ Tree-sitter-specific concerns such as conflicts, precedence, supertypes, extras,
 field names, aliases, and query shaping live in optional JSON metadata, so the
 grammar stays readable.
 
-Core generation supports independent backends. Request `tree-sitter` when you
-only need Tree-sitter artifacts, or `typescript-ll1` when you need the
-standalone predictive parser subset.
+Core generation defaults to the Tree-sitter backend. Request `typescript-ll1`
+when you need the standalone predictive parser subset, or `all` when you want
+both backends in one output directory.
 
 ## Quick Start
 
@@ -65,10 +66,9 @@ That writes:
 
 ```text
 generated/
-  lexical.json
-  tokenizer.ts
-  parser.ts
   grammar.js
+  tree-sitter.json
+  queries/
 ```
 
 Generate the opt-in workbench scaffold:
@@ -90,13 +90,11 @@ deno run --allow-read --allow-write src/cli.ts generate grammar.ebnf \
 deno run --allow-read --allow-write src/cli.ts init tiny
 ```
 
-That keeps the core files and adds:
+That keeps the Tree-sitter files and adds:
 
 ```text
 generated/
-  tree-sitter.json
   package.json
-  queries/
   editor/
   ast/
   tests/
@@ -104,20 +102,28 @@ generated/
   formatter/
 ```
 
-Use the generated tokenizer:
+Generate the TypeScript tokenizer/parser backend:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated-ts \
+  --name tiny \
+  --backend typescript-ll1
+```
+
+Use the generated tokenizer from a TypeScript backend output:
 
 ```ts
-import { lex } from "./generated/tokenizer.ts";
+import { lex } from "./generated-ts/tokenizer.ts";
 
 const tokens = lex(`fn add(a: i32) { let n = 1; }`);
 console.log(tokens.map((token) => [token.kind, token.text]));
 ```
 
-Use the generated parser when you want a TypeScript-only scaffold without
-tree-sitter:
+Use the generated parser when you want a TypeScript-only scaffold:
 
 ```ts
-import { parse } from "./generated/parser.ts";
+import { parse } from "./generated-ts/parser.ts";
 
 const result = parse(`fn add(a: i32) { let n = 1; }`);
 if (!result.ok) console.error(result.diagnostics);
@@ -127,7 +133,7 @@ else console.log(result.tree, result.ast);
 Generate only the lexical manifest to stdout:
 
 ```sh
-deno run --allow-read src/cli.ts grammar.ebnf
+deno run --allow-read src/cli.ts grammar.ebnf --backend typescript-ll1
 ```
 
 Generate a Tree-sitter grammar at a specific path without building the
@@ -144,7 +150,7 @@ Select core backends explicitly:
 ```sh
 deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --out generated \
-  --backend tree-sitter
+  --backend all
 ```
 
 Generate both the local bundle and a tree-sitter output copy:
@@ -158,8 +164,9 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
 
 Generated output directories receive a `.baba-manifest.json` ownership file. On
 later runs, Baba refuses to overwrite or remove files that are modified since
-the last generation or were not previously owned by Baba. Delete or move an
-unowned file before regenerating that path.
+the last generation or were not previously owned by Baba. The generated-file
+header is informational only; ownership is determined by manifest hashes. Delete
+or move an unowned file before regenerating that path.
 
 Pass tree-sitter metadata when needed:
 
@@ -201,7 +208,6 @@ try {
     name: "tiny",
     rootRule: "module",
     metadata,
-    backends: ["tree-sitter"],
   });
 
   for (const diagnostic of bundle.diagnostics ?? []) {
@@ -474,7 +480,6 @@ want the package page to show this guide instead of the shorter module docs.
 
 ## Release Notes
 
-See [CHANGELOG.md](./CHANGELOG.md). The `0.4.0` release is a correctness release
-with breaking pre-1.0 changes: WGSL-specific builtins were removed from core,
-Tree-sitter `dedent` lowering was replaced with an explicit capability error,
-and `--ts-out` now avoids the TypeScript parser backend unless requested.
+See [CHANGELOG.md](./CHANGELOG.md). The `0.5.0` release makes Tree-sitter the
+default backend, keeps the TypeScript LL(1) backend opt-in, tightens
+generated-file ownership, and emits CLI diagnostics.

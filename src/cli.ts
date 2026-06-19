@@ -5,6 +5,7 @@
  */
 
 import type {
+  Diagnostic,
   GenerateBackend,
   GeneratedBundle,
   GeneratedFile,
@@ -34,6 +35,7 @@ interface Options {
   preset: GeneratePreset;
   backends?: GenerateBackend[];
   listFiles: boolean;
+  diagnosticFormat: "text" | "json";
   help: boolean;
 }
 
@@ -88,6 +90,8 @@ export async function main(args: string[]): Promise<void> {
         ? ["tree-sitter"]
         : undefined),
   });
+  assertDistinctOutputRoots(options);
+  emitDiagnostics(bundle.diagnostics ?? [], options.diagnosticFormat);
 
   if (options.listFiles) {
     console.log(bundle.files.map((file) => file.path).join("\n"));
@@ -114,6 +118,7 @@ function parseArgs(args: string[]): Options {
     name: "grammar",
     preset: "core",
     listFiles: false,
+    diagnosticFormat: "text",
     help: false,
   };
 
@@ -208,6 +213,23 @@ function parseArgs(args: string[]): Options {
       case "--list-files":
         options.listFiles = true;
         break;
+      case "--diagnostic-format": {
+        const format = args[++i];
+        if (!format) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected format after --diagnostic-format",
+          });
+        }
+        if (format !== "text" && format !== "json") {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: `Unknown diagnostic format '${format}'`,
+          });
+        }
+        options.diagnosticFormat = format;
+        break;
+      }
       default:
         if (arg.startsWith("-")) {
           throw new BabaError({
@@ -251,6 +273,7 @@ Options:
   --backend     Core backend: tree-sitter, typescript-ll1, or all
   --ts-meta     JSON metadata for tree-sitter/editor/AST/formatter/LSP generation
   --ts-out      Additional output path for tree-sitter grammar and queries
+  --diagnostic-format  Diagnostic output format: text or json. Defaults to text
   --list-files  Print generated file paths without writing output files`;
 }
 
@@ -270,6 +293,34 @@ function parseBackendList(value: string): GenerateBackend[] {
     }
   }
   return backends;
+}
+
+function emitDiagnostics(
+  diagnostics: readonly Diagnostic[],
+  format: Options["diagnosticFormat"],
+): void {
+  if (diagnostics.length === 0) return;
+  if (format === "json") {
+    console.error(JSON.stringify(diagnostics, null, 2));
+    return;
+  }
+  for (const diagnostic of diagnostics) {
+    console.error(formatDiagnostic(diagnostic));
+  }
+}
+
+function assertDistinctOutputRoots(options: Options): void {
+  if (!options.outDir || !options.treeSitterOut) return;
+  const outRoot = normalizeFsPath(options.outDir);
+  const treeSitterRoot = normalizeFsPath(
+    parentDir(options.treeSitterOut) ?? ".",
+  );
+  if (outRoot !== treeSitterRoot) return;
+  throw new BabaError({
+    code: "CLI_OUTPUT_CONFLICT",
+    message:
+      "--out and --ts-out cannot target the same output directory because each output root has its own ownership manifest.",
+  });
 }
 
 async function initProject(options: Options): Promise<void> {
@@ -311,18 +362,16 @@ async function writeTreeSitterOutput(
     ...grammar,
     path: baseName(treeSitterOut),
   }];
+  const treeSitterConfig = bundle.files.find((file) =>
+    file.path === "tree-sitter.json"
+  );
+  if (treeSitterConfig) files.push(treeSitterConfig);
   const cleanupPaths: string[] = [];
   const queries = treeSitterQueryFiles(bundle);
   for (const file of queries) {
     const name = treeSitterQueryOutputName(file);
     const path = `queries/${name}`;
-    if (bundle.preset === "workbench") {
-      files.push({ ...file, path });
-    } else if (file.content) {
-      files.push({ ...file, path });
-    } else {
-      cleanupPaths.push(path);
-    }
+    files.push({ ...file, path });
   }
   for (const cleanupPath of bundle.cleanupPaths ?? []) {
     if (!cleanupPath.endsWith(".scm")) continue;
@@ -338,51 +387,73 @@ async function writeGeneratedFiles(
 ): Promise<void> {
   await Deno.mkdir(rootDir, { recursive: true });
   const previous = await readManifest(rootDir);
+  const nextPaths = new Set(files.map((file) => file.path));
+  const stalePaths = previous
+    ? Object.keys(previous.files).filter((path) => !nextPaths.has(path))
+    : [];
+  const removePaths = [...new Set([...cleanupPaths, ...stalePaths])];
 
   for (const file of files) {
     await assertCanOverwrite(
       `${rootDir}/${file.path}`,
       file.path,
-      file.content,
       previous,
     );
   }
-  for (const cleanupPath of cleanupPaths) {
+  for (const cleanupPath of removePaths) {
     await assertCanRemove(`${rootDir}/${cleanupPath}`, cleanupPath, previous);
   }
 
-  for (const file of files) {
-    const path = `${rootDir}/${file.path}`;
-    const parent = parentDir(path);
-    if (parent) await Deno.mkdir(parent, { recursive: true });
-    await Deno.writeTextFile(path, file.content);
-  }
-  for (const cleanupPath of cleanupPaths) {
-    await removeIfExists(`${rootDir}/${cleanupPath}`);
-  }
+  const stagedWrites: Array<{ finalPath: string; tempPath: string }> = [];
+  let manifestTempPath: string | null = null;
+  try {
+    for (const file of files) {
+      const path = `${rootDir}/${file.path}`;
+      const parent = parentDir(path);
+      if (parent) await Deno.mkdir(parent, { recursive: true });
+      const tempPath = temporarySiblingPath(path);
+      await Deno.writeTextFile(tempPath, file.content);
+      stagedWrites.push({ finalPath: path, tempPath });
+    }
 
-  const manifestFiles: OutputManifest["files"] = {};
-  for (const file of files) {
-    manifestFiles[file.path] = {
-      hash: await hashText(file.content),
-      ownership: "generated",
+    const manifestFiles: OutputManifest["files"] = {};
+    for (const file of files) {
+      manifestFiles[file.path] = {
+        hash: await hashText(file.content),
+        ownership: "generated",
+      };
+    }
+    const manifest: OutputManifest = {
+      generator: "@mewhhaha/baba",
+      manifestVersion: 1,
+      files: manifestFiles,
     };
+    manifestTempPath = temporarySiblingPath(manifestPath(rootDir));
+    await Deno.writeTextFile(
+      manifestTempPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    );
+
+    for (const staged of stagedWrites) {
+      await Deno.rename(staged.tempPath, staged.finalPath);
+    }
+    for (const cleanupPath of removePaths) {
+      await removeIfExists(`${rootDir}/${cleanupPath}`);
+    }
+    await Deno.rename(manifestTempPath, manifestPath(rootDir));
+    manifestTempPath = null;
+  } catch (error) {
+    for (const staged of stagedWrites) {
+      await removeIfExists(staged.tempPath);
+    }
+    if (manifestTempPath) await removeIfExists(manifestTempPath);
+    throw error;
   }
-  const manifest: OutputManifest = {
-    generator: "@mewhhaha/baba",
-    manifestVersion: 1,
-    files: manifestFiles,
-  };
-  await Deno.writeTextFile(
-    manifestPath(rootDir),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  );
 }
 
 async function assertCanOverwrite(
   path: string,
   relativePath: string,
-  nextContent: string,
   manifest: OutputManifest | null,
 ): Promise<void> {
   let current: string;
@@ -393,10 +464,16 @@ async function assertCanOverwrite(
     throw error;
   }
 
-  if (current === nextContent) return;
+  const manifestEntry = manifest?.files[relativePath];
+  if (!manifestEntry) {
+    throw new BabaError({
+      code: "CLI_OVERWRITE_REFUSED",
+      message:
+        `Refusing to overwrite modified or unowned file '${relativePath}'. Move it aside or delete it before regenerating.`,
+    });
+  }
   const currentHash = await hashText(current);
-  if (manifest?.files[relativePath]?.hash === currentHash) return;
-  if (hasGeneratedMarker(current)) return;
+  if (manifestEntry.hash === currentHash) return;
   throw new BabaError({
     code: "CLI_OVERWRITE_REFUSED",
     message:
@@ -417,9 +494,16 @@ async function assertCanRemove(
     throw error;
   }
 
+  const manifestEntry = manifest?.files[relativePath];
+  if (!manifestEntry) {
+    throw new BabaError({
+      code: "CLI_OVERWRITE_REFUSED",
+      message:
+        `Refusing to remove modified or unowned file '${relativePath}'. Move it aside or delete it before regenerating.`,
+    });
+  }
   const currentHash = await hashText(current);
-  if (manifest?.files[relativePath]?.hash === currentHash) return;
-  if (hasGeneratedMarker(current)) return;
+  if (manifestEntry.hash === currentHash) return;
   throw new BabaError({
     code: "CLI_OVERWRITE_REFUSED",
     message:
@@ -449,10 +533,6 @@ function manifestPath(rootDir: string): string {
   return `${rootDir}/.baba-manifest.json`;
 }
 
-function hasGeneratedMarker(content: string): boolean {
-  return content.includes("Generated by @mewhhaha/baba");
-}
-
 async function hashText(content: string): Promise<string> {
   const bytes = new TextEncoder().encode(content);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -472,6 +552,24 @@ function baseName(path: string): string {
   const normalized = path.replaceAll("\\", "/");
   const slash = normalized.lastIndexOf("/");
   return slash === -1 ? normalized : normalized.slice(slash + 1);
+}
+
+function normalizeFsPath(path: string): string {
+  const normalized = path.replaceAll("\\", "/");
+  const absolute = normalized.startsWith("/")
+    ? normalized
+    : `${Deno.cwd().replaceAll("\\", "/")}/${normalized}`;
+  const parts: string[] = [];
+  for (const part of absolute.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+}
+
+function temporarySiblingPath(path: string): string {
+  return `${path}.tmp-${crypto.randomUUID()}`;
 }
 
 async function removeIfExists(path: string): Promise<void> {

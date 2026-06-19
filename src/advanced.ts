@@ -48,6 +48,7 @@ export {
   generateLspScaffoldSource,
   generateParserSource,
   generateTokenizerSource,
+  generateTreeSitterConfigSource,
   generateTreeSitterFoldsQuery,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,
@@ -63,6 +64,8 @@ export {
   validateGenerationMetadataSemantics,
   validateParserGrammar,
   validateTreeSitterBackendCapabilities,
+  validateTreeSitterGenerationMetadataSemantics,
+  validateWorkbenchGenerationMetadataSemantics,
 } from "./generate.ts";
 export { parseTreeSitterMetadata } from "./metadata.ts";
 export { EbnfError, formatEbnfError, parseEbnf } from "./parser.ts";

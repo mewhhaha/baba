@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0
+
+### Changed
+
+- Core generation now defaults to the Tree-sitter backend only. Use
+  `backends: ["typescript-ll1"]`, CLI `--backend typescript-ll1`, or
+  `--backend all` to generate the standalone TypeScript tokenizer/parser.
+- The core Tree-sitter backend now owns `grammar.js`, `tree-sitter.json`, and
+  the complete `queries/*.scm` set.
+- Parser-only generation no longer validates Tree-sitter query/workbench
+  metadata.
+
+### Fixed
+
+- Generated-file protection now trusts only manifest hashes. A generated marker
+  no longer authorizes overwrite or stale-file deletion.
+- Manifest cleanup now derives stale files from the previous manifest, so
+  backend and preset switches remove files Baba previously owned.
+- CLI generation now emits bundle diagnostics to stderr, including
+  `--list-files`, with `--diagnostic-format text|json`.
+- Generated core tokenizers now receive `language.comment` metadata.
+- Default Tree-sitter highlight captures now filter literals, token captures,
+  literal wrappers, and aliases by the selected root.
+
 ## 0.4.0
 
 ### Added

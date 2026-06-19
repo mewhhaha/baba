@@ -134,6 +134,22 @@ async function captureConsoleLog(
   return logs;
 }
 
+async function captureConsoleError(
+  action: () => Promise<void>,
+): Promise<string[]> {
+  const original = console.error;
+  const logs: string[] = [];
+  console.error = (...args: unknown[]) => {
+    logs.push(args.map(String).join(" "));
+  };
+  try {
+    await action();
+  } finally {
+    console.error = original;
+  }
+  return logs;
+}
+
 async function assertMissing(path: string): Promise<void> {
   try {
     await Deno.stat(path);
@@ -770,7 +786,9 @@ Deno.test("highlight defaults only reference exposed tree-sitter nodes", () => {
 
 Deno.test("highlight defaults start from the selected root rule", () => {
   const source = `
+    token Ghost = /ghost/ ;
     unused = string ;
+    dead = "unused" Ghost ;
     module = "fn" ident ;
   `;
 
@@ -782,6 +800,8 @@ Deno.test("highlight defaults start from the selected root rule", () => {
   });
   assertIncludes(rootedHighlights, "(ident) @variable");
   assertNotIncludes(rootedHighlights, "(string) @string");
+  assertNotIncludes(rootedHighlights, '"unused" @keyword');
+  assertNotIncludes(rootedHighlights, "(Ghost) @constant");
 });
 
 Deno.test("query metadata emits raw patterns and suppresses highlight defaults", () => {
@@ -1011,17 +1031,19 @@ Deno.test("stable API parses validates and generates deterministic bundles", () 
 
   const core = generate(grammar, { name: "tiny", metadata });
   assertEquals(core.preset, "core");
+  assertEquals(core.backends?.join(","), "tree-sitter");
   assertEquals(
     core.files.map((file) => file.path).join(","),
-    "grammar.js,lexical.json,parser.ts,textobjects.scm,tokenizer.ts",
+    "grammar.js,queries/folds.scm,queries/highlights.scm,queries/indents.scm,queries/injections.scm,queries/locals.scm,queries/rainbows.scm,queries/tags.scm,queries/textobjects.scm,tree-sitter.json",
   );
   assertIncludes(
-    core.files.find((file) => file.path === "textobjects.scm")?.content ?? "",
+    core.files.find((file) => file.path === "queries/textobjects.scm")
+      ?.content ?? "",
     "(module) @module.outer",
   );
   assertEquals(
     core.cleanupPaths?.join(","),
-    "injections.scm,rainbows.scm",
+    "lexical.json,parser.ts,tokenizer.ts",
   );
   assertEquals(
     core.files.map((file) => file.path).join(","),
@@ -1048,24 +1070,28 @@ Deno.test("stable API parses validates and generates deterministic bundles", () 
   const cleanupCore = generate(grammar, { name: "tiny" });
   assertEquals(
     cleanupCore.cleanupPaths?.join(","),
-    "injections.scm,rainbows.scm,textobjects.scm",
+    "lexical.json,parser.ts,tokenizer.ts",
   );
 
   const treeSitterOnly = generate(
     `expr = expr "+" ident | ident ;`,
-    { name: "tiny", rootRule: "expr", backends: ["tree-sitter"] },
+    { name: "tiny", rootRule: "expr" },
   );
   assertEquals(treeSitterOnly.backends?.join(","), "tree-sitter");
   assertEquals(
     treeSitterOnly.files.map((file) => file.path).join(","),
-    "grammar.js",
+    "grammar.js,queries/folds.scm,queries/highlights.scm,queries/indents.scm,queries/injections.scm,queries/locals.scm,queries/rainbows.scm,queries/tags.scm,queries/textobjects.scm,tree-sitter.json",
   );
   assertEquals(
     treeSitterOnly.cleanupPaths?.join(","),
-    "injections.scm,lexical.json,parser.ts,rainbows.scm,textobjects.scm,tokenizer.ts",
+    "lexical.json,parser.ts,tokenizer.ts",
   );
   assertThrowsIncludes(
-    () => generate(`expr = expr "+" ident | ident ;`, { rootRule: "expr" }),
+    () =>
+      generate(`expr = expr "+" ident | ident ;`, {
+        rootRule: "expr",
+        backends: ["typescript-ll1"],
+      }),
     "Left-recursive parser rule cycle",
   );
 
@@ -1078,6 +1104,31 @@ Deno.test("stable API parses validates and generates deterministic bundles", () 
     parserOnly.files.map((file) => file.path).join(","),
     "lexical.json,parser.ts,tokenizer.ts",
   );
+  assertEquals(
+    parserOnly.cleanupPaths?.join(","),
+    "grammar.js,queries/folds.scm,queries/highlights.scm,queries/indents.scm,queries/injections.scm,queries/locals.scm,queries/rainbows.scm,queries/tags.scm,queries/textobjects.scm,tree-sitter.json",
+  );
+
+  const parserOnlyWithTreeSitterMetadata = generate(grammar, {
+    name: "tiny",
+    backends: ["typescript-ll1"],
+    metadata: parseMetadata(JSON.stringify({
+      queries: { highlights: [{ node: "missing", capture: "keyword" }] },
+    })),
+  });
+  assertEquals(
+    parserOnlyWithTreeSitterMetadata.files.map((file) => file.path).join(","),
+    "lexical.json,parser.ts,tokenizer.ts",
+  );
+
+  const hashCommentTokenizer = generate(grammar, {
+    name: "tiny",
+    backends: ["typescript-ll1"],
+    metadata: parseMetadata(JSON.stringify({
+      language: { comment: "#" },
+    })),
+  }).files.find((file) => file.path === "tokenizer.ts")?.content ?? "";
+  assertIncludes(hashCommentTokenizer, 'const lineComment = "#";');
 
   const diagnostics = validateGrammar(parseGrammar(`module = missing ;`));
   assertEquals(diagnostics.length, 1);
@@ -1886,16 +1937,86 @@ Deno.test("cli writes requested output destinations", async () => {
     assertIncludes(listLogs.join("\n"), "queries/textobjects.scm");
     await assertMissing(`${dir}/queries/highlights.scm`);
 
+    const diagnosticMetadataPath = `${dir}/diagnostic-meta.json`;
+    await Deno.writeTextFile(
+      diagnosticMetadataPath,
+      JSON.stringify({
+        queries: {
+          highlights: {
+            defaults: { suppress: [{ node: "ident" }] },
+          },
+        },
+      }),
+    );
+    let diagnosticErrors: string[] = [];
+    await captureConsoleLog(async () => {
+      diagnosticErrors = await captureConsoleError(() =>
+        main([
+          "generate",
+          grammarPath,
+          "--ts-meta",
+          diagnosticMetadataPath,
+          "--list-files",
+        ])
+      );
+    });
+    assertIncludes(
+      diagnosticErrors.join("\n"),
+      "QUERY_UNCAPTURED_CONTEXT [warning/tree-sitter]",
+    );
+    let jsonDiagnosticErrors: string[] = [];
+    await captureConsoleLog(async () => {
+      jsonDiagnosticErrors = await captureConsoleError(() =>
+        main([
+          "generate",
+          grammarPath,
+          "--ts-meta",
+          diagnosticMetadataPath,
+          "--list-files",
+          "--diagnostic-format",
+          "json",
+        ])
+      );
+    });
+    const parsedDiagnostics = JSON.parse(
+      jsonDiagnosticErrors.join("\n"),
+    ) as Array<{ code: string; severity: string; backend: string }>;
+    assertEquals(parsedDiagnostics[0].code, "QUERY_UNCAPTURED_CONTEXT");
+    assertEquals(parsedDiagnostics[0].severity, "warning");
+    assertEquals(parsedDiagnostics[0].backend, "tree-sitter");
+
     const outDir = `${dir}/bundle`;
     await main([grammarPath, "--out", outDir]);
-    assertIncludes(await Deno.readTextFile(`${outDir}/lexical.json`), '"fn"');
-    assertIncludes(
-      await Deno.readTextFile(`${outDir}/tokenizer.ts`),
-      "export function lex",
-    );
     assertIncludes(
       await Deno.readTextFile(`${outDir}/grammar.js`),
       "export default grammar({",
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${outDir}/tree-sitter.json`),
+      '"name": "grammar"',
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${outDir}/queries/highlights.scm`),
+      '"fn" @keyword',
+    );
+    assertEquals(await Deno.readTextFile(`${outDir}/queries/locals.scm`), "");
+    await assertMissing(`${outDir}/lexical.json`);
+    await assertMissing(`${outDir}/tokenizer.ts`);
+    await assertMissing(`${outDir}/parser.ts`);
+
+    const allBackendsOutDir = `${dir}/all-backends`;
+    await main([grammarPath, "--out", allBackendsOutDir, "--backend", "all"]);
+    assertIncludes(
+      await Deno.readTextFile(`${allBackendsOutDir}/lexical.json`),
+      '"fn"',
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${allBackendsOutDir}/tokenizer.ts`),
+      "export function lex",
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${allBackendsOutDir}/parser.ts`),
+      "export function parse",
     );
 
     const treeSitterOnlyOutDir = `${dir}/tree-sitter-only`;
@@ -1910,13 +2031,62 @@ Deno.test("cli writes requested output destinations", async () => {
       await Deno.readTextFile(`${treeSitterOnlyOutDir}/grammar.js`),
       "export default grammar({",
     );
+    assertEquals(
+      await Deno.readTextFile(`${treeSitterOnlyOutDir}/queries/locals.scm`),
+      "",
+    );
     await assertMissing(`${treeSitterOnlyOutDir}/parser.ts`);
 
-    await Deno.writeTextFile(`${outDir}/parser.ts`, "user edit\n");
+    await Deno.writeTextFile(`${allBackendsOutDir}/parser.ts`, "user edit\n");
     await assertRejectsIncludes(
-      () => main([grammarPath, "--out", outDir]),
+      () => main([grammarPath, "--out", allBackendsOutDir, "--backend", "all"]),
       "Refusing to overwrite modified or unowned file 'parser.ts'",
     );
+
+    const markerBypassOutDir = `${dir}/marker-bypass`;
+    await main([grammarPath, "--out", markerBypassOutDir, "--backend", "all"]);
+    await Deno.writeTextFile(
+      `${markerBypassOutDir}/parser.ts`,
+      `${await Deno.readTextFile(
+        `${markerBypassOutDir}/parser.ts`,
+      )}\nexport const userCode = true;\n`,
+    );
+    await assertRejectsIncludes(
+      () =>
+        main([grammarPath, "--out", markerBypassOutDir, "--backend", "all"]),
+      "Refusing to overwrite modified or unowned file 'parser.ts'",
+    );
+
+    const staleMarkerOutDir = `${dir}/stale-marker`;
+    await main([grammarPath, "--out", staleMarkerOutDir, "--backend", "all"]);
+    await Deno.writeTextFile(
+      `${staleMarkerOutDir}/parser.ts`,
+      `${await Deno.readTextFile(
+        `${staleMarkerOutDir}/parser.ts`,
+      )}\nexport const userParser = true;\n`,
+    );
+    await assertRejectsIncludes(
+      () => main([grammarPath, "--out", staleMarkerOutDir]),
+      "Refusing to remove modified or unowned file 'parser.ts'",
+    );
+
+    const unownedMarkerOutDir = `${dir}/unowned-marker`;
+    await Deno.mkdir(unownedMarkerOutDir);
+    await Deno.writeTextFile(
+      `${unownedMarkerOutDir}/grammar.js`,
+      "// Generated by @mewhhaha/baba. Do not edit by hand.\nexport const user = true;\n",
+    );
+    await assertRejectsIncludes(
+      () => main([grammarPath, "--out", unownedMarkerOutDir]),
+      "Refusing to overwrite modified or unowned file 'grammar.js'",
+    );
+
+    const staleCleanupOutDir = `${dir}/stale-cleanup`;
+    await main([grammarPath, "--out", staleCleanupOutDir, "--backend", "all"]);
+    await main([grammarPath, "--out", staleCleanupOutDir]);
+    await assertMissing(`${staleCleanupOutDir}/parser.ts`);
+    await assertMissing(`${staleCleanupOutDir}/tokenizer.ts`);
+    await assertMissing(`${staleCleanupOutDir}/lexical.json`);
 
     const duplicateTreeSitterOut = `${dir}/duplicate/tree-sitter/grammar.js`;
     await main([
@@ -1931,6 +2101,18 @@ Deno.test("cli writes requested output destinations", async () => {
       "export default grammar({",
     );
 
+    await assertRejectsIncludes(
+      () =>
+        main([
+          grammarPath,
+          "--out",
+          `${dir}/same-root`,
+          "--ts-out",
+          `${dir}/same-root/grammar.js`,
+        ]),
+      "--out and --ts-out cannot target the same output directory",
+    );
+
     const staleOutDir = `${dir}/stale-bundle`;
     const staleTreeSitterOut = `${dir}/stale-tree-sitter/grammar.js`;
     await main([
@@ -1943,15 +2125,15 @@ Deno.test("cli writes requested output destinations", async () => {
       metadataPath,
     ]);
     assertIncludes(
-      await Deno.readTextFile(`${staleOutDir}/rainbows.scm`),
+      await Deno.readTextFile(`${staleOutDir}/queries/rainbows.scm`),
       "@rainbow.scope",
     );
     assertIncludes(
-      await Deno.readTextFile(`${staleOutDir}/injections.scm`),
+      await Deno.readTextFile(`${staleOutDir}/queries/injections.scm`),
       "@injection.content",
     );
     assertIncludes(
-      await Deno.readTextFile(`${staleOutDir}/textobjects.scm`),
+      await Deno.readTextFile(`${staleOutDir}/queries/textobjects.scm`),
       "(module) @module.outer",
     );
     assertIncludes(
@@ -1978,12 +2160,36 @@ Deno.test("cli writes requested output destinations", async () => {
       "--ts-out",
       staleTreeSitterOut,
     ]);
-    await assertMissing(`${staleOutDir}/rainbows.scm`);
-    await assertMissing(`${staleOutDir}/injections.scm`);
-    await assertMissing(`${staleOutDir}/textobjects.scm`);
-    await assertMissing(`${dir}/stale-tree-sitter/queries/rainbows.scm`);
-    await assertMissing(`${dir}/stale-tree-sitter/queries/injections.scm`);
-    await assertMissing(`${dir}/stale-tree-sitter/queries/textobjects.scm`);
+    assertEquals(
+      await Deno.readTextFile(`${staleOutDir}/queries/rainbows.scm`),
+      "",
+    );
+    assertEquals(
+      await Deno.readTextFile(`${staleOutDir}/queries/injections.scm`),
+      "",
+    );
+    assertEquals(
+      await Deno.readTextFile(`${staleOutDir}/queries/textobjects.scm`),
+      "",
+    );
+    assertEquals(
+      await Deno.readTextFile(
+        `${dir}/stale-tree-sitter/queries/rainbows.scm`,
+      ),
+      "",
+    );
+    assertEquals(
+      await Deno.readTextFile(
+        `${dir}/stale-tree-sitter/queries/injections.scm`,
+      ),
+      "",
+    );
+    assertEquals(
+      await Deno.readTextFile(
+        `${dir}/stale-tree-sitter/queries/textobjects.scm`,
+      ),
+      "",
+    );
 
     const workbenchOutDir = `${dir}/workbench`;
     const workbenchTreeSitterOut = `${dir}/workbench-tree-sitter/grammar.js`;

@@ -1503,12 +1503,19 @@ export function generateTreeSitterGrammar(
 /** Generates an optional tree-sitter rainbow-bracket query. */
 export function generateTreeSitterRainbowsQuery(
   sourceOrGrammar: string | EbnfGrammar,
-  options: { metadata?: TreeSitterMetadata; skipValidation?: boolean } = {},
+  options: {
+    rootRule?: string;
+    metadata?: TreeSitterMetadata;
+    skipValidation?: boolean;
+  } = {},
 ): string {
   const grammar = typeof sourceOrGrammar === "string"
     ? parseEbnf(sourceOrGrammar)
     : sourceOrGrammar;
-  if (!options.skipValidation) validateEbnfGrammar(grammar);
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  if (!options.skipValidation) {
+    validateEbnfGrammar(grammar, { rootRule: rootRuleName });
+  }
   const metadata = options.metadata ?? {};
   if (!options.skipValidation) {
     validateTreeSitterQueryMetadata(grammar, metadata);
@@ -1517,7 +1524,8 @@ export function generateTreeSitterRainbowsQuery(
   const rainbow = metadata.queries?.rainbows;
   const patterns = rainbow?.patterns ?? [];
   const scopes = rainbow?.scopes ?? [];
-  const brackets = rainbow?.brackets ?? collectDefaultRainbowBrackets(grammar);
+  const brackets = rainbow?.brackets ??
+    collectDefaultRainbowBrackets(grammar, rootRuleName);
   const lines: string[] = [...patterns];
   if (patterns.length > 0 && (scopes.length > 0 || brackets.length > 0)) {
     lines.push("");
@@ -1594,6 +1602,7 @@ export function generateTreeSitterHighlightsQuery(
   const explicit = resolveHighlightCaptureSelectors(
     metadata.queries?.highlights?.entries ?? [],
     grammar,
+    rootRuleName,
   );
   const explicitSelectors = new Set(
     explicit.filter(isCaptureMetadata).map(captureSelectorKey),
@@ -2124,6 +2133,7 @@ export function generateWorkbenchQueries(
       skipValidation: options.skipValidation,
     }),
     "rainbows.scm": generateTreeSitterRainbowsQuery(grammar, {
+      rootRule: options.rootRule,
       metadata,
       skipValidation: options.skipValidation,
     }),
@@ -2158,9 +2168,14 @@ function captureSelectorKey(
 function resolveHighlightCaptureSelectors(
   captures: TreeSitterCaptureQueryEntry[],
   grammar: EbnfGrammar,
+  rootRuleName: string,
 ): TreeSitterCaptureQueryEntry[] {
-  const anonymousLiterals = collectAnonymousLiteralTerminals(grammar);
-  const singleLiteralRules = collectSingleLiteralRules(grammar);
+  const reachable = collectReachableRuleNames(grammar, rootRuleName);
+  const anonymousLiterals = collectAnonymousLiteralTerminals(
+    grammar,
+    reachable,
+  );
+  const singleLiteralRules = collectSingleLiteralRules(grammar, reachable);
   return captures.map((capture) => {
     if (isRawQueryEntry(capture)) return capture;
     if (!capture.literal || anonymousLiterals.has(capture.literal)) {
@@ -2191,8 +2206,12 @@ function defaultHighlightQueryEntries(
   rootRuleName: string,
 ): string[] {
   const lines: string[] = [];
-  const terminals = collectTerminals(grammar);
-  const namedLiteralTerminals = collectNamedLiteralRuleTerminals(grammar);
+  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
+  const terminals = collectReachableTerminals(grammar, reachableRules);
+  const namedLiteralTerminals = collectNamedLiteralRuleTerminals(
+    grammar,
+    reachableRules,
+  );
   const exposedNodes = collectExposedTreeSitterNodeNames(
     grammar,
     metadata,
@@ -2241,13 +2260,12 @@ function defaultHighlightQueryEntries(
 
   for (const token of grammar.tokens) {
     if (token.kind !== "token") continue;
-    if (explicitSelectors.has(`node:${token.name}`)) continue;
     const capture = token.name === "ident"
       ? "variable"
       : token.name === "int" || token.name === "number"
       ? "number"
       : "constant";
-    lines.push(`(${token.name}) @${capture}`);
+    pushNode(token.name, capture);
   }
 
   return lines;
@@ -2263,6 +2281,7 @@ function collectExposedTreeSitterNodeNames(
   const tokensByName = new Map(
     grammar.tokens.map((token) => [token.name, token]),
   );
+  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
   const queue = [rootRuleName];
 
   for (let index = 0; index < queue.length; index++) {
@@ -2283,7 +2302,10 @@ function collectExposedTreeSitterNodeNames(
     }
   }
 
-  for (const ruleMeta of Object.values(metadata.rules ?? {})) {
+  for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
+    if (ruleName !== "source_file" && !reachableRules.has(ruleName)) {
+      continue;
+    }
     for (const pathMeta of Object.values(ruleMeta.paths ?? {})) {
       if (pathMeta.alias_node) names.add(pathMeta.alias_node);
       if (pathMeta.alias_ref) names.add(pathMeta.alias_ref);
@@ -2351,9 +2373,25 @@ function collectExpressionRefsInto(
   }
 }
 
-function collectNamedLiteralRuleTerminals(grammar: EbnfGrammar): Set<string> {
+function collectReachableTerminals(
+  grammar: EbnfGrammar,
+  reachableRules: Set<string>,
+): string[] {
   const terminals = new Set<string>();
   for (const rule of grammar.rules) {
+    if (!reachableRules.has(rule.name)) continue;
+    collectLiteralTerminals(rule.expression, terminals);
+  }
+  return [...terminals].sort();
+}
+
+function collectNamedLiteralRuleTerminals(
+  grammar: EbnfGrammar,
+  reachableRules?: Set<string>,
+): Set<string> {
+  const terminals = new Set<string>();
+  for (const rule of grammar.rules) {
+    if (reachableRules && !reachableRules.has(rule.name)) continue;
     collectLiteralOnlyExpressionTerminals(rule.expression, terminals);
   }
   return terminals;
@@ -2382,9 +2420,13 @@ function collectLiteralOnlyExpressionTerminals(
   }
 }
 
-function collectSingleLiteralRules(grammar: EbnfGrammar): Map<string, string> {
+function collectSingleLiteralRules(
+  grammar: EbnfGrammar,
+  reachableRules?: Set<string>,
+): Map<string, string> {
   const rules = new Map<string, string>();
   for (const rule of grammar.rules) {
+    if (reachableRules && !reachableRules.has(rule.name)) continue;
     if (rule.expression.kind === "literal") {
       rules.set(rule.expression.value, rule.name);
     }
@@ -2392,9 +2434,13 @@ function collectSingleLiteralRules(grammar: EbnfGrammar): Map<string, string> {
   return rules;
 }
 
-function collectAnonymousLiteralTerminals(grammar: EbnfGrammar): Set<string> {
+function collectAnonymousLiteralTerminals(
+  grammar: EbnfGrammar,
+  reachableRules?: Set<string>,
+): Set<string> {
   const terminals = new Set<string>();
   for (const rule of grammar.rules) {
+    if (reachableRules && !reachableRules.has(rule.name)) continue;
     if (rule.expression.kind === "literal") continue;
     collectLiteralTerminals(rule.expression, terminals);
   }
@@ -2433,7 +2479,7 @@ function collectLiteralTerminals(
   }
 }
 
-function generateTreeSitterConfigSource(
+export function generateTreeSitterConfigSource(
   name: string,
   metadata: TreeSitterMetadata,
 ): string {
@@ -2876,18 +2922,43 @@ function validateTreeSitterMetadataSemantics(
     }
     validateRuleMetadata(ruleMeta, expression, ruleName);
   }
-
-  validateWorkbenchMetadataSemantics(grammar, metadata);
 }
 
-/** Validates metadata semantics against a parsed grammar. */
-export function validateGenerationMetadataSemantics(
+/** Validates Tree-sitter backend metadata semantics against a parsed grammar. */
+export function validateTreeSitterGenerationMetadataSemantics(
   grammar: EbnfGrammar,
   rootRuleName: string,
   metadata: TreeSitterMetadata = {},
 ): void {
   validateTreeSitterMetadataSemantics(grammar, rootRuleName, metadata);
   validateTreeSitterQueryMetadata(grammar, metadata);
+}
+
+/** Validates workbench metadata semantics against a parsed grammar. */
+export function validateWorkbenchGenerationMetadataSemantics(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+  metadata: TreeSitterMetadata = {},
+): void {
+  validateTreeSitterGenerationMetadataSemantics(
+    grammar,
+    rootRuleName,
+    metadata,
+  );
+  validateWorkbenchMetadataSemantics(grammar, metadata);
+}
+
+/** Validates all generation metadata semantics against a parsed grammar. */
+export function validateGenerationMetadataSemantics(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+  metadata: TreeSitterMetadata = {},
+): void {
+  validateWorkbenchGenerationMetadataSemantics(
+    grammar,
+    rootRuleName,
+    metadata,
+  );
 }
 
 function validateTreeSitterQueryMetadata(
@@ -3314,8 +3385,16 @@ function collectKnownTreeSitterNodeNamesWithMetadata(
   return names;
 }
 
-function collectDefaultRainbowBrackets(grammar: EbnfGrammar): string[] {
-  const terminals = new Set(collectTerminals(grammar));
+function collectDefaultRainbowBrackets(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+): string[] {
+  const terminals = new Set(
+    collectReachableTerminals(
+      grammar,
+      collectReachableRuleNames(grammar, rootRuleName),
+    ),
+  );
   return ["(", ")", "[", "]", "{", "}"].filter((token) => terminals.has(token));
 }
 

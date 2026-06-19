@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.8.0
+
+      - name: Install Tree-sitter CLI
+        run: deno install -g -A npm:tree-sitter-cli@0.25.8
+
+      - name: Check formatting
+        run: deno fmt --check
+
+      - name: Lint
+        run: deno lint
+
+      - name: Type check
+        run: deno task check
+
+      - name: Test
+        run: deno task test
+
+      - name: Publish dry run
+        run: deno task publish:dry-run

@@ -11,7 +11,6 @@
  * const bundle = generate(grammar, {
  *   name: "tiny",
  *   metadata,
- *   backends: ["tree-sitter"],
  * });
  * ```
  *

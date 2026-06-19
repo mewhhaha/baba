@@ -11,9 +11,10 @@ import {
   collectTerminals,
   createLexicalSpec,
   validateEbnfGrammar,
-  validateGenerationMetadataSemantics,
   validateParserGrammar,
   validateTreeSitterBackendCapabilities,
+  validateTreeSitterGenerationMetadataSemantics,
+  validateWorkbenchGenerationMetadataSemantics,
 } from "./generate.ts";
 import { parseEbnf } from "./parser.ts";
 
@@ -59,10 +60,26 @@ export function createGenerationContext(
   } catch (error) {
     throw toBabaError(error, "GRAMMAR_VALIDATION_ERROR");
   }
-  try {
-    validateGenerationMetadataSemantics(grammar, rootRuleName, metadata);
-  } catch (error) {
-    throw toBabaError(error, "METADATA_SEMANTIC_ERROR");
+  if (preset === "workbench") {
+    try {
+      validateWorkbenchGenerationMetadataSemantics(
+        grammar,
+        rootRuleName,
+        metadata,
+      );
+    } catch (error) {
+      throw toBabaError(error, "METADATA_SEMANTIC_ERROR");
+    }
+  } else if (backends.includes("tree-sitter")) {
+    try {
+      validateTreeSitterGenerationMetadataSemantics(
+        grammar,
+        rootRuleName,
+        metadata,
+      );
+    } catch (error) {
+      throw toBabaError(error, "METADATA_SEMANTIC_ERROR");
+    }
   }
   try {
     if (preset === "workbench" || backends.includes("tree-sitter")) {
@@ -90,7 +107,7 @@ export function createGenerationContext(
 function normalizeBackends(
   requested: readonly GenerateBackend[] | undefined,
 ): GenerateBackend[] {
-  const backends = requested ?? ["tree-sitter", "typescript-ll1"];
+  const backends = requested ?? ["tree-sitter"];
   const seen = new Set<GenerateBackend>();
   for (const backend of backends) {
     if (backend !== "tree-sitter" && backend !== "typescript-ll1") {
