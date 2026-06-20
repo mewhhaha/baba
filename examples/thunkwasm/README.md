@@ -14,8 +14,9 @@ This example is intentionally a runnable v0.1 slice of the larger design:
   captured environment, and returns cached results after that.
 - `fun x -> expr` allocates a unary heap closure.
 - `if likely ... then ... else ...` and `if unlikely ...` parse and lower to
-  normal Wasm branches; the hint is preserved in the source language, but MVP
-  Wasm has no stable branch-hint opcode.
+  normal Wasm branches.
+- The thunk `force` helper can emit the `metadata.code.branch_hint` custom
+  section for Deno/V8.
 - `tick(expr)` is a tiny builtin used by the examples to prove a thunk body ran
   exactly once.
 
@@ -72,6 +73,28 @@ Validate the generated TypeScript:
 ```sh
 deno task check
 ```
+
+## Lazy Benchmark
+
+The compiler has a `forceBranchHint` option for cached thunks:
+
+- `none`: omit branch-hint metadata.
+- `metadata`: emit `metadata.code.branch_hint` for the cached/evaluated path.
+
+This example targets Deno/V8, where branch-hint metadata is available. Other
+runtimes may ignore the custom section.
+
+Run:
+
+```sh
+deno task bench:lazy
+```
+
+The benchmark compiles `programs/lazy_bench.tw` twice with identical executable
+code, once without metadata and once with branch-hint metadata. It instantiates
+both modules, resets their linear memory before each sample, and performs
+repeated calls where each call forces the same thunk 500 times. The counters
+verify that the thunk body runs once per call.
 
 ## Helix
 

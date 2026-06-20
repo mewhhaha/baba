@@ -50,6 +50,17 @@ interface CompileResult {
   mainArity: number;
 }
 
+export type ForceBranchHint = "metadata" | "none";
+
+export interface CompileOptions {
+  /**
+   * Emits WebAssembly branch-hint metadata for the thunk-force fast path.
+   * This example targets Deno/V8, where the branch-hint custom section is
+   * supported. Other runtimes may ignore it.
+   */
+  forceBranchHint?: ForceBranchHint;
+}
+
 interface RunResult {
   result: number | string;
   ticks: number;
@@ -59,6 +70,7 @@ interface RunResult {
 }
 
 enum Section {
+  Custom = 0,
   Type = 1,
   Function = 3,
   Table = 4,
@@ -165,16 +177,25 @@ const THUNK_STATE = 20;
 const THUNK_RESULT = 24;
 const THUNK_ENV_BASE = 28;
 
-export function compileThunkWasm(source: string): CompileResult {
+interface BranchHint {
+  codeOffset: number;
+  value: 0 | 1;
+}
+
+export function compileThunkWasm(
+  source: string,
+  options: CompileOptions = {},
+): CompileResult {
   const program = parseProgram(source);
-  return new Compiler(program).compile();
+  return new Compiler(program, normalizeCompileOptions(options)).compile();
 }
 
 export async function runThunkWasm(
   source: string,
   args: readonly number[] = [],
+  options: CompileOptions = {},
 ): Promise<RunResult> {
-  const compiled = compileThunkWasm(source);
+  const compiled = compileThunkWasm(source, options);
   if (args.length !== compiled.mainArity) {
     throw new Error(
       `main expects ${compiled.mainArity} argument(s), got ${args.length}.`,
@@ -187,13 +208,18 @@ export async function runThunkWasm(
     : instantiated;
   const main = instance.exports.main;
   const memory = instance.exports.memory;
+  const reset = instance.exports.reset;
   if (typeof main !== "function") {
     throw new Error("Generated Wasm module did not export main().");
+  }
+  if (typeof reset !== "function") {
+    throw new Error("Generated Wasm module did not export reset().");
   }
   if (!(memory instanceof WebAssembly.Memory)) {
     throw new Error("Generated Wasm module did not export memory.");
   }
 
+  reset();
   const rawResult = main(...args.map(tagInt));
   if (typeof rawResult !== "number") {
     throw new Error("main() did not return an i32 value.");
@@ -205,6 +231,22 @@ export async function runThunkWasm(
     allocations: view.getInt32(COUNTER_ALLOCATIONS, true),
     releases: view.getInt32(COUNTER_RELEASES, true),
     wasm: compiled.wasm,
+  };
+}
+
+export function encodeThunkWasmInt(value: number): number {
+  return tagInt(value);
+}
+
+export function decodeThunkWasmValue(value: number): number | string {
+  return formatValue(value);
+}
+
+function normalizeCompileOptions(
+  options: CompileOptions,
+): Required<CompileOptions> {
+  return {
+    forceBranchHint: options.forceBranchHint ?? "metadata",
   };
 }
 
@@ -220,6 +262,7 @@ class Compiler {
   private readonly definitions = new Map<string, Definition>();
   private readonly directFunctions = new Map<string, number>();
 
+  private readonly voidType = this.builder.type([], []);
   private readonly valueToValueType = this.builder.type(
     [ValType.I32],
     [ValType.I32],
@@ -235,6 +278,7 @@ class Compiler {
     [],
   );
 
+  private readonly resetIndex = this.builder.declareFunction(this.voidType);
   private readonly allocIndex = this.builder.declareFunction(this.allocType);
   private readonly retainValueIndex = this.builder.declareFunction(
     this.valueVoidType,
@@ -249,7 +293,10 @@ class Compiler {
     this.valueToValueType,
   );
 
-  constructor(private readonly program: Program) {
+  constructor(
+    private readonly program: Program,
+    private readonly options: Required<CompileOptions>,
+  ) {
     for (const definition of program.definitions) {
       if (this.definitions.has(definition.name)) {
         throw new Error(
@@ -278,6 +325,7 @@ class Compiler {
       throw new Error('Expected a compiled function named "main".');
     }
     this.builder.exportFunction("main", mainIndex);
+    this.builder.exportFunction("reset", this.resetIndex);
     this.builder.exportMemory("memory");
     return {
       wasm: new Uint8Array(this.builder.module()),
@@ -297,6 +345,7 @@ class Compiler {
   }
 
   private emitRuntime(): void {
+    this.builder.setFunctionBody(this.resetIndex, this.resetBody());
     this.builder.setFunctionBody(this.allocIndex, this.allocBody());
     this.builder.setFunctionBody(this.retainValueIndex, this.retainValueBody());
     this.builder.setFunctionBody(this.releaseEnvIndex, this.releaseEnvBody());
@@ -881,7 +930,23 @@ class Compiler {
     const body = new FunctionBody(1);
     const resultLocal = body.addLocal();
 
-    body.code.push(
+    this.emitForceEvaluatedReturn(
+      body,
+      resultLocal,
+      this.options.forceBranchHint === "metadata",
+    );
+    this.emitForceEvaluatingTrap(body.code);
+    this.emitForceEvaluate(body.code, resultLocal);
+    return body.finish();
+  }
+
+  private emitForceEvaluatedReturn(
+    body: FunctionBody,
+    resultLocal: number,
+    emitMetadata: boolean,
+  ): void {
+    const out = body.code;
+    out.push(
       WasmInstruction.LocalGet,
       ...u32(0),
       WasmInstruction.I32Load,
@@ -890,8 +955,20 @@ class Compiler {
       WasmInstruction.I32Const,
       ...i32(THUNK_EVALUATED),
       WasmInstruction.I32Eq,
+    );
+    if (emitMetadata) {
+      body.branchHints.push({ codeOffset: out.length, value: 1 });
+    }
+    out.push(
       WasmInstruction.If,
       BlockType.Empty,
+    );
+    this.emitForceEvaluatedResult(out, resultLocal);
+    out.push(WasmInstruction.Return, WasmInstruction.End);
+  }
+
+  private emitForceEvaluatedResult(out: number[], resultLocal: number): void {
+    out.push(
       WasmInstruction.LocalGet,
       ...u32(0),
       WasmInstruction.I32Load,
@@ -905,11 +982,11 @@ class Compiler {
       ...u32(this.retainValueIndex),
       WasmInstruction.LocalGet,
       ...u32(resultLocal),
-      WasmInstruction.Return,
-      WasmInstruction.End,
     );
+  }
 
-    body.code.push(
+  private emitForceEvaluatingTrap(out: number[]): void {
+    out.push(
       WasmInstruction.LocalGet,
       ...u32(0),
       WasmInstruction.I32Load,
@@ -923,9 +1000,11 @@ class Compiler {
       WasmInstruction.Unreachable,
       WasmInstruction.End,
     );
+  }
 
-    emitStoreLocalConst(body.code, 0, THUNK_STATE, THUNK_EVALUATING);
-    body.code.push(
+  private emitForceEvaluate(out: number[], resultLocal: number): void {
+    emitStoreLocalConst(out, 0, THUNK_STATE, THUNK_EVALUATING);
+    out.push(
       WasmInstruction.LocalGet,
       ...u32(0),
       WasmInstruction.LocalGet,
@@ -939,7 +1018,7 @@ class Compiler {
       WasmInstruction.LocalSet,
       ...u32(resultLocal),
     );
-    body.code.push(
+    out.push(
       WasmInstruction.LocalGet,
       ...u32(resultLocal),
       WasmInstruction.Call,
@@ -952,8 +1031,8 @@ class Compiler {
       WORD_ALIGN,
       ...u32(THUNK_RESULT),
     );
-    emitStoreLocalConst(body.code, 0, THUNK_STATE, THUNK_EVALUATED);
-    body.code.push(
+    emitStoreLocalConst(out, 0, THUNK_STATE, THUNK_EVALUATED);
+    out.push(
       WasmInstruction.LocalGet,
       ...u32(0),
       WasmInstruction.I32Const,
@@ -966,14 +1045,27 @@ class Compiler {
       WasmInstruction.Call,
       ...u32(this.releaseEnvIndex),
     );
-    emitStoreLocalConst(body.code, 0, OBJECT_ENV_COUNT, 0);
-    body.code.push(
+    emitStoreLocalConst(out, 0, OBJECT_ENV_COUNT, 0);
+    out.push(
       WasmInstruction.LocalGet,
       ...u32(resultLocal),
       WasmInstruction.Call,
       ...u32(this.retainValueIndex),
       WasmInstruction.LocalGet,
       ...u32(resultLocal),
+    );
+  }
+
+  private resetBody(): EncodedFunctionBody {
+    const body = new FunctionBody(0);
+    emitStoreConst(body.code, COUNTER_TICKS, 0);
+    emitStoreConst(body.code, COUNTER_ALLOCATIONS, 0);
+    emitStoreConst(body.code, COUNTER_RELEASES, 0);
+    body.code.push(
+      WasmInstruction.I32Const,
+      ...i32(HEAP_START),
+      WasmInstruction.GlobalSet,
+      ...u32(0),
     );
     return body.finish();
   }
@@ -1051,10 +1143,12 @@ class CodegenContext {
 interface EncodedFunctionBody {
   localCount: number;
   code: readonly number[];
+  branchHints: readonly BranchHint[];
 }
 
 class FunctionBody {
   readonly code: number[] = [];
+  readonly branchHints: BranchHint[] = [];
   private localCount = 0;
 
   constructor(readonly paramCount: number) {}
@@ -1066,7 +1160,11 @@ class FunctionBody {
   }
 
   finish(): EncodedFunctionBody {
-    return { localCount: this.localCount, code: this.code };
+    return {
+      localCount: this.localCount,
+      code: this.code,
+      branchHints: this.branchHints,
+    };
   }
 }
 
@@ -1141,6 +1239,7 @@ class WasmBuilder {
       ...(this.tableFunctions.length > 0
         ? section(Section.Element, this.elementSection())
         : []),
+      ...this.branchHintSection(),
       ...section(Section.Code, this.codeSection()),
     ];
   }
@@ -1190,6 +1289,29 @@ class WasmBuilder {
       WasmInstruction.End,
       ...vec(this.tableFunctions.map((index) => u32(index))),
     ]]);
+  }
+
+  private branchHintSection(): number[] {
+    const entries: number[][] = [];
+    for (const [functionIndex, func] of this.functions.entries()) {
+      const body = func.body;
+      if (!body || body.branchHints.length === 0) continue;
+      entries.push([
+        ...u32(functionIndex),
+        ...vec(
+          body.branchHints.map((hint) => [
+            ...u32(localDeclarationSize(body) + hint.codeOffset),
+            ...u32(1),
+            hint.value,
+          ]),
+        ),
+      ]);
+    }
+    if (entries.length === 0) return [];
+    return section(Section.Custom, [
+      ...name("metadata.code.branch_hint"),
+      ...vec(entries),
+    ]);
   }
 
   private codeSection(): number[] {
@@ -1463,10 +1585,18 @@ function sameList(left: readonly number[], right: readonly number[]): boolean {
 }
 
 function encodeBody(body: EncodedFunctionBody): number[] {
-  const locals = body.localCount === 0
+  const locals = encodeLocalDeclaration(body);
+  return sized([...locals, ...body.code, WasmInstruction.End]);
+}
+
+function localDeclarationSize(body: EncodedFunctionBody): number {
+  return encodeLocalDeclaration(body).length;
+}
+
+function encodeLocalDeclaration(body: EncodedFunctionBody): number[] {
+  return body.localCount === 0
     ? vec([])
     : vec([[...u32(body.localCount), ValType.I32]]);
-  return sized([...locals, ...body.code, WasmInstruction.End]);
 }
 
 function section(id: Section, payload: readonly number[]): number[] {
@@ -1512,6 +1642,12 @@ function emitStoreLocalConst(
   value: number,
 ): void {
   emitLocalGet(out, local);
+  emitI32Const(out, value);
+  out.push(WasmInstruction.I32Store, WORD_ALIGN, ...u32(offset));
+}
+
+function emitStoreConst(out: number[], offset: number, value: number): void {
+  emitI32Const(out, 0);
   emitI32Const(out, value);
   out.push(WasmInstruction.I32Store, WORD_ALIGN, ...u32(offset));
 }
