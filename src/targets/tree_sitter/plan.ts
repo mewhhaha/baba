@@ -1,8 +1,8 @@
-import type { GeneratedFile } from "../../ast.ts";
-import type { GenerationContext } from "../../context.ts";
+import type { BabaMetadata, GeneratedFile } from "../../ast.ts";
+import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import {
-  generateTreeSitterGrammar,
-  generateTreeSitterQueries,
+  generateAnalyzedTreeSitterGrammar,
+  generateAnalyzedTreeSitterQueries,
 } from "../../generate.ts";
 
 const treeSitterQueryOutputs: Array<
@@ -20,22 +20,23 @@ const treeSitterQueryOutputs: Array<
 
 /** Emits the existing Tree-sitter target files without changing their content. */
 export function emitTreeSitterTarget(
-  context: GenerationContext,
+  analyzed: AnalyzedGrammar,
+  options: {
+    name?: string;
+    metadata?: BabaMetadata;
+  } = {},
 ): GeneratedFile[] {
+  const metadata = options.metadata ?? {};
   const files: GeneratedFile[] = [{
     path: "grammar.js",
-    content: generateTreeSitterGrammar(context.grammar, {
-      name: context.name,
-      rootRule: context.rootRuleName,
-      metadata: context.metadata,
-      skipValidation: true,
+    content: generateAnalyzedTreeSitterGrammar(analyzed, {
+      name: options.name ?? analyzed.name,
+      metadata,
     }),
     kind: "source",
   }];
-  const queries = generateTreeSitterQueries(context.grammar, {
-    rootRule: context.rootRuleName,
-    metadata: context.metadata,
-    skipValidation: true,
+  const queries = generateAnalyzedTreeSitterQueries(analyzed, {
+    metadata,
   });
   for (const [path, name] of treeSitterQueryOutputs) {
     const content = queries[name];

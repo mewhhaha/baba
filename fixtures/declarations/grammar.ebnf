@@ -1,0 +1,7 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token INTEGER = /[0-9]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = declaration+ ;
+declaration = "let" name:IDENT "=" value:expr ";" ;
+expr = INTEGER | IDENT ;

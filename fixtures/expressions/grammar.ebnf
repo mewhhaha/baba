@@ -1,0 +1,8 @@
+token INT = /[0-9]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = expr ;
+expr = additive ;
+additive = first:multiplicative rest:(("+" | "-") multiplicative)* ;
+multiplicative = first:primary rest:(("*" | "/") primary)* ;
+primary = INT | "(" expr ")" ;

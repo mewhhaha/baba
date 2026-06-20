@@ -1,5 +1,10 @@
 import type { Diagnostic } from "../../ast.ts";
-import type { BnfGrammar, BnfProduction, BnfSymbol } from "./bnf.ts";
+import type {
+  BnfGrammar,
+  BnfProduction,
+  BnfSymbol,
+  ProductionOrigin,
+} from "./bnf.ts";
 
 export type LrAction =
   | { kind: "shift"; state: number }
@@ -9,7 +14,12 @@ export type LrAction =
 export interface LrItem {
   production: number;
   dot: number;
-  lookahead: number;
+  lookaheads: LookaheadBitset;
+}
+
+export interface LookaheadBitset {
+  readonly words: readonly number[];
+  readonly size: number;
 }
 
 export interface LrState {
@@ -21,7 +31,29 @@ export interface LrTable {
   states: readonly LrState[];
   actions: ReadonlyMap<number, ReadonlyMap<number, LrAction>>;
   gotos: ReadonlyMap<number, ReadonlyMap<number, number>>;
+  stats: LrPlanningStats;
   diagnostics: readonly Diagnostic[];
+}
+
+export interface LrPlanningStats {
+  bnfProductions: number;
+  states: number;
+  coreItems: number;
+  items: number;
+  actionEntries: number;
+  gotoEntries: number;
+  tableEntries: number;
+}
+
+interface MutableLrItem {
+  production: number;
+  dot: number;
+  lookaheads: MutableLookaheadBitset;
+}
+
+interface MutableLookaheadBitset {
+  words: number[];
+  size: number;
 }
 
 interface FirstAnalysis {
@@ -32,7 +64,11 @@ interface FirstAnalysis {
 
 export function buildCanonicalLr1Table(
   grammar: BnfGrammar,
-  options: { stateLimit: number },
+  options: {
+    stateLimit: number;
+    itemLimit?: number;
+    tableEntryLimit?: number;
+  },
 ): LrTable {
   const analysis = analyzeFirst(grammar);
   const diagnostics: Diagnostic[] = [];
@@ -40,12 +76,15 @@ export function buildCanonicalLr1Table(
   const transitions = new Map<string, number>();
   const states: LrState[] = [];
   const queue: LrState[] = [];
+  let totalCoreItems = 0;
+  let totalItems = 0;
 
   const addState = (items: readonly LrItem[]): LrState => {
     const closed = closure(grammar, analysis, items);
     const key = itemSetKey(closed);
     const existing = stateByKey.get(key);
     if (existing !== undefined) return states[existing];
+    const closedItemCount = countLookaheadEntries(closed);
     if (states.length >= options.stateLimit) {
       diagnostics.push({
         code: "TS_PARSER_STATE_LIMIT",
@@ -56,14 +95,33 @@ export function buildCanonicalLr1Table(
       });
       return states[0] ?? { id: 0, items: [] };
     }
+    if (
+      options.itemLimit !== undefined &&
+      totalItems + closedItemCount > options.itemLimit
+    ) {
+      diagnostics.push({
+        code: "TS_PARSER_ITEM_LIMIT",
+        severity: "error",
+        backend: "typescript",
+        message:
+          `The TypeScript parser exceeded the canonical LR(1) item limit (${options.itemLimit}).`,
+      });
+      return states[0] ?? { id: 0, items: [] };
+    }
     const state = { id: states.length, items: closed };
     states.push(state);
+    totalCoreItems += closed.length;
+    totalItems += closedItemCount;
     queue.push(state);
     stateByKey.set(key, state.id);
     return state;
   };
 
-  addState([{ production: 0, dot: 0, lookahead: grammar.eofTerminal }]);
+  addState([{
+    production: 0,
+    dot: 0,
+    lookaheads: lookaheadBitset([grammar.eofTerminal]),
+  }]);
   for (let index = 0; index < queue.length; index++) {
     if (diagnostics.length > 0) break;
     const state = queue[index];
@@ -121,18 +179,62 @@ export function buildCanonicalLr1Table(
         }
         continue;
       }
-      if (item.production === 0 && item.lookahead === grammar.eofTerminal) {
-        setAction(state, grammar.eofTerminal, { kind: "accept" });
-      } else {
-        setAction(state, item.lookahead, {
-          kind: "reduce",
-          production: item.production,
-        });
+      for (const lookahead of lookaheadValues(item.lookaheads)) {
+        if (item.production === 0 && lookahead === grammar.eofTerminal) {
+          setAction(state, grammar.eofTerminal, { kind: "accept" });
+        } else {
+          setAction(state, lookahead, {
+            kind: "reduce",
+            production: item.production,
+          });
+        }
       }
     }
   }
 
-  return { states, actions, gotos, diagnostics };
+  const actionEntries = countEntries(actions);
+  const gotoEntries = countEntries(gotos);
+  const tableEntries = actionEntries + gotoEntries;
+  if (
+    options.tableEntryLimit !== undefined &&
+    tableEntries > options.tableEntryLimit
+  ) {
+    diagnostics.push({
+      code: "TS_PARSER_TABLE_ENTRY_LIMIT",
+      severity: "error",
+      backend: "typescript",
+      message:
+        `The TypeScript parser exceeded the ACTION/GOTO table entry limit (${options.tableEntryLimit}).`,
+    });
+  }
+
+  return {
+    states,
+    actions,
+    gotos,
+    stats: {
+      bnfProductions: grammar.productions.length,
+      states: states.length,
+      coreItems: totalCoreItems,
+      items: totalItems,
+      actionEntries,
+      gotoEntries,
+      tableEntries,
+    },
+    diagnostics,
+  };
+}
+
+function countLookaheadEntries(items: readonly LrItem[]): number {
+  let count = 0;
+  for (const item of items) count += item.lookaheads.size;
+  return count;
+}
+
+function countEntries<K, V>(table: ReadonlyMap<K, ReadonlyMap<K, V>>): number {
+  let count = 0;
+  for (const row of table.values()) count += row.size;
+  return count;
 }
 
 function analyzeFirst(grammar: BnfGrammar): FirstAnalysis {
@@ -198,15 +300,29 @@ function closure(
   analysis: FirstAnalysis,
   items: readonly LrItem[],
 ): LrItem[] {
-  const byKey = new Map<string, LrItem>();
-  const queue: LrItem[] = [];
-  const add = (item: LrItem) => {
-    const key = itemKey(item);
-    if (byKey.has(key)) return;
-    byKey.set(key, item);
-    queue.push(item);
+  const byKey = new Map<string, MutableLrItem>();
+  const queue: MutableLrItem[] = [];
+  const add = (
+    production: number,
+    dot: number,
+    lookaheads: Iterable<number>,
+  ) => {
+    const key = coreItemKey(production, dot);
+    let item = byKey.get(key);
+    let changed = false;
+    if (!item) {
+      item = { production, dot, lookaheads: mutableLookaheadBitset() };
+      byKey.set(key, item);
+      changed = true;
+    }
+    for (const lookahead of lookaheads) {
+      changed = addLookahead(item.lookaheads, lookahead) || changed;
+    }
+    if (changed) queue.push(item);
   };
-  for (const item of items) add(item);
+  for (const item of items) {
+    add(item.production, item.dot, lookaheadValues(item.lookaheads));
+  }
 
   for (let index = 0; index < queue.length; index++) {
     const item = queue[index];
@@ -214,20 +330,24 @@ function closure(
     const symbol = production.rhs[item.dot];
     if (!symbol || symbol.kind !== "nonterminal") continue;
     const tail = production.rhs.slice(item.dot + 1);
-    const lookaheads = firstOfSequence(
-      tail,
-      analysis.nullable,
-      analysis.first,
-      item.lookahead,
-    );
     for (const next of analysis.productionsByLhs.get(symbol.id) ?? []) {
-      for (const lookahead of lookaheads) {
-        add({ production: next.id, dot: 0, lookahead });
+      for (const lookahead of lookaheadValues(item.lookaheads)) {
+        const nextLookaheads = firstOfSequence(
+          tail,
+          analysis.nullable,
+          analysis.first,
+          lookahead,
+        );
+        add(next.id, 0, nextLookaheads);
       }
     }
   }
 
-  return [...byKey.values()].sort(compareItems);
+  return [...byKey.values()].map((item) => ({
+    production: item.production,
+    dot: item.dot,
+    lookaheads: freezeLookaheadBitset(item.lookaheads),
+  })).sort(compareItems);
 }
 
 function gotoItems(
@@ -243,7 +363,7 @@ function gotoItems(
     .map((item) => ({
       production: item.production,
       dot: item.dot + 1,
-      lookahead: item.lookahead,
+      lookaheads: item.lookaheads,
     }));
   return closure(grammar, analysis, advanced);
 }
@@ -268,22 +388,23 @@ function conflictDiagnostic(
   right: LrAction,
 ): Diagnostic {
   const terminalName = grammar.terminals[terminal]?.display ?? String(terminal);
-  const reductions = [left, right]
+  const reductionProductions = [left, right]
     .filter((action): action is { kind: "reduce"; production: number } =>
       action.kind === "reduce"
     )
-    .map((action) =>
-      productionDisplay(grammar, grammar.productions[action.production])
-    );
-  const shifts = state.items
+    .map((action) => grammar.productions[action.production]);
+  const shiftProductions = state.items
     .filter((item) => {
       const symbol = grammar.productions[item.production].rhs[item.dot];
       return symbol?.kind === "terminal" && symbol.id === terminal;
     })
-    .map((item) =>
-      productionDisplay(grammar, grammar.productions[item.production], item.dot)
-    );
-  const code = shifts.length > 0 && reductions.length > 0
+    .map((item) => grammar.productions[item.production]);
+  const origins = uniqueOrigins([
+    ...shiftProductions,
+    ...reductionProductions,
+  ]);
+  const ruleName = origins[0]?.ruleName;
+  const code = shiftProductions.length > 0 && reductionProductions.length > 0
     ? "TS_PARSER_SHIFT_REDUCE_CONFLICT"
     : "TS_PARSER_REDUCE_REDUCE_CONFLICT";
   const details = [
@@ -291,31 +412,65 @@ function conflictDiagnostic(
       code === "TS_PARSER_REDUCE_REDUCE_CONFLICT"
         ? "Reduce/reduce"
         : "Shift/reduce"
-    } conflict on ${terminalName} while generating the TypeScript parser.`,
+    } conflict on ${terminalName}${
+      ruleName ? ` in rule ${JSON.stringify(ruleName)}` : ""
+    } while generating the TypeScript parser.`,
     "",
-    ...shifts.flatMap((shift) => ["Possible shift:", `  ${shift}`]),
-    ...reductions.flatMap((reduction) => [
-      "Possible reduction:",
-      `  ${reduction}`,
-    ]),
+    ...originDescriptions(grammar, "Shift interpretation", shiftProductions),
+    ...originDescriptions(
+      grammar,
+      "Reduction interpretation",
+      reductionProductions,
+    ),
     "Encode precedence structurally or generate only the Tree-sitter target.",
   ].filter((line, index, lines) => line !== "" || lines[index - 1] !== "");
-  const spanProduction = [left, right]
-    .find((action): action is { kind: "reduce"; production: number } =>
-      action.kind === "reduce"
-    );
+  const primaryOrigin = origins[0];
   return {
     code,
     severity: "error",
     backend: "typescript",
     message: details.join("\n"),
-    span: spanProduction
-      ? grammar.productions[spanProduction.production]?.span
-      : undefined,
+    span: primaryOrigin?.span,
+    related: origins.slice(1).map((origin) => ({
+      message: `Related interpretation: ${origin.description}`,
+      span: origin.span,
+    })),
   };
 }
 
-function productionDisplay(
+function uniqueOrigins(
+  productions: readonly BnfProduction[],
+): ProductionOrigin[] {
+  const seen = new Set<string>();
+  const origins: ProductionOrigin[] = [];
+  for (const production of productions) {
+    const origin = production.origin;
+    if (!origin) continue;
+    const key = `${origin.ruleId}/${
+      origin.expressionId ?? -1
+    }/${origin.description}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    origins.push(origin);
+  }
+  return origins;
+}
+
+function originDescriptions(
+  grammar: BnfGrammar,
+  label: string,
+  productions: readonly BnfProduction[],
+): string[] {
+  const origins = uniqueOrigins(productions);
+  if (origins.length === 0) {
+    return productions.map((production) =>
+      `${label}:\n  ${productionDisplayFallback(grammar, production)}`
+    );
+  }
+  return origins.map((origin) => `${label}:\n  ${origin.description}`);
+}
+
+function productionDisplayFallback(
   grammar: BnfGrammar,
   production: BnfProduction,
   dot?: number,
@@ -353,7 +508,13 @@ function itemSetKey(items: readonly LrItem[]): string {
 }
 
 function itemKey(item: LrItem): string {
-  return `${item.production}/${item.dot}/${item.lookahead}`;
+  return `${coreItemKey(item.production, item.dot)}/${
+    lookaheadBitsetKey(item.lookaheads)
+  }`;
+}
+
+function coreItemKey(production: number, dot: number): string {
+  return `${production}/${dot}`;
 }
 
 function symbolKey(symbol: BnfSymbol): string {
@@ -367,7 +528,70 @@ function sameSymbol(left: BnfSymbol | undefined, right: BnfSymbol): boolean {
 function compareItems(left: LrItem, right: LrItem): number {
   return left.production - right.production ||
     left.dot - right.dot ||
-    left.lookahead - right.lookahead;
+    compareLookaheadBitsets(left.lookaheads, right.lookaheads);
+}
+
+function lookaheadBitset(values: Iterable<number>): LookaheadBitset {
+  return freezeLookaheadBitset(mutableLookaheadBitset(values));
+}
+
+function mutableLookaheadBitset(
+  values: Iterable<number> = [],
+): MutableLookaheadBitset {
+  const bitset: MutableLookaheadBitset = { words: [], size: 0 };
+  for (const value of values) addLookahead(bitset, value);
+  return bitset;
+}
+
+function addLookahead(bitset: MutableLookaheadBitset, value: number): boolean {
+  const wordIndex = value >>> 5;
+  const mask = 1 << (value & 31);
+  const word = bitset.words[wordIndex] ?? 0;
+  if ((word & mask) !== 0) return false;
+  bitset.words[wordIndex] = word | mask;
+  bitset.size++;
+  return true;
+}
+
+function freezeLookaheadBitset(
+  bitset: MutableLookaheadBitset,
+): LookaheadBitset {
+  let lastWord = bitset.words.length - 1;
+  while (lastWord >= 0 && (bitset.words[lastWord] ?? 0) === 0) lastWord--;
+  const words: number[] = [];
+  for (let index = 0; index <= lastWord; index++) {
+    words.push(bitset.words[index] ?? 0);
+  }
+  return { words, size: bitset.size };
+}
+
+function lookaheadValues(bitset: LookaheadBitset): number[] {
+  const values: number[] = [];
+  for (let wordIndex = 0; wordIndex < bitset.words.length; wordIndex++) {
+    let word = bitset.words[wordIndex] ?? 0;
+    for (let bit = 0; bit < 32; bit++) {
+      if ((word & (1 << bit)) !== 0) values.push(wordIndex * 32 + bit);
+    }
+  }
+  return values;
+}
+
+function lookaheadBitsetKey(bitset: LookaheadBitset): string {
+  return `${bitset.size}:${bitset.words.join(",")}`;
+}
+
+function compareLookaheadBitsets(
+  left: LookaheadBitset,
+  right: LookaheadBitset,
+): number {
+  const leftValues = lookaheadValues(left);
+  const rightValues = lookaheadValues(right);
+  const length = Math.min(leftValues.length, rightValues.length);
+  for (let index = 0; index < length; index++) {
+    const delta = leftValues[index] - rightValues[index];
+    if (delta !== 0) return delta;
+  }
+  return leftValues.length - rightValues.length;
 }
 
 function compareSymbols(left: BnfSymbol, right: BnfSymbol): number {

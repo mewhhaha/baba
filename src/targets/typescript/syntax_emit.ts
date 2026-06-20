@@ -198,7 +198,7 @@ export function collectRuleFieldSchemas(
         return {
           name,
           type: array
-            ? `readonly ${parenthesizeType(type)}[]`
+            ? readonlyArrayType(type)
             : nullable
             ? `${type} | null`
             : type,
@@ -343,17 +343,13 @@ function expressionType(
       } | null`;
     case "repeat":
     case "repeat1":
-      return `readonly ${
-        parenthesizeType(
-          expressionType(analyzed, expression.expression, nodeTypesByRuleId),
-        )
-      }[]`;
+      return readonlyArrayType(
+        expressionType(analyzed, expression.expression, nodeTypesByRuleId),
+      );
     case "separated":
-      return `readonly ${
-        parenthesizeType(
-          expressionType(analyzed, expression.item, nodeTypesByRuleId),
-        )
-      }[]`;
+      return readonlyArrayType(
+        expressionType(analyzed, expression.item, nodeTypesByRuleId),
+      );
   }
 }
 
@@ -500,8 +496,8 @@ function unionType(types: readonly string[]): string {
   return unique.join(" | ");
 }
 
-function parenthesizeType(type: string): string {
-  return type.includes(" | ") ? `(${type})` : type;
+function readonlyArrayType(type: string): string {
+  return `ReadonlyArray<${type}>`;
 }
 
 function safeProperty(name: string): string {

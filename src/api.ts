@@ -8,12 +8,11 @@ import type {
   GeneratedFile,
   GenerateOptions,
   GenerateTarget,
+  PortabilityMode,
   ValidateOptions,
 } from "./ast.ts";
-import { createGenerationContext } from "./context.ts";
 import {
-  collectReachabilityDiagnostics,
-  collectTreeSitterHighlightDiagnostics,
+  collectAnalyzedTreeSitterHighlightDiagnostics,
   validateTreeSitterBackendCapabilities,
   validateTreeSitterGenerationMetadataSemantics,
 } from "./generate.ts";
@@ -59,6 +58,7 @@ export function validateGrammar(
   } catch (error) {
     return [toBabaError(error, "VALIDATION_ERROR").toDiagnostic()];
   }
+  const portability = normalizePortability(options.portability, targets);
   const analyzed = analyzeGrammar(grammar, {
     name: "grammar",
     rootRule: options.rootRule,
@@ -80,6 +80,7 @@ export function validateGrammar(
           analyzed,
           options.typescript,
           options.metadata,
+          portability,
         ).diagnostics,
       );
     } catch (error) {
@@ -117,6 +118,7 @@ export function compile(
   }
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
   const metadata = options.metadata ?? {};
+  const portability = normalizePortability(options.portability, targets);
   const analyzed = analyzeGrammar(grammar, {
     name: options.name ?? "grammar",
     rootRule: rootRuleName,
@@ -133,6 +135,7 @@ export function compile(
         analyzed,
         options.typescript,
         metadata,
+        portability,
       );
     } catch (error) {
       diagnostics.push({
@@ -153,23 +156,14 @@ export function compile(
 
   try {
     const files: GeneratedFile[] = [];
-    const context = createGenerationContext(grammar, {
-      ...options,
-      targets,
-      rootRule: rootRuleName,
-      metadata,
-    });
     if (targets.includes("tree-sitter")) {
-      files.push(...emitTreeSitterTarget(context));
+      files.push(...emitTreeSitterTarget(analyzed, {
+        name: options.name ?? "grammar",
+        metadata,
+      }));
       diagnostics.push(
-        ...collectReachabilityDiagnostics(
-          context.grammar,
-          context.rootRuleName,
-        ),
-        ...collectTreeSitterHighlightDiagnostics(context.grammar, {
-          rootRule: context.rootRuleName,
-          metadata: context.metadata,
-          skipValidation: true,
+        ...collectAnalyzedTreeSitterHighlightDiagnostics(analyzed, {
+          metadata,
         }),
       );
     }
@@ -266,6 +260,20 @@ function normalizeTargets(
   return result;
 }
 
+function normalizePortability(
+  portability: PortabilityMode | undefined,
+  targets: readonly GenerateTarget[],
+): PortabilityMode {
+  if (
+    portability === "strict" || portability === "warn" || portability === "off"
+  ) {
+    return portability;
+  }
+  return targets.includes("tree-sitter") && targets.includes("typescript")
+    ? "strict"
+    : "warn";
+}
+
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
   return diagnostics.some((diagnostic) =>
     (diagnostic.severity ?? "error") === "error"
@@ -298,17 +306,18 @@ function collectBundlePathDiagnostics(
     }
     seen.add(path);
   }
-  for (let index = 0; index < paths.length; index++) {
-    const path = paths[index];
-    for (let next = index + 1; next < paths.length; next++) {
-      const other = paths[next];
-      if (!other.startsWith(`${path}/`)) break;
-      diagnostics.push({
-        code: "OUTPUT_PATH_COLLISION",
-        severity: "error",
-        message:
-          `Generated output path '${path}' collides with nested path '${other}'.`,
-      });
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let index = 1; index < parts.length; index++) {
+      const ancestor = parts.slice(0, index).join("/");
+      if (seen.has(ancestor)) {
+        diagnostics.push({
+          code: "OUTPUT_PATH_COLLISION",
+          severity: "error",
+          message:
+            `Generated output path '${ancestor}' collides with nested path '${path}'.`,
+        });
+      }
     }
   }
   return diagnostics;

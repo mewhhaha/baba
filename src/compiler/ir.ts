@@ -31,6 +31,7 @@ export interface AnalyzedToken {
   name: string;
   kind: "token" | "skip";
   pattern: string;
+  priority: number;
   declarationOrder: number;
   span: SourceSpan;
 }

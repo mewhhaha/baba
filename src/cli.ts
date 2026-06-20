@@ -4,7 +4,12 @@
  * @module
  */
 
-import type { Diagnostic, GenerateTarget } from "./ast.ts";
+import type {
+  Diagnostic,
+  GenerateTarget,
+  PortabilityMode,
+  TypeScriptTargetOptions,
+} from "./ast.ts";
 import {
   applyBundle,
   BabaError,
@@ -22,6 +27,8 @@ interface Options {
   name: string;
   rootRule?: string;
   targets: GenerateTarget[];
+  portability?: PortabilityMode;
+  typescript: TypeScriptTargetOptions;
   listFiles: boolean;
   diagnosticFormat: "text" | "json";
   help: boolean;
@@ -80,6 +87,10 @@ export async function main(args: string[]): Promise<void> {
     rootRule: options.rootRule,
     metadata,
     targets: options.targets.length ? options.targets : undefined,
+    portability: options.portability,
+    typescript: hasTypeScriptOptions(options.typescript)
+      ? options.typescript
+      : undefined,
   });
   if (hasErrors(result.diagnostics)) {
     throw new CliDiagnosticsError(result.diagnostics, options.diagnosticFormat);
@@ -105,6 +116,7 @@ function parseArgs(args: string[]): Options {
     command: "generate",
     name: "grammar",
     targets: [],
+    typescript: {},
     listFiles: false,
     diagnosticFormat: "text",
     help: false,
@@ -166,6 +178,66 @@ function parseArgs(args: string[]): Options {
         addTarget(options, target);
         break;
       }
+      case "--typescript-dir":
+      case "--ts-out": {
+        const directory = args[++i];
+        if (!directory) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: `Expected directory after ${arg}`,
+          });
+        }
+        options.typescript.directory = directory;
+        break;
+      }
+      case "--preserve-trivia":
+        options.typescript.preserveTrivia = true;
+        break;
+      case "--discard-trivia":
+        options.typescript.preserveTrivia = false;
+        break;
+      case "--parser-state-limit":
+        options.typescript.parserStateLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        break;
+      case "--parser-item-limit":
+        options.typescript.parserItemLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        break;
+      case "--parser-table-entry-limit":
+        options.typescript.parserTableEntryLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        break;
+      case "--generated-byte-limit":
+        options.typescript.generatedByteLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        break;
+      case "--parser-stats":
+        options.typescript.reportParserStats = true;
+        break;
+      case "--portability": {
+        const portability = args[++i];
+        if (
+          portability !== "strict" &&
+          portability !== "warn" &&
+          portability !== "off"
+        ) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected portability mode strict, warn, or off",
+          });
+        }
+        options.portability = portability;
+        break;
+      }
       case "--metadata":
       case "--meta":
       case "--ts-meta": {
@@ -202,7 +274,6 @@ function parseArgs(args: string[]): Options {
       case "init":
       case "--preset":
       case "--backend":
-      case "--ts-out":
         throw new BabaError({
           code: "REMOVED_CLI_OPTION",
           message:
@@ -239,11 +310,45 @@ Options:
   --name        Grammar/target name. Defaults to grammar
   --root        Root grammar rule. Defaults to the first grammar rule
   --target      Output target: tree-sitter, typescript, or all. May repeat
+  --typescript-dir  TypeScript target output directory. Defaults to typescript
+  --ts-out      Alias for --typescript-dir
+  --preserve-trivia  Preserve skip matches as trivia tokens
+  --discard-trivia   Omit skip matches from generated lexer output
+  --parser-state-limit  Maximum TypeScript LR state count
+  --parser-item-limit   Maximum total TypeScript LR item count
+  --parser-table-entry-limit  Maximum TypeScript ACTION/GOTO entry count
+  --generated-byte-limit  Maximum generated TypeScript source bytes
+  --parser-stats  Emit TypeScript parser planning statistics
+  --portability  Cross-target portability mode: strict, warn, or off
   --metadata    JSON metadata for Tree-sitter shaping and query generation
   --meta        Alias for --metadata
   --ts-meta     Deprecated alias for --metadata
   --diagnostic-format  Diagnostic output format: text or json. Defaults to text
   --list-files  Print generated file paths without writing output files`;
+}
+
+function parsePositiveIntegerArg(
+  value: string | undefined,
+  flag: string,
+): number {
+  if (!value) {
+    throw new BabaError({
+      code: "CLI_BAD_ARGS",
+      message: `Expected positive integer after ${flag}`,
+    });
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new BabaError({
+      code: "CLI_BAD_ARGS",
+      message: `Expected positive integer after ${flag}`,
+    });
+  }
+  return parsed;
+}
+
+function hasTypeScriptOptions(options: TypeScriptTargetOptions): boolean {
+  return Object.keys(options).length > 0;
 }
 
 function diagnosticFormatFromArgs(

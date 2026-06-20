@@ -19,6 +19,7 @@ export type {
   GeneratedFile,
   GenerateOptions,
   GenerateTarget,
+  PortabilityMode,
   SourceSpan,
   TreeSitterCaptureMetadata,
   TreeSitterExtra,
@@ -48,10 +49,13 @@ export type {
   TokenId,
 } from "./compiler/ir.ts";
 export {
+  collectAnalyzedTreeSitterHighlightDiagnostics,
   collectGrammarDiagnostics,
   collectReachabilityDiagnostics,
   collectTerminals,
   collectTreeSitterHighlightDiagnostics,
+  generateAnalyzedTreeSitterGrammar,
+  generateAnalyzedTreeSitterQueries,
   generateTreeSitterFoldsQuery,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,

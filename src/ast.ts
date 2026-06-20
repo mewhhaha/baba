@@ -28,6 +28,8 @@ export interface EbnfTokenDeclaration {
   name: string;
   /** JavaScript regular expression source without surrounding slashes. */
   pattern: string;
+  /** Explicit lexical priority. Higher values win equal-length matches. */
+  priority?: number;
   /** Source span for the full declaration. */
   span: SourceSpan;
 }
@@ -105,10 +107,18 @@ export interface Diagnostic {
   path?: string;
   /** Optional source line for span diagnostics. */
   sourceLine?: string;
+  /** Related source locations that help explain the diagnostic. */
+  related?: readonly {
+    message: string;
+    span: SourceSpan;
+  }[];
 }
 
 /** Output target selected for a generation run. */
 export type GenerateTarget = "tree-sitter" | "typescript";
+
+/** Cross-target portability diagnostic policy. */
+export type PortabilityMode = "strict" | "warn" | "off";
 
 /** Options for the standalone TypeScript lexer/parser target. */
 export interface TypeScriptTargetOptions {
@@ -118,6 +128,14 @@ export interface TypeScriptTargetOptions {
   preserveTrivia?: boolean;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
+  /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
+  parserItemLimit?: number;
+  /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
+  parserTableEntryLimit?: number;
+  /** Maximum generated TypeScript source bytes. Defaults to unlimited. */
+  generatedByteLimit?: number;
+  /** Emit an informational parser planning statistics diagnostic. */
+  reportParserStats?: boolean;
 }
 
 /** Options for the stable high-level `generate` API. */
@@ -130,6 +148,8 @@ export interface GenerateOptions {
   metadata?: BabaMetadata;
   /** Output targets. Defaults to ["tree-sitter"]. */
   targets?: readonly GenerateTarget[];
+  /** Cross-target portability policy. Defaults to strict for multiple targets, warn otherwise. */
+  portability?: PortabilityMode;
   /** Standalone TypeScript target options. */
   typescript?: TypeScriptTargetOptions;
 }
@@ -153,6 +173,8 @@ export interface ValidateOptions {
   metadata?: BabaMetadata;
   /** Output targets to validate. Defaults to ["tree-sitter"]. */
   targets?: readonly GenerateTarget[];
+  /** Cross-target portability policy. Defaults to strict for multiple targets, warn otherwise. */
+  portability?: PortabilityMode;
   /** Standalone TypeScript target options. */
   typescript?: TypeScriptTargetOptions;
 }

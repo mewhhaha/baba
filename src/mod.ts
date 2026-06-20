@@ -26,6 +26,7 @@ export type {
   GeneratedFile,
   GenerateOptions,
   GenerateTarget,
+  PortabilityMode,
   SourceSpan,
   TypeScriptTargetOptions,
   ValidateOptions,

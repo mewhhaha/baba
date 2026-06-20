@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+
+- Added the standalone TypeScript target with a generated table-driven DFA
+  lexer, canonical LR(1) parser, typed CST, and `parseTokens()` API.
+- Added explicit lexical priorities with `priority <number>` on token and skip
+  declarations. Priorities lower to both TypeScript and Tree-sitter.
+- Added strict/warn/off portability mode. Multi-target generation defaults to
+  strict and rejects known Tree-sitter/TypeScript acceptance differences.
+- Added TypeScript CLI options for output directory, trivia preservation, parser
+  state/item/table-entry/generated-byte limits, parser statistics, and
+  portability.
+
+### Changed
+
+- Regex validation now uses one portable regex parser shared by both targets.
+- Reachability diagnostics are target-neutral and reported by shared compiler
+  analysis.
+- Tree-sitter grammar emission now consumes the shared analyzed grammar used by
+  the TypeScript planner.
+- Tree-sitter query bundle emission now has analyzed-grammar entrypoints.
+- LR item sets now store lookaheads as bitsets and simple choice alternatives
+  avoid unnecessary synthetic BNF helper productions.
+- The regression suite is split into API, lexer, parser, Tree-sitter, output,
+  and shared helper files.
+
+### Fixed
+
+- Generated TypeScript field array types use `ReadonlyArray<T>`.
+- `parseTokens()` validates EOF placement, token widths, source gaps, and
+  token-kind/channel consistency.
+- TypeScript lexer overlap diagnostics use automata intersections and real
+  witness strings.
+- Generated lexers treat non-BMP Unicode code points consistently.
+- Runtime CST field construction checks required, nullable, array, and unknown
+  field-capture invariants.
+- Output path collision detection now checks every generated path ancestor.
+- TypeScript parser conflicts now report user rule origins instead of only
+  synthetic BNF nonterminals.
+
 ## 1.0.0
 
 ### Changed

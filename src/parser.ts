@@ -7,7 +7,13 @@ import type {
 } from "./ast.ts";
 import { BabaError } from "./errors.ts";
 
-type TokenKind = "identifier" | "literal" | "regex" | "symbol" | "eof";
+type TokenKind =
+  | "identifier"
+  | "literal"
+  | "number"
+  | "regex"
+  | "symbol"
+  | "eof";
 
 interface Token {
   kind: TokenKind;
@@ -196,6 +202,17 @@ function lexEbnf(source: string, lines: number[]): Token[] {
       continue;
     }
 
+    if (/[0-9]/.test(char)) {
+      i++;
+      while (i < source.length && /[0-9]/.test(source[i])) i++;
+      tokens.push({
+        kind: "number",
+        text: source.slice(start, i),
+        span: spanAt(lines, start, i),
+      });
+      continue;
+    }
+
     if ("=;|{}[]()?*+%:".includes(char)) {
       tokens.push({
         kind: "symbol",
@@ -257,6 +274,17 @@ class Parser {
       throw this.errorAt(kindToken, "Expected token or skip declaration");
     }
     const name = this.expectKind("identifier", "Expected token name").text;
+    let priority: number | undefined;
+    if (this.matchText("priority")) {
+      const priorityToken = this.expectKind(
+        "number",
+        "Expected priority value",
+      );
+      priority = Number(priorityToken.text);
+      if (!Number.isSafeInteger(priority)) {
+        throw this.errorAt(priorityToken, "Invalid priority value");
+      }
+    }
     this.expectText("=");
     const patternToken = this.expectKind("regex", "Expected regex literal");
     try {
@@ -270,6 +298,7 @@ class Parser {
       kind,
       name,
       pattern: patternToken.text,
+      priority,
       span: this.span(kindToken.span.start, semicolon.span.end),
     };
   }

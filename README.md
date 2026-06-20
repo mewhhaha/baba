@@ -75,12 +75,18 @@ generated/
   queries/
     generated-highlights.scm
     generated-rainbows.scm
+  .baba-manifest.json
+```
+
+With `--target all` or `--target typescript`, the bundle also includes:
+
+```text
+generated/
   typescript/
     syntax.ts
     lexer.ts
     parser.ts
     mod.ts
-  .baba-manifest.json
 ```
 
 Only query files with content are written. Regenerating through `applyBundle()`
@@ -105,6 +111,26 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
 
 `--meta` is an alias for `--metadata`. `--ts-meta` remains as a deprecated
 alias.
+
+Useful TypeScript-target options:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --target typescript \
+  --typescript-dir ts \
+  --discard-trivia \
+  --parser-state-limit 20000 \
+  --parser-item-limit 200000 \
+  --parser-table-entry-limit 200000 \
+  --generated-byte-limit 1000000 \
+  --parser-stats
+```
+
+`--ts-out` is an alias for `--typescript-dir`. `--preserve-trivia` and
+`--discard-trivia` control whether skip matches are emitted as trivia tokens.
+`--portability strict|warn|off` controls diagnostics for known cross-target
+acceptance differences. When both targets are selected, portability defaults to
+`strict`; otherwise it defaults to `warn`.
 
 ## Library API
 
@@ -151,6 +177,7 @@ Terminal declarations are explicit:
 
 ```ebnf
 token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token TYPE_IDENT priority 10 = /[A-Z][A-Za-z0-9_]*/ ;
 token STRING = /"([^"\\]|\\.)*"/ ;
 skip WHITESPACE = /[ \t\r\n]+/ ;
 skip LINE_COMMENT = /\/\/[^\n]*/ ;
@@ -172,6 +199,13 @@ Expressions support:
 There are no implicit token builtins. Names such as `ident`, `string`, `number`,
 `newline`, `indent`, `dedent`, `fenced_text`, and `line_comment` are ordinary
 names and must be declared before use.
+
+Token and skip regexes use Baba's portable regex subset. Shorthand classes,
+Unicode property escapes, anchors, lookaround, lazy quantifiers, backreferences,
+inline flags, and target-specific escape forms are rejected. Overlapping token
+languages must either be disjoint or use explicit priority. On equal-length
+matches, higher priority wins; literals win ties at the same priority; then
+declaration order breaks remaining ties.
 
 Rules unreachable from the selected root are omitted from generated outputs and
 reported as `UNREACHABLE_RULE` warnings.

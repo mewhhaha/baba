@@ -4,7 +4,7 @@ import type {
   EbnfExpression,
   EbnfGrammar,
 } from "../ast.ts";
-import { collectGrammarDiagnostics } from "../generate.ts";
+import { collectGrammarDiagnostics } from "./diagnostics.ts";
 import type {
   AnalyzedExpression,
   AnalyzedGrammar,
@@ -162,6 +162,7 @@ export function analyzeGrammar(
     name: token.name,
     kind: token.kind,
     pattern: token.pattern,
+    priority: token.priority ?? 0,
     declarationOrder: id,
     span: token.span,
   }));
@@ -184,6 +185,18 @@ export function analyzeGrammar(
         reachableExternals.add(expression.reference.name);
       }
     });
+  }
+  if (diagnosticErrorCount(diagnostics) === 0) {
+    for (const rule of rules) {
+      if (reachableRules.has(rule.id)) continue;
+      diagnostics.push({
+        code: "UNREACHABLE_RULE",
+        severity: "warning",
+        message:
+          `Rule '${rule.name}' is unreachable from root rule '${rootRuleName}' and was omitted from generated outputs.`,
+        span: rule.span,
+      });
+    }
   }
 
   return {

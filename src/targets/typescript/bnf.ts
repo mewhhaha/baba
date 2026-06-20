@@ -7,6 +7,7 @@ import {
 import type {
   AnalyzedExpression,
   AnalyzedGrammar,
+  AnalyzedRule,
   RuleId,
 } from "../../compiler/ir.ts";
 
@@ -55,6 +56,15 @@ export interface BnfProduction {
   rhs: readonly BnfSymbol[];
   reducer: ReducerSpec;
   span?: { start: number; end: number; line: number; column: number };
+  origin?: ProductionOrigin;
+}
+
+export interface ProductionOrigin {
+  ruleId: RuleId;
+  ruleName: string;
+  expressionId?: number;
+  span: { start: number; end: number; line: number; column: number };
+  description: string;
 }
 
 export interface BnfGrammar {
@@ -192,13 +202,14 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
         });
       }
     });
-    const expression = lowerExpression(state, rule.expression);
+    const expression = lowerExpression(state, rule, rule.expression);
     addProduction(
       state,
       ruleNonterminals.get(rule.id)!,
       [{ kind: "nonterminal", id: expression }],
       { kind: "rule", ruleId: rule.id },
       rule.span,
+      ruleOrigin(rule, rule.expression),
     );
   }
 
@@ -215,6 +226,7 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
 
 function lowerExpression(
   state: LoweringState,
+  rule: AnalyzedRule,
   expression: AnalyzedExpression,
 ): number {
   const existing = state.expressionNonterminals.get(expression.id);
@@ -227,14 +239,22 @@ function lowerExpression(
     name: `$e${expression.id}`,
     expressionId: expression.id,
   });
+  const origin = expressionOrigin(state, rule, expression);
 
   switch (expression.kind) {
     case "field": {
-      const child = lowerExpression(state, expression.expression);
-      addProduction(state, nonterminal, [{ kind: "nonterminal", id: child }], {
-        kind: "field",
-        name: expression.name,
-      }, expression.span);
+      const child = lowerExpression(state, rule, expression.expression);
+      addProduction(
+        state,
+        nonterminal,
+        [{ kind: "nonterminal", id: child }],
+        {
+          kind: "field",
+          name: expression.name,
+        },
+        expression.span,
+        origin,
+      );
       return nonterminal;
     }
     case "ref": {
@@ -247,6 +267,7 @@ function lowerExpression(
             [{ kind: "nonterminal", id: rule }],
             { kind: "ruleRef" },
             expression.span,
+            origin,
           );
         }
       } else if (expression.reference.kind === "token") {
@@ -259,6 +280,7 @@ function lowerExpression(
           }],
           { kind: "terminal" },
           expression.span,
+          origin,
         );
       }
       return nonterminal;
@@ -273,6 +295,7 @@ function lowerExpression(
         }],
         { kind: "terminal" },
         expression.span,
+        origin,
       );
       return nonterminal;
     case "sequence":
@@ -281,31 +304,27 @@ function lowerExpression(
         nonterminal,
         expression.items.map((item) => ({
           kind: "nonterminal" as const,
-          id: lowerExpression(state, item),
+          id: lowerExpression(state, rule, item),
         })),
         { kind: "sequence" },
         expression.span,
+        origin,
       );
       return nonterminal;
     case "choice":
       for (const option of expression.options) {
-        addProduction(
-          state,
-          nonterminal,
-          [{ kind: "nonterminal", id: lowerExpression(state, option) }],
-          { kind: "identity" },
-          option.span,
-        );
+        addChoiceOptionProductions(state, rule, option, nonterminal);
       }
       return nonterminal;
     case "optional": {
-      const child = lowerExpression(state, expression.expression);
+      const child = lowerExpression(state, rule, expression.expression);
       addProduction(
         state,
         nonterminal,
         [],
         { kind: "optionalEmpty" },
         expression.span,
+        origin,
       );
       addProduction(
         state,
@@ -313,17 +332,19 @@ function lowerExpression(
         [{ kind: "nonterminal", id: child }],
         { kind: "optionalSome" },
         expression.span,
+        origin,
       );
       return nonterminal;
     }
     case "repeat": {
-      const child = lowerExpression(state, expression.expression);
+      const child = lowerExpression(state, rule, expression.expression);
       addProduction(
         state,
         nonterminal,
         [],
         { kind: "repeatEmpty" },
         expression.span,
+        origin,
       );
       addProduction(
         state,
@@ -334,17 +355,19 @@ function lowerExpression(
         ],
         { kind: "repeatAppend" },
         expression.span,
+        origin,
       );
       return nonterminal;
     }
     case "repeat1": {
-      const child = lowerExpression(state, expression.expression);
+      const child = lowerExpression(state, rule, expression.expression);
       addProduction(
         state,
         nonterminal,
         [{ kind: "nonterminal", id: child }],
         { kind: "repeat1First" },
         expression.span,
+        origin,
       );
       addProduction(
         state,
@@ -355,18 +378,20 @@ function lowerExpression(
         ],
         { kind: "repeat1Append" },
         expression.span,
+        origin,
       );
       return nonterminal;
     }
     case "separated": {
-      const item = lowerExpression(state, expression.item);
-      const separator = lowerExpression(state, expression.separator);
+      const item = lowerExpression(state, rule, expression.item);
+      const separator = lowerExpression(state, rule, expression.separator);
       addProduction(
         state,
         nonterminal,
         [{ kind: "nonterminal", id: item }],
         { kind: "separatedFirst" },
         expression.span,
+        origin,
       );
       addProduction(
         state,
@@ -378,9 +403,125 @@ function lowerExpression(
         ],
         { kind: "separatedAppend" },
         expression.span,
+        origin,
       );
       return nonterminal;
     }
+  }
+}
+
+function addChoiceOptionProductions(
+  state: LoweringState,
+  rule: AnalyzedRule,
+  expression: AnalyzedExpression,
+  lhs: number,
+): void {
+  const origin = expressionOrigin(state, rule, expression);
+  switch (expression.kind) {
+    case "field": {
+      addProduction(
+        state,
+        lhs,
+        [{
+          kind: "nonterminal",
+          id: lowerExpression(state, rule, expression.expression),
+        }],
+        { kind: "field", name: expression.name },
+        expression.span,
+        origin,
+      );
+      return;
+    }
+    case "ref":
+      if (expression.reference.kind === "rule") {
+        const target = state.ruleNonterminals.get(expression.reference.ruleId);
+        if (target !== undefined) {
+          addProduction(
+            state,
+            lhs,
+            [{ kind: "nonterminal", id: target }],
+            { kind: "ruleRef" },
+            expression.span,
+            origin,
+          );
+        }
+      } else if (expression.reference.kind === "token") {
+        addProduction(
+          state,
+          lhs,
+          [{
+            kind: "terminal",
+            id: tokenTerminal(state, expression.reference.tokenId),
+          }],
+          { kind: "terminal" },
+          expression.span,
+          origin,
+        );
+      }
+      return;
+    case "literal":
+      addProduction(
+        state,
+        lhs,
+        [{
+          kind: "terminal",
+          id: literalTerminal(state, expression.literalId),
+        }],
+        { kind: "terminal" },
+        expression.span,
+        origin,
+      );
+      return;
+    case "sequence":
+      addProduction(
+        state,
+        lhs,
+        expression.items.map((item) => ({
+          kind: "nonterminal" as const,
+          id: lowerExpression(state, rule, item),
+        })),
+        { kind: "sequence" },
+        expression.span,
+        origin,
+      );
+      return;
+    case "choice":
+      for (const option of expression.options) {
+        addChoiceOptionProductions(state, rule, option, lhs);
+      }
+      return;
+    case "optional": {
+      const child = lowerExpression(state, rule, expression.expression);
+      addProduction(
+        state,
+        lhs,
+        [],
+        { kind: "optionalEmpty" },
+        expression.span,
+        origin,
+      );
+      addProduction(
+        state,
+        lhs,
+        [{ kind: "nonterminal", id: child }],
+        { kind: "optionalSome" },
+        expression.span,
+        origin,
+      );
+      return;
+    }
+    case "repeat":
+    case "repeat1":
+    case "separated":
+      addProduction(
+        state,
+        lhs,
+        [{ kind: "nonterminal", id: lowerExpression(state, rule, expression) }],
+        { kind: "identity" },
+        expression.span,
+        origin,
+      );
+      return;
   }
 }
 
@@ -390,6 +531,7 @@ function addProduction(
   rhs: readonly BnfSymbol[],
   reducer: ReducerSpec,
   span?: BnfProduction["span"],
+  origin?: ProductionOrigin,
 ): void {
   state.productions.push({
     id: state.productions.length,
@@ -397,7 +539,60 @@ function addProduction(
     rhs,
     reducer,
     span,
+    origin,
   });
+}
+
+function ruleOrigin(
+  rule: AnalyzedRule,
+  expression: AnalyzedExpression,
+): ProductionOrigin {
+  return {
+    ruleId: rule.id,
+    ruleName: rule.name,
+    expressionId: expression.id,
+    span: rule.span,
+    description: `${rule.name} = ${describeExpression(expression)}`,
+  };
+}
+
+function expressionOrigin(
+  _state: LoweringState,
+  rule: AnalyzedRule,
+  expression: AnalyzedExpression,
+): ProductionOrigin {
+  return {
+    ruleId: rule.id,
+    ruleName: rule.name,
+    expressionId: expression.id,
+    span: expression.span,
+    description: `${rule.name} = ${describeExpression(expression)}`,
+  };
+}
+
+function describeExpression(expression: AnalyzedExpression): string {
+  switch (expression.kind) {
+    case "field":
+      return `${expression.name}:${describeExpression(expression.expression)}`;
+    case "ref":
+      return expression.name;
+    case "literal":
+      return JSON.stringify(expression.value);
+    case "sequence":
+      return expression.items.map(describeExpression).join(" ");
+    case "choice":
+      return expression.options.map(describeExpression).join(" | ");
+    case "optional":
+      return `(${describeExpression(expression.expression)})?`;
+    case "repeat":
+      return `(${describeExpression(expression.expression)})*`;
+    case "repeat1":
+      return `(${describeExpression(expression.expression)})+`;
+    case "separated":
+      return `${describeExpression(expression.item)} % ${
+        describeExpression(expression.separator)
+      }`;
+  }
 }
 
 function tokenTerminal(state: LoweringState, tokenId: number): number {
