@@ -196,6 +196,12 @@ function parseArgs(args: string[]): Options {
       case "--discard-trivia":
         options.typescript.preserveTrivia = false;
         break;
+      case "--lexer-state-limit":
+        options.typescript.lexerStateLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        break;
       case "--parser-state-limit":
         options.typescript.parserStateLimit = parsePositiveIntegerArg(
           args[++i],
@@ -221,6 +227,9 @@ function parseArgs(args: string[]): Options {
         );
         break;
       case "--parser-stats":
+        options.typescript.reportParserStats = true;
+        break;
+      case "--verbose":
         options.typescript.reportParserStats = true;
         break;
       case "--portability": {
@@ -314,11 +323,13 @@ Options:
   --ts-out      Alias for --typescript-dir
   --preserve-trivia  Preserve skip matches as trivia tokens
   --discard-trivia   Omit skip matches from generated lexer output
+  --lexer-state-limit  Maximum TypeScript lexer DFA state count
   --parser-state-limit  Maximum TypeScript LR state count
   --parser-item-limit   Maximum total TypeScript LR item count
   --parser-table-entry-limit  Maximum TypeScript ACTION/GOTO entry count
   --generated-byte-limit  Maximum generated TypeScript source bytes
   --parser-stats  Emit TypeScript parser planning statistics
+  --verbose      Alias for --parser-stats
   --portability  Cross-target portability mode: strict, warn, or off
   --metadata    JSON metadata for Tree-sitter shaping and query generation
   --meta        Alias for --metadata

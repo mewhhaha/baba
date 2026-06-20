@@ -79,6 +79,98 @@ Deno.test("TypeScript parser target supports left-recursive arithmetic", async (
   }
 });
 
+Deno.test("TypeScript ParseResult narrows successful roots", async () => {
+  const result = compile(`module = "x" ;`, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await Deno.writeTextFile(
+      `${dir}/parse_result_check.ts`,
+      `import { parse, type ParseDiagnostic } from "./typescript/mod.ts";
+
+const result = parse("x");
+if (result.ok) {
+  result.root.children;
+  const diagnostics: readonly [] = result.diagnostics;
+  void diagnostics;
+} else {
+  const root: null = result.root;
+  const diagnostics: readonly ParseDiagnostic[] = result.diagnostics;
+  void root;
+  void diagnostics;
+}
+`,
+    );
+    await denoCheck(`${dir}/parse_result_check.ts`);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript syntax separates main/trivia tokens and maps positions", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = IDENT ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await Deno.writeTextFile(
+      `${dir}/syntax_contract_check.ts`,
+      `import {
+  createSourceMap,
+  lex,
+  parse,
+  parseTokensUnchecked,
+  positionAt,
+  type MainNamedToken,
+  type ParseDiagnostic,
+  type TriviaToken,
+} from "./typescript/mod.ts";
+
+const main: MainNamedToken<"IDENT"> = {
+  type: "named",
+  kind: "IDENT",
+  text: "value",
+  span: { start: 0, end: 5 },
+  channel: "main",
+};
+const trivia: TriviaToken<"WS"> = {
+  type: "named",
+  kind: "WS",
+  text: " ",
+  span: { start: 5, end: 6 },
+  channel: "trivia",
+};
+const source = "value\\nnext";
+const direct = positionAt(source, 6);
+const mapped = createSourceMap(source).positionAt(6);
+if (direct.line !== 2 || direct.column !== 1) throw new Error("bad position");
+if (mapped.line !== 2 || mapped.column !== 1) throw new Error("bad source map");
+const lexed = lex("value");
+const unchecked = parseTokensUnchecked(lexed.source, lexed.tokens);
+const parsed = parse("value");
+if (!unchecked.ok || !parsed.ok) throw new Error("parse failed");
+const diagnostics: readonly ParseDiagnostic[] = [];
+void main;
+void trivia;
+void diagnostics;
+`,
+    );
+    await denoCheck(`${dir}/syntax_contract_check.ts`);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("TypeScript target rejects nonportable character class escapes", () => {
   for (const pattern of ["[\\s]+", "[\\d]+", "[\\p{L}]+"]) {
     const result = compile(
@@ -439,6 +531,13 @@ Deno.test("TypeScript target rejects unsafe options and zero-length literals", (
     "TS_LEXER_GENERATION_ERROR",
   );
 
+  const invalidLexerLimit = compile(`module = "ok" ;`, {
+    targets: ["typescript"],
+    typescript: { lexerStateLimit: 0 },
+  });
+  assertEquals(invalidLexerLimit.bundle, undefined);
+  assertEquals(invalidLexerLimit.diagnostics[0].code, "TS_LEXER_STATE_LIMIT");
+
   const invalidStateLimit = compile(`module = "ok" ;`, {
     targets: ["typescript"],
     typescript: { parserStateLimit: 0 },
@@ -504,6 +603,13 @@ Deno.test("TypeScript target rejects nullable separated-list parts", () => {
 });
 
 Deno.test("TypeScript parser reports deliberately small state limits", () => {
+  const lexerLimit = compile(`module = "a" | "b" ;`, {
+    targets: ["typescript"],
+    typescript: { lexerStateLimit: 1 },
+  });
+  assertEquals(lexerLimit.bundle, undefined);
+  assertEquals(lexerLimit.diagnostics[0].code, "TS_LEXER_STATE_LIMIT");
+
   const stateLimit = compile(
     `
     module = "a" | "b" ;

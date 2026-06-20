@@ -1,0 +1,5 @@
+def grow = repeat(3, inc);
+def edges = [first, last];
+def score = [grow >> sum, edges >> product, id >> sum];
+
+emit [2, 4, 6] => score;

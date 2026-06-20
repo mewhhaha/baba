@@ -1,0 +1,34 @@
+{
+  "generator": "@mewhhaha/baba",
+  "manifestVersion": 1,
+  "files": {
+    "grammar.js": {
+      "hash": "b723e960aec6cde1bffcbe7a5e2456be27f0743da179818b5b6235bed340d72e",
+      "ownership": "generated"
+    },
+    "queries/generated-highlights.scm": {
+      "hash": "a995ceddef44bdbe9ea997bc17167607e0703bd9fdd1a0be05dd18807a2d6248",
+      "ownership": "generated"
+    },
+    "queries/generated-rainbows.scm": {
+      "hash": "e20bc1103280388f834ab69d6a705e787ee10375fe56c58cab0f331c7c552c27",
+      "ownership": "generated"
+    },
+    "ts/lexer.ts": {
+      "hash": "8e0b485219df9db3a2c95ca936a1bee640a853a8569701051981165f7c06b68e",
+      "ownership": "generated"
+    },
+    "ts/mod.ts": {
+      "hash": "c9ddb7c9e8d3057ae09cef4a9f5b4fb4b705795cc03d085bcf2dc80f06f6ecee",
+      "ownership": "generated"
+    },
+    "ts/parser.ts": {
+      "hash": "58c38380103e1309e21e3393707a810577c81e80cab554449addf02c7f6777cf",
+      "ownership": "generated"
+    },
+    "ts/syntax.ts": {
+      "hash": "676e6e4362dd5538da4b81b882bb757bcf2e3e1016045041c1b942be9c6f0a3e",
+      "ownership": "generated"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+fn expensive x = tick(x * 10);
+
+fn main x =
+  let a = lazy expensive(x) in
+  let b = force a in
+  let c = force a in
+  b + c;

@@ -89,6 +89,18 @@ generated/
     mod.ts
 ```
 
+The generated TypeScript API is standalone and exports:
+
+- `lex(source)` for DFA tokenization;
+- `parse(source)` returning a discriminated `ParseResult`;
+- strict `parseTokens(source, tokens)` validation for external token streams;
+- low-level `parseTokensUnchecked(source, tokens)` when validation is not
+  wanted;
+- `positionAt(source, offset)` and `createSourceMap(source)` for UTF-16
+  offset-to-line/column diagnostics;
+- separate `MainNamedToken` and `TriviaToken` types for significant and trivia
+  channels.
+
 Only query files with content are written. Regenerating through `applyBundle()`
 removes previously owned generated query fragments that become empty. Ordinary
 `queries/*.scm` files are user-owned and are never written by baba.
@@ -119,6 +131,7 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --target typescript \
   --typescript-dir ts \
   --discard-trivia \
+  --lexer-state-limit 50000 \
   --parser-state-limit 20000 \
   --parser-item-limit 200000 \
   --parser-table-entry-limit 200000 \
@@ -128,6 +141,7 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
 
 `--ts-out` is an alias for `--typescript-dir`. `--preserve-trivia` and
 `--discard-trivia` control whether skip matches are emitted as trivia tokens.
+`--lexer-state-limit` caps generated TypeScript lexer DFA states.
 `--portability strict|warn|off` controls diagnostics for known cross-target
 acceptance differences. When both targets are selected, portability defaults to
 `strict`; otherwise it defaults to `warn`.

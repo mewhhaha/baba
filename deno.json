@@ -13,7 +13,20 @@
       "CHANGELOG.md",
       "LICENSE",
       "deno.json",
-      "src/**/*.ts"
+      "src/**/*.ts",
+      "examples/**/*",
+      "examples/brainfuck/.helix/languages.toml",
+      "examples/brainfuck/.helix/runtime/queries/brainfuck/highlights.scm",
+      "examples/brainfuck/.helix/runtime/queries/brainfuck/rainbows.scm",
+      "examples/brainfuck/generated/.baba-manifest.json",
+      "examples/funcfuck/.helix/languages.toml",
+      "examples/funcfuck/.helix/runtime/queries/funcfuck/highlights.scm",
+      "examples/funcfuck/.helix/runtime/queries/funcfuck/rainbows.scm",
+      "examples/funcfuck/generated/.baba-manifest.json",
+      "examples/thunkwasm/.helix/languages.toml",
+      "examples/thunkwasm/.helix/runtime/queries/thunkwasm/highlights.scm",
+      "examples/thunkwasm/.helix/runtime/queries/thunkwasm/rainbows.scm",
+      "examples/thunkwasm/generated/.baba-manifest.json"
     ]
   },
   "tasks": {

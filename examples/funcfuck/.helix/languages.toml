@@ -1,0 +1,14 @@
+use-grammars = { only = ["funcfuck"] }
+
+[[language]]
+name = "funcfuck"
+scope = "source.funcfuck"
+file-types = ["ff"]
+comment-token = "#"
+grammar = "funcfuck"
+roots = ["grammar.ebnf"]
+rainbow-brackets = true
+
+[[grammar]]
+name = "funcfuck"
+source = { path = "generated" }

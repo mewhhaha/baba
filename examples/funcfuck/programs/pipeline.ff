@@ -1,0 +1,4 @@
+def boost = add(2) >> square;
+def summarize = [id, boost, sum];
+
+emit [1, 2, 3] => summarize;

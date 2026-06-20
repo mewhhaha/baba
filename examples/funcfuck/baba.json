@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "queries": {
+    "highlights": {
+      "entries": [
+        { "literal": "def", "capture": "keyword" },
+        { "literal": "emit", "capture": "keyword" },
+        { "literal": "repeat", "capture": "function.builtin" },
+        { "node": "INTEGER", "capture": "number" },
+        { "node": "id", "capture": "function.builtin" },
+        { "node": "inc", "capture": "function.builtin" },
+        { "node": "dec", "capture": "function.builtin" },
+        { "node": "double", "capture": "function.builtin" },
+        { "node": "square", "capture": "function.builtin" },
+        { "node": "neg", "capture": "function.builtin" },
+        { "node": "sum", "capture": "function.builtin" },
+        { "node": "product", "capture": "function.builtin" },
+        { "node": "first", "capture": "function.builtin" },
+        { "node": "last", "capture": "function.builtin" },
+        { "node": "add", "capture": "function.builtin" },
+        { "node": "mul", "capture": "function.builtin" },
+        { "node": "take", "capture": "function.builtin" },
+        { "node": "drop", "capture": "function.builtin" }
+      ]
+    },
+    "rainbows": {
+      "scopes": ["group", "fanout", "repeat", "stream"],
+      "brackets": ["(", ")", "[", "]"]
+    }
+  }
+}

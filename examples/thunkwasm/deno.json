@@ -1,0 +1,18 @@
+{
+  "tasks": {
+    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name thunkwasm --root module --metadata baba.json --target all --typescript-dir ts",
+    "check": "deno check aot.ts",
+    "cached": "deno run --allow-read aot.ts programs/cached.tw 7",
+    "closure": "deno run --allow-read aot.ts programs/closure.tw 7",
+    "branch": "deno run --allow-read aot.ts programs/branch.tw 4",
+    "emit:cached": "deno run --allow-read --allow-write aot.ts programs/cached.tw 7 --emit cached.wasm",
+    "helix:sync": "cp generated/queries/generated-highlights.scm .helix/runtime/queries/thunkwasm/highlights.scm && cp generated/queries/generated-rainbows.scm .helix/runtime/queries/thunkwasm/rainbows.scm",
+    "helix:build": "deno task tree-sitter:generate && mkdir -p .helix/runtime/grammars && XDG_CACHE_HOME=$PWD/.cache sh -c 'cd generated && tree-sitter build -o ../.helix/runtime/grammars/thunkwasm.so'",
+    "helix:prepare": "deno task generate && deno task helix:sync && deno task helix:build",
+    "helix:health": "HELIX_RUNTIME=$PWD/.helix/runtime hx --health thunkwasm",
+    "helix:open": "HELIX_RUNTIME=$PWD/.helix/runtime hx programs/cached.tw",
+    "tree-sitter:generate": "cd generated && tree-sitter generate",
+    "tree-sitter:build": "XDG_CACHE_HOME=$PWD/.cache sh -c 'cd generated && tree-sitter build -o parser.so'",
+    "tree-sitter:parse": "XDG_CACHE_HOME=$PWD/.cache tree-sitter parse --lib-path generated/parser.so --lang-name thunkwasm programs/cached.tw"
+  }
+}

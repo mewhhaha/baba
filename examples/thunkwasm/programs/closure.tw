@@ -1,0 +1,5 @@
+fn makeAdder x = fun y -> x + y;
+
+fn main x =
+  let addX = makeAdder(x) in
+  addX(10);

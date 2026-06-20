@@ -1,0 +1,76 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token INTEGER = /[0-9]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = definition+ ;
+
+definition = "fn" name:IDENT params:IDENT* "=" body:expr ";" ;
+
+expr =
+  let_expr
+  | if_expr
+  | fun_expr
+  | lazy_expr
+  | force_expr
+  | equality
+;
+
+let_expr = "let" name:IDENT "=" value:expr "in" body:expr ;
+if_expr =
+  "if" hint:branch_hint? condition:expr "then" consequent:expr "else" alternate:expr
+;
+branch_hint = likely | unlikely ;
+likely = "likely" ;
+unlikely = "unlikely" ;
+
+fun_expr = "fun" param:IDENT "->" body:expr ;
+lazy_expr = "lazy" body:expr ;
+force_expr = "force" body:expr ;
+
+equality = left:comparison rest:equality_tail* ;
+equality_tail = op:equality_op right:comparison ;
+equality_op = eq | ne ;
+eq = "==" ;
+ne = "!=" ;
+
+comparison = left:additive rest:comparison_tail* ;
+comparison_tail = op:comparison_op right:additive ;
+comparison_op = lt | le | gt | ge ;
+lt = "<" ;
+le = "<=" ;
+gt = ">" ;
+ge = ">=" ;
+
+additive = left:multiplicative rest:additive_tail* ;
+additive_tail = op:additive_op right:multiplicative ;
+additive_op = plus | minus ;
+plus = "+" ;
+minus = "-" ;
+
+multiplicative = left:unary rest:multiplicative_tail* ;
+multiplicative_tail = op:multiplicative_op right:unary ;
+multiplicative_op = star | slash ;
+star = "*" ;
+slash = "/" ;
+
+unary =
+  negate
+  | call
+;
+negate = "-" body:unary ;
+
+call = callee:primary args:call_arguments* ;
+call_arguments = "(" values:argument_values? ")" ;
+argument_values = head:expr tail:argument_tail* ;
+argument_tail = "," value:expr ;
+
+primary =
+  integer
+  | variable
+  | tick
+  | group
+;
+integer = value:INTEGER ;
+variable = name:IDENT ;
+tick = "tick" "(" value:expr ")" ;
+group = "(" body:expr ")" ;

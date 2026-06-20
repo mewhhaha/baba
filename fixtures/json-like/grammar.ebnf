@@ -1,0 +1,9 @@
+token STRING = /"[^"]*"/ ;
+token NUMBER = /-?[0-9]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = value ;
+value = object | array | STRING | NUMBER | "true" | "false" | "null" ;
+object = "{" entries:(pair % ",")? "}" ;
+pair = key:STRING ":" value:value ;
+array = "[" items:(value % ",")? "]" ;

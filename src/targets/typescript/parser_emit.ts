@@ -60,7 +60,7 @@ import type {
   AnyRuleNode,
   LexDiagnostic,
   LiteralToken,
-  NamedToken,
+  MainNamedToken,
   ParseDiagnostic,
   ParseOptions,
   ParseResult,
@@ -175,6 +175,19 @@ export function parseTokens(
   return parseTokenList(source, tokens, [...streamDiagnostics, ...diagnostics]);
 }
 
+export function parseTokensUnchecked(
+  source: string,
+  tokens: readonly Token[],
+): ParseResult<RootNode> {
+  const diagnostics = tokens
+    .filter((token) =>
+      token.type === "error" ||
+      (!isTriviaToken(token) && tokenToTerminal(token) < 0)
+    )
+    .map((token): ParseDiagnostic => lexicalTokenDiagnostic(token));
+  return parseTokenList(source, tokens, diagnostics);
+}
+
 function parseTokenList(
   source: string,
   tokens: readonly Token[],
@@ -236,12 +249,21 @@ function parseTokenList(
         : isFragment(accepted) && isRuleNode(accepted.value)
         ? accepted.value as RootNode
         : null;
+      if (root) {
+        return {
+          ok: true,
+          root,
+          source,
+          tokens,
+          diagnostics: [],
+        };
+      }
       return {
-        ok: root !== null,
-        root,
+        ok: false,
+        root: null,
         source,
         tokens,
-        diagnostics: root ? [] : [{
+        diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
           message: "Parser accepted without producing a root node.",
           span: { start: source.length, end: source.length },
@@ -309,7 +331,7 @@ function reduceProduction(
       return node as AnyRuleNode;
     }
     case "terminal":
-      return tokenFragment(rhs[0] as NamedToken | LiteralToken);
+      return tokenFragment(rhs[0] as MainNamedToken | LiteralToken);
     case "ruleRef":
       return ruleFragment(rhs[0] as AnyRuleNode);
     case "identity":
@@ -348,7 +370,7 @@ function reduceProduction(
   }
 }
 
-function tokenFragment(token: NamedToken | LiteralToken): Fragment {
+function tokenFragment(token: MainNamedToken | LiteralToken): Fragment {
   return {
     value: token,
     children: [token],

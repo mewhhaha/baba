@@ -126,6 +126,8 @@ export interface TypeScriptTargetOptions {
   directory?: string;
   /** Preserve skip-token matches as trivia tokens. Defaults to true. */
   preserveTrivia?: boolean;
+  /** Maximum generated lexer DFA state count. Defaults to 50,000. */
+  lexerStateLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
   /** Maximum total LR(1) item count across all states. Defaults to unlimited. */

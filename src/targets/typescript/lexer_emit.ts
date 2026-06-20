@@ -123,13 +123,23 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
         });
       } else {
         const spec = NAMED_SPECS[specRef.specIndex];
-        if (spec.channel !== "trivia" || preserveTrivia) {
+        if (spec.channel === "trivia") {
+          if (preserveTrivia) {
+            tokens.push({
+              type: "named",
+              kind: spec.kind as never,
+              text: source.slice(start, end),
+              span: { start, end },
+              channel: "trivia",
+            });
+          }
+        } else {
           tokens.push({
             type: "named",
-            kind: spec.kind,
+            kind: spec.kind as never,
             text: source.slice(start, end),
             span: { start, end },
-            channel: spec.channel,
+            channel: "main",
           });
         }
       }

@@ -1,0 +1,27 @@
+token INTEGER = /[0-9]+/ ;
+skip ignored = /[^\+\-<>.,\[\]\{\}!0-9]+/ ;
+
+module = instruction+ ;
+
+instruction = count:INTEGER? (
+  increment
+  | decrement
+  | move_left
+  | move_right
+  | output
+  | input
+  | loop
+  | fork
+  | join
+) ;
+
+increment = "+" ;
+decrement = "-" ;
+move_left = "<" ;
+move_right = ">" ;
+output = "." ;
+input = "," ;
+
+loop = "[" body:instruction* "]" ;
+fork = "{" body:instruction* "}" ;
+join = "!" ;

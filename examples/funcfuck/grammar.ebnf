@@ -1,0 +1,63 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token INTEGER = /-?[0-9]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = item+ ;
+
+item = definition | emit ;
+
+definition = "def" name:IDENT "=" body:composition ";" ;
+emit = "emit" input:stream "=>" body:composition ";" ;
+
+composition = first:term rest:composition_tail* ;
+composition_tail = ">>" next:term ;
+
+term =
+  builtin
+  | reference
+  | repeat
+  | fanout
+  | group
+;
+
+group = "(" body:composition ")" ;
+reference = name:IDENT ;
+fanout = "[" head:composition tail:fanout_tail* "]" ;
+fanout_tail = "," value:composition ;
+repeat = "repeat" "(" count:INTEGER "," body:composition ")" ;
+
+builtin =
+  id
+  | inc
+  | dec
+  | double
+  | square
+  | neg
+  | sum
+  | product
+  | first
+  | last
+  | add
+  | mul
+  | take
+  | drop
+;
+
+id = "id" ;
+inc = "inc" ;
+dec = "dec" ;
+double = "double" ;
+square = "square" ;
+neg = "neg" ;
+sum = "sum" ;
+product = "product" ;
+first = "first" ;
+last = "last" ;
+add = "add" "(" amount:INTEGER ")" ;
+mul = "mul" "(" factor:INTEGER ")" ;
+take = "take" "(" count:INTEGER ")" ;
+drop = "drop" "(" count:INTEGER ")" ;
+
+stream = "[" values:integer_values? "]" ;
+integer_values = head:INTEGER tail:integer_tail* ;
+integer_tail = "," value:INTEGER ;

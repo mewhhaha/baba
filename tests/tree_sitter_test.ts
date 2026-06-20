@@ -151,8 +151,16 @@ Deno.test("Tree-sitter and TypeScript agree on explicit whitespace", async () =>
 });
 
 Deno.test("portable fixtures have matching Tree-sitter and TypeScript acceptance", async () => {
-  for (const fixture of ["expressions", "declarations"]) {
+  for (
+    const fixture of [
+      "expressions",
+      "declarations",
+      "json-like",
+      "markup-like",
+    ]
+  ) {
     const source = await Deno.readTextFile(`fixtures/${fixture}/grammar.ebnf`);
+    const languageName = fixture.replaceAll("-", "_");
     const result = compile(source, { targets: ["typescript"] });
     assertEquals(result.diagnostics.length, 0);
     assert(result.bundle);
@@ -163,11 +171,17 @@ Deno.test("portable fixtures have matching Tree-sitter and TypeScript acceptance
       const mod = await import(`file://${dir}/typescript/mod.ts`);
       for (const sample of await fixtureSamples(fixture, "valid")) {
         assertEquals(mod.parse(sample).ok, true);
-        assertEquals(await treeSitterAccepts(source, sample, fixture), true);
+        assertEquals(
+          await treeSitterAccepts(source, sample, languageName),
+          true,
+        );
       }
       for (const sample of await fixtureSamples(fixture, "invalid")) {
         assertEquals(mod.parse(sample).ok, false);
-        assertEquals(await treeSitterAccepts(source, sample, fixture), false);
+        assertEquals(
+          await treeSitterAccepts(source, sample, languageName),
+          false,
+        );
       }
     } finally {
       await Deno.remove(dir, { recursive: true });

@@ -14,6 +14,17 @@ jobs:
         with:
           deno-version: v2.8.0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.21"
+
+      - name: Install Node smoke dependencies
+        run: npm install --no-save typescript@5.9.3
+
       - name: Install Tree-sitter CLI
         run: deno install -g -A npm:tree-sitter-cli@0.25.8
 
@@ -28,6 +39,9 @@ jobs:
 
       - name: Test
         run: deno task test
+
+      - name: Runtime smoke
+        run: deno run --allow-read --allow-write --allow-run tests/runtime_smoke.ts deno node bun
 
       - name: Publish dry run
         run: deno task publish:dry-run

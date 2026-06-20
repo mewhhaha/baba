@@ -1,0 +1,6 @@
+token NAME = /[A-Z][A-Za-z0-9]*/ ;
+token TEXT = /[a-z]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = element+ ;
+element = "<" name:NAME ">" body:(element | TEXT)* "</" close:NAME ">" ;

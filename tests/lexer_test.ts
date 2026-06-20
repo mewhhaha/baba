@@ -348,6 +348,45 @@ Deno.test("TypeScript lexer uses generated DFA tables for many short tokens", as
   }
 });
 
+Deno.test("TypeScript lexer performance gates cover large inputs", async () => {
+  const result = compile(
+    `
+    token A_RUN = /a+/ ;
+    module = A_RUN ;
+  `,
+    { targets: ["typescript"] },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    for (
+      const [size, limitMs] of [
+        [10_000, 1_000],
+        [100_000, 1_500],
+        [1_000_000, 5_000],
+      ] as const
+    ) {
+      const input = "a".repeat(size);
+      const start = performance.now();
+      const lexed = mod.lex(input, { preserveTrivia: false });
+      const elapsed = performance.now() - start;
+      assertEquals(lexed.diagnostics.length, 0);
+      assertEquals(lexed.tokens.length, 2);
+      assert(
+        elapsed < limitMs,
+        `Expected ${size} bytes to lex in under ${limitMs}ms, took ${elapsed}ms`,
+      );
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("TypeScript target rejects nonportable regex shorthand classes", () => {
   const result = compile(
     `

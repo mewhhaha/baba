@@ -1,6 +1,5 @@
 import type { Diagnostic, EbnfExpression, EbnfGrammar } from "../ast.ts";
-import { isRegexNullable } from "./regex/ast.ts";
-import { parsePortableRegex } from "./regex/parser.ts";
+import { analyzeRegexPattern } from "./regex/diagnostics.ts";
 
 const reservedGrammarRuleNames = new Set(["source_file"]);
 const reservedTokenDeclarationNames = new Set(["source_file"]);
@@ -81,18 +80,14 @@ export function collectGrammarDiagnostics(
         span: token.span,
       });
     }
-    try {
-      const regex = parsePortableRegex(token.pattern);
-      if (isRegexNullable(regex)) throw new Error("must not match empty text");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      diagnostics.push({
+    diagnostics.push(
+      ...analyzeRegexPattern({
+        pattern: token.pattern,
+        label: `Invalid regex for token '${token.name}'`,
         code: "INVALID_TOKEN_REGEX",
-        severity: "error",
-        message: `Invalid regex for token '${token.name}': ${message}`,
         span: token.span,
-      });
-    }
+      }).diagnostics,
+    );
     declaredNames.add(token.name);
     if (token.kind === "skip") skipNames.add(token.name);
     else tokenNames.add(token.name);

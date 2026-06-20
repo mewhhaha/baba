@@ -239,6 +239,17 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
       () => main([grammarPath, "--backend", "typescript-ll1"]),
       "'--backend' was removed in baba 1.0",
     );
+
+    const verboseLogs = await captureConsoleError(() =>
+      main([
+        "check",
+        grammarPath,
+        "--target",
+        "typescript",
+        "--verbose",
+      ])
+    );
+    assertIncludes(verboseLogs.join("\n"), "TS_PARSER_STATS");
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
