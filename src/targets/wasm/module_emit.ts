@@ -1,4 +1,5 @@
 import type { Dfa } from "../../compiler/regex/dfa.ts";
+import type { BnfGrammar } from "../typescript/bnf.ts";
 import type { LrAction, LrTable } from "../typescript/lr1.ts";
 
 export interface WasmModuleImage {
@@ -8,12 +9,14 @@ export interface WasmModuleImage {
 
 interface DataLayout {
   accepts: number;
+  asciiTransitions: number | null;
   transitionRows: number;
   transitions: number;
   actionRows: number;
   actionPairs: number;
   gotoRows: number;
   gotoPairs: number;
+  productions: number;
   inputBase: number;
   bytes: Uint8Array;
 }
@@ -29,9 +32,10 @@ const ACTION_ACCEPT = 0x03_00_00_00;
 
 export function emitWasmModule(
   dfa: Dfa,
+  bnf: BnfGrammar,
   lr: LrTable,
 ): WasmModuleImage {
-  const layout = buildDataLayout(dfa, lr);
+  const layout = buildDataLayout(dfa, bnf, lr);
   const initialPages = Math.max(1, Math.ceil(layout.inputBase / PAGE_SIZE));
   const sections = [
     section(1, typeSection()),
@@ -59,6 +63,7 @@ export function emitWasmModule(
 
 function buildDataLayout(
   dfa: Dfa,
+  bnf: BnfGrammar,
   lr: LrTable,
 ): DataLayout {
   const data: number[] = [];
@@ -76,6 +81,10 @@ function buildDataLayout(
   const accepts = appendI32s(
     dfa.states.map((state) => state.selectedAccept ?? -1),
   );
+  const asciiTransitions = buildAsciiTransitions(dfa);
+  const asciiTransitionsOffset = asciiTransitions
+    ? appendI32s(asciiTransitions)
+    : null;
   const transitionRows: number[] = [];
   const transitions: number[] = [];
   for (const state of dfa.states) {
@@ -114,14 +123,23 @@ function buildDataLayout(
   const gotoRowsOffset = appendI32s(gotoRows);
   const gotoPairsOffset = appendI32s(gotoPairs);
 
+  const productions = appendI32s(
+    bnf.productions.flatMap((production) => [
+      production.lhs,
+      production.rhs.length,
+    ]),
+  );
+
   return {
     accepts,
+    asciiTransitions: asciiTransitionsOffset,
     transitionRows: transitionRowsOffset,
     transitions: transitionsOffset,
     actionRows: actionRowsOffset,
     actionPairs: actionPairsOffset,
     gotoRows: gotoRowsOffset,
     gotoPairs: gotoPairsOffset,
+    productions,
     inputBase: align(data.length, 8),
     bytes: Uint8Array.from(data),
   };
@@ -155,6 +173,23 @@ function encodePayload(kind: number, payload: number): number {
   return kind | payload;
 }
 
+function buildAsciiTransitions(dfa: Dfa): number[] | null {
+  const cellCount = dfa.states.length * 128;
+  if (cellCount > 65_536) return null;
+  const table = new Array(cellCount).fill(-1);
+  for (const state of dfa.states) {
+    const base = state.id * 128;
+    for (const transition of state.transitions) {
+      const start = Math.max(0, transition.start);
+      const end = Math.min(127, transition.end);
+      for (let codePoint = start; codePoint <= end; codePoint++) {
+        table[base + codePoint] = transition.target;
+      }
+    }
+  }
+  return table;
+}
+
 function typeSection(): number[] {
   return vec([
     [
@@ -167,6 +202,11 @@ function typeSection(): number[] {
       ...vec([I32, I32, I32, I32]),
       ...vec([I32]),
     ],
+    [
+      FUNC,
+      ...vec([I32, I32, I32, I32, I32, I32]),
+      ...vec([I32]),
+    ],
   ]);
 }
 
@@ -177,6 +217,7 @@ function functionSection(): number[] {
     u32(0),
     u32(0),
     u32(1),
+    u32(2),
   ]);
 }
 
@@ -191,6 +232,7 @@ function exportSection(): number[] {
     exportEntry("parser_action", 0x00, 2),
     exportEntry("parser_goto", 0x00, 3),
     exportEntry("lex_all", 0x00, 4),
+    exportEntry("parse_trace", 0x00, 5),
   ]);
 }
 
@@ -220,7 +262,8 @@ function codeSection(
         missing: -1,
       }),
     ),
-    functionBody(9, lexAllFunction()),
+    functionBody(15, lexAllFunction(layout)),
+    functionBody(11, parseTraceFunction(layout)),
   ]);
 }
 
@@ -253,6 +296,29 @@ function transitionFunction(
     ...i32(-1),
     0x0f,
     0x0b,
+
+    ...(layout.asciiTransitions === null ? [] : [
+      ...get(codePoint),
+      ...i32(128),
+      0x49,
+      0x04,
+      EMPTY_BLOCK,
+      ...loadAsciiTransition(
+        layout.asciiTransitions,
+        state,
+        codePoint,
+      ),
+      ...set(base),
+      ...get(base),
+      ...i32(0),
+      0x4e,
+      0x04,
+      EMPTY_BLOCK,
+      ...get(base),
+      0x0f,
+      0x0b,
+      0x0b,
+    ]),
 
     ...loadTableValue(layout.transitionRows, state),
     ...set(index),
@@ -459,20 +525,25 @@ function lexOneFunction(acceptsOffset: number): number[] {
   ];
 }
 
-function lexAllFunction(): number[] {
+function lexAllFunction(layout: DataLayout): number[] {
   const src = 0;
   const len = 1;
-  const result = 2;
   const tokens = 3;
   const offset = 4;
   const count = 5;
-  const matched = 6;
-  const spec = 7;
-  const end = 8;
-  const unit = 9;
-  const nextUnit = 10;
-  const width = 11;
-  const record = 12;
+  const spec = 6;
+  const end = 7;
+  const unit = 8;
+  const nextUnit = 9;
+  const width = 10;
+  const record = 11;
+  const state = 12;
+  const index = 13;
+  const bestSpec = 14;
+  const bestEnd = 15;
+  const codePoint = 16;
+  const target = 17;
+  const accept = 18;
   return [
     ...i32(0),
     ...set(offset),
@@ -489,70 +560,81 @@ function lexAllFunction(): number[] {
     0x0d,
     ...u32(1),
 
-    ...get(src),
-    ...get(len),
-    ...get(offset),
-    ...get(result),
-    0x10,
-    ...u32(1),
-    ...set(matched),
-
-    ...get(matched),
     ...i32(0),
-    0x47,
+    ...set(state),
+    ...get(offset),
+    ...set(index),
+    ...i32(-1),
+    ...set(bestSpec),
+    ...get(offset),
+    ...set(bestEnd),
+
+    0x02,
+    EMPTY_BLOCK,
+    0x03,
+    EMPTY_BLOCK,
+    ...get(index),
+    ...get(len),
+    0x4f,
+    0x0d,
+    ...u32(1),
+
+    ...decodeAndTransition(
+      layout,
+      src,
+      index,
+      len,
+      unit,
+      nextUnit,
+      codePoint,
+      width,
+      state,
+      target,
+    ),
+    ...get(target),
+    ...i32(0),
+    0x48,
+    0x0d,
+    ...u32(1),
+
+    ...get(index),
+    ...get(width),
+    0x6a,
+    ...set(index),
+    ...get(target),
+    ...set(state),
+
+    ...loadTableValue(layout.accepts, state),
+    ...set(accept),
+    ...get(accept),
+    ...i32(0),
+    0x4e,
     0x04,
     EMPTY_BLOCK,
-    ...get(result),
-    ...load32(),
+    ...get(accept),
+    ...set(bestSpec),
+    ...get(index),
+    ...set(bestEnd),
+    0x0b,
+
+    0x0c,
+    ...u32(0),
+    0x0b,
+    0x0b,
+
+    ...get(bestSpec),
+    ...i32(0),
+    0x4e,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(bestSpec),
     ...set(spec),
-    ...get(result),
-    ...i32(4),
-    0x6a,
-    ...load32(),
+    ...get(bestEnd),
     ...set(end),
     0x05,
     ...i32(-1),
     ...set(spec),
-    ...i32(1),
-    ...set(width),
-    ...loadUtf16(src, offset),
-    ...set(unit),
-    ...get(unit),
-    ...i32(0xd800),
-    0x4f,
-    0x04,
-    EMPTY_BLOCK,
-    ...get(unit),
-    ...i32(0xdbff),
-    0x4d,
-    0x04,
-    EMPTY_BLOCK,
-    ...get(offset),
-    ...i32(1),
-    0x6a,
-    ...get(len),
-    0x49,
-    0x04,
-    EMPTY_BLOCK,
-    ...loadUtf16AtIndexPlusOne(src, offset),
-    ...set(nextUnit),
-    ...get(nextUnit),
-    ...i32(0xdc00),
-    0x4f,
-    0x04,
-    EMPTY_BLOCK,
-    ...get(nextUnit),
-    ...i32(0xdfff),
-    0x4d,
-    0x04,
-    EMPTY_BLOCK,
-    ...i32(2),
-    ...set(width),
-    0x0b,
-    0x0b,
-    0x0b,
-    0x0b,
-    0x0b,
+    ...decodeCodePoint(src, offset, len, unit, nextUnit, codePoint, width),
     ...get(offset),
     ...get(width),
     0x6a,
@@ -591,6 +673,349 @@ function lexAllFunction(): number[] {
     0x0b,
 
     ...get(count),
+  ];
+}
+
+function decodeCodePoint(
+  srcLocal: number,
+  indexLocal: number,
+  lenLocal: number,
+  unitLocal: number,
+  nextUnitLocal: number,
+  codePointLocal: number,
+  widthLocal: number,
+): number[] {
+  return [
+    ...loadUtf16(srcLocal, indexLocal),
+    ...set(unitLocal),
+    ...decodeCodePointFromLoadedUnit(
+      srcLocal,
+      indexLocal,
+      lenLocal,
+      unitLocal,
+      nextUnitLocal,
+      codePointLocal,
+      widthLocal,
+    ),
+  ];
+}
+
+function decodeAndTransition(
+  layout: DataLayout,
+  srcLocal: number,
+  indexLocal: number,
+  lenLocal: number,
+  unitLocal: number,
+  nextUnitLocal: number,
+  codePointLocal: number,
+  widthLocal: number,
+  stateLocal: number,
+  targetLocal: number,
+): number[] {
+  return [
+    ...loadUtf16(srcLocal, indexLocal),
+    ...set(unitLocal),
+    ...(layout.asciiTransitions === null
+      ? [
+        ...decodeCodePointFromLoadedUnit(
+          srcLocal,
+          indexLocal,
+          lenLocal,
+          unitLocal,
+          nextUnitLocal,
+          codePointLocal,
+          widthLocal,
+        ),
+        ...get(stateLocal),
+        ...get(codePointLocal),
+        0x10,
+        ...u32(0),
+        ...set(targetLocal),
+      ]
+      : [
+        ...get(unitLocal),
+        ...i32(128),
+        0x49,
+        0x04,
+        EMPTY_BLOCK,
+        ...get(unitLocal),
+        ...set(codePointLocal),
+        ...i32(1),
+        ...set(widthLocal),
+        ...loadAsciiTransition(
+          layout.asciiTransitions,
+          stateLocal,
+          unitLocal,
+        ),
+        ...set(targetLocal),
+        0x05,
+        ...decodeCodePointFromLoadedUnit(
+          srcLocal,
+          indexLocal,
+          lenLocal,
+          unitLocal,
+          nextUnitLocal,
+          codePointLocal,
+          widthLocal,
+        ),
+        ...get(stateLocal),
+        ...get(codePointLocal),
+        0x10,
+        ...u32(0),
+        ...set(targetLocal),
+        0x0b,
+      ]),
+  ];
+}
+
+function decodeCodePointFromLoadedUnit(
+  srcLocal: number,
+  indexLocal: number,
+  lenLocal: number,
+  unitLocal: number,
+  nextUnitLocal: number,
+  codePointLocal: number,
+  widthLocal: number,
+): number[] {
+  return [
+    ...get(unitLocal),
+    ...set(codePointLocal),
+    ...i32(1),
+    ...set(widthLocal),
+
+    ...get(unitLocal),
+    ...i32(0xd800),
+    0x4f,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(unitLocal),
+    ...i32(0xdbff),
+    0x4d,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(indexLocal),
+    ...i32(1),
+    0x6a,
+    ...get(lenLocal),
+    0x49,
+    0x04,
+    EMPTY_BLOCK,
+    ...loadUtf16AtIndexPlusOne(srcLocal, indexLocal),
+    ...set(nextUnitLocal),
+    ...get(nextUnitLocal),
+    ...i32(0xdc00),
+    0x4f,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(nextUnitLocal),
+    ...i32(0xdfff),
+    0x4d,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(unitLocal),
+    ...i32(0xd800),
+    0x6b,
+    ...i32(10),
+    0x74,
+    ...get(nextUnitLocal),
+    ...i32(0xdc00),
+    0x6b,
+    0x6a,
+    ...i32(0x1_00_00),
+    0x6a,
+    ...set(codePointLocal),
+    ...i32(2),
+    ...set(widthLocal),
+    0x0b,
+    0x0b,
+    0x0b,
+    0x0b,
+    0x0b,
+  ];
+}
+
+function loadAsciiTransition(
+  asciiTransitionsOffset: number,
+  stateLocal: number,
+  unitLocal: number,
+): number[] {
+  return [
+    ...i32(asciiTransitionsOffset),
+    ...get(stateLocal),
+    ...i32(128),
+    0x6c,
+    ...get(unitLocal),
+    0x6a,
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...load32(),
+  ];
+}
+
+function parseTraceFunction(layout: DataLayout): number[] {
+  const terminals = 0;
+  const terminalCount = 1;
+  const trace = 2;
+  const traceCapacity = 3;
+  const stack = 4;
+  const error = 5;
+  const depth = 6;
+  const streamIndex = 7;
+  const traceCount = 8;
+  const state = 9;
+  const terminal = 10;
+  const action = 11;
+  const kind = 12;
+  const payload = 13;
+  const rhsLength = 14;
+  const lhs = 15;
+  const gotoState = 16;
+  return [
+    ...i32(1),
+    ...set(depth),
+    ...i32(0),
+    ...set(streamIndex),
+    ...i32(0),
+    ...set(traceCount),
+    ...get(stack),
+    ...i32(0),
+    ...store32(),
+
+    0x02,
+    EMPTY_BLOCK,
+    0x03,
+    EMPTY_BLOCK,
+
+    ...get(streamIndex),
+    ...get(terminalCount),
+    0x4f,
+    0x04,
+    EMPTY_BLOCK,
+    ...loadStackValue(stack, depth, -1),
+    ...set(state),
+    ...storeError(error, state, streamIndex),
+    ...i32(-1),
+    0x0f,
+    0x0b,
+
+    ...loadStackValue(stack, depth, -1),
+    ...set(state),
+    ...loadArrayValue(terminals, streamIndex),
+    ...set(terminal),
+    ...get(state),
+    ...get(terminal),
+    0x10,
+    ...u32(2),
+    ...set(action),
+
+    ...get(action),
+    ...i32(0),
+    0x46,
+    0x04,
+    EMPTY_BLOCK,
+    ...storeError(error, state, streamIndex),
+    ...i32(-1),
+    0x0f,
+    0x0b,
+
+    ...get(action),
+    ...i32(24),
+    0x76,
+    ...set(kind),
+    ...get(action),
+    ...i32(0x00_ff_ff_ff),
+    0x71,
+    ...set(payload),
+
+    ...get(kind),
+    ...i32(1),
+    0x46,
+    0x04,
+    EMPTY_BLOCK,
+    ...storeTraceOrOverflow(trace, traceCapacity, traceCount, action),
+    ...get(stack),
+    ...get(depth),
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...get(payload),
+    ...store32(),
+    ...get(depth),
+    ...i32(1),
+    0x6a,
+    ...set(depth),
+    ...get(streamIndex),
+    ...i32(1),
+    0x6a,
+    ...set(streamIndex),
+    0x0c,
+    ...u32(1),
+    0x0b,
+
+    ...get(kind),
+    ...i32(2),
+    0x46,
+    0x04,
+    EMPTY_BLOCK,
+    ...storeTraceOrOverflow(trace, traceCapacity, traceCount, action),
+    ...loadProductionField(layout.productions, payload, 1),
+    ...set(rhsLength),
+    ...loadProductionField(layout.productions, payload, 0),
+    ...set(lhs),
+    ...get(depth),
+    ...get(rhsLength),
+    0x6b,
+    ...set(depth),
+    ...loadStackValue(stack, depth, -1),
+    ...set(state),
+    ...get(state),
+    ...get(lhs),
+    0x10,
+    ...u32(3),
+    ...set(gotoState),
+    ...get(gotoState),
+    ...i32(0),
+    0x48,
+    0x04,
+    EMPTY_BLOCK,
+    ...storeError(error, state, streamIndex),
+    ...i32(-3),
+    0x0f,
+    0x0b,
+    ...get(stack),
+    ...get(depth),
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...get(gotoState),
+    ...store32(),
+    ...get(depth),
+    ...i32(1),
+    0x6a,
+    ...set(depth),
+    0x0c,
+    ...u32(1),
+    0x0b,
+
+    ...get(kind),
+    ...i32(3),
+    0x46,
+    0x04,
+    EMPTY_BLOCK,
+    ...storeTraceOrOverflow(trace, traceCapacity, traceCount, action),
+    ...get(traceCount),
+    0x0f,
+    0x0b,
+
+    ...storeError(error, state, streamIndex),
+    ...i32(-3),
+    0x0f,
+
+    0x0b,
+    0x0b,
+
+    ...i32(-3),
   ];
 }
 
@@ -670,6 +1095,97 @@ function loadTableValue(offset: number, indexLocal: number): number[] {
     0x6c,
     0x6a,
     ...load32(),
+  ];
+}
+
+function loadArrayValue(baseLocal: number, indexLocal: number): number[] {
+  return [
+    ...get(baseLocal),
+    ...get(indexLocal),
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...load32(),
+  ];
+}
+
+function loadStackValue(
+  stackLocal: number,
+  depthLocal: number,
+  relative: number,
+): number[] {
+  return [
+    ...get(stackLocal),
+    ...get(depthLocal),
+    ...i32(relative),
+    0x6a,
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...load32(),
+  ];
+}
+
+function loadProductionField(
+  productionsOffset: number,
+  productionLocal: number,
+  field: 0 | 1,
+): number[] {
+  return [
+    ...i32(productionsOffset),
+    ...get(productionLocal),
+    ...i32(8),
+    0x6c,
+    0x6a,
+    ...i32(field * 4),
+    0x6a,
+    ...load32(),
+  ];
+}
+
+function storeError(
+  errorLocal: number,
+  stateLocal: number,
+  indexLocal: number,
+): number[] {
+  return [
+    ...get(errorLocal),
+    ...get(stateLocal),
+    ...store32(),
+    ...get(errorLocal),
+    ...i32(4),
+    0x6a,
+    ...get(indexLocal),
+    ...store32(),
+  ];
+}
+
+function storeTraceOrOverflow(
+  traceLocal: number,
+  capacityLocal: number,
+  countLocal: number,
+  actionLocal: number,
+): number[] {
+  return [
+    ...get(countLocal),
+    ...get(capacityLocal),
+    0x4f,
+    0x04,
+    EMPTY_BLOCK,
+    ...i32(-2),
+    0x0f,
+    0x0b,
+    ...get(traceLocal),
+    ...get(countLocal),
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...get(actionLocal),
+    ...store32(),
+    ...get(countLocal),
+    ...i32(1),
+    0x6a,
+    ...set(countLocal),
   ];
 }
 

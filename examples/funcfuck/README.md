@@ -63,6 +63,7 @@ That command creates:
 - `generated/grammar.js`: Tree-sitter grammar.
 - `generated/queries/*.scm`: generated Tree-sitter queries.
 - `generated/ts/*.ts`: generated TypeScript lexer/parser/syntax types.
+- `generated/wasm/*.ts`: generated Wasm-backed lexer/parser runtime.
 - `.helix/runtime/queries/funcfuck/*.scm`: local Helix query copies.
 
 The `.helix/languages.toml` file declares the generated Tree-sitter grammar for
@@ -98,7 +99,7 @@ If Helix was already open, restart it after building the parser.
 Step 4: write `interpreter.ts`, importing the generated parser:
 
 ```ts
-import { parse } from "./generated/ts/mod.ts";
+import { parse } from "./generated/wasm/mod.ts";
 ```
 
 The interpreter compiles the generated CST into JavaScript functions, resolves
@@ -120,7 +121,7 @@ Expected output:
 [8, 15, 16, 39, 78]
 ```
 
-Validate the generated TypeScript:
+Validate the generated runtime and interpreter:
 
 ```sh
 deno task check

@@ -28,7 +28,8 @@ refcounts, function table ids, environments, and cached thunk results.
 
 All commands assume your current directory is `examples/thunkwasm`.
 
-Generate the parser artifacts:
+Generate the parser artifacts, including the Wasm-backed parser used by the AOT
+compiler:
 
 ```sh
 deno task generate
@@ -68,7 +69,7 @@ Write a `.wasm` file and run the same compiled module:
 deno task emit:cached
 ```
 
-Validate the generated TypeScript:
+Validate the generated runtime and compiler:
 
 ```sh
 deno task check

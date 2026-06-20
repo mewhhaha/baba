@@ -53,7 +53,7 @@ export function planWasmTarget(
   }
 
   const dfa = buildLexerDfa(lexerSpecs(analyzed));
-  const wasm = emitWasmModule(dfa, typeScriptPlan.lr);
+  const wasm = emitWasmModule(dfa, typeScriptPlan.bnf, typeScriptPlan.lr);
   return {
     analyzed,
     bnf: typeScriptPlan.bnf,
@@ -84,7 +84,7 @@ export function emitWasmTarget(
     },
     {
       path: `${dir}/lexer.ts`,
-      content: emitWasmLexer(plan.analyzed, plan.preserveTrivia),
+      content: emitWasmLexer(plan.analyzed, plan.bnf, plan.preserveTrivia),
       kind: "source",
     },
     {

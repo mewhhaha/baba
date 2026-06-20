@@ -49,14 +49,24 @@ type ReducerSpec =
 
 interface Fragment {
   value: unknown;
-  children: readonly SyntaxElement[];
-  fields: readonly FieldCapture[];
+  children: SyntaxElement[];
+  fields: FieldCapture[];
   span: Span | null;
 }
 
 interface FieldCapture {
   name: string;
   value: unknown;
+}
+
+interface FieldConfig {
+  array: boolean;
+  nullable: boolean;
+}
+
+interface RuntimeRuleFieldSchema {
+  entries: readonly (readonly [name: string, config: FieldConfig])[];
+  byName: Record<string, FieldConfig>;
 }
 
 const EOF_TERMINAL = 0;
@@ -69,21 +79,25 @@ const LITERAL_TERMINALS = new Map<string, number>([["fn",3],["=",4],[";",5],["le
 const MAIN_TOKEN_KINDS = new Set<string>(["IDENT","INTEGER"]);
 const TRIVIA_TOKEN_KINDS = new Set<string>(["WS"]);
 const RULE_NAMES: readonly string[] = ["module","definition","expr","let_expr","if_expr","branch_hint","likely","unlikely","fun_expr","lazy_expr","force_expr","equality","equality_tail","equality_op","eq","ne","comparison","comparison_tail","comparison_op","lt","le","gt","ge","additive","additive_tail","additive_op","plus","minus","multiplicative","multiplicative_tail","multiplicative_op","star","slash","unary","negate","call","call_arguments","argument_values","argument_tail","primary","integer","variable","tick","group"];
+const EMPTY_PARSE_DIAGNOSTICS: readonly ParseDiagnostic[] = [];
 const RULE_FIELD_SCHEMA_ENTRIES: readonly (
   readonly [
     ruleId: number,
     fields: readonly (readonly [
       name: string,
-      config: { array: boolean; nullable: boolean },
+      config: FieldConfig,
     ])[],
   ]
 )[] = [[0,[]],[1,[["body",{"array":false,"nullable":false}],["name",{"array":false,"nullable":false}],["params",{"array":false,"nullable":false}]]],[2,[]],[3,[["body",{"array":false,"nullable":false}],["name",{"array":false,"nullable":false}],["value",{"array":false,"nullable":false}]]],[4,[["alternate",{"array":false,"nullable":false}],["condition",{"array":false,"nullable":false}],["consequent",{"array":false,"nullable":false}],["hint",{"array":false,"nullable":false}]]],[5,[]],[6,[]],[7,[]],[8,[["body",{"array":false,"nullable":false}],["param",{"array":false,"nullable":false}]]],[9,[["body",{"array":false,"nullable":false}]]],[10,[["body",{"array":false,"nullable":false}]]],[11,[["left",{"array":false,"nullable":false}],["rest",{"array":false,"nullable":false}]]],[12,[["op",{"array":false,"nullable":false}],["right",{"array":false,"nullable":false}]]],[13,[]],[14,[]],[15,[]],[16,[["left",{"array":false,"nullable":false}],["rest",{"array":false,"nullable":false}]]],[17,[["op",{"array":false,"nullable":false}],["right",{"array":false,"nullable":false}]]],[18,[]],[19,[]],[20,[]],[21,[]],[22,[]],[23,[["left",{"array":false,"nullable":false}],["rest",{"array":false,"nullable":false}]]],[24,[["op",{"array":false,"nullable":false}],["right",{"array":false,"nullable":false}]]],[25,[]],[26,[]],[27,[]],[28,[["left",{"array":false,"nullable":false}],["rest",{"array":false,"nullable":false}]]],[29,[["op",{"array":false,"nullable":false}],["right",{"array":false,"nullable":false}]]],[30,[]],[31,[]],[32,[]],[33,[]],[34,[["body",{"array":false,"nullable":false}]]],[35,[["args",{"array":false,"nullable":false}],["callee",{"array":false,"nullable":false}]]],[36,[["values",{"array":false,"nullable":false}]]],[37,[["head",{"array":false,"nullable":false}],["tail",{"array":false,"nullable":false}]]],[38,[["value",{"array":false,"nullable":false}]]],[39,[]],[40,[["value",{"array":false,"nullable":false}]]],[41,[["name",{"array":false,"nullable":false}]]],[42,[["value",{"array":false,"nullable":false}]]],[43,[["body",{"array":false,"nullable":false}]]]];
-const RULE_FIELD_SCHEMAS = new Map(
-  RULE_FIELD_SCHEMA_ENTRIES.map(([ruleId, fields]) => [
-    ruleId,
-    new Map(fields),
-  ]),
-);
+const RULE_FIELD_SCHEMAS: readonly (RuntimeRuleFieldSchema | undefined)[] = (() => {
+  const schemas: (RuntimeRuleFieldSchema | undefined)[] = [];
+  for (const [ruleId, entries] of RULE_FIELD_SCHEMA_ENTRIES) {
+    const byName = Object.create(null) as Record<string, FieldConfig>;
+    for (const [name, config] of entries) byName[name] = config;
+    schemas[ruleId] = { entries, byName };
+  }
+  return schemas;
+})();
 
 export function parse(
   source: string,
@@ -93,7 +107,7 @@ export function parse(
   return parseTokenList(
     source,
     lexed.tokens,
-    lexed.diagnostics.map((diagnostic) => lexicalDiagnostic(diagnostic)),
+    lexicalDiagnostics(lexed.diagnostics),
   );
 }
 
@@ -102,26 +116,19 @@ export function parseTokens(
   tokens: readonly Token[],
 ): ParseResult<RootNode> {
   const streamDiagnostics = validateTokenStream(source, tokens);
-  const diagnostics = tokens
-    .filter((token) =>
-      token.type === "error" ||
-      (!isTriviaToken(token) && tokenToTerminal(token) < 0)
-    )
-    .map((token): ParseDiagnostic => lexicalTokenDiagnostic(token));
-  return parseTokenList(source, tokens, [...streamDiagnostics, ...diagnostics]);
+  const tokenDiagnostics = lexicalTokenDiagnostics(tokens);
+  return parseTokenList(
+    source,
+    tokens,
+    combineDiagnostics(streamDiagnostics, tokenDiagnostics),
+  );
 }
 
 export function parseTokensUnchecked(
   source: string,
   tokens: readonly Token[],
 ): ParseResult<RootNode> {
-  const diagnostics = tokens
-    .filter((token) =>
-      token.type === "error" ||
-      (!isTriviaToken(token) && tokenToTerminal(token) < 0)
-    )
-    .map((token): ParseDiagnostic => lexicalTokenDiagnostic(token));
-  return parseTokenList(source, tokens, diagnostics);
+  return parseTokenList(source, tokens, lexicalTokenDiagnostics(tokens));
 }
 
 function parseTokenList(
@@ -264,7 +271,7 @@ function reduceProduction(
         children: fragment.children,
         fields: buildFields(reducer.ruleId, fragment.fields),
       };
-      return node as AnyRuleNode;
+      return node as unknown as AnyRuleNode;
     }
     case "terminal":
       return tokenFragment(rhs[0] as MainNamedToken | LiteralToken);
@@ -274,7 +281,7 @@ function reduceProduction(
     case "optionalSome":
       return asFragment(rhs[0]);
     case "sequence":
-      return sequenceFragment(rhs.map(asFragment), offset);
+      return sequenceFragment(rhs, offset);
     case "optionalEmpty":
       return emptyFragment(null, offset);
     case "repeatEmpty":
@@ -284,11 +291,13 @@ function reduceProduction(
       return appendFragment(asFragment(rhs[0]), asFragment(rhs[1]));
     case "repeat1First": {
       const item = asFragment(rhs[0]);
-      return { ...item, value: [item.value] };
+      item.value = [item.value];
+      return item;
     }
     case "separatedFirst": {
       const item = asFragment(rhs[0]);
-      return { ...item, value: [item.value] };
+      item.value = [item.value];
+      return item;
     }
     case "separatedAppend":
       return appendSeparatedFragment(
@@ -298,10 +307,8 @@ function reduceProduction(
       );
     case "field": {
       const fragment = asFragment(rhs[0]);
-      return {
-        ...fragment,
-        fields: [...fragment.fields, { name: reducer.name, value: fragment.value }],
-      };
+      fragment.fields.push({ name: reducer.name, value: fragment.value });
+      return fragment;
     }
   }
 }
@@ -324,12 +331,23 @@ function ruleFragment(node: AnyRuleNode): Fragment {
   };
 }
 
-function sequenceFragment(parts: readonly Fragment[], offset: number): Fragment {
+function sequenceFragment(values: readonly unknown[], offset: number): Fragment {
+  const fragmentValues: unknown[] = [];
+  const children: SyntaxElement[] = [];
+  const fields: FieldCapture[] = [];
+  let span: Span | null = null;
+  for (const value of values) {
+    const part = asFragment(value);
+    fragmentValues.push(part.value);
+    appendAll(children, part.children);
+    appendAll(fields, part.fields);
+    span = combineSpans(span, part.span);
+  }
   return {
-    value: parts.map((part) => part.value),
-    children: parts.flatMap((part) => [...part.children]),
-    fields: parts.flatMap((part) => [...part.fields]),
-    span: spanFromFragments(parts) ?? { start: offset, end: offset },
+    value: fragmentValues,
+    children,
+    fields,
+    span: span ?? { start: offset, end: offset },
   };
 }
 
@@ -343,10 +361,14 @@ function emptyFragment(value: unknown, offset: number): Fragment {
 }
 
 function appendFragment(list: Fragment, item: Fragment): Fragment {
+  const values = asMutableArray(list.value);
+  values.push(item.value);
+  appendAll(list.children, item.children);
+  appendAll(list.fields, item.fields);
   return {
-    value: [...asArray(list.value), item.value],
-    children: [...list.children, ...item.children],
-    fields: [...list.fields, ...item.fields],
+    value: values,
+    children: list.children,
+    fields: list.fields,
     span: combineSpans(list.span, item.span),
   };
 }
@@ -356,11 +378,17 @@ function appendSeparatedFragment(
   separator: Fragment,
   item: Fragment,
 ): Fragment {
+  const values = asMutableArray(list.value);
+  values.push(item.value);
+  appendAll(list.children, separator.children);
+  appendAll(list.children, item.children);
+  appendAll(list.fields, separator.fields);
+  appendAll(list.fields, item.fields);
   return {
-    value: [...asArray(list.value), item.value],
-    children: [...list.children, ...separator.children, ...item.children],
-    fields: [...list.fields, ...separator.fields, ...item.fields],
-    span: spanFromFragments([list, separator, item]),
+    value: values,
+    children: list.children,
+    fields: list.fields,
+    span: combineSpans(combineSpans(list.span, separator.span), item.span),
   };
 }
 
@@ -369,28 +397,76 @@ function asFragment(value: unknown): Fragment {
   throw new Error("Expected parser reduction fragment.");
 }
 
-function asArray(value: unknown): readonly unknown[] {
+function asMutableArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   throw new Error("Expected parser reduction array.");
+}
+
+function appendAll<T>(target: T[], values: readonly T[]): T[] {
+  for (const value of values) target.push(value);
+  return target;
+}
+
+function combineDiagnostics(
+  left: readonly ParseDiagnostic[],
+  right: readonly ParseDiagnostic[],
+): readonly ParseDiagnostic[] {
+  if (left.length === 0) return right;
+  if (right.length === 0) return left;
+  return [...left, ...right];
+}
+
+function lexicalDiagnostics(
+  diagnostics: readonly LexDiagnostic[],
+): readonly ParseDiagnostic[] {
+  if (diagnostics.length === 0) return EMPTY_PARSE_DIAGNOSTICS;
+  const parsed: ParseDiagnostic[] = [];
+  for (const diagnostic of diagnostics) {
+    parsed.push(lexicalDiagnostic(diagnostic));
+  }
+  return parsed;
+}
+
+function lexicalTokenDiagnostics(
+  tokens: readonly Token[],
+): readonly ParseDiagnostic[] {
+  let diagnostics: ParseDiagnostic[] | null = null;
+  for (const token of tokens) {
+    if (
+      token.type !== "error" &&
+      (isTriviaToken(token) || tokenToTerminal(token) >= 0)
+    ) {
+      continue;
+    }
+    diagnostics ??= [];
+    diagnostics.push(lexicalTokenDiagnostic(token));
+  }
+  return diagnostics ?? EMPTY_PARSE_DIAGNOSTICS;
 }
 
 function buildFields(
   ruleId: number,
   captures: readonly FieldCapture[],
 ): Record<string, unknown> {
-  const schema = RULE_FIELD_SCHEMAS.get(ruleId) ?? new Map();
+  const schema = RULE_FIELD_SCHEMAS[ruleId];
+  if (!schema || schema.entries.length === 0) {
+    if (captures.length > 0) {
+      throw new Error("Rule has field captures but no field schema.");
+    }
+    return Object.create(null) as Record<string, unknown>;
+  }
   const fields = Object.create(null) as Record<string, unknown>;
-  const counts = new Map<string, number>();
-  for (const [name, config] of schema.entries()) {
+  const counts = Object.create(null) as Record<string, number>;
+  for (const [name, config] of schema.entries) {
     fields[name] = config.array ? [] : config.nullable ? null : undefined;
-    counts.set(name, 0);
+    counts[name] = 0;
   }
   for (const capture of captures) {
-    const config = schema.get(capture.name);
+    const config = schema.byName[capture.name];
     if (!config) {
       throw new Error(`Unknown field capture '${capture.name}'.`);
     }
-    counts.set(capture.name, (counts.get(capture.name) ?? 0) + 1);
+    counts[capture.name] = (counts[capture.name] ?? 0) + 1;
     if (config.array) {
       const values = fields[capture.name];
       if (!Array.isArray(values)) {
@@ -398,14 +474,14 @@ function buildFields(
       }
       values.push(capture.value);
     } else {
-      if ((counts.get(capture.name) ?? 0) > 1) {
+      if ((counts[capture.name] ?? 0) > 1) {
         throw new Error(`Scalar field '${capture.name}' was captured more than once.`);
       }
       fields[capture.name] = capture.value;
     }
   }
-  for (const [name, config] of schema.entries()) {
-    const count = counts.get(name) ?? 0;
+  for (const [name, config] of schema.entries) {
+    const count = counts[name] ?? 0;
     if (config.array) {
       if (!Array.isArray(fields[name])) {
         throw new Error(`Array field '${name}' was not initialized as an array.`);

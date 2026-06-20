@@ -1,7 +1,7 @@
 # Brainfuck Example
 
 This example builds a small Brainfuck-family language with Baba, then uses the
-generated TypeScript parser to implement an interpreter.
+generated Wasm-backed parser to implement an interpreter.
 
 The language supports standard Brainfuck plus:
 
@@ -43,6 +43,7 @@ That command creates:
 - `generated/grammar.js`: Tree-sitter grammar.
 - `generated/queries/*.scm`: generated Tree-sitter queries.
 - `generated/ts/*.ts`: generated TypeScript lexer/parser/syntax types.
+- `generated/wasm/*.ts`: generated Wasm-backed lexer/parser runtime.
 - `.helix/runtime/queries/brainfuck/*.scm`: local Helix query copies.
 
 The `.helix/languages.toml` file declares the generated Tree-sitter grammar for
@@ -78,7 +79,7 @@ If Helix was already open, restart it after building the parser.
 Step 4: write `interpreter.ts`, importing the generated parser:
 
 ```ts
-import { parse } from "./generated/ts/mod.ts";
+import { parse } from "./generated/wasm/mod.ts";
 ```
 
 Step 5: run the interpreter.
@@ -99,7 +100,7 @@ OK
 ABCD
 ```
 
-Validate the generated TypeScript:
+Validate the generated runtime and interpreter:
 
 ```sh
 deno task check

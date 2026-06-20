@@ -7,11 +7,19 @@ ${byteLines(image.bytes)}
 ]);
 
 const INPUT_BASE = ${image.inputBase};
+const I32_BYTES = 4;
+const LEX_RESULT_BYTES = 8;
+const STATE_STACK_SLACK = 16;
+const TOKEN_RECORD_BYTES = 12;
+const TRACE_CAPACITY_FACTOR = 8;
+const UTF16_UNIT_BYTES = 2;
+const WASM_PAGE_BYTES = 65536;
 
 interface ParserWasmExports {
   memory: WebAssembly.Memory;
   lex_one(sourcePtr: number, sourceLength: number, offset: number, resultPtr: number): number;
   lex_all(sourcePtr: number, sourceLength: number, resultPtr: number, tokenPtr: number): number;
+  parse_trace(terminalsPtr: number, terminalCount: number, tracePtr: number, traceCapacity: number, stateStackPtr: number, errorPtr: number): number;
   parser_action(state: number, terminal: number): number;
   parser_goto(state: number, nonterminal: number): number;
 }
@@ -38,11 +46,11 @@ let cachedBuffer: WasmSourceBuffer | null = null;
 export function writeSource(source: string): WasmSourceBuffer {
   if (cachedSource === source && cachedBuffer) return cachedBuffer;
   const sourcePtr = INPUT_BASE;
-  const sourceBytes = source.length * 2;
+  const sourceBytes = source.length * UTF16_UNIT_BYTES;
   const resultPtr = align4(sourcePtr + sourceBytes);
-  const tokenPtr = align4(resultPtr + 8);
+  const tokenPtr = align4(resultPtr + LEX_RESULT_BYTES);
   const tokenCapacity = source.length;
-  ensureCapacity(tokenPtr + tokenCapacity * 12);
+  ensureCapacity(tokenPtr + tokenCapacity * TOKEN_RECORD_BYTES);
   const units = new Uint16Array(memory.buffer, sourcePtr, source.length);
   for (let index = 0; index < source.length; index++) {
     units[index] = source.charCodeAt(index);
@@ -86,14 +94,118 @@ export function lexAll(buffer: WasmSourceBuffer): Int32Array {
   return new Int32Array(memory.buffer, buffer.tokenPtr, count * 3);
 }
 
+export type ParseTraceResult =
+  | { ok: true; trace: Int32Array }
+  | { ok: false; state: number; index: number; internal: boolean };
+
+export interface ParseTraceInput {
+  terminals: Int32Array;
+  terminalsPtr: number;
+  terminalCapacity: number;
+  traceCapacity: number;
+}
+
+export function createParseTraceInput(terminalCapacity: number): ParseTraceInput {
+  assertPositiveInteger("terminalCapacity", terminalCapacity);
+  const terminalsPtr = parseBase();
+  const traceCapacity = Math.max(
+    STATE_STACK_SLACK,
+    terminalCapacity * TRACE_CAPACITY_FACTOR + STATE_STACK_SLACK,
+  );
+  const tracePtr = align4(terminalsPtr + terminalCapacity * I32_BYTES);
+  const stateStackPtr = align4(tracePtr + traceCapacity * I32_BYTES);
+  const stateCapacity = terminalCapacity + STATE_STACK_SLACK;
+  const errorPtr = align4(stateStackPtr + stateCapacity * I32_BYTES);
+  ensureCapacity(errorPtr + 8);
+  return {
+    terminals: new Int32Array(memory.buffer, terminalsPtr, terminalCapacity),
+    terminalsPtr,
+    terminalCapacity,
+    traceCapacity,
+  };
+}
+
+export function parseTrace(
+  input: ParseTraceInput,
+  terminalCount: number,
+): ParseTraceResult {
+  assertParseTraceInput(input);
+  assertNonNegativeInteger("terminalCount", terminalCount);
+  if (terminalCount > input.terminalCapacity) {
+    throw new RangeError("terminalCount exceeds parse input terminalCapacity.");
+  }
+  let traceCapacity = input.traceCapacity;
+  while (true) {
+    const tracePtr = align4(
+      input.terminalsPtr + input.terminalCapacity * I32_BYTES,
+    );
+    const stateStackPtr = align4(tracePtr + traceCapacity * I32_BYTES);
+    const stateCapacity = input.terminalCapacity + STATE_STACK_SLACK;
+    const errorPtr = align4(stateStackPtr + stateCapacity * I32_BYTES);
+    ensureCapacity(errorPtr + 8);
+
+    const count = wasm.parse_trace(
+      input.terminalsPtr,
+      terminalCount,
+      tracePtr,
+      traceCapacity,
+      stateStackPtr,
+      errorPtr,
+    );
+    if (count === -2) {
+      traceCapacity *= 2;
+      continue;
+    }
+    if (count < 0) {
+      const view = new DataView(memory.buffer);
+      return {
+        ok: false,
+        state: view.getInt32(errorPtr, true),
+        index: view.getInt32(errorPtr + 4, true),
+        internal: count !== -1,
+      };
+    }
+    return {
+      ok: true,
+      trace: new Int32Array(memory.buffer, tracePtr, count),
+    };
+  }
+}
+
 function ensureCapacity(requiredBytes: number): void {
+  assertNonNegativeInteger("requiredBytes", requiredBytes);
   const current = memory.buffer.byteLength;
   if (requiredBytes <= current) return;
-  memory.grow(Math.ceil((requiredBytes - current) / 65536));
+  memory.grow(Math.ceil((requiredBytes - current) / WASM_PAGE_BYTES));
 }
 
 function align4(value: number): number {
-  return Math.ceil(value / 4) * 4;
+  return Math.ceil(value / I32_BYTES) * I32_BYTES;
+}
+
+function parseBase(): number {
+  if (!cachedBuffer) return INPUT_BASE;
+  return align4(
+    cachedBuffer.tokenPtr + cachedBuffer.tokenCapacity * TOKEN_RECORD_BYTES,
+  );
+}
+
+function assertParseTraceInput(input: ParseTraceInput): void {
+  assertNonNegativeInteger("terminalsPtr", input.terminalsPtr);
+  assertPositiveInteger("terminalCapacity", input.terminalCapacity);
+  assertPositiveInteger("traceCapacity", input.traceCapacity);
+}
+
+function assertPositiveInteger(name: string, value: number): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new RangeError(name + " must be a positive integer.");
+  }
+}
+
+function assertNonNegativeInteger(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(name + " must be a non-negative integer.");
+  }
 }
 `;
 }

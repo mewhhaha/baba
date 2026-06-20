@@ -11,7 +11,7 @@ import {
   type RepeatNode,
   type StreamNode,
   type TermNode,
-} from "./generated/ts/mod.ts";
+} from "./generated/wasm/mod.ts";
 
 type Func = (input: readonly number[]) => readonly number[];
 

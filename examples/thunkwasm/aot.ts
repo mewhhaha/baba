@@ -2,7 +2,7 @@ import {
   type AnyRuleNode,
   parse,
   type SyntaxElement,
-} from "./generated/ts/mod.ts";
+} from "./generated/wasm/mod.ts";
 
 interface Program {
   definitions: readonly Definition[];

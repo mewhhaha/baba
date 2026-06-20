@@ -3,6 +3,7 @@ import {
   assert,
   assertEquals,
   assertIncludes,
+  assertThrowsIncludes,
   captureConsoleError,
   captureConsoleLog,
   compile,
@@ -64,6 +65,68 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     const statement = parsed.root.children[0];
     assertEquals(statement.fields.name.text, "x");
     assertEquals(statement.fields.value.text, "42");
+
+    const reparsed = mod.parseTokensUnchecked(
+      "let x = 42;",
+      mod.lex("let x = 42;").tokens,
+    );
+    assertEquals(reparsed.ok, true);
+    const checkedReparse = mod.parseTokens(
+      "let x = 42;",
+      mod.lex("let x = 42;").tokens,
+    );
+    assertEquals(checkedReparse.ok, true);
+
+    const parseError = mod.parse("let x 42;");
+    assertEquals(parseError.ok, false);
+    assertEquals(parseError.diagnostics[0].code, "PARSE_UNEXPECTED_TOKEN");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm parser reports trailing input through trace replay", async () => {
+  const result = compile(`module = "a" ;`, { targets: ["wasm"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    const mod = await import(`file://${dir}/wasm/mod.ts`);
+
+    const parsed = mod.parse("aa");
+    assertEquals(parsed.ok, false);
+    assertEquals(parsed.diagnostics[0].code, "PARSE_TRAILING_INPUT");
+    assertEquals(parsed.diagnostics[0].found, JSON.stringify("a"));
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm runtime validates parse trace input bounds", async () => {
+  const result = compile(`module = "a" ;`, { targets: ["wasm"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    const runtime = await import(`file://${dir}/wasm/wasm.ts`);
+
+    assertThrowsIncludes(
+      () => runtime.createParseTraceInput(0),
+      "terminalCapacity must be a positive integer",
+    );
+    const input = runtime.createParseTraceInput(1);
+    assertThrowsIncludes(
+      () => runtime.parseTrace(input, 2),
+      "terminalCount exceeds parse input terminalCapacity",
+    );
+    assertThrowsIncludes(
+      () => runtime.parseTrace(input, -1),
+      "terminalCount must be a non-negative integer",
+    );
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -82,6 +145,32 @@ Deno.test("Wasm lexer preserves UTF-16 offsets for non-BMP literals", async () =
     assertEquals(parsed.ok, true);
     assertEquals(parsed.root.span.end, 2);
     assertEquals(parsed.root.fields.face.span.end, 2);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm parse fast path handles large parser buffers", async () => {
+  const source = `
+    token INT = /[0-9]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = expr ;
+    expr = additive ;
+    additive = first:multiplicative rest:(("+" | "-") multiplicative)* ;
+    multiplicative = first:primary rest:(("*" | "/") primary)* ;
+    primary = INT | "(" expr ")" ;
+  `;
+  const result = compile(source, { targets: ["wasm"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    const mod = await import(`file://${dir}/wasm/mod.ts`);
+    const parsed = mod.parse(expressionSource(900));
+    assertEquals(parsed.ok, true);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -140,3 +229,12 @@ Deno.test("CLI generates Wasm target with custom directory", async () => {
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+function expressionSource(count: number): string {
+  const parts: string[] = [];
+  for (let index = 1; index <= count; index++) {
+    if (index > 1) parts.push(index % 2 === 0 ? " + " : " - ");
+    parts.push(String(index), index % 3 === 0 ? " * 2" : "");
+  }
+  return parts.join("");
+}

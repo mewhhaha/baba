@@ -2,7 +2,7 @@ import {
   type AnyRuleNode,
   type InstructionNode,
   parse,
-} from "./generated/ts/mod.ts";
+} from "./generated/wasm/mod.ts";
 
 type Op =
   | { kind: "inc"; amount: number }

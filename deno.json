@@ -32,6 +32,7 @@
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-run",
     "check": "deno check src/mod.ts src/advanced.ts src/cli.ts tests/*.ts",
+    "bench:wasm": "deno run --allow-read --allow-write bench/ts_vs_wasm.ts",
     "publish:dry-run": "deno publish --dry-run"
   }
 }
