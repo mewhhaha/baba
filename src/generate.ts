@@ -50,6 +50,7 @@ export function collectGrammarDiagnostics(
 
   const declaredNames = new Set<string>();
   const tokenNames = new Set<string>();
+  const skipNames = new Set<string>();
   const externalNames = new Set(options.externals ?? []);
   const seenExternalNames = new Set<string>();
   for (const external of options.externals ?? []) {
@@ -109,7 +110,8 @@ export function collectGrammarDiagnostics(
       });
     }
     declaredNames.add(token.name);
-    tokenNames.add(token.name);
+    if (token.kind === "skip") skipNames.add(token.name);
+    else tokenNames.add(token.name);
   }
 
   const ruleNames = new Set<string>();
@@ -159,6 +161,16 @@ export function collectGrammarDiagnostics(
     if (!reachableRuleNames.has(rule.name)) continue;
     visitRefExpressions(rule.expression, (ref) => {
       const name = ref.name;
+      if (skipNames.has(name)) {
+        diagnostics.push({
+          code: "SKIP_TOKEN_REFERENCE",
+          severity: "error",
+          message:
+            `Rule '${rule.name}' references skip declaration '${name}'. Skip declarations are consumed as trivia and cannot appear in parser rules. Use a token declaration if ${name} must be syntactically significant.`,
+          span: ref.span,
+        });
+        return;
+      }
       if (
         ruleNames.has(name) ||
         tokenNames.has(name) ||
@@ -354,13 +366,11 @@ export function generateTreeSitterGrammar(
       .filter((token) => token.kind === "skip")
       .map((token): TreeSitterExtra => ({ kind: "rule", name: token.name })),
   ];
-  if (extras.length) {
-    headerLines.push("  extras: $ => [");
-    for (const extra of extras) {
-      headerLines.push(`    ${renderExtra(extra)},`);
-    }
-    headerLines.push("  ],", "");
+  headerLines.push("  extras: $ => [");
+  for (const extra of extras) {
+    headerLines.push(`    ${renderExtra(extra)},`);
   }
+  headerLines.push("  ],", "");
 
   if (metadata.word) {
     headerLines.push(`  word: $ => $.${metadata.word},`, "");

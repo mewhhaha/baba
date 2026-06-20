@@ -28,6 +28,7 @@ export function planTypeScriptTarget(
     ...typescriptCapabilityDiagnostics(analyzed, metadata),
     ...typescriptRegexDiagnostics(analyzed),
     ...typescriptLiteralDiagnostics(analyzed),
+    ...typescriptTokenOverlapDiagnostics(analyzed),
     ...typescriptOptionsDiagnostics(options),
   ];
   if (hasErrors(diagnostics)) return { diagnostics };
@@ -186,6 +187,37 @@ function typescriptRegexDiagnostics(analyzed: AnalyzedGrammar): Diagnostic[] {
   return diagnostics;
 }
 
+function typescriptTokenOverlapDiagnostics(
+  analyzed: AnalyzedGrammar,
+): Diagnostic[] {
+  const tokens = analyzed.tokens.filter((token) =>
+    token.kind === "token" && analyzed.reachableTokens.has(token.id)
+  );
+  const diagnostics: Diagnostic[] = [];
+  for (let leftIndex = 0; leftIndex < tokens.length; leftIndex++) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < tokens.length;
+      rightIndex++
+    ) {
+      const left = tokens[leftIndex];
+      const right = tokens[rightIndex];
+      const witness = tokenOverlapWitness(left.pattern, right.pattern);
+      if (!witness) continue;
+      diagnostics.push({
+        code: "TS_LEXER_TOKEN_OVERLAP",
+        severity: "error",
+        backend: "typescript",
+        message: `Token ${left.name} and token ${right.name} can both match ${
+          JSON.stringify(witness)
+        }. The standalone lexer would always select ${left.name} by declaration order, making ${right.name} unavailable for this input.`,
+        span: right.span,
+      });
+    }
+  }
+  return diagnostics;
+}
+
 function typescriptLiteralDiagnostics(analyzed: AnalyzedGrammar): Diagnostic[] {
   return analyzed.literals
     .filter((literal) =>
@@ -239,6 +271,12 @@ function findUnsupportedPortableRegexConstruct(
     const char = pattern[index];
     if (escaped) {
       if (!inClass && /^[1-9]$/.test(char)) return "backreferences";
+      if (!inClass && (char === "p" || char === "P")) {
+        return "Unicode property escapes";
+      }
+      if (!inClass && "sSdDwWbB".includes(char)) {
+        return "regex shorthand classes or boundaries";
+      }
       escaped = false;
       continue;
     }
@@ -255,6 +293,7 @@ function findUnsupportedPortableRegexConstruct(
       continue;
     }
     if (inClass) continue;
+    if (char === "^" || char === "$") return "anchors";
     if (char === "(" && pattern[index + 1] === "?") {
       const operator = pattern.slice(index + 2, index + 4);
       if (
@@ -268,6 +307,7 @@ function findUnsupportedPortableRegexConstruct(
       if (/^<[_A-Za-z]/.test(pattern.slice(index + 2))) {
         return "named capture groups";
       }
+      return "inline regex flags or extensions";
     }
     if (
       (char === "*" || char === "+" || char === "?") &&
@@ -280,6 +320,41 @@ function findUnsupportedPortableRegexConstruct(
     }
   }
   return undefined;
+}
+
+function tokenOverlapWitness(left: string, right: string): string | null {
+  const leftLiteral = simpleRegexLiteral(left);
+  const rightLiteral = simpleRegexLiteral(right);
+  if (
+    leftLiteral !== null && rightLiteral !== null &&
+    leftLiteral === rightLiteral
+  ) {
+    return leftLiteral;
+  }
+  if (left === right) return leftLiteral ?? left;
+  return null;
+}
+
+function simpleRegexLiteral(pattern: string): string | null {
+  let result = "";
+  let escaped = false;
+  for (const char of pattern) {
+    if (escaped) {
+      if ("|()[]{}*+?.^$".includes(char) || char === "\\" || char === "/") {
+        result += char;
+        escaped = false;
+        continue;
+      }
+      return null;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if ("|()[]{}*+?.^$".includes(char)) return null;
+    result += char;
+  }
+  return escaped ? null : result;
 }
 
 function isSafeRelativeDirectory(directory: string): boolean {

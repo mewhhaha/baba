@@ -141,6 +141,54 @@ async function runCommand(
   return { stdout, stderr };
 }
 
+async function treeSitterAccepts(
+  source: string,
+  sample: string,
+  name = "tiny",
+): Promise<boolean> {
+  const dir = await Deno.makeTempDir();
+  try {
+    const bundle = generate(source, { name });
+    await applyBundle(bundle, { root: dir });
+    const samplePath = `${dir}/sample.${name}`;
+    await Deno.writeTextFile(samplePath, sample);
+    const env = {
+      HOME: `${dir}/home`,
+      XDG_CACHE_HOME: `${dir}/cache`,
+    };
+    await runCommand("tree-sitter", ["generate"], dir, env);
+    await runCommand(
+      "tree-sitter",
+      ["build", "-o", `${dir}/parser.so`],
+      dir,
+      env,
+    );
+    const parseCommand = new Deno.Command("tree-sitter", {
+      args: [
+        "parse",
+        "--lib-path",
+        `${dir}/parser.so`,
+        "--lang-name",
+        name,
+        samplePath,
+      ],
+      cwd: dir,
+      env,
+    });
+    const output = await parseCommand.output();
+    const decoder = new TextDecoder();
+    const stdout = decoder.decode(output.stdout);
+    const stderr = decoder.decode(output.stderr);
+    if (!output.success) return false;
+    return !stdout.includes("ERROR") &&
+      !stdout.includes("MISSING") &&
+      !stderr.includes("ERROR") &&
+      !stderr.includes("MISSING");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+}
+
 const explicitGrammar = `
   token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
   token integer = /[0-9]+/ ;
@@ -183,6 +231,17 @@ Deno.test("validateGrammar collects independent span-aware errors", () => {
       .filter((diagnostic) => diagnostic.code === "UNKNOWN_RULE_REFERENCE")
       .every((diagnostic) => diagnostic.span?.line === 4),
   );
+});
+
+Deno.test("skip declarations cannot be referenced by parser rules", () => {
+  const grammar = parseGrammar(`
+    skip WS = / +/ ;
+    module = WS "x" ;
+  `);
+  const diagnostics = validateGrammar(grammar, { targets: ["typescript"] });
+  assertEquals(diagnostics[0].code, "SKIP_TOKEN_REFERENCE");
+  assertIncludes(diagnostics[0].message, "cannot appear in parser rules");
+  assertEquals(compile(grammar, { targets: ["typescript"] }).bundle, undefined);
 });
 
 Deno.test("implicit token builtins are rejected", () => {
@@ -340,6 +399,58 @@ Deno.test("TypeScript lexer uses maximal munch for literals and identifiers", as
   }
 });
 
+Deno.test("TypeScript lexer matches the longest prefix within one regex", async () => {
+  const source = `
+    token TEST = /a|ab/ ;
+    module = value:TEST ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("ab");
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.fields.value.text, "ab");
+    assertEquals(
+      mod.lex("ab").tokens.map((token: { text: string }) => token.text).join(
+        ",",
+      ),
+      "ab,",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript lexer reports overlapping named tokens", () => {
+  const source = `
+    token A = /x/ ;
+    token B = /x/ ;
+    module = "a" A | "b" B ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.bundle, undefined);
+  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertIncludes(result.diagnostics[0].message, '"x"');
+});
+
+Deno.test("TypeScript target rejects nonportable regex shorthand classes", () => {
+  const result = compile(
+    `
+    token WS = /\\s+/ ;
+    module = WS ;
+  `,
+    { targets: ["typescript"], rootRule: "module" },
+  );
+  assertEquals(result.bundle, undefined);
+  assertEquals(result.diagnostics[0].code, "TS_LEXER_UNSUPPORTED_REGEX");
+});
+
 Deno.test("TypeScript parser derives optional separated-list fields", async () => {
   const source = `
     token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -387,18 +498,66 @@ Deno.test("TypeScript parser ignores trivia in parseTokens and rejects unknown t
     assertEquals(parsed.root.fields.name.text, "value");
 
     const unknown = mod.parseTokens("if value", [
-      ...lexed.tokens.slice(0, -1),
+      ...lexed.tokens.slice(0, 2),
       {
         type: "literal",
-        literal: "missing",
-        text: "missing",
-        span: { start: 8, end: 15 },
+        literal: "value",
+        text: "value",
+        span: { start: 3, end: 8 },
         channel: "main",
       },
       lexed.tokens.at(-1),
     ]);
     assertEquals(unknown.ok, false);
     assertEquals(unknown.diagnostics[0].code, "PARSE_LEXICAL_ERROR");
+
+    const eofBeforeMore = mod.parseTokens("if value", [
+      lexed.tokens.at(-1),
+      ...lexed.tokens.slice(0, -1),
+    ]);
+    assertEquals(eofBeforeMore.ok, false);
+    assertEquals(
+      eofBeforeMore.diagnostics[0].code,
+      "PARSE_INVALID_TOKEN_STREAM",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser assigns current offsets to empty rule spans", async () => {
+  const source = `
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = start:empty "a" middle:empty "b" after_trivia:empty "c" eof:empty ;
+    empty = ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("ab c");
+    assertEquals(parsed.ok, true);
+    assertEquals(
+      JSON.stringify(parsed.root.fields.start.span),
+      '{"start":0,"end":0}',
+    );
+    assertEquals(
+      JSON.stringify(parsed.root.fields.middle.span),
+      '{"start":1,"end":1}',
+    );
+    assertEquals(
+      JSON.stringify(parsed.root.fields.after_trivia.span),
+      '{"start":3,"end":3}',
+    );
+    assertEquals(
+      JSON.stringify(parsed.root.fields.eof.span),
+      '{"start":4,"end":4}',
+    );
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -452,6 +611,59 @@ Deno.test("TypeScript syntax emitter avoids rule node type name collisions", asy
     assertEquals(parsed.ok, true);
     assertEquals(parsed.root.fields.lower.name, "foo");
     assertEquals(parsed.root.fields.upper.name, "Foo");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript syntax emitter reserves public API type names", async () => {
+  const source = `
+    root = any:any_rule ;
+    any_rule = "x" ;
+  `;
+  const result = compile(source, { targets: ["typescript"], rootRule: "root" });
+  assert(result.bundle);
+  const syntax =
+    result.bundle.files.find((file) => file.path === "typescript/syntax.ts")
+      ?.content ?? "";
+  assertIncludes(syntax, "export interface RootNode2 ");
+  assertIncludes(syntax, "export interface AnyRuleNode2 ");
+  assertIncludes(syntax, "export type RootNode = RootNode2;");
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser handles prototype-like token and field names", async () => {
+  const source = `
+    token __proto__ = /x/ ;
+    token constructor = /y/ ;
+    token toString = /z/ ;
+    module =
+      __proto__:__proto__
+      constructor:constructor
+      toString:toString
+    ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("xyz");
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.fields.__proto__.text, "x");
+    assertEquals(parsed.root.fields.constructor.text, "y");
+    assertEquals(parsed.root.fields.toString.text, "z");
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -513,6 +725,58 @@ Deno.test("TypeScript target rejects unsafe options and zero-length literals", (
   assertEquals(invalidStateLimit.diagnostics[0].code, "TS_PARSER_STATE_LIMIT");
 });
 
+Deno.test("target output paths cannot collide", () => {
+  const result = compile(`module = "ok" ;`, {
+    targets: ["tree-sitter", "typescript"],
+    typescript: { directory: "grammar.js" },
+  });
+  assertEquals(result.bundle, undefined);
+  assertEquals(result.diagnostics[0].code, "OUTPUT_PATH_COLLISION");
+});
+
+Deno.test("TypeScript target rejects nullable separated-list parts", () => {
+  const nullableItem = compile(
+    `
+    empty = ;
+    module = empty % "," ;
+  `,
+    { targets: ["typescript"], rootRule: "module" },
+  );
+  assertEquals(nullableItem.bundle, undefined);
+  assertEquals(
+    nullableItem.diagnostics[0].code,
+    "TS_PARSER_NULLABLE_LIST_ITEM",
+  );
+
+  const nullableSeparator = compile(
+    `
+    token ID = /[a-z]+/ ;
+    empty = ;
+    module = ID % empty ;
+  `,
+    { targets: ["typescript"], rootRule: "module" },
+  );
+  assertEquals(nullableSeparator.bundle, undefined);
+  assertEquals(
+    nullableSeparator.diagnostics[0].code,
+    "TS_PARSER_NULLABLE_LIST_SEPARATOR",
+  );
+});
+
+Deno.test("TypeScript parser reports deliberately small state limits", () => {
+  const result = compile(
+    `
+    module = "a" | "b" ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { parserStateLimit: 1 },
+    },
+  );
+  assertEquals(result.bundle, undefined);
+  assertEquals(result.diagnostics[0].code, "TS_PARSER_STATE_LIMIT");
+});
+
 Deno.test("TypeScript target diagnoses conflicts without blocking Tree-sitter", () => {
   const source = `
     token IDENT = /[a-z]+/ ;
@@ -561,6 +825,7 @@ Deno.test("Tree-sitter grammar lowering uses explicit declarations only", () => 
   const grammar = generateTreeSitterGrammar(explicitGrammar, { name: "tiny" });
 
   assertIncludes(grammar, "source_file: $ => $.module,");
+  assertIncludes(grammar, "extras: $ => [");
   assertIncludes(grammar, "module: $ => seq(");
   assertIncludes(grammar, 'field("name", $.ident)');
   assertIncludes(grammar, 'field("body", $.block)');
@@ -570,6 +835,37 @@ Deno.test("Tree-sitter grammar lowering uses explicit declarations only", () => 
   assertNotIncludes(grammar, "line_comment:");
   assertNotIncludes(grammar, "fenced_text:");
   assertNotIncludes(grammar, "number: $ =>");
+});
+
+Deno.test("Tree-sitter and TypeScript agree on explicit whitespace", async () => {
+  const noSkip = `module = "a" "b" ;`;
+  const noSkipTs = compile(noSkip, { targets: ["typescript"] });
+  assert(noSkipTs.bundle);
+  const noSkipDir = await Deno.makeTempDir();
+  try {
+    await applyBundle(noSkipTs.bundle, { root: noSkipDir });
+    const mod = await import(`file://${noSkipDir}/typescript/mod.ts`);
+    assertEquals(mod.parse("a b").ok, false);
+  } finally {
+    await Deno.remove(noSkipDir, { recursive: true });
+  }
+  assertEquals(await treeSitterAccepts(noSkip, "a b"), false);
+
+  const withSkip = `
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = "a" "b" ;
+  `;
+  const withSkipTs = compile(withSkip, { targets: ["typescript"] });
+  assert(withSkipTs.bundle);
+  const withSkipDir = await Deno.makeTempDir();
+  try {
+    await applyBundle(withSkipTs.bundle, { root: withSkipDir });
+    const mod = await import(`file://${withSkipDir}/typescript/mod.ts`);
+    assertEquals(mod.parse("a b").ok, true);
+  } finally {
+    await Deno.remove(withSkipDir, { recursive: true });
+  }
+  assertEquals(await treeSitterAccepts(withSkip, "a b"), true);
 });
 
 Deno.test("external tokens are explicit metadata", () => {

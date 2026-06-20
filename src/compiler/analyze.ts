@@ -48,7 +48,12 @@ export function analyzeGrammar(
     const ruleId = rulesByName.get(name);
     if (ruleId !== undefined) return { kind: "rule", ruleId };
     const tokenId = tokensByName.get(name);
-    if (tokenId !== undefined) return { kind: "token", tokenId };
+    if (tokenId !== undefined) {
+      const token = grammar.tokens[tokenId];
+      return token.kind === "skip"
+        ? { kind: "skip", tokenId }
+        : { kind: "token", tokenId };
+    }
     if (externals.has(name)) return { kind: "external", name };
     return { kind: "unknown", name };
   };

@@ -74,13 +74,19 @@ export function validateGrammar(
     ));
   }
   if (targets.includes("typescript")) {
-    diagnostics.push(
-      ...planTypeScriptTarget(
-        analyzed,
-        options.typescript,
-        options.metadata,
-      ).diagnostics,
-    );
+    try {
+      diagnostics.push(
+        ...planTypeScriptTarget(
+          analyzed,
+          options.typescript,
+          options.metadata,
+        ).diagnostics,
+      );
+    } catch (error) {
+      diagnostics.push(
+        toBabaError(error, "TYPESCRIPT_TARGET_INTERNAL_ERROR").toDiagnostic(),
+      );
+    }
   }
   return diagnostics;
 }
@@ -117,10 +123,25 @@ export function compile(
     metadata,
   });
   const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
-  const typeScriptPlan = targets.includes("typescript") &&
-      !hasErrors(diagnostics)
-    ? planTypeScriptTarget(analyzed, options.typescript, metadata)
-    : undefined;
+  let typeScriptPlan:
+    | TypeScriptPlan
+    | { diagnostics: readonly Diagnostic[] }
+    | undefined;
+  if (targets.includes("typescript") && !hasErrors(diagnostics)) {
+    try {
+      typeScriptPlan = planTypeScriptTarget(
+        analyzed,
+        options.typescript,
+        metadata,
+      );
+    } catch (error) {
+      diagnostics.push({
+        ...toBabaError(error, "TYPESCRIPT_TARGET_INTERNAL_ERROR")
+          .toDiagnostic(),
+        backend: "typescript",
+      });
+    }
+  }
 
   if (!hasErrors(diagnostics) && targets.includes("tree-sitter")) {
     diagnostics.push(
@@ -155,6 +176,9 @@ export function compile(
     if (isTypeScriptPlan(typeScriptPlan)) {
       files.push(...emitTypeScriptTarget(typeScriptPlan, options.typescript));
     }
+
+    diagnostics.push(...collectBundlePathDiagnostics(files));
+    if (hasErrors(diagnostics)) return { diagnostics };
 
     const bundle = generatedBundle(files);
     return {
@@ -256,4 +280,36 @@ function isTypeScriptPlan(
     | undefined,
 ): value is TypeScriptPlan {
   return !!value && "bnf" in value;
+}
+
+function collectBundlePathDiagnostics(
+  files: readonly GeneratedFile[],
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const paths = files.map((file) => file.path).sort();
+  const seen = new Set<string>();
+  for (const path of paths) {
+    if (seen.has(path)) {
+      diagnostics.push({
+        code: "OUTPUT_PATH_COLLISION",
+        severity: "error",
+        message: `Generated output path '${path}' is produced more than once.`,
+      });
+    }
+    seen.add(path);
+  }
+  for (let index = 0; index < paths.length; index++) {
+    const path = paths[index];
+    for (let next = index + 1; next < paths.length; next++) {
+      const other = paths[next];
+      if (!other.startsWith(`${path}/`)) break;
+      diagnostics.push({
+        code: "OUTPUT_PATH_COLLISION",
+        severity: "error",
+        message:
+          `Generated output path '${path}' collides with nested path '${other}'.`,
+      });
+    }
+  }
+  return diagnostics;
 }

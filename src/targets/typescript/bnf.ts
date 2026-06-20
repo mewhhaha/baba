@@ -165,6 +165,32 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
           span: expression.span,
         });
       }
+      if (
+        expression.kind === "separated" &&
+        isExpressionNullable(expression.item, state.nullableRules)
+      ) {
+        diagnostics.push({
+          code: "TS_PARSER_NULLABLE_LIST_ITEM",
+          severity: "error",
+          backend: "typescript",
+          message:
+            "The TypeScript parser target cannot lower a separated list whose item is nullable.",
+          span: expression.item.span,
+        });
+      }
+      if (
+        expression.kind === "separated" &&
+        isExpressionNullable(expression.separator, state.nullableRules)
+      ) {
+        diagnostics.push({
+          code: "TS_PARSER_NULLABLE_LIST_SEPARATOR",
+          severity: "error",
+          backend: "typescript",
+          message:
+            "The TypeScript parser target cannot lower a separated list whose separator is nullable.",
+          span: expression.separator.span,
+        });
+      }
     });
     const expression = lowerExpression(state, rule.expression);
     addProduction(

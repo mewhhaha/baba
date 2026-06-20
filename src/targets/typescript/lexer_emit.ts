@@ -49,7 +49,7 @@ const LITERAL_SPECS: readonly {
 
 const NAMED_REGEXES = NAMED_SPECS.map((spec) => ({
   ...spec,
-  regex: new RegExp(spec.pattern, "y"),
+  regex: new RegExp(\`^(?:\${spec.pattern})$\`),
 }));
 
 interface Candidate {
@@ -127,9 +127,7 @@ function bestCandidate(source: string, offset: number): Candidate | null {
 
   for (let specIndex = 0; specIndex < NAMED_REGEXES.length; specIndex++) {
     const spec = NAMED_REGEXES[specIndex];
-    spec.regex.lastIndex = offset;
-    const match = spec.regex.exec(source);
-    const text = match?.index === offset ? match[0] : "";
+    const text = longestRegexPrefix(spec.regex, source, offset);
     if (text.length === 0) continue;
     best = chooseBetter(best, {
       type: "named",
@@ -153,6 +151,19 @@ function bestCandidate(source: string, offset: number): Candidate | null {
     });
   }
 
+  return best;
+}
+
+function longestRegexPrefix(
+  regex: RegExp,
+  source: string,
+  offset: number,
+): string {
+  let best = "";
+  for (let end = offset + 1; end <= source.length; end++) {
+    const text = source.slice(offset, end);
+    if (regex.test(text)) best = text;
+  }
   return best;
 }
 

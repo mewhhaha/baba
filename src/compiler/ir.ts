@@ -49,6 +49,7 @@ export interface AnalyzedExternalToken {
 export type ResolvedReference =
   | { kind: "rule"; ruleId: RuleId }
   | { kind: "token"; tokenId: TokenId }
+  | { kind: "skip"; tokenId: TokenId }
   | { kind: "external"; name: string }
   | { kind: "unknown"; name: string };
 

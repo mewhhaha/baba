@@ -56,7 +56,9 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
     "  code:",
     '    | "PARSE_LEXICAL_ERROR"',
     '    | "PARSE_UNEXPECTED_TOKEN"',
-    '    | "PARSE_TRAILING_INPUT";',
+    '    | "PARSE_TRAILING_INPUT"',
+    '    | "PARSE_INVALID_TOKEN_STREAM"',
+    '    | "PARSER_INTERNAL_ERROR";',
     "  message: string;",
     "  span: Span;",
     "  expected?: readonly string[];",
@@ -66,10 +68,18 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
     "export type NamedTokenKind =",
     ...unionLines(namedTokens.map((token) => token.name)),
     "",
+    "export type AnyNamedTokenKind = NamedTokenKind extends never",
+    "  ? string",
+    "  : NamedTokenKind;",
+    "",
     "export type LiteralKind =",
     ...unionLines(literals.map((literal) => literal.value)),
     "",
-    "export interface NamedToken<K extends NamedTokenKind = NamedTokenKind> {",
+    "export type AnyLiteralKind = LiteralKind extends never",
+    "  ? string",
+    "  : LiteralKind;",
+    "",
+    "export interface NamedToken<K extends string = AnyNamedTokenKind> {",
     '  type: "named";',
     "  kind: K;",
     "  text: string;",
@@ -77,7 +87,7 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
     '  channel: "main" | "trivia";',
     "}",
     "",
-    "export interface LiteralToken<L extends LiteralKind = LiteralKind> {",
+    "export interface LiteralToken<L extends string = AnyLiteralKind> {",
     '  type: "literal";',
     "  literal: L;",
     "  text: L;",
@@ -351,6 +361,9 @@ function collectNodeTypeNames(
   analyzed: AnalyzedGrammar,
 ): ReadonlyMap<number, string> {
   const used = new Map<string, number>();
+  for (const reserved of reservedGeneratedTypeNames) {
+    used.set(reserved, 1);
+  }
   const result = new Map<number, string>();
   for (const rule of analyzed.rules) {
     if (!analyzed.reachableRules.has(rule.id)) continue;
@@ -361,6 +374,28 @@ function collectNodeTypeNames(
   }
   return result;
 }
+
+const reservedGeneratedTypeNames = new Set([
+  "Span",
+  "LexDiagnostic",
+  "ParseDiagnostic",
+  "NamedTokenKind",
+  "LiteralKind",
+  "NamedToken",
+  "LiteralToken",
+  "ErrorToken",
+  "EofToken",
+  "Token",
+  "RuleName",
+  "RuleNodeBase",
+  "AnyRuleNode",
+  "RootNode",
+  "SyntaxElement",
+  "LexOptions",
+  "LexResult",
+  "ParseOptions",
+  "ParseResult",
+]);
 
 function combineSequence(maps: readonly OccurrenceMap[]): OccurrenceMap {
   const result: OccurrenceMap = new Map();
