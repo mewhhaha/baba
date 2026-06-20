@@ -2,7 +2,7 @@
 
 `baba` compiles an explicit EBNF language specification into predictable syntax
 infrastructure: a Tree-sitter grammar and queries, plus an optional standalone
-TypeScript lexer, parser, and typed concrete syntax tree.
+TypeScript or WebAssembly-backed lexer, parser, and typed concrete syntax tree.
 
 Version 1.1 is still intentionally narrow:
 
@@ -12,6 +12,7 @@ Version 1.1 is still intentionally narrow:
 - generate non-empty Tree-sitter query fragments under `queries/generated-*`;
 - optionally generate a self-contained TypeScript lexer, LR(1) parser, and CST
   under `typescript/`;
+- optionally generate a WebAssembly-backed lexer/parser adapter under `wasm/`;
 - apply generated bundles with manifest-based ownership protection.
 
 It does not generate semantic analysis, name resolution, type checking,
@@ -19,8 +20,8 @@ lowering, code generation, formatter policy, LSP behavior, editor extension
 projects, package metadata, or language-specific scanner syntax. If a language
 needs comments, strings, numbers, layout, fenced blocks, or embedded languages,
 declare those tokens/rules explicitly. Scanner-produced symbols must be declared
-with `externals` metadata and implemented outside baba; the TypeScript target
-reports reachable external tokens as unsupported.
+with `externals` metadata and implemented outside baba; the TypeScript and Wasm
+targets report reachable external tokens as unsupported.
 
 ## Quick Start
 
@@ -51,7 +52,15 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --target typescript
 ```
 
-Generate both targets:
+Generate the WebAssembly-backed lexer/parser target:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --out generated \
+  --target wasm
+```
+
+Generate every target:
 
 ```sh
 deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
@@ -86,6 +95,19 @@ generated/
     syntax.ts
     lexer.ts
     parser.ts
+    mod.ts
+```
+
+With `--target all` or `--target wasm`, the bundle also includes a generated
+TypeScript adapter with embedded Wasm bytes:
+
+```text
+generated/
+  wasm/
+    syntax.ts
+    lexer.ts
+    parser.ts
+    wasm.ts
     mod.ts
 ```
 
@@ -141,10 +163,11 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
 
 `--ts-out` is an alias for `--typescript-dir`. `--preserve-trivia` and
 `--discard-trivia` control whether skip matches are emitted as trivia tokens.
-`--lexer-state-limit` caps generated TypeScript lexer DFA states.
+`--wasm-dir` controls the Wasm target output directory. `--lexer-state-limit`
+caps generated TypeScript and Wasm lexer DFA states.
 `--portability strict|warn|off` controls diagnostics for known cross-target
-acceptance differences. When both targets are selected, portability defaults to
-`strict`; otherwise it defaults to `warn`.
+acceptance differences. When multiple targets are selected, portability defaults
+to `strict`; otherwise it defaults to `warn`.
 
 ## Library API
 

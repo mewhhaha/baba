@@ -115,7 +115,7 @@ export interface Diagnostic {
 }
 
 /** Output target selected for a generation run. */
-export type GenerateTarget = "tree-sitter" | "typescript";
+export type GenerateTarget = "tree-sitter" | "typescript" | "wasm";
 
 /** Cross-target portability diagnostic policy. */
 export type PortabilityMode = "strict" | "warn" | "off";
@@ -140,6 +140,22 @@ export interface TypeScriptTargetOptions {
   reportParserStats?: boolean;
 }
 
+/** Options for the standalone Wasm lexer/parser target. */
+export interface WasmTargetOptions {
+  /** Relative directory inside the generated bundle. Defaults to `wasm`. */
+  directory?: string;
+  /** Preserve skip-token matches as trivia tokens. Defaults to true. */
+  preserveTrivia?: boolean;
+  /** Maximum generated lexer DFA state count. Defaults to 50,000. */
+  lexerStateLimit?: number;
+  /** Maximum canonical LR(1) state count. Defaults to 20,000. */
+  parserStateLimit?: number;
+  /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
+  parserItemLimit?: number;
+  /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
+  parserTableEntryLimit?: number;
+}
+
 /** Options for the stable high-level `generate` API. */
 export interface GenerateOptions {
   /** Language/tree-sitter grammar name. */
@@ -154,6 +170,8 @@ export interface GenerateOptions {
   portability?: PortabilityMode;
   /** Standalone TypeScript target options. */
   typescript?: TypeScriptTargetOptions;
+  /** Standalone Wasm target options. */
+  wasm?: WasmTargetOptions;
 }
 
 /** Options for the nonthrowing compiler API. */
@@ -179,6 +197,8 @@ export interface ValidateOptions {
   portability?: PortabilityMode;
   /** Standalone TypeScript target options. */
   typescript?: TypeScriptTargetOptions;
+  /** Standalone Wasm target options. */
+  wasm?: WasmTargetOptions;
 }
 
 /** One generated file. */

@@ -27,6 +27,11 @@ import {
   planTypeScriptTarget,
   type TypeScriptPlan,
 } from "./targets/typescript/plan.ts";
+import {
+  emitWasmTarget,
+  planWasmTarget,
+  type WasmPlan,
+} from "./targets/wasm/plan.ts";
 export { applyBundle } from "./output.ts";
 
 /** Parses EBNF source into a grammar AST. */
@@ -89,6 +94,22 @@ export function validateGrammar(
       );
     }
   }
+  if (targets.includes("wasm")) {
+    try {
+      diagnostics.push(
+        ...planWasmTarget(
+          analyzed,
+          options.wasm,
+          options.metadata,
+          portability,
+        ).diagnostics,
+      );
+    } catch (error) {
+      diagnostics.push(
+        toBabaError(error, "WASM_TARGET_INTERNAL_ERROR").toDiagnostic(),
+      );
+    }
+  }
   return diagnostics;
 }
 
@@ -129,6 +150,7 @@ export function compile(
     | TypeScriptPlan
     | { diagnostics: readonly Diagnostic[] }
     | undefined;
+  let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
   if (targets.includes("typescript") && !hasErrors(diagnostics)) {
     try {
       typeScriptPlan = planTypeScriptTarget(
@@ -145,6 +167,21 @@ export function compile(
       });
     }
   }
+  if (targets.includes("wasm") && !hasErrors(diagnostics)) {
+    try {
+      wasmPlan = planWasmTarget(
+        analyzed,
+        options.wasm,
+        metadata,
+        portability,
+      );
+    } catch (error) {
+      diagnostics.push({
+        ...toBabaError(error, "WASM_TARGET_INTERNAL_ERROR").toDiagnostic(),
+        backend: "wasm",
+      });
+    }
+  }
 
   if (!hasErrors(diagnostics) && targets.includes("tree-sitter")) {
     diagnostics.push(
@@ -152,6 +189,7 @@ export function compile(
     );
   }
   if (typeScriptPlan) diagnostics.push(...typeScriptPlan.diagnostics);
+  if (wasmPlan) diagnostics.push(...wasmPlan.diagnostics);
   if (hasErrors(diagnostics)) return { diagnostics };
 
   try {
@@ -169,6 +207,9 @@ export function compile(
     }
     if (isTypeScriptPlan(typeScriptPlan)) {
       files.push(...emitTypeScriptTarget(typeScriptPlan, options.typescript));
+    }
+    if (isWasmPlan(wasmPlan)) {
+      files.push(...emitWasmTarget(wasmPlan, options.wasm));
     }
 
     diagnostics.push(...collectBundlePathDiagnostics(files));
@@ -249,7 +290,9 @@ function normalizeTargets(
   if (!targets || targets.length === 0) return ["tree-sitter"];
   const result: GenerateTarget[] = [];
   for (const target of targets) {
-    if (target !== "tree-sitter" && target !== "typescript") {
+    if (
+      target !== "tree-sitter" && target !== "typescript" && target !== "wasm"
+    ) {
       throw new BabaError({
         code: "UNKNOWN_TARGET",
         message: `Unknown generation target '${String(target)}'.`,
@@ -288,6 +331,16 @@ function isTypeScriptPlan(
     | undefined,
 ): value is TypeScriptPlan {
   return !!value && "bnf" in value;
+}
+
+function isWasmPlan(
+  value:
+    | WasmPlan
+    | { diagnostics: readonly Diagnostic[] }
+    | false
+    | undefined,
+): value is WasmPlan {
+  return !!value && "wasm" in value;
 }
 
 function collectBundlePathDiagnostics(

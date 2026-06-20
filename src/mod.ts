@@ -30,6 +30,7 @@ export type {
   SourceSpan,
   TypeScriptTargetOptions,
   ValidateOptions,
+  WasmTargetOptions,
 } from "./ast.ts";
 export {
   applyBundle,
