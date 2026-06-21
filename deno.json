@@ -14,6 +14,7 @@
       "CHANGELOG.md",
       "LICENSE",
       "deno.json",
+      "docs/**/*.md",
       "scripts/**/*.ts",
       "src/**/*.ts",
       "examples/**/*",

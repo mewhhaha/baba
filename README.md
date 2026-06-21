@@ -172,6 +172,11 @@ runtime source family. It is not yet a claim that TypeScript and Wasm were
 compiled from one runtime-language source; that remains the next runtime
 compiler boundary.
 
+The initial private runtime-language semantics are documented in
+`docs/runtime-language.md`. Its Stage-0 executable subset currently covers
+32-bit scalar control and arithmetic conformance; the parser runtime has not yet
+been lowered through it.
+
 Use `--target kit` when another tool wants Baba's parser data without generated
 TypeScript source:
 
@@ -574,6 +579,7 @@ deno fmt --check
 deno lint
 deno task check
 deno task test
+deno test --allow-read --allow-write tests/runtime_language_test.ts
 deno task bench:wasm -- --samples 5
 deno task publish:dry-run
 ```

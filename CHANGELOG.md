@@ -16,6 +16,8 @@
   token streams, spans, and CST token ranges.
 - Added runtime implementation identity metadata and a checked source manifest
   for generated TypeScript, generated Wasm, and parser-kit outputs.
+- Added a private runtime-language v1 semantic seed with TypeScript/Wasm
+  conformance tests for the initial `u32` executable subset.
 
 ### Changed
 

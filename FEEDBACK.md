@@ -52,6 +52,10 @@ runtime language:
   (`baba-runtime-implementation` v1) to generated TypeScript, generated Wasm,
   and parser-kit outputs, backed by a checked source-hash manifest for the
   current shared runtime source files.
+- Added an initial private runtime-language v1 semantic seed with a typed
+  executable `u32` subset, TypeScript and Wasm emitters, conformance tests, and
+  `docs/runtime-language.md`. This is a compiler foundation step; the parser
+  runtime is not yet lowered through it.
 
 Still unresolved:
 
