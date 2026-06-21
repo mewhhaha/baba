@@ -33,9 +33,11 @@ The Stage-0 runtime-language compiler accepts typed programs made of `u32`
 functions with statement bodies. The current conformance subset supports:
 
 - `u32` function parameters and locals;
+- read-only `u32` tables;
 - `u32` constants;
 - local reads and assignments;
 - calls between `u32` functions;
+- checked read-only table loads by constant or local index;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - `u32` equality, producing `0` or `1`;
@@ -63,6 +65,9 @@ execute both outputs and compare returned values or traps.
 - Locals are initialized to zero before the first statement executes.
 - Function arguments evaluate left-to-right.
 - Calls trap if the callee traps.
+- Table loads trap on out-of-bounds indexes.
+- Table load indexes are currently restricted to constants and locals; assign
+  computed indexes to locals before loading.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
@@ -70,7 +75,7 @@ execute both outputs and compare returned values or traps.
 These rules must be specified before the parser runtime can be fully lowered:
 
 - records and record layout;
-- arrays/vectors, growth, bounds checks, and ownership;
+- mutable arrays/vectors, growth, bounds checks, and ownership;
 - text representation and Unicode iteration;
 - allocation arenas and reset lifetime;
 - structured errors versus traps for each runtime boundary;

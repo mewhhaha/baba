@@ -69,6 +69,9 @@ runtime language:
   conformance coverage, and included the Stage-0 runtime-language compiler in
   generated runtime implementation identity now that generated parser runtime
   helpers depend on compiler output.
+- Added read-only `u32` runtime-language tables with checked TypeScript/Wasm
+  table-load conformance coverage, moving the language toward table-driven
+  lexer/parser runtime code.
 
 Still unresolved:
 

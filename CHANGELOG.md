@@ -26,6 +26,8 @@
   runtime-language source with TypeScript/Wasm conformance coverage.
 - Added runtime-language function calls and multi-function TypeScript/Wasm
   conformance coverage.
+- Added read-only `u32` runtime-language tables with checked TypeScript/Wasm
+  table-load conformance coverage.
 
 ### Changed
 

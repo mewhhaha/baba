@@ -208,6 +208,58 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 22 },
     },
     {
+      name: "read-only tables load u32 values",
+      program: {
+        name: "table_lookup",
+        entry: "main",
+        tables: [{
+          name: "accepts",
+          type: "u32",
+          values: [3, 5, 8, 13],
+        }],
+        functions: [{
+          name: "main",
+          parameters: [{ name: "index", type: "u32" }],
+          result: "u32",
+          body: [{
+            kind: "return",
+            expression: {
+              kind: "loadTableU32",
+              table: "accepts",
+              index: local("index"),
+            },
+          }],
+        }],
+      },
+      args: [2],
+      expected: { kind: "value", value: 8 },
+    },
+    {
+      name: "read-only table bounds failures trap",
+      program: {
+        name: "table_oob",
+        entry: "main",
+        tables: [{
+          name: "accepts",
+          type: "u32",
+          values: [3, 5],
+        }],
+        functions: [{
+          name: "main",
+          result: "u32",
+          body: [{
+            kind: "return",
+            expression: {
+              kind: "loadTableU32",
+              table: "accepts",
+              index: u32(2),
+            },
+          }],
+        }],
+      },
+      expected: { kind: "trap" },
+    },
+    {
       name: "UTF-16 helper returns one code unit below the astral plane",
       program: UTF16_CODE_POINT_WIDTH_PROGRAM,
       args: [0xffff],

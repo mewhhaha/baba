@@ -4,7 +4,14 @@ export const RUNTIME_LANGUAGE_SEMANTICS = "baba-runtime-language-v1" as const;
 export interface RuntimeLanguageProgram {
   readonly name: string;
   readonly entry: string;
+  readonly tables?: readonly RuntimeLanguageTable[];
   readonly functions: readonly RuntimeLanguageFunction[];
+}
+
+export interface RuntimeLanguageTable {
+  readonly name: string;
+  readonly type: RuntimeScalarType;
+  readonly values: readonly number[];
 }
 
 export interface RuntimeLanguageFunction {
@@ -62,6 +69,11 @@ export type RuntimeExpression =
     readonly args: readonly RuntimeExpression[];
   }
   | {
+    readonly kind: "loadTableU32";
+    readonly table: string;
+    readonly index: RuntimeExpression;
+  }
+  | {
     readonly kind:
       | "addU32"
       | "subU32"
@@ -113,6 +125,7 @@ function emitTypeScriptRuntime(
   options: { readonly exportEntry?: boolean },
 ): string {
   const functions = runtimeLanguageFunctions(program);
+  const tables = runtimeLanguageTables(program);
   return `class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
     super(message);
@@ -126,6 +139,10 @@ function divU32(left: number, right: number): number {
   return Math.trunc((left >>> 0) / divisor) >>> 0;
 }
 
+${tables.map(emitTypeScriptTable).join("\n")}
+${tables.map((table) => emitTypeScriptTableLoader(table)).join("\n")}${
+    tables.length > 0 ? "\n" : ""
+  }
 ${
     functions.map((fn) =>
       emitTypeScriptFunction(program, fn, {
@@ -133,6 +150,26 @@ ${
       })
     ).join("\n")
   }`;
+}
+
+function emitTypeScriptTable(table: RuntimeLanguageTable): string {
+  return `const ${runtimeTableIdentifier(table)}: readonly number[] = ${
+    JSON.stringify(table.values.map((value) => value >>> 0))
+  };`;
+}
+
+function emitTypeScriptTableLoader(table: RuntimeLanguageTable): string {
+  const tableName = runtimeTableIdentifier(table);
+  return `function ${
+    runtimeTableLoaderIdentifier(table)
+  }(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= ${tableName}.length) {
+    throw new RuntimeLanguageTrap("table index out of bounds");
+  }
+  return ${tableName}[normalized] >>> 0;
+}
+`;
 }
 
 function emitTypeScriptFunction(
@@ -169,34 +206,49 @@ export function compileRuntimeLanguageWasm(
 ): Uint8Array {
   validateRuntimeLanguageProgram(program);
   const functions = runtimeLanguageFunctions(program);
+  const tables = runtimeLanguageTables(program);
+  const tableLayout = buildRuntimeTableLayout(tables);
+  const tableLoaders = tables.map((table) => ({
+    table,
+    name: runtimeTableLoaderIdentifier(table),
+    offset: tableLayout.offsets.get(table.name) ?? 0,
+  }));
+  const allFunctions = [
+    ...functions.map((fn) => ({ kind: "program" as const, fn })),
+    ...tableLoaders.map((loader) => ({ kind: "tableLoader" as const, loader })),
+  ];
   const functionIndexes = new Map(
     functions.map((fn, index) => [fn.name, index]),
   );
+  const tableLoaderIndexes = new Map(
+    tableLoaders.map((loader, index) => [
+      loader.table.name,
+      functions.length + index,
+    ]),
+  );
   const entryIndex = functionIndex(program.entry, functionIndexes);
-  const bodies = functions.map((fn) => {
-    const localIndexes = localIndexMap(
-      functionParameters(fn),
-      functionLocals(fn),
-    );
-    const body = [
-      ...localDeclarations(functionLocals(fn)),
-      ...fn.body.flatMap((statement) =>
-        emitWasmStatement(statement, localIndexes, functionIndexes)
-      ),
-      0x00,
-      0x0b,
-    ];
+  const bodies = allFunctions.map((item) => {
+    const body = item.kind === "program"
+      ? wasmProgramFunctionBody(item.fn, functionIndexes, tableLoaderIndexes)
+      : wasmTableLoaderBody(item.loader);
     return [...u32(body.length), ...body];
   });
   const sections = [
     section(1, [
-      ...u32(functions.length),
-      ...functions.flatMap(wasmFunctionType),
+      ...u32(allFunctions.length),
+      ...allFunctions.flatMap((item) =>
+        item.kind === "program"
+          ? wasmFunctionType(item.fn)
+          : wasmTableLoaderType()
+      ),
     ]),
     section(3, [
-      ...u32(functions.length),
-      ...functions.map((_, index) => u32(index)).flat(),
+      ...u32(allFunctions.length),
+      ...allFunctions.map((_, index) => u32(index)).flat(),
     ]),
+    ...(tables.length > 0
+      ? [section(5, memorySection(tableLayout.bytes))]
+      : []),
     section(7, [
       ...u32(1),
       ...name(program.entry),
@@ -204,9 +256,10 @@ export function compileRuntimeLanguageWasm(
       ...u32(entryIndex),
     ]),
     section(10, [
-      ...u32(functions.length),
+      ...u32(allFunctions.length),
       ...bodies.flat(),
     ]),
+    ...(tables.length > 0 ? [section(11, dataSection(tableLayout.bytes))] : []),
   ];
   return new Uint8Array([
     0x00,
@@ -262,9 +315,21 @@ function validateRuntimeLanguageProgram(program: RuntimeLanguageProgram): void {
   identifier(program.entry);
   runtimeLanguageEntryFunction(program);
   const functions = runtimeLanguageFunctions(program);
+  const tables = runtimeLanguageTables(program);
+  const tableNames = new Set<string>();
+  for (const table of tables) {
+    validateRuntimeLanguageTable(table);
+    if (tableNames.has(table.name)) {
+      throw new Error(
+        `Runtime-language program '${program.name}' has duplicate table '${table.name}'.`,
+      );
+    }
+    tableNames.add(table.name);
+  }
   const names = new Set<string>();
   for (const fn of functions) {
     identifier(fn.name);
+    assertNotReservedRuntimeName(fn.name);
     if (names.has(fn.name)) {
       throw new Error(
         `Runtime-language program '${program.name}' has duplicate function '${fn.name}'.`,
@@ -285,7 +350,24 @@ function validateRuntimeLanguageProgram(program: RuntimeLanguageProgram): void {
       ...functionLocals(fn).map((local) => local.name),
     ]);
     for (const statement of fn.body) {
-      validateStatement(statement, locals, functionMap);
+      validateStatement(statement, locals, functionMap, tableNames);
+    }
+  }
+}
+
+function validateRuntimeLanguageTable(table: RuntimeLanguageTable): void {
+  identifier(table.name);
+  assertNotReservedRuntimeName(table.name);
+  if (table.type !== "u32") {
+    throw new Error(
+      `Runtime-language table '${table.name}' has unsupported type '${table.type}'.`,
+    );
+  }
+  for (const value of table.values) {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) {
+      throw new Error(
+        `Runtime-language table '${table.name}' contains non-u32 value '${value}'.`,
+      );
     }
   }
 }
@@ -294,30 +376,31 @@ function validateStatement(
   statement: RuntimeStatement,
   locals: ReadonlySet<string>,
   functions: ReadonlyMap<string, RuntimeLanguageFunction>,
+  tables: ReadonlySet<string>,
 ): void {
   switch (statement.kind) {
     case "trap":
       return;
     case "return":
-      validateExpression(statement.expression, locals, functions);
+      validateExpression(statement.expression, locals, functions, tables);
       return;
     case "setLocal":
       assertKnownLocal(statement.name, locals);
-      validateExpression(statement.expression, locals, functions);
+      validateExpression(statement.expression, locals, functions, tables);
       return;
     case "if":
-      validateExpression(statement.condition, locals, functions);
+      validateExpression(statement.condition, locals, functions, tables);
       for (const item of statement.consequent) {
-        validateStatement(item, locals, functions);
+        validateStatement(item, locals, functions, tables);
       }
       for (const item of statement.alternate ?? []) {
-        validateStatement(item, locals, functions);
+        validateStatement(item, locals, functions, tables);
       }
       return;
     case "while":
-      validateExpression(statement.condition, locals, functions);
+      validateExpression(statement.condition, locals, functions, tables);
       for (const item of statement.body) {
-        validateStatement(item, locals, functions);
+        validateStatement(item, locals, functions, tables);
       }
       return;
   }
@@ -327,6 +410,7 @@ function validateExpression(
   expression: RuntimeExpression,
   locals: ReadonlySet<string>,
   functions: ReadonlyMap<string, RuntimeLanguageFunction>,
+  tables: ReadonlySet<string>,
 ): void {
   switch (expression.kind) {
     case "u32":
@@ -343,13 +427,21 @@ function validateExpression(
       }
       validateCallExpression(expression, target);
       for (const argument of expression.args) {
-        validateExpression(argument, locals, functions);
+        validateExpression(argument, locals, functions, tables);
       }
       return;
     }
+    case "loadTableU32":
+      if (!tables.has(expression.table)) {
+        throw new Error(
+          `Runtime-language table '${expression.table}' is not declared.`,
+        );
+      }
+      validateSimpleTableIndex(expression.index, locals);
+      return;
     default:
-      validateExpression(expression.left, locals, functions);
-      validateExpression(expression.right, locals, functions);
+      validateExpression(expression.left, locals, functions, tables);
+      validateExpression(expression.right, locals, functions, tables);
       return;
   }
 }
@@ -457,6 +549,13 @@ function emitTypeScriptExpression(
         ).join(", ")
       }) >>> 0`;
     }
+    case "loadTableU32": {
+      const table = runtimeLanguageTable(program, expression.table);
+      validateSimpleTableIndex(expression.index, locals);
+      return `${runtimeTableLoaderIdentifier(table)}(${
+        emitTypeScriptExpression(expression.index, locals, program)
+      }) >>> 0`;
+    }
     case "addU32":
       return `((${
         emitTypeScriptExpression(expression.left, locals, program)
@@ -510,34 +609,35 @@ function emitWasmStatement(
   statement: RuntimeStatement,
   locals: ReadonlyMap<string, number>,
   functions: ReadonlyMap<string, number>,
+  tables: ReadonlyMap<string, number>,
 ): number[] {
   switch (statement.kind) {
     case "trap":
       return [0x00];
     case "return":
       return [
-        ...emitWasmExpression(statement.expression, locals, functions),
+        ...emitWasmExpression(statement.expression, locals, functions, tables),
         0x0f,
       ];
     case "setLocal":
       return [
-        ...emitWasmExpression(statement.expression, locals, functions),
+        ...emitWasmExpression(statement.expression, locals, functions, tables),
         0x21,
         ...u32(localIndex(statement.name, locals)),
       ];
     case "if":
       return [
-        ...emitWasmExpression(statement.condition, locals, functions),
+        ...emitWasmExpression(statement.condition, locals, functions, tables),
         0x04,
         0x40,
         ...statement.consequent.flatMap((item) =>
-          emitWasmStatement(item, locals, functions)
+          emitWasmStatement(item, locals, functions, tables)
         ),
         ...(statement.alternate && statement.alternate.length > 0
           ? [
             0x05,
             ...statement.alternate.flatMap((item) =>
-              emitWasmStatement(item, locals, functions)
+              emitWasmStatement(item, locals, functions, tables)
             ),
           ]
           : []),
@@ -549,12 +649,12 @@ function emitWasmStatement(
         0x40,
         0x03,
         0x40,
-        ...emitWasmExpression(statement.condition, locals, functions),
+        ...emitWasmExpression(statement.condition, locals, functions, tables),
         0x45,
         0x0d,
         ...u32(1),
         ...statement.body.flatMap((item) =>
-          emitWasmStatement(item, locals, functions)
+          emitWasmStatement(item, locals, functions, tables)
         ),
         0x0c,
         ...u32(0),
@@ -568,6 +668,7 @@ function emitWasmExpression(
   expression: RuntimeExpression,
   locals: ReadonlyMap<string, number>,
   functions: ReadonlyMap<string, number>,
+  tables: ReadonlyMap<string, number>,
 ): number[] {
   switch (expression.kind) {
     case "u32":
@@ -577,27 +678,33 @@ function emitWasmExpression(
     case "call":
       return [
         ...expression.args.flatMap((argument) =>
-          emitWasmExpression(argument, locals, functions)
+          emitWasmExpression(argument, locals, functions, tables)
         ),
         0x10,
         ...u32(functionIndex(expression.function, functions)),
       ];
+    case "loadTableU32":
+      return [
+        ...emitWasmExpression(expression.index, locals, functions, tables),
+        0x10,
+        ...u32(tableLoaderIndex(expression.table, tables)),
+      ];
     case "addU32":
-      return binaryExpression(expression, locals, functions, 0x6a);
+      return binaryExpression(expression, locals, functions, tables, 0x6a);
     case "subU32":
-      return binaryExpression(expression, locals, functions, 0x6b);
+      return binaryExpression(expression, locals, functions, tables, 0x6b);
     case "mulU32":
-      return binaryExpression(expression, locals, functions, 0x6c);
+      return binaryExpression(expression, locals, functions, tables, 0x6c);
     case "divU32":
-      return binaryExpression(expression, locals, functions, 0x6e);
+      return binaryExpression(expression, locals, functions, tables, 0x6e);
     case "eqU32":
-      return binaryExpression(expression, locals, functions, 0x46);
+      return binaryExpression(expression, locals, functions, tables, 0x46);
     case "ltS32":
-      return binaryExpression(expression, locals, functions, 0x48);
+      return binaryExpression(expression, locals, functions, tables, 0x48);
     case "shlU32":
-      return binaryExpression(expression, locals, functions, 0x74);
+      return binaryExpression(expression, locals, functions, tables, 0x74);
     case "shrU32":
-      return binaryExpression(expression, locals, functions, 0x76);
+      return binaryExpression(expression, locals, functions, tables, 0x76);
   }
 }
 
@@ -608,12 +715,113 @@ function binaryExpression(
   >,
   locals: ReadonlyMap<string, number>,
   functions: ReadonlyMap<string, number>,
+  tables: ReadonlyMap<string, number>,
   opcode: number,
 ): number[] {
   return [
-    ...emitWasmExpression(expression.left, locals, functions),
-    ...emitWasmExpression(expression.right, locals, functions),
+    ...emitWasmExpression(expression.left, locals, functions, tables),
+    ...emitWasmExpression(expression.right, locals, functions, tables),
     opcode,
+  ];
+}
+
+function wasmProgramFunctionBody(
+  fn: RuntimeLanguageFunction,
+  functions: ReadonlyMap<string, number>,
+  tables: ReadonlyMap<string, number>,
+): number[] {
+  const localIndexes = localIndexMap(
+    functionParameters(fn),
+    functionLocals(fn),
+  );
+  return [
+    ...localDeclarations(functionLocals(fn)),
+    ...fn.body.flatMap((statement) =>
+      emitWasmStatement(statement, localIndexes, functions, tables)
+    ),
+    0x00,
+    0x0b,
+  ];
+}
+
+function wasmTableLoaderBody(
+  loader: RuntimeTableLoader,
+): number[] {
+  return [
+    0x00,
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(loader.table.values.length),
+    0x4f,
+    0x04,
+    0x40,
+    0x00,
+    0x0b,
+    0x41,
+    ...i32(loader.offset),
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(2),
+    0x74,
+    0x6a,
+    0x28,
+    ...u32(2),
+    ...u32(0),
+    0x0f,
+    0x00,
+    0x0b,
+  ];
+}
+
+interface RuntimeTableLoader {
+  readonly table: RuntimeLanguageTable;
+  readonly name: string;
+  readonly offset: number;
+}
+
+interface RuntimeTableLayout {
+  readonly offsets: ReadonlyMap<string, number>;
+  readonly bytes: Uint8Array;
+}
+
+function buildRuntimeTableLayout(
+  tables: readonly RuntimeLanguageTable[],
+): RuntimeTableLayout {
+  const offsets = new Map<string, number>();
+  const bytes: number[] = [];
+  for (const table of tables) {
+    while (bytes.length % 4 !== 0) bytes.push(0);
+    offsets.set(table.name, bytes.length);
+    for (const value of table.values) {
+      const normalized = value >>> 0;
+      bytes.push(normalized & 0xff);
+      bytes.push((normalized >>> 8) & 0xff);
+      bytes.push((normalized >>> 16) & 0xff);
+      bytes.push((normalized >>> 24) & 0xff);
+    }
+  }
+  return { offsets, bytes: Uint8Array.from(bytes) };
+}
+
+function memorySection(data: Uint8Array): number[] {
+  return [
+    ...u32(1),
+    0x00,
+    ...u32(Math.max(1, Math.ceil(data.length / 65_536))),
+  ];
+}
+
+function dataSection(data: Uint8Array): number[] {
+  return [
+    ...u32(1),
+    0x00,
+    0x41,
+    ...i32(0),
+    0x0b,
+    ...u32(data.length),
+    ...data,
   ];
 }
 
@@ -627,6 +835,27 @@ function functionLocals(
   fn: RuntimeLanguageFunction,
 ): readonly RuntimeLanguageVariable[] {
   return fn.locals ?? [];
+}
+
+function runtimeLanguageTables(
+  program: RuntimeLanguageProgram,
+): readonly RuntimeLanguageTable[] {
+  return program.tables ?? [];
+}
+
+function runtimeLanguageTable(
+  program: RuntimeLanguageProgram,
+  name: string,
+): RuntimeLanguageTable {
+  const table = runtimeLanguageTables(program).find((item) =>
+    item.name === name
+  );
+  if (!table) {
+    throw new Error(
+      `Runtime-language program '${program.name}' has no table '${name}'.`,
+    );
+  }
+  return table;
 }
 
 function validateVariableSet(
@@ -688,6 +917,17 @@ function functionIndex(
   return index;
 }
 
+function tableLoaderIndex(
+  name: string,
+  tables: ReadonlyMap<string, number>,
+): number {
+  const index = tables.get(name);
+  if (index === undefined) {
+    throw new Error(`Runtime-language table '${name}' is not declared.`);
+  }
+  return index;
+}
+
 function assertKnownLocal(
   name: string,
   locals: ReadonlySet<string>,
@@ -724,6 +964,16 @@ function wasmFunctionType(fn: RuntimeLanguageFunction): number[] {
   ];
 }
 
+function wasmTableLoaderType(): number[] {
+  return [
+    0x60,
+    ...u32(1),
+    0x7f,
+    0x01,
+    0x7f,
+  ];
+}
+
 function validateCallExpression(
   expression: Extract<RuntimeExpression, { readonly kind: "call" }>,
   target: RuntimeLanguageFunction,
@@ -732,6 +982,36 @@ function validateCallExpression(
   if (expression.args.length !== expected) {
     throw new Error(
       `Runtime-language call to '${expression.function}' has ${expression.args.length} arguments, expected ${expected}.`,
+    );
+  }
+}
+
+function validateSimpleTableIndex(
+  expression: RuntimeExpression,
+  locals: ReadonlySet<string>,
+): void {
+  if (expression.kind === "u32") return;
+  if (expression.kind === "local") {
+    assertKnownLocal(expression.name, locals);
+    return;
+  }
+  throw new Error(
+    "Runtime-language table indexes currently must be u32 constants or locals.",
+  );
+}
+
+function runtimeTableIdentifier(table: RuntimeLanguageTable): string {
+  return `__baba_table_${identifier(table.name)}`;
+}
+
+function runtimeTableLoaderIdentifier(table: RuntimeLanguageTable): string {
+  return `__baba_load_${identifier(table.name)}`;
+}
+
+function assertNotReservedRuntimeName(name: string): void {
+  if (name.startsWith("__baba_")) {
+    throw new Error(
+      `Runtime-language name '${name}' uses the reserved __baba_ prefix.`,
     );
   }
 }

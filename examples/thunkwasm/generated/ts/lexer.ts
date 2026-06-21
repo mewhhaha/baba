@@ -219,6 +219,8 @@ function divU32(left: number, right: number): number {
   return Math.trunc((left >>> 0) / divisor) >>> 0;
 }
 
+
+
 function utf16CodePointWidth(codePoint: number): number {
   if (((((codePoint) | 0) < ((65536) | 0) ? 1 : 0)) !== 0) {
     return (1) >>> 0;
