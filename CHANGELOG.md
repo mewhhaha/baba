@@ -56,6 +56,8 @@
   generated TypeScript and Wasm-adapter parse diagnostics.
 - Added runtime-language parser production metadata helpers and use them for
   generated TypeScript and Wasm-adapter reduce replay.
+- Added a runtime-language `andU32` operator plus parser action kind/payload
+  helpers for generated TypeScript and Wasm-adapter action decoding.
 
 ### Changed
 

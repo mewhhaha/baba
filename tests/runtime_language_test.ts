@@ -18,6 +18,7 @@ import {
 } from "../src/targets/runtime/language_manifest.ts";
 import {
   createLexerRuntimeProgram,
+  createParserActionRuntimeProgram,
   createParserConflictTableRuntimeProgram,
   createParserExpectedRuntimeProgram,
   createParserGotoRuntimeProgram,
@@ -137,6 +138,26 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       [],
     ],
   });
+  const parserActionBaseProgram = createParserActionRuntimeProgram();
+  const parserActionRuntimeProgram: RuntimeLanguageProgram = {
+    ...parserActionBaseProgram,
+    name: "parser_action_conformance",
+    entry: "main",
+    functions: [
+      ...parserActionBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            call("parserActionKind", [u32(RUNTIME_ACTION_REDUCE + 42)]),
+            call("parserActionPayload", [u32(RUNTIME_ACTION_REDUCE + 42)]),
+          ),
+        }],
+      },
+    ],
+  };
   const parserGotoRuntimeProgram = createParserGotoRuntimeProgram({
     gotoRows: [
       [
@@ -466,6 +487,15 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 1 },
     },
     {
+      name: "bitwise and masks u32 bits",
+      program: returning("u32_and", {
+        kind: "andU32",
+        left: u32(0xf0f0),
+        right: u32(0x0ff0),
+      }),
+      expected: { kind: "value", value: 0x00f0 },
+    },
+    {
       name: "shift counts are masked to five bits",
       program: returning("shift_masking", {
         kind: "shlU32",
@@ -778,6 +808,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       program: parserTableRuntimeProgram,
       args: [0, 4],
       expected: { kind: "value", value: 0 },
+    },
+    {
+      name: "parser action lookup splits kind and payload",
+      program: parserActionRuntimeProgram,
+      expected: { kind: "value", value: RUNTIME_ACTION_REDUCE + 42 },
     },
     {
       name: "parser conflict lookup finds first action",

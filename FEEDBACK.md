@@ -120,6 +120,8 @@ runtime language:
   `parserProductionLhs`/`parserProductionRhsLength` helpers, so TypeScript
   branch reduction, deterministic trace replay, and Wasm-adapter trace replay
   consume the same production row helper.
+- Added a runtime-language `andU32` operator and moved generated parser action
+  kind/payload decoding onto `parserActionKind`/`parserActionPayload` helpers.
 
 Still unresolved:
 
@@ -128,13 +130,13 @@ Still unresolved:
   lexer/parser table helpers plus deterministic TypeScript lexer candidate
   selection, expected-terminal diagnostic ranges, and parser trace control flow
   from the runtime language. Production LHS/RHS-length metadata lookup is also
-  runtime-language-backed now, but conflict branch scheduling, Wasm parser
-  control flow, generated token object emission/diagnostics, and reducer/CST
-  algorithms are still not mechanically emitted from one runtime-language
-  implementation. The compiler now has a shared lowered control-flow/value IR
-  and checked helper artifact hashes, but it still needs broader parser-runtime
-  lowering before the release can fully satisfy "one runtime implementation, two
-  execution targets."
+  runtime-language-backed now, and generated action kind/payload decoding uses
+  runtime-language helpers, but conflict branch scheduling, Wasm parser control
+  flow, generated token object emission/diagnostics, and reducer/CST algorithms
+  are still not mechanically emitted from one runtime-language implementation.
+  The compiler now has a shared lowered control-flow/value IR and checked helper
+  artifact hashes, but it still needs broader parser-runtime lowering before the
+  release can fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

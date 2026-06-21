@@ -43,14 +43,15 @@ Generated parsers also use `parserExpectedStart`/`parserExpectedEnd` helpers to
 map parser states to flattened expected-terminal display ranges for diagnostics.
 Reduction replay uses `parserProductionLhs`/`parserProductionRhsLength` helpers
 for production metadata lookups while generated TypeScript still owns reducer
-descriptor execution and CST construction. Deterministic TypeScript parsers also
-use a runtime-language `parserTrace` helper backed by growable scratch memory
-for LR shift/reduce/accept control flow; TypeScript code still replays that
-trace to build the CST. The same runtime-language source shape is also compiled
-to Wasm in conformance tests. Because generated parser runtime code depends on
-runtime-language compiler output, the checked runtime implementation manifest
-includes both runtime language sources, the Stage-0 compiler, and the checked
-runtime-language artifact manifest.
+descriptor execution and CST construction. Generated parser action decoding uses
+`parserActionKind`/`parserActionPayload` helpers. Deterministic TypeScript
+parsers also use a runtime-language `parserTrace` helper backed by growable
+scratch memory for LR shift/reduce/accept control flow; TypeScript code still
+replays that trace to build the CST. The same runtime-language source shape is
+also compiled to Wasm in conformance tests. Because generated parser runtime
+code depends on runtime-language compiler output, the checked runtime
+implementation manifest includes both runtime language sources, the Stage-0
+compiler, and the checked runtime-language artifact manifest.
 
 ## Current Executable Subset
 
@@ -68,6 +69,7 @@ functions with statement bodies. The current conformance subset supports:
 - checked scratch-memory growth, loads, and stores by computed `u32` index;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
+- bitwise AND;
 - `u32` equality, producing `0` or `1`;
 - signed less-than over the same 32-bit bits interpreted as `i32`;
 - left shift and unsigned right shift with counts masked to five bits;
@@ -82,6 +84,7 @@ execute both outputs and compare returned values or traps.
 
 - Integer storage in the current subset is 32 bits.
 - `u32` arithmetic wraps modulo `2^32`.
+- Bitwise AND operates on the 32 stored bits and returns a `u32`.
 - Signed comparison interprets the same 32-bit value as two's-complement `i32`.
 - Division by zero traps.
 - Shift counts are masked with `count & 31`.

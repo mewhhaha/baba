@@ -188,6 +188,17 @@ export function createParserTableRuntimeProgram(
   };
 }
 
+export function createParserActionRuntimeProgram(): RuntimeLanguageProgram {
+  return {
+    name: "parser_action_runtime",
+    entry: "parserActionKind",
+    functions: [
+      parserActionKindFunction(),
+      parserActionPayloadFunction(),
+    ],
+  };
+}
+
 export function createParserTraceRuntimeProgram(
   input: ParserTraceRuntimeProgramInput,
 ): RuntimeLanguageProgram {
@@ -542,6 +553,38 @@ function parserProductionLoadFunction(
         ],
       },
       { kind: "return", expression: u32(RUNTIME_NO_PRODUCTION) },
+    ],
+  };
+}
+
+function parserActionKindFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserActionKind",
+    parameters: [
+      { name: "action", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: and(local("action"), u32(RUNTIME_ACTION_KIND_MASK)),
+      },
+    ],
+  };
+}
+
+function parserActionPayloadFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserActionPayload",
+    parameters: [
+      { name: "action", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: and(local("action"), u32(RUNTIME_ACTION_PAYLOAD_MASK)),
+      },
     ],
   };
 }
@@ -1117,6 +1160,13 @@ function mul(
   right: RuntimeExpression,
 ): RuntimeExpression {
   return { kind: "mulU32", left, right };
+}
+
+function and(
+  left: RuntimeExpression,
+  right: RuntimeExpression,
+): RuntimeExpression {
+  return { kind: "andU32", left, right };
 }
 
 function shr(

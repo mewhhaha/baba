@@ -97,8 +97,6 @@ const ACTION_NONE = 0;
 const ACTION_SHIFT = 16777216;
 const ACTION_REDUCE = 33554432;
 const ACTION_ACCEPT = 50331648;
-const ACTION_KIND_MASK = 4278190080;
-const ACTION_PAYLOAD_MASK = 16777215;
 const NO_GOTO = 4294967295;
 const NO_PRODUCTION = 4294967295;
 
@@ -152,6 +150,16 @@ function parserProductionRhsLength(production: number): number {
     return (__baba_load_parserProductions(offset) >>> 0) >>> 0;
   }
   return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserActionKind(action: number): number {
+  return (((action) & (4278190080)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserActionPayload(action: number): number {
+  return (((action) & (16777215)) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -304,10 +312,10 @@ function replayTrace(
 
   for (let traceIndex = 0; traceIndex < trace.length; traceIndex++) {
     const encoded = trace[traceIndex];
-    const kind = encoded >>> 24;
-    const payload = encoded & 0x00ffffff;
+    const kind = parserActionKind(encoded);
+    const payload = parserActionPayload(encoded);
 
-    if (kind === 1) {
+    if (kind === ACTION_SHIFT) {
       values.push(shiftedToken(
         streamTokens[index] ?? eofToken(source.length),
         streamTokenIndices[index] ?? tokens.length,
@@ -316,12 +324,12 @@ function replayTrace(
       continue;
     }
 
-    if (kind === 3) {
+    if (kind === ACTION_ACCEPT) {
       return acceptedParseResult(source, tokens, values[values.length - 1]);
     }
 
     const token = streamTokens[index] ?? eofToken(source.length);
-    if (kind !== 2) {
+    if (kind !== ACTION_REDUCE) {
       return {
         ok: false,
         root: null,
