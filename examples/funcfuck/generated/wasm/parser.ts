@@ -15,37 +15,10 @@ import type {
   Token,
 } from "./syntax.ts";
 
-type EncodedAction =
-  | readonly [terminal: number, kind: 1, state: number]
-  | readonly [terminal: number, kind: 2, production: number]
-  | readonly [terminal: number, kind: 3];
-
-type RuntimeAction =
-  | { kind: "shift"; state: number }
-  | { kind: "reduce"; production: number }
-  | { kind: "accept" };
-
 interface Production {
   lhs: number;
   rhsLength: number;
   reducer: ReducerSpec;
-}
-
-interface ParseBranch {
-  states: number[];
-  values: unknown[];
-  index: number;
-}
-
-type BranchAdvanceResult =
-  | { kind: "continue" }
-  | { kind: "forked" }
-  | { kind: "success"; result: ParseResult<RootNode> }
-  | { kind: "failure"; failure: ParseFailure };
-
-interface ParseFailure {
-  diagnostic: ParseDiagnostic;
-  offset: number;
 }
 
 type ReducerSpec =
@@ -88,16 +61,14 @@ interface RuntimeRuleFieldSchema {
 }
 
 const EOF_TERMINAL = 0;
-const EXPECTED_TERMINALS: readonly (readonly string[])[] = [["\"def\"","\"emit\""],["IDENT"],["\"[\""],["EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"=\""],["\"=\""],["\"=\""],["\"]\"","INTEGER"],["\"=>\""],["\"=>\""],["\"=>\""],["\"=>\""],["\"def\"","\"emit\"","EOF"],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\",\"","\"]\""],["\"]\""],["\"]\""],["\"]\""],["\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\";\"","\">>\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\"(\""],["\"(\""],["\"(\""],["\"(\""],["\";\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\""],["\";\""],["\";\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\"=>\""],["\"]\""],["\",\"","\"]\""],["\";\""],["\";\""],["\";\""],["\")\"","\">>\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\"(\""],["\"(\""],["\"(\""],["\"(\""],["\")\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\""],["\")\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\",\"","\">>\"","\"]\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\"(\""],["\"(\""],["\"(\""],["\"(\""],["\",\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["\"def\"","\"emit\"","EOF"],["\";\""],["\";\"","\">>\""],["INTEGER"],["\",\"","\"]\""],["\",\"","\"]\""],["\"def\"","\"emit\"","EOF"],["\")\""],["\",\"","\"]\""],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["\")\""],["\")\"","\">>\""],["\";\"","\">>\""],["\")\""],["\",\"","\"]\""],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["\",\"","\"]\""],["\",\"","\">>\"","\"]\""],["\"]\""],["\",\"","\"]\""],["\",\""],["\",\""],["\",\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\";\"","\">>\""],["\";\"","\">>\""],["\",\"","\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\")\"","\">>\""],["\"]\""],["\",\""],["\")\""],["\")\""],["\")\""],["\")\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\")\"","\">>\""],["\")\"","\">>\""],["\",\"","\">>\"","\"]\""],["\"]\""],["\",\""],["\")\""],["\")\""],["\")\""],["\")\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\";\"","\">>\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\",\"","\"]\""],["\",\"","\"]\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\")\"","\">>\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\",\"","\">>\"","\"]\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\";\"","\">>\""],["\")\"","\">>\""],["\",\"","\">>\"","\"]\""]];
 const PRODUCTIONS: readonly Production[] = [{"lhs":0,"rhsLength":1,"reducer":{"kind":"start"}},{"lhs":31,"rhsLength":1,"reducer":{"kind":"repeat1First"}},{"lhs":31,"rhsLength":2,"reducer":{"kind":"repeat1Append"}},{"lhs":1,"rhsLength":1,"reducer":{"kind":"rule","ruleId":0}},{"lhs":32,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":32,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":2,"rhsLength":1,"reducer":{"kind":"rule","ruleId":1}},{"lhs":35,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":34,"rhsLength":1,"reducer":{"kind":"field","name":"name"}},{"lhs":37,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":36,"rhsLength":1,"reducer":{"kind":"field","name":"body"}},{"lhs":33,"rhsLength":5,"reducer":{"kind":"sequence"}},{"lhs":3,"rhsLength":1,"reducer":{"kind":"rule","ruleId":2}},{"lhs":40,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":39,"rhsLength":1,"reducer":{"kind":"field","name":"input"}},{"lhs":42,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":41,"rhsLength":1,"reducer":{"kind":"field","name":"body"}},{"lhs":38,"rhsLength":5,"reducer":{"kind":"sequence"}},{"lhs":4,"rhsLength":1,"reducer":{"kind":"rule","ruleId":3}},{"lhs":45,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":44,"rhsLength":1,"reducer":{"kind":"field","name":"first"}},{"lhs":47,"rhsLength":0,"reducer":{"kind":"repeatEmpty"}},{"lhs":47,"rhsLength":2,"reducer":{"kind":"repeatAppend"}},{"lhs":46,"rhsLength":1,"reducer":{"kind":"field","name":"rest"}},{"lhs":43,"rhsLength":2,"reducer":{"kind":"sequence"}},{"lhs":5,"rhsLength":1,"reducer":{"kind":"rule","ruleId":4}},{"lhs":50,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":49,"rhsLength":1,"reducer":{"kind":"field","name":"next"}},{"lhs":48,"rhsLength":2,"reducer":{"kind":"sequence"}},{"lhs":6,"rhsLength":1,"reducer":{"kind":"rule","ruleId":5}},{"lhs":51,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":51,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":51,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":51,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":51,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":7,"rhsLength":1,"reducer":{"kind":"rule","ruleId":6}},{"lhs":54,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":53,"rhsLength":1,"reducer":{"kind":"field","name":"body"}},{"lhs":52,"rhsLength":3,"reducer":{"kind":"sequence"}},{"lhs":8,"rhsLength":1,"reducer":{"kind":"rule","ruleId":7}},{"lhs":56,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":55,"rhsLength":1,"reducer":{"kind":"field","name":"name"}},{"lhs":9,"rhsLength":1,"reducer":{"kind":"rule","ruleId":8}},{"lhs":59,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":58,"rhsLength":1,"reducer":{"kind":"field","name":"head"}},{"lhs":61,"rhsLength":0,"reducer":{"kind":"repeatEmpty"}},{"lhs":61,"rhsLength":2,"reducer":{"kind":"repeatAppend"}},{"lhs":60,"rhsLength":1,"reducer":{"kind":"field","name":"tail"}},{"lhs":57,"rhsLength":4,"reducer":{"kind":"sequence"}},{"lhs":10,"rhsLength":1,"reducer":{"kind":"rule","ruleId":9}},{"lhs":64,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":63,"rhsLength":1,"reducer":{"kind":"field","name":"value"}},{"lhs":62,"rhsLength":2,"reducer":{"kind":"sequence"}},{"lhs":11,"rhsLength":1,"reducer":{"kind":"rule","ruleId":10}},{"lhs":67,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":66,"rhsLength":1,"reducer":{"kind":"field","name":"count"}},{"lhs":69,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":68,"rhsLength":1,"reducer":{"kind":"field","name":"body"}},{"lhs":65,"rhsLength":6,"reducer":{"kind":"sequence"}},{"lhs":12,"rhsLength":1,"reducer":{"kind":"rule","ruleId":11}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":70,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":13,"rhsLength":1,"reducer":{"kind":"rule","ruleId":12}},{"lhs":71,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":14,"rhsLength":1,"reducer":{"kind":"rule","ruleId":13}},{"lhs":72,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":15,"rhsLength":1,"reducer":{"kind":"rule","ruleId":14}},{"lhs":73,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"rule","ruleId":15}},{"lhs":74,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":17,"rhsLength":1,"reducer":{"kind":"rule","ruleId":16}},{"lhs":75,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":18,"rhsLength":1,"reducer":{"kind":"rule","ruleId":17}},{"lhs":76,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":19,"rhsLength":1,"reducer":{"kind":"rule","ruleId":18}},{"lhs":77,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":20,"rhsLength":1,"reducer":{"kind":"rule","ruleId":19}},{"lhs":78,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":21,"rhsLength":1,"reducer":{"kind":"rule","ruleId":20}},{"lhs":79,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":22,"rhsLength":1,"reducer":{"kind":"rule","ruleId":21}},{"lhs":80,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":23,"rhsLength":1,"reducer":{"kind":"rule","ruleId":22}},{"lhs":83,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":82,"rhsLength":1,"reducer":{"kind":"field","name":"amount"}},{"lhs":81,"rhsLength":4,"reducer":{"kind":"sequence"}},{"lhs":24,"rhsLength":1,"reducer":{"kind":"rule","ruleId":23}},{"lhs":86,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":85,"rhsLength":1,"reducer":{"kind":"field","name":"factor"}},{"lhs":84,"rhsLength":4,"reducer":{"kind":"sequence"}},{"lhs":25,"rhsLength":1,"reducer":{"kind":"rule","ruleId":24}},{"lhs":89,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":88,"rhsLength":1,"reducer":{"kind":"field","name":"count"}},{"lhs":87,"rhsLength":4,"reducer":{"kind":"sequence"}},{"lhs":26,"rhsLength":1,"reducer":{"kind":"rule","ruleId":25}},{"lhs":92,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":91,"rhsLength":1,"reducer":{"kind":"field","name":"count"}},{"lhs":90,"rhsLength":4,"reducer":{"kind":"sequence"}},{"lhs":27,"rhsLength":1,"reducer":{"kind":"rule","ruleId":26}},{"lhs":95,"rhsLength":0,"reducer":{"kind":"optionalEmpty"}},{"lhs":95,"rhsLength":1,"reducer":{"kind":"optionalSome"}},{"lhs":94,"rhsLength":1,"reducer":{"kind":"field","name":"values"}},{"lhs":93,"rhsLength":3,"reducer":{"kind":"sequence"}},{"lhs":28,"rhsLength":1,"reducer":{"kind":"rule","ruleId":27}},{"lhs":98,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":97,"rhsLength":1,"reducer":{"kind":"field","name":"head"}},{"lhs":100,"rhsLength":0,"reducer":{"kind":"repeatEmpty"}},{"lhs":100,"rhsLength":2,"reducer":{"kind":"repeatAppend"}},{"lhs":99,"rhsLength":1,"reducer":{"kind":"field","name":"tail"}},{"lhs":96,"rhsLength":2,"reducer":{"kind":"sequence"}},{"lhs":29,"rhsLength":1,"reducer":{"kind":"rule","ruleId":28}},{"lhs":103,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":102,"rhsLength":1,"reducer":{"kind":"field","name":"value"}},{"lhs":101,"rhsLength":2,"reducer":{"kind":"sequence"}},{"lhs":30,"rhsLength":1,"reducer":{"kind":"rule","ruleId":29}}];
-const TERMINAL_NAMES: readonly string[] = ["EOF","IDENT","INTEGER","\"def\"","\"=\"","\";\"","\"emit\"","\"=>\"","\">>\"","\"(\"","\")\"","\"[\"","\"]\"","\",\"","\"repeat\"","\"id\"","\"inc\"","\"dec\"","\"double\"","\"square\"","\"neg\"","\"sum\"","\"product\"","\"first\"","\"last\"","\"add\"","\"mul\"","\"take\"","\"drop\""];
+const EXPECTED_TERMINALS: readonly (readonly string[])[] = [["\"def\"","\"emit\""],["IDENT"],["\"[\""],["EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"def\"","\"emit\"","EOF"],["\"=\""],["\"=\""],["\"=\""],["\"]\"","INTEGER"],["\"=>\""],["\"=>\""],["\"=>\""],["\"=>\""],["\"def\"","\"emit\"","EOF"],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\",\"","\"]\""],["\"]\""],["\"]\""],["\"]\""],["\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\";\"","\">>\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\"(\""],["\"(\""],["\"(\""],["\"(\""],["\";\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\""],["\";\""],["\";\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\"=>\""],["\"]\""],["\",\"","\"]\""],["\";\""],["\";\""],["\";\""],["\")\"","\">>\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\"(\""],["\"(\""],["\"(\""],["\"(\""],["\")\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\""],["\")\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\",\"","\">>\"","\"]\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\"(\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\"(\""],["\"(\""],["\"(\""],["\"(\""],["\",\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["\"def\"","\"emit\"","EOF"],["\";\""],["\";\"","\">>\""],["INTEGER"],["\",\"","\"]\""],["\",\"","\"]\""],["\"def\"","\"emit\"","EOF"],["\")\""],["\",\"","\"]\""],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["\")\""],["\")\"","\">>\""],["\";\"","\">>\""],["\")\""],["\",\"","\"]\""],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["INTEGER"],["\",\"","\"]\""],["\",\"","\">>\"","\"]\""],["\"]\""],["\",\"","\"]\""],["\",\""],["\",\""],["\",\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\";\"","\">>\""],["\";\"","\">>\""],["\",\"","\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\")\"","\">>\""],["\"]\""],["\",\""],["\")\""],["\")\""],["\")\""],["\")\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\")\"","\">>\""],["\")\"","\">>\""],["\",\"","\">>\"","\"]\""],["\"]\""],["\",\""],["\")\""],["\")\""],["\")\""],["\")\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\";\"","\">>\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\",\"","\"]\""],["\",\"","\"]\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\";\"","\">>\""],["\")\"","\">>\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\")\"","\">>\""],["\",\"","\">>\"","\"]\""],["\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT"],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\">>\"","\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\",\"","\"]\""],["\")\""],["\")\""],["\")\""],["\")\""],["\")\""],["\";\"","\">>\""],["\")\"","\">>\""],["\",\"","\">>\"","\"]\""]];
 const NAMED_TERMINALS = new Map<string, number>([["IDENT",1],["INTEGER",2]]);
 const LITERAL_TERMINALS = new Map<string, number>([["def",3],["=",4],[";",5],["emit",6],["=>",7],[">>",8],["(",9],[")",10],["[",11],["]",12],[",",13],["repeat",14],["id",15],["inc",16],["dec",17],["double",18],["square",19],["neg",20],["sum",21],["product",22],["first",23],["last",24],["add",25],["mul",26],["take",27],["drop",28]]);
 const MAIN_TOKEN_KINDS = new Set<string>(["IDENT","INTEGER"]);
 const TRIVIA_TOKEN_KINDS = new Set<string>(["WS"]);
 const RULE_NAMES: readonly string[] = ["module","item","definition","emit","composition","composition_tail","term","group","reference","fanout","fanout_tail","repeat","builtin","id","inc","dec","double","square","neg","sum","product","first","last","add","mul","take","drop","stream","integer_values","integer_tail"];
 const EMPTY_PARSE_DIAGNOSTICS: readonly ParseDiagnostic[] = [];
-const MAX_PARSE_BRANCHES = 100000;
 const RULE_FIELD_SCHEMA_ENTRIES: readonly (
   readonly [
     ruleId: number,
@@ -183,23 +154,12 @@ function parseTokenList(
         }],
       };
     }
-    const expected = expectedTerminals(traced.state);
-    const found = tokenDisplay(token);
-    const code = expected.includes("EOF") && found !== "EOF"
-      ? "PARSE_TRAILING_INPUT"
-      : "PARSE_UNEXPECTED_TOKEN";
     return {
       ok: false,
       root: null,
       source,
       tokens,
-      diagnostics: [{
-        code,
-        message: `Unexpected token ${found}.`,
-        span: token.span,
-        expected,
-        found,
-      }],
+      diagnostics: [unexpectedTokenDiagnostic(token, traced.state)],
     };
   }
 
@@ -258,32 +218,7 @@ function replayTrace(
     }
 
     if (kind === 3) {
-      const accepted = values[values.length - 1];
-      const root = isRuleNode(accepted)
-        ? accepted as RootNode
-        : isFragment(accepted) && isRuleNode(accepted.value)
-        ? accepted.value as RootNode
-        : null;
-      if (root) {
-        return {
-          ok: true,
-          root,
-          source,
-          tokens,
-          diagnostics: [],
-        };
-      }
-      return {
-        ok: false,
-        root: null,
-        source,
-        tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Parser accepted without producing a root node.",
-          span: { start: source.length, end: source.length },
-        }],
-      };
+      return acceptedParseResult(source, tokens, values[values.length - 1]);
     }
 
     const token = streamTokens[index] ?? eofToken(source.length);
@@ -501,11 +436,6 @@ function appendSeparatedFragment(
   };
 }
 
-function asFragment(value: unknown): Fragment {
-  if (isFragment(value)) return value;
-  throw new Error("Expected parser reduction fragment.");
-}
-
 function toFragment(value: unknown): Fragment {
   if (isFragment(value)) return value;
   if (isRuleNode(value)) return ruleFragment(value);
@@ -614,8 +544,55 @@ function buildFields(
   return fields;
 }
 
+function acceptedParseResult(
+  source: string,
+  tokens: readonly Token[],
+  accepted: unknown,
+): ParseResult<RootNode> {
+  const root = isRuleNode(accepted)
+    ? accepted as RootNode
+    : isFragment(accepted) && isRuleNode(accepted.value)
+    ? accepted.value as RootNode
+    : null;
+  if (root) {
+    return {
+      ok: true,
+      root,
+      source,
+      tokens,
+      diagnostics: [],
+    };
+  }
+  return {
+    ok: false,
+    root: null,
+    source,
+    tokens,
+    diagnostics: [{
+      code: "PARSER_INTERNAL_ERROR",
+      message: "Parser accepted without producing a root node.",
+      span: { start: source.length, end: source.length },
+    }],
+  };
+}
+
 function expectedTerminals(state: number): readonly string[] {
   return EXPECTED_TERMINALS[state] ?? [];
+}
+
+function unexpectedTokenDiagnostic(token: Token, state: number): ParseDiagnostic {
+  const expected = expectedTerminals(state);
+  const found = tokenDisplay(token);
+  const code = expected.includes("EOF") && found !== "EOF"
+    ? "PARSE_TRAILING_INPUT"
+    : "PARSE_UNEXPECTED_TOKEN";
+  return {
+    code,
+    message: `Unexpected token ${found}.`,
+    span: token.span,
+    expected,
+    found,
+  };
 }
 
 function tokenToTerminal(token: Token): number {
@@ -891,13 +868,6 @@ function eofToken(offset: number): Token {
 
 function currentSpan(token: Token): Span {
   return token.span;
-}
-
-function spanFromFragments(parts: readonly Fragment[]): Span | null {
-  return parts.reduce<Span | null>(
-    (span, part) => combineSpans(span, part.span),
-    null,
-  );
 }
 
 function spanFromChildren(children: readonly SyntaxElement[]): Span | null {

@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.3.0
+
+### Added
+
+- Added actionable LR conflict diagnostics that suggest
+  `metadata.parser.resolutions` entries, declared `metadata.parser.conflicts`
+  branches, and explicit reduce candidates for reduce/reduce conflicts.
+- Added structured user-facing diagnostics for metadata and Tree-sitter
+  validation failures, including stable codes plus backend, path, and span
+  details when available.
+
+### Changed
+
+- Generated TypeScript parsers now emit branch-search runtime support only for
+  grammars with declared parser conflicts.
+- Generated Wasm parser adapters now use an explicit Wasm emission mode instead
+  of rewriting the TypeScript parser output.
+- Generated syntax types now share an `EmptyFields` type for nodes without
+  fields.
+
+### Fixed
+
+- Fixed Tree-sitter `grammar.js` regex literal emission for Baba regexes that
+  contain escaped slash delimiters, such as line comments written with
+  `/\/\/[^\n\r]*/`.
+- Removed unused generated parser constants and helpers from deterministic
+  TypeScript and Wasm parser outputs.
+
 ## 1.2.0
 
 ### Added

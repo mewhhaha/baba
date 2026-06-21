@@ -119,6 +119,12 @@ Both generated parser runtimes export the same main TypeScript API:
 
 The Wasm target also exports `wasmBytes` from `wasm/mod.ts`.
 
+Generated parser code is specialized to the grammar. Deterministic TypeScript
+parsers omit branch-search helpers, while grammars with declared parser
+conflicts include the bounded branch runtime. Wasm parser adapters use the same
+public API and replay the Wasm parser engine's successful action trace to build
+the TypeScript CST.
+
 Only query files with content are written. Regenerating through `applyBundle()`
 removes previously owned generated query fragments that become empty. Ordinary
 `queries/*.scm` files are user-owned and are never written by Baba.
@@ -252,7 +258,9 @@ Unicode property escapes, anchors, lookaround, lazy quantifiers, backreferences,
 inline flags, and target-specific escape forms are rejected. Overlapping token
 languages must either be disjoint or use explicit priority. On equal-length
 matches, higher priority wins; literals win ties at the same priority; then
-declaration order breaks remaining ties.
+declaration order breaks remaining ties. Regexes that need a literal slash may
+escape it, such as `skip line_comment = /\/\/[^\n\r]*/ ;`; generated Tree-sitter
+grammars preserve that pattern as a valid JavaScript regex literal.
 
 Rules unreachable from the selected root are omitted from generated outputs and
 reported as `UNREACHABLE_RULE` warnings.
@@ -342,14 +350,26 @@ separate from Tree-sitter shaping metadata:
 `resolutions` keep the generated LR table deterministic by selecting either a
 `shift` or `reduce` action when the listed rules and optional terminal are
 involved. For reduce/reduce conflicts, add `reduce` with the rule or expression
-text that should win.
+text that should win. When generation reports an LR conflict, the diagnostic
+includes candidate `resolutions` metadata shaped for the conflicting rules and
+lookahead token.
 
 `conflicts` declares local grammar ambiguities that the generated TypeScript and
 Wasm parsers may explore with bounded branch search. This is useful for grammars
 that need Tree-sitter-like conflict handling but still want standalone parser
 runtimes. The Wasm target traces declared conflict branches inside its generated
 Wasm parser engine and replays the successful action trace in TypeScript to
-build the CST.
+build the CST. Shift/reduce diagnostics with multiple rule origins also suggest
+a matching `conflicts` entry when branch search is the intended policy.
+
+### Diagnostics
+
+Generation failures caused by grammar or metadata input are reported as
+structured diagnostics rather than generic internal errors. Diagnostics include
+a stable `code`, a clear `message`, and may include `backend`, metadata `path`,
+and source `span` fields. Examples include unknown metadata references, invalid
+aliases, invalid external token declarations, legacy path misuse, query selector
+errors, and Tree-sitter validation failures.
 
 External scanner symbols are declared in metadata:
 

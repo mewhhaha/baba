@@ -187,9 +187,10 @@ export interface RuleNodeBase<N extends RuleName = RuleName> {
   fields: unknown;
 }
 
+export type EmptyFields = Record<string, never>;
+
 export interface ModuleNode extends RuleNodeBase<"module"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface InstructionNode extends RuleNodeBase<"instruction"> {
@@ -199,33 +200,27 @@ export interface InstructionNode extends RuleNodeBase<"instruction"> {
 }
 
 export interface IncrementNode extends RuleNodeBase<"increment"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface DecrementNode extends RuleNodeBase<"decrement"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface MoveLeftNode extends RuleNodeBase<"move_left"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface MoveRightNode extends RuleNodeBase<"move_right"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface OutputNode extends RuleNodeBase<"output"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface InputNode extends RuleNodeBase<"input"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface LoopNode extends RuleNodeBase<"loop"> {
@@ -241,8 +236,7 @@ export interface ForkNode extends RuleNodeBase<"fork"> {
 }
 
 export interface JoinNode extends RuleNodeBase<"join"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export type AnyRuleNode =

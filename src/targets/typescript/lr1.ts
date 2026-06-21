@@ -414,42 +414,33 @@ function conflictDiagnostic(
   terminal: number,
   actions: readonly LrAction[],
 ): Diagnostic {
+  const context = conflictContext(grammar, state, terminal, actions);
   const terminalName = grammar.terminals[terminal]?.display ?? String(terminal);
-  const reductionProductions = actions
-    .filter((action): action is { kind: "reduce"; production: number } =>
-      action.kind === "reduce"
-    )
-    .map((action) => grammar.productions[action.production]);
-  const shiftProductions = state.items
-    .filter((item) => {
-      const symbol = grammar.productions[item.production].rhs[item.dot];
-      return symbol?.kind === "terminal" && symbol.id === terminal;
-    })
-    .map((item) => grammar.productions[item.production]);
-  const origins = uniqueOrigins([
-    ...shiftProductions,
-    ...reductionProductions,
-  ]);
+  const origins = context.origins;
   const ruleName = origins[0]?.ruleName;
-  const code = shiftProductions.length > 0 && reductionProductions.length > 0
+  const isShiftReduce = context.shiftProductions.length > 0 &&
+    context.reductionProductions.length > 0;
+  const code = isShiftReduce
     ? "TS_PARSER_SHIFT_REDUCE_CONFLICT"
     : "TS_PARSER_REDUCE_REDUCE_CONFLICT";
   const details = [
     `${
-      code === "TS_PARSER_REDUCE_REDUCE_CONFLICT"
-        ? "Reduce/reduce"
-        : "Shift/reduce"
+      isShiftReduce ? "Shift/reduce" : "Reduce/reduce"
     } conflict on ${terminalName}${
       ruleName ? ` in rule ${JSON.stringify(ruleName)}` : ""
     } while generating the TypeScript parser.`,
     "",
-    ...originDescriptions(grammar, "Shift interpretation", shiftProductions),
+    ...originDescriptions(
+      grammar,
+      "Shift interpretation",
+      context.shiftProductions,
+    ),
     ...originDescriptions(
       grammar,
       "Reduction interpretation",
-      reductionProductions,
+      context.reductionProductions,
     ),
-    "Encode precedence structurally or generate only the Tree-sitter target.",
+    ...metadataSuggestionLines(grammar, context, isShiftReduce),
   ].filter((line, index, lines) => line !== "" || lines[index - 1] !== "");
   const primaryOrigin = origins[0];
   return {
@@ -463,6 +454,49 @@ function conflictDiagnostic(
       span: origin.span,
     })),
   };
+}
+
+function metadataSuggestionLines(
+  grammar: BnfGrammar,
+  context: ConflictContext,
+  isShiftReduce: boolean,
+): string[] {
+  const rules = uniqueRuleNames(context.origins);
+  const terminal = terminalMetadataValue(grammar, context.terminal);
+  const resolution = {
+    rules,
+    on: terminal,
+    prefer: isShiftReduce ? "shift" : "reduce",
+    ...(!isShiftReduce
+      ? { reduce: reduceCandidates(context)[0] ?? rules[0] ?? "" }
+      : {}),
+  };
+  const lines = [
+    "Resolve this in metadata.parser.resolutions with an entry like:",
+    indentJson(resolution),
+  ];
+  if (isShiftReduce) {
+    lines.push(
+      'Use prefer: "reduce" instead if the reduction interpretation should win.',
+    );
+  } else {
+    const candidates = reduceCandidates(context);
+    if (candidates.length > 0) {
+      lines.push(
+        `Candidate reduce values: ${
+          candidates.map((candidate) => JSON.stringify(candidate)).join(", ")
+        }`,
+      );
+    }
+  }
+
+  if (isShiftReduce && rules.length > 1) {
+    lines.push(
+      "If both interpretations are valid, allow branch search with metadata.parser.conflicts:",
+      indentJson([rules]),
+    );
+  }
+  return lines;
 }
 
 function resolveConflict(
@@ -616,6 +650,43 @@ function originDescriptions(
     );
   }
   return origins.map((origin) => `${label}:\n  ${origin.description}`);
+}
+
+function uniqueRuleNames(origins: readonly ProductionOrigin[]): string[] {
+  const names: string[] = [];
+  for (const origin of origins) {
+    if (names.includes(origin.ruleName)) continue;
+    names.push(origin.ruleName);
+  }
+  return names;
+}
+
+function terminalMetadataValue(grammar: BnfGrammar, terminal: number): string {
+  const display = grammar.terminals[terminal]?.display ?? String(terminal);
+  if (!display.startsWith('"')) return display;
+  try {
+    const parsed = JSON.parse(display);
+    return typeof parsed === "string" ? parsed : display;
+  } catch {
+    return display;
+  }
+}
+
+function reduceCandidates(context: ConflictContext): string[] {
+  const candidates: string[] = [];
+  for (const production of context.reductionProductions) {
+    const origin = production.origin;
+    if (!origin) continue;
+    const candidate = origin.description;
+    if (candidates.includes(candidate)) continue;
+    candidates.push(candidate);
+  }
+  return candidates;
+}
+
+function indentJson(value: unknown): string {
+  return JSON.stringify(value, null, 2).split("\n").map((line) => `  ${line}`)
+    .join("\n");
 }
 
 function productionDisplayFallback(

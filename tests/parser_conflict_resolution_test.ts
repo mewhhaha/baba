@@ -51,6 +51,15 @@ Deno.test("TypeScript parser resolves declared shift/reduce conflicts determinis
     unresolved.diagnostics[0].code,
     "TS_PARSER_SHIFT_REDUCE_CONFLICT",
   );
+  assertIncludes(
+    unresolved.diagnostics[0].message,
+    "metadata.parser.resolutions",
+  );
+  assertIncludes(unresolved.diagnostics[0].message, '"prefer": "shift"');
+  assertIncludes(
+    unresolved.diagnostics[0].message,
+    "metadata.parser.conflicts",
+  );
 
   const metadata = parseMetadata(JSON.stringify({
     version: 1,
@@ -83,6 +92,56 @@ Deno.test("TypeScript parser resolves declared shift/reduce conflicts determinis
   }
 });
 
+Deno.test("TypeScript parser reduce/reduce diagnostics suggest reduce candidates", () => {
+  const result = compile(
+    `
+    module = left | right ;
+    left = "x" ;
+    right = "x" ;
+  `,
+    {
+      targets: ["typescript"],
+    },
+  );
+  assertEquals(result.bundle, undefined);
+  assertEquals(
+    result.diagnostics[0].code,
+    "TS_PARSER_REDUCE_REDUCE_CONFLICT",
+  );
+  assertIncludes(result.diagnostics[0].message, "metadata.parser.resolutions");
+  assertIncludes(result.diagnostics[0].message, '"prefer": "reduce"');
+  assertIncludes(result.diagnostics[0].message, '"reduce": "left = \\"x\\""');
+  assertIncludes(
+    result.diagnostics[0].message,
+    'Candidate reduce values: "left = \\"x\\"", "right = \\"x\\""',
+  );
+});
+
+Deno.test("generated deterministic parser omits branch-only helpers", () => {
+  const result = compile(`module = "a" ;`, {
+    targets: ["typescript"],
+  });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+  const parserSource =
+    result.bundle.files.find((file) => file.path === "typescript/parser.ts")
+      ?.content ?? "";
+  assertIncludes(parserSource, "function findAction(");
+  assertNotIncludes(parserSource, "MAX_PARSE_BRANCHES");
+  assertNotIncludes(parserSource, "interface ParseBranch");
+  assertNotIncludes(parserSource, "function findActions(");
+  assertNotIncludes(parserSource, "TERMINAL_NAMES");
+  assertNotIncludes(parserSource, "function asFragment(");
+  assertNotIncludes(parserSource, "spanFromFragments");
+
+  const syntaxSource =
+    result.bundle.files.find((file) => file.path === "typescript/syntax.ts")
+      ?.content ?? "";
+  assertIncludes(syntaxSource, "export type EmptyFields");
+  assertIncludes(syntaxSource, "fields: EmptyFields;");
+  assertNotIncludes(syntaxSource, "fields: {\n  };");
+});
+
 Deno.test("TypeScript parser branches through declared local grammar conflicts", async () => {
   const unresolved = compile(parenthesizedTypeGrammar, {
     targets: ["typescript"],
@@ -112,6 +171,10 @@ Deno.test("TypeScript parser branches through declared local grammar conflicts",
   const dir = await Deno.makeTempDir();
   try {
     await applyBundle(resolved.bundle, { root: dir });
+    const parserSource = await Deno.readTextFile(`${dir}/typescript/parser.ts`);
+    assertIncludes(parserSource, "MAX_PARSE_BRANCHES");
+    assertIncludes(parserSource, "interface ParseBranch");
+    assertIncludes(parserSource, "function findActions(");
     await denoCheck(`${dir}/typescript/mod.ts`);
     const mod = await import(`file://${dir}/typescript/mod.ts`);
     for (const source of ["(a)", "(a, b)", "((a))"]) {
@@ -145,7 +208,10 @@ Deno.test("Wasm parser target traces declared conflict branches", async () => {
     const parserSource = await Deno.readTextFile(`${dir}/wasm/parser.ts`);
     assertIncludes(parserSource, "parseTrace");
     assertIncludes(parserSource, "function replayTrace(");
+    assertNotIncludes(parserSource, "const ACTIONS");
+    assertNotIncludes(parserSource, "const GOTOS");
     assertNotIncludes(parserSource, "function findActions(");
+    assertNotIncludes(parserSource, "TERMINAL_NAMES");
     await denoCheck(`${dir}/wasm/mod.ts`);
     const mod = await import(`file://${dir}/wasm/mod.ts`);
     for (const source of ["(a)", "(a, b)", "((a))"]) {

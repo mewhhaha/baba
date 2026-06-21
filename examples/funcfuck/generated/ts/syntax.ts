@@ -222,14 +222,14 @@ export interface RuleNodeBase<N extends RuleName = RuleName> {
   fields: unknown;
 }
 
+export type EmptyFields = Record<string, never>;
+
 export interface ModuleNode extends RuleNodeBase<"module"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface ItemNode extends RuleNodeBase<"item"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface DefinitionNode extends RuleNodeBase<"definition"> {
@@ -260,8 +260,7 @@ export interface CompositionTailNode extends RuleNodeBase<"composition_tail"> {
 }
 
 export interface TermNode extends RuleNodeBase<"term"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface GroupNode extends RuleNodeBase<"group"> {
@@ -297,58 +296,47 @@ export interface RepeatNode extends RuleNodeBase<"repeat"> {
 }
 
 export interface BuiltinNode extends RuleNodeBase<"builtin"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface IdNode extends RuleNodeBase<"id"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface IncNode extends RuleNodeBase<"inc"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface DecNode extends RuleNodeBase<"dec"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface DoubleNode extends RuleNodeBase<"double"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface SquareNode extends RuleNodeBase<"square"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface NegNode extends RuleNodeBase<"neg"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface SumNode extends RuleNodeBase<"sum"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface ProductNode extends RuleNodeBase<"product"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface FirstNode extends RuleNodeBase<"first"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface LastNode extends RuleNodeBase<"last"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface AddNode extends RuleNodeBase<"add"> {

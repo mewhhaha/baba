@@ -119,6 +119,48 @@ Deno.test("Tree-sitter grammar lowering uses explicit declarations only", () => 
   assertNotIncludes(grammar, "number: $ =>");
 });
 
+Deno.test("Tree-sitter regex literals preserve escaped slash patterns", async () => {
+  const source = `
+    skip line_comment = /\\/\\/[^\\n\\r]*/ ;
+    skip whitespace = /[ \\t\\r\\n]+/ ;
+    module = "a" ;
+  `;
+  const bundle = generate(source, { name: "slashy" });
+  const grammarSource = bundle.files.find((file) => file.path === "grammar.js")
+    ?.content ?? "";
+  assertIncludes(
+    grammarSource,
+    "line_comment: $ => /\\/\\/[^\\n\\r]*/",
+  );
+  assertNotIncludes(grammarSource, "line_comment: $ => /\\\\/\\\\/");
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(bundle, { root: dir });
+    await Deno.writeTextFile(`${dir}/grammar.mjs`, grammarSource);
+    const nodeCheck = new Deno.Command("node", {
+      args: ["--check", `${dir}/grammar.mjs`],
+    });
+    const output = await nodeCheck.output();
+    assert(
+      output.success,
+      new TextDecoder().decode(output.stderr),
+    );
+
+    const treeSitterVersion = await runCommand("tree-sitter", ["--version"])
+      .then((result) => result.stdout.trim())
+      .catch(() => "");
+    if (treeSitterVersion) {
+      await runCommand("tree-sitter", ["generate"], dir, {
+        HOME: `${dir}/home`,
+        XDG_CACHE_HOME: `${dir}/cache`,
+      });
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("Tree-sitter and TypeScript agree on explicit whitespace", async () => {
   const noSkip = `module = "a" "b" ;`;
   const noSkipTs = compile(noSkip, { targets: ["typescript"] });
@@ -326,6 +368,90 @@ Deno.test("versioned metadata rejects legacy numeric paths", () => {
         })),
       }),
     "uses legacy numeric metadata",
+  );
+});
+
+Deno.test("compile reports structured Tree-sitter metadata diagnostics", () => {
+  const unknownWord = compile(explicitGrammar, {
+    targets: ["tree-sitter"],
+    metadata: parseTreeSitterMetadata(JSON.stringify({
+      version: 1,
+      word: "missing",
+    })),
+  });
+  assertEquals(unknownWord.bundle, undefined);
+  assertEquals(unknownWord.diagnostics[0].code, "METADATA_UNKNOWN_REFERENCE");
+  assertEquals(unknownWord.diagnostics[0].backend, "tree-sitter");
+  assertEquals(unknownWord.diagnostics[0].path, "metadata.word");
+
+  const invalidAlias = compile(explicitGrammar, {
+    targets: ["tree-sitter"],
+    metadata: parseTreeSitterMetadata(JSON.stringify({
+      version: 1,
+      rules: {
+        module: {
+          paths: {
+            name: { alias_ref: "invalid-alias" },
+          },
+        },
+      },
+    })),
+  });
+  assertEquals(invalidAlias.diagnostics[0].code, "METADATA_INVALID_ALIAS");
+  assertIncludes(invalidAlias.diagnostics[0].path ?? "", "alias_ref");
+  assertEquals(invalidAlias.diagnostics[0].backend, "tree-sitter");
+
+  const legacyPath = compile(explicitGrammar, {
+    targets: ["tree-sitter"],
+    metadata: parseTreeSitterMetadata(JSON.stringify({
+      version: 1,
+      rules: {
+        module: {
+          paths: {
+            "1": { alias_ref: "name" },
+          },
+        },
+      },
+    })),
+  });
+  assertEquals(legacyPath.diagnostics[0].code, "METADATA_LEGACY_PATH");
+  assertEquals(legacyPath.diagnostics[0].path, "metadata.rules.module.paths.1");
+
+  const invalidExternal = compile(`module = "a" ;`, {
+    targets: ["tree-sitter"],
+    metadata: parseTreeSitterMetadata(JSON.stringify({
+      version: 1,
+      externals: ["bad-token"],
+    })),
+  });
+  assertEquals(
+    invalidExternal.diagnostics[0].code,
+    "INVALID_EXTERNAL_TOKEN",
+  );
+  assertEquals(invalidExternal.diagnostics[0].path, "metadata.externals[0]");
+
+  const unknownQueryNode = compile(
+    `
+    token ident = /[a-z]+/ ;
+    module = ident ;
+  `,
+    {
+      targets: ["tree-sitter"],
+      metadata: parseTreeSitterMetadata(JSON.stringify({
+        version: 1,
+        queries: {
+          locals: [{ node: "dead", capture: "local.definition" }],
+        },
+      })),
+    },
+  );
+  assertEquals(
+    unknownQueryNode.diagnostics[0].code,
+    "METADATA_UNKNOWN_QUERY_NODE",
+  );
+  assertEquals(
+    unknownQueryNode.diagnostics[0].path,
+    "metadata.queries.locals[0].node",
   );
 });
 

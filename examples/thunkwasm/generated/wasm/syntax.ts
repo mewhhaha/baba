@@ -238,9 +238,10 @@ export interface RuleNodeBase<N extends RuleName = RuleName> {
   fields: unknown;
 }
 
+export type EmptyFields = Record<string, never>;
+
 export interface ModuleNode extends RuleNodeBase<"module"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface DefinitionNode extends RuleNodeBase<"definition"> {
@@ -252,8 +253,7 @@ export interface DefinitionNode extends RuleNodeBase<"definition"> {
 }
 
 export interface ExprNode extends RuleNodeBase<"expr"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface LetExprNode extends RuleNodeBase<"let_expr"> {
@@ -274,18 +274,15 @@ export interface IfExprNode extends RuleNodeBase<"if_expr"> {
 }
 
 export interface BranchHintNode extends RuleNodeBase<"branch_hint"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface LikelyNode extends RuleNodeBase<"likely"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface UnlikelyNode extends RuleNodeBase<"unlikely"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface FunExprNode extends RuleNodeBase<"fun_expr"> {
@@ -322,18 +319,15 @@ export interface EqualityTailNode extends RuleNodeBase<"equality_tail"> {
 }
 
 export interface EqualityOpNode extends RuleNodeBase<"equality_op"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface EqNode extends RuleNodeBase<"eq"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface NeNode extends RuleNodeBase<"ne"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface ComparisonNode extends RuleNodeBase<"comparison"> {
@@ -351,28 +345,23 @@ export interface ComparisonTailNode extends RuleNodeBase<"comparison_tail"> {
 }
 
 export interface ComparisonOpNode extends RuleNodeBase<"comparison_op"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface LtNode extends RuleNodeBase<"lt"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface LeNode extends RuleNodeBase<"le"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface GtNode extends RuleNodeBase<"gt"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface GeNode extends RuleNodeBase<"ge"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface AdditiveNode extends RuleNodeBase<"additive"> {
@@ -390,18 +379,15 @@ export interface AdditiveTailNode extends RuleNodeBase<"additive_tail"> {
 }
 
 export interface AdditiveOpNode extends RuleNodeBase<"additive_op"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface PlusNode extends RuleNodeBase<"plus"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface MinusNode extends RuleNodeBase<"minus"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface MultiplicativeNode extends RuleNodeBase<"multiplicative"> {
@@ -419,23 +405,19 @@ export interface MultiplicativeTailNode extends RuleNodeBase<"multiplicative_tai
 }
 
 export interface MultiplicativeOpNode extends RuleNodeBase<"multiplicative_op"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface StarNode extends RuleNodeBase<"star"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface SlashNode extends RuleNodeBase<"slash"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface UnaryNode extends RuleNodeBase<"unary"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface NegateNode extends RuleNodeBase<"negate"> {
@@ -471,8 +453,7 @@ export interface ArgumentTailNode extends RuleNodeBase<"argument_tail"> {
 }
 
 export interface PrimaryNode extends RuleNodeBase<"primary"> {
-  fields: {
-  };
+  fields: EmptyFields;
 }
 
 export interface IntegerNode extends RuleNodeBase<"integer"> {

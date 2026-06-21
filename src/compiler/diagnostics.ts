@@ -38,12 +38,14 @@ export function collectGrammarDiagnostics(
   const skipNames = new Set<string>();
   const externalNames = new Set(options.externals ?? []);
   const seenExternalNames = new Set<string>();
-  for (const external of options.externals ?? []) {
+  for (const [index, external] of (options.externals ?? []).entries()) {
+    const path = `metadata.externals[${index}]`;
     if (seenExternalNames.has(external)) {
       diagnostics.push({
         code: "DUPLICATE_DECLARATION",
         severity: "error",
         message: `Duplicate declaration '${external}'`,
+        path,
       });
     }
     seenExternalNames.add(external);
@@ -52,6 +54,7 @@ export function collectGrammarDiagnostics(
         code: "INVALID_EXTERNAL_TOKEN",
         severity: "error",
         message: `Invalid external token name '${external}'`,
+        path,
       });
     }
     if (reservedTokenDeclarationNames.has(external)) {
@@ -59,6 +62,7 @@ export function collectGrammarDiagnostics(
         code: "RESERVED_GENERATED_NAME",
         severity: "error",
         message: `External token '${external}' uses reserved generated name`,
+        path,
       });
     }
     declaredNames.add(external);

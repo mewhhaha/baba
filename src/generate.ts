@@ -24,6 +24,7 @@ import {
 } from "./compiler/diagnostics.ts";
 import type { AnalyzedExpression, AnalyzedGrammar } from "./compiler/ir.ts";
 import { parsePortableRegex } from "./compiler/regex/parser.ts";
+import { BabaError } from "./errors.ts";
 import { parseEbnf } from "./parser.ts";
 
 export {
@@ -31,6 +32,21 @@ export {
   collectReachabilityDiagnostics,
   validateEbnfGrammar,
 } from "./compiler/diagnostics.ts";
+
+function treeSitterDiagnosticError(
+  code: string,
+  message: string,
+  options: { path?: string; span?: SourceSpan } = {},
+): never {
+  throw new BabaError({
+    code,
+    severity: "error",
+    backend: "tree-sitter",
+    message,
+    path: options.path,
+    span: options.span,
+  });
+}
 
 /** Collects literal terminal strings referenced by grammar rules. */
 export function collectTerminals(grammar: EbnfGrammar): string[] {
@@ -149,10 +165,12 @@ export function validateTreeSitterBackendCapabilities(
       parsePortableRegex(token.pattern);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
+      treeSitterDiagnosticError(
+        "TREE_SITTER_UNSUPPORTED_REGEX",
         `${
           token.kind === "skip" ? "Skip" : "Token"
         } '${token.name}' uses regex outside Baba's portable subset: ${message}`,
+        { span: token.span },
       );
     }
   }
@@ -183,7 +201,12 @@ export function generateTreeSitterGrammar(
   }
   validateTreeSitterBackendCapabilities(grammar);
   const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
-  if (!rootRule) throw new Error(`Unknown root rule '${rootRuleName}'`);
+  if (!rootRule) {
+    treeSitterDiagnosticError(
+      "TREE_SITTER_UNKNOWN_ROOT_RULE",
+      `Unknown root rule '${rootRuleName}'`,
+    );
+  }
 
   if (!options.skipValidation) {
     validateTreeSitterMetadataSemantics(
@@ -804,7 +827,12 @@ function sourceFileExpression(
   rootRuleName: string,
 ): EbnfExpression {
   const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
-  if (!rootRule) throw new Error(`Unknown root rule '${rootRuleName}'`);
+  if (!rootRule) {
+    treeSitterDiagnosticError(
+      "TREE_SITTER_UNKNOWN_ROOT_RULE",
+      `Unknown root rule '${rootRuleName}'`,
+    );
+  }
   return { kind: "ref", name: rootRuleName, span: rootRule.span };
 }
 
@@ -1009,24 +1037,32 @@ function validateTreeSitterMetadataSemantics(
 
   const seenAliasNodes = new Set<string>();
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
+    const rulePath = `metadata.rules.${ruleName}`;
     if (ruleName !== "source_file" && !reachableRules.has(ruleName)) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_UNREACHABLE_RULE",
         `Metadata rule '${ruleName}' is unreachable from root rule '${rootRuleName}'`,
+        { path: rulePath },
       );
     }
     for (const [path, pathMeta] of Object.entries(ruleMeta.paths ?? {})) {
+      const metadataPath = `${rulePath}.paths.${path}`;
       const aliasName = pathMeta.alias_node;
       if (!aliasName) continue;
       if (
         knownRules.has(aliasName) || metadata.externals?.includes(aliasName)
       ) {
-        throw new Error(
+        treeSitterDiagnosticError(
+          "METADATA_ALIAS_CONFLICT",
           `Rule '${ruleName}' path '${path}' alias_node '${aliasName}' conflicts with existing rule`,
+          { path: metadataPath },
         );
       }
       if (seenAliasNodes.has(aliasName)) {
-        throw new Error(
+        treeSitterDiagnosticError(
+          "METADATA_DUPLICATE_ALIAS",
           `Duplicate alias_node '${aliasName}' in tree-sitter metadata`,
+          { path: metadataPath },
         );
       }
       seenAliasNodes.add(aliasName);
@@ -1034,13 +1070,19 @@ function validateTreeSitterMetadataSemantics(
     }
   }
 
-  for (const external of metadata.externals ?? []) {
+  for (const [index, external] of (metadata.externals ?? []).entries()) {
     if (!isValidSymbolName(external)) {
-      throw new Error(`Invalid external token name '${external}'`);
+      treeSitterDiagnosticError(
+        "METADATA_INVALID_EXTERNAL",
+        `Invalid external token name '${external}'`,
+        { path: `metadata.externals[${index}]` },
+      );
     }
     if (knownRules.has(external)) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_EXTERNAL_CONFLICT",
         `External token '${external}' conflicts with existing rule`,
+        { path: `metadata.externals[${index}]` },
       );
     }
   }
@@ -1050,32 +1092,64 @@ function validateTreeSitterMetadataSemantics(
       metadata.word,
       new Set([...symbolSets.tokens, ...symbolSets.externals]),
       "word token",
+      "metadata.word",
     );
   }
-  for (const extra of metadata.extras ?? []) {
-    validateExtra(extra, symbolSets.extraRules);
+  for (const [index, extra] of (metadata.extras ?? []).entries()) {
+    validateExtra(extra, symbolSets.extraRules, `metadata.extras[${index}]`);
   }
-  for (const name of metadata.supertypes ?? []) {
-    validateRuleRef(name, symbolSets.parserRules, "supertype");
+  for (const [index, name] of (metadata.supertypes ?? []).entries()) {
+    validateRuleRef(
+      name,
+      symbolSets.parserRules,
+      "supertype",
+      `metadata.supertypes[${index}]`,
+    );
   }
-  for (const name of metadata.inline ?? []) {
-    validateRuleRef(name, symbolSets.parserRules, "inline");
+  for (const [index, name] of (metadata.inline ?? []).entries()) {
+    validateRuleRef(
+      name,
+      symbolSets.parserRules,
+      "inline",
+      `metadata.inline[${index}]`,
+    );
   }
-  for (const conflict of metadata.conflicts ?? []) {
-    for (const name of conflict) {
-      validateRuleRef(name, symbolSets.parserRules, "conflict");
+  for (
+    const [conflictIndex, conflict] of (metadata.conflicts ?? [])
+      .entries()
+  ) {
+    for (const [nameIndex, name] of conflict.entries()) {
+      validateRuleRef(
+        name,
+        symbolSets.parserRules,
+        "conflict",
+        `metadata.conflicts[${conflictIndex}][${nameIndex}]`,
+      );
     }
   }
 
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
-    if (ruleMeta.wrap) validateWrap(ruleMeta.wrap, ruleName);
+    const rulePath = `metadata.rules.${ruleName}`;
+    if (ruleMeta.wrap) {
+      validateWrap(ruleMeta.wrap, ruleName, `${rulePath}.wrap`);
+    }
     const expression = ruleName === "source_file"
       ? sourceFileExpression(grammar, rootRuleName)
       : grammar.rules.find((rule) => rule.name === ruleName)?.expression;
     if (!expression) {
-      throw new Error(`Missing grammar rule '${ruleName}' for metadata`);
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_RULE",
+        `Missing grammar rule '${ruleName}' for metadata`,
+        { path: rulePath },
+      );
     }
-    validateRuleMetadata(ruleMeta, expression, ruleName, metadata.version);
+    validateRuleMetadata(
+      ruleMeta,
+      expression,
+      ruleName,
+      metadata.version,
+      rulePath,
+    );
   }
 }
 
@@ -1115,12 +1189,14 @@ function validateTreeSitterQueryMetadata(
     metadata,
     rootRuleName,
     queries.rainbows,
+    "metadata.queries.rainbows",
   );
   validateTreeSitterInjectionsMetadata(
     grammar,
     metadata,
     rootRuleName,
     queries.injections,
+    "metadata.queries.injections",
   );
   validateCaptureMetadata(
     grammar,
@@ -1128,6 +1204,7 @@ function validateTreeSitterQueryMetadata(
     rootRuleName,
     queries.highlights?.entries,
     "highlight",
+    "metadata.queries.highlights.entries",
   );
   validateCaptureSelectorsMetadata(
     grammar,
@@ -1135,6 +1212,7 @@ function validateTreeSitterQueryMetadata(
     rootRuleName,
     queries.highlights?.defaults?.suppress,
     "highlight default suppression",
+    "metadata.queries.highlights.defaults.suppress",
   );
   validateHighlightCoverageIgnoreMetadata(grammar, metadata, rootRuleName);
   validateCaptureMetadata(
@@ -1143,6 +1221,7 @@ function validateTreeSitterQueryMetadata(
     rootRuleName,
     queries.locals,
     "locals",
+    "metadata.queries.locals",
   );
   validateCaptureMetadata(
     grammar,
@@ -1150,6 +1229,7 @@ function validateTreeSitterQueryMetadata(
     rootRuleName,
     queries.folds,
     "fold",
+    "metadata.queries.folds",
   );
   validateCaptureMetadata(
     grammar,
@@ -1157,6 +1237,7 @@ function validateTreeSitterQueryMetadata(
     rootRuleName,
     queries.indents,
     "indent",
+    "metadata.queries.indents",
   );
   validateCaptureMetadata(
     grammar,
@@ -1164,6 +1245,7 @@ function validateTreeSitterQueryMetadata(
     rootRuleName,
     queries.tags,
     "tag",
+    "metadata.queries.tags",
   );
   validateCaptureMetadata(
     grammar,
@@ -1171,6 +1253,7 @@ function validateTreeSitterQueryMetadata(
     rootRuleName,
     queries.textobjects,
     "textobject",
+    "metadata.queries.textobjects",
   );
 }
 
@@ -1187,16 +1270,21 @@ function validateHighlightCoverageIgnoreMetadata(
     rootRuleName,
     ignore,
     "highlight coverage ignore",
+    "metadata.queries.highlights.defaults.ignore",
   );
   const knownNodes = collectGeneratedTreeSitterNodeNames(
     grammar,
     metadata,
     rootRuleName,
   );
-  for (const entry of ignore) {
+  for (const [index, entry] of ignore.entries()) {
     if (!knownNodes.has(entry.parent)) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_QUERY_NODE",
         `Unknown highlight coverage ignore parent '${entry.parent}'`,
+        {
+          path: `metadata.queries.highlights.defaults.ignore[${index}].parent`,
+        },
       );
     }
   }
@@ -1208,6 +1296,7 @@ function validateCaptureMetadata(
   rootRuleName: string,
   metadata: TreeSitterCaptureQueryEntry[] | undefined,
   context: string,
+  path: string,
 ): void {
   if (!metadata) return;
 
@@ -1222,14 +1311,21 @@ function validateCaptureMetadata(
       collectReachableRuleNames(grammar, rootRuleName),
     ),
   );
-  for (const capture of metadata) {
+  for (const [index, capture] of metadata.entries()) {
+    const entryPath = `${path}[${index}]`;
     if (isRawQueryEntry(capture)) continue;
     if (capture.node && !knownNodes.has(capture.node)) {
-      throw new Error(`Unknown ${context} capture node '${capture.node}'`);
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_QUERY_NODE",
+        `Unknown ${context} capture node '${capture.node}'`,
+        { path: `${entryPath}.node` },
+      );
     }
     if (capture.literal && !terminals.has(capture.literal)) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_QUERY_LITERAL",
         `Unknown ${context} capture literal '${capture.literal}'`,
+        { path: `${entryPath}.literal` },
       );
     }
   }
@@ -1241,6 +1337,7 @@ function validateCaptureSelectorsMetadata(
   rootRuleName: string,
   metadata: TreeSitterCaptureSelectorMetadata[] | undefined,
   context: string,
+  path: string,
 ): void {
   if (!metadata) return;
 
@@ -1255,12 +1352,21 @@ function validateCaptureSelectorsMetadata(
       collectReachableRuleNames(grammar, rootRuleName),
     ),
   );
-  for (const selector of metadata) {
+  for (const [index, selector] of metadata.entries()) {
+    const entryPath = `${path}[${index}]`;
     if (selector.node && !knownNodes.has(selector.node)) {
-      throw new Error(`Unknown ${context} node '${selector.node}'`);
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_QUERY_NODE",
+        `Unknown ${context} node '${selector.node}'`,
+        { path: `${entryPath}.node` },
+      );
     }
     if (selector.literal && !terminals.has(selector.literal)) {
-      throw new Error(`Unknown ${context} literal '${selector.literal}'`);
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_QUERY_LITERAL",
+        `Unknown ${context} literal '${selector.literal}'`,
+        { path: `${entryPath}.literal` },
+      );
     }
   }
 }
@@ -1429,6 +1535,7 @@ function validateTreeSitterRainbowsMetadata(
   fullMetadata: TreeSitterMetadata,
   rootRuleName: string,
   metadata?: TreeSitterRainbowsMetadata,
+  path = "metadata.queries.rainbows",
 ): void {
   if (!metadata) return;
 
@@ -1437,9 +1544,13 @@ function validateTreeSitterRainbowsMetadata(
     fullMetadata,
     rootRuleName,
   );
-  for (const scope of metadata.scopes ?? []) {
+  for (const [index, scope] of (metadata.scopes ?? []).entries()) {
     if (!knownNodes.has(scope)) {
-      throw new Error(`Unknown rainbow scope node '${scope}'`);
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_QUERY_NODE",
+        `Unknown rainbow scope node '${scope}'`,
+        { path: `${path}.scopes[${index}]` },
+      );
     }
   }
 
@@ -1449,9 +1560,13 @@ function validateTreeSitterRainbowsMetadata(
       collectReachableRuleNames(grammar, rootRuleName),
     ),
   );
-  for (const bracket of metadata.brackets ?? []) {
+  for (const [index, bracket] of (metadata.brackets ?? []).entries()) {
     if (!terminals.has(bracket)) {
-      throw new Error(`Unknown rainbow bracket literal '${bracket}'`);
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_QUERY_LITERAL",
+        `Unknown rainbow bracket literal '${bracket}'`,
+        { path: `${path}.brackets[${index}]` },
+      );
     }
   }
 }
@@ -1461,6 +1576,7 @@ function validateTreeSitterInjectionsMetadata(
   fullMetadata: TreeSitterMetadata,
   rootRuleName: string,
   metadata?: TreeSitterInjectionQueryEntry[],
+  path = "metadata.queries.injections",
 ): void {
   if (!metadata) return;
 
@@ -1469,13 +1585,22 @@ function validateTreeSitterInjectionsMetadata(
     fullMetadata,
     rootRuleName,
   );
-  for (const injection of metadata) {
+  for (const [index, injection] of metadata.entries()) {
+    const entryPath = `${path}[${index}]`;
     if (isRawQueryEntry(injection)) continue;
     if (!knownNodes.has(injection.node)) {
-      throw new Error(`Unknown injection node '${injection.node}'`);
+      treeSitterDiagnosticError(
+        "METADATA_UNKNOWN_QUERY_NODE",
+        `Unknown injection node '${injection.node}'`,
+        { path: `${entryPath}.node` },
+      );
     }
     if (!/^[A-Za-z0-9_+-]+$/.test(injection.language)) {
-      throw new Error(`Invalid injection language '${injection.language}'`);
+      treeSitterDiagnosticError(
+        "METADATA_INVALID_INJECTION_LANGUAGE",
+        `Invalid injection language '${injection.language}'`,
+        { path: `${entryPath}.language` },
+      );
     }
   }
 }
@@ -1556,29 +1681,55 @@ function collectDefaultRainbowBrackets(
   return ["(", ")", "[", "]", "{", "}"].filter((token) => terminals.has(token));
 }
 
-function validateExtra(extra: TreeSitterExtra, knownRules: Set<string>): void {
+function validateExtra(
+  extra: TreeSitterExtra,
+  knownRules: Set<string>,
+  path?: string,
+): void {
   if (extra.kind === "regex") return;
-  validateRuleRef(extra.name, knownRules, "extra");
+  validateRuleRef(
+    extra.name,
+    knownRules,
+    "extra",
+    path ? `${path}.name` : path,
+  );
 }
 
 function validateRuleRef(
   name: string,
   knownRules: Set<string>,
   context: string,
+  path?: string,
 ): void {
   if (knownRules.has(name)) return;
-  throw new Error(`Unknown ${context} rule '${name}'`);
+  treeSitterDiagnosticError(
+    "METADATA_UNKNOWN_REFERENCE",
+    `Unknown ${context} rule '${name}'`,
+    { path },
+  );
 }
 
-function validateWrap(wrap: TreeSitterRuleWrap, ruleName: string): void {
+function validateWrap(
+  wrap: TreeSitterRuleWrap,
+  ruleName: string,
+  path?: string,
+): void {
   if (wrap.kind === "prec.left" || wrap.kind === "prec.right") {
     if (wrap.value !== undefined && !Number.isInteger(wrap.value)) {
-      throw new Error(`Expected integer precedence for '${ruleName}'`);
+      treeSitterDiagnosticError(
+        "METADATA_INVALID_PRECEDENCE",
+        `Expected integer precedence for '${ruleName}'`,
+        { path },
+      );
     }
     return;
   }
   if (!Number.isInteger(wrap.value)) {
-    throw new Error(`Expected integer precedence for '${ruleName}'`);
+    treeSitterDiagnosticError(
+      "METADATA_INVALID_PRECEDENCE",
+      `Expected integer precedence for '${ruleName}'`,
+      { path },
+    );
   }
 }
 
@@ -1587,28 +1738,35 @@ function resolveMetadataPathSelector(
   selector: string,
   ruleName: string,
   metadataVersion?: TreeSitterMetadata["version"],
+  metadataPath?: string,
 ): string {
   if (selector === "") return "";
   if (isLegacyNumericPath(selector)) {
     if (metadataVersion === 1) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_LEGACY_PATH",
         `Rule '${ruleName}' path '${selector}' uses legacy numeric metadata; use a named EBNF field`,
+        { path: metadataPath },
       );
     }
-    parsePathSegments(selector, ruleName);
+    parsePathSegments(selector, ruleName, metadataPath);
     return selector;
   }
 
   const namedFieldPaths = collectNamedFieldPaths(expression);
   const matches = namedFieldPaths.get(selector) ?? [];
   if (matches.length === 0) {
-    throw new Error(
+    treeSitterDiagnosticError(
+      "METADATA_UNKNOWN_FIELD_SELECTOR",
       `Unknown field selector '${selector}' on rule '${ruleName}'`,
+      { path: metadataPath },
     );
   }
   if (matches.length > 1) {
-    throw new Error(
+    treeSitterDiagnosticError(
+      "METADATA_AMBIGUOUS_FIELD_SELECTOR",
       `Field selector '${selector}' is ambiguous on rule '${ruleName}'`,
+      { path: metadataPath },
     );
   }
   return matches[0];
@@ -1669,11 +1827,19 @@ function isLegacyNumericPath(selector: string): boolean {
   );
 }
 
-function parsePathSegments(path: string, ruleName: string): number[] {
+function parsePathSegments(
+  path: string,
+  ruleName: string,
+  metadataPath?: string,
+): number[] {
   const segments = path.length === 0 ? [] : path.split(".").map((segment) => {
     const index = Number(segment);
     if (!Number.isInteger(index) || index < 0) {
-      throw new Error(`Invalid field path '${path}' on rule '${ruleName}'`);
+      treeSitterDiagnosticError(
+        "METADATA_INVALID_FIELD_PATH",
+        `Invalid field path '${path}' on rule '${ruleName}'`,
+        { path: metadataPath },
+      );
     }
     return index;
   });
@@ -1684,9 +1850,10 @@ function resolveExpressionAtPath(
   expression: EbnfExpression,
   path: string,
   ruleName: string,
+  metadataPath?: string,
 ): EbnfExpression {
-  const segments = parsePathSegments(path, ruleName);
-  return walkResolvedPath(expression, segments, path, ruleName);
+  const segments = parsePathSegments(path, ruleName, metadataPath);
+  return walkResolvedPath(expression, segments, path, ruleName, metadataPath);
 }
 
 function walkResolvedPath(
@@ -1694,54 +1861,103 @@ function walkResolvedPath(
   segments: number[],
   path: string,
   ruleName: string,
+  metadataPath?: string,
 ): EbnfExpression {
   if (segments.length === 0) return expression;
   const [head, ...rest] = segments;
   switch (expression.kind) {
     case "field":
       if (head !== 0) {
-        throw new Error(
+        treeSitterDiagnosticError(
+          "METADATA_FIELD_PATH_OUT_OF_BOUNDS",
           `Field path '${path}' is out of bounds on rule '${ruleName}'`,
+          { path: metadataPath },
         );
       }
-      return walkResolvedPath(expression.expression, rest, path, ruleName);
+      return walkResolvedPath(
+        expression.expression,
+        rest,
+        path,
+        ruleName,
+        metadataPath,
+      );
     case "sequence":
       if (head >= expression.items.length) {
-        throw new Error(
+        treeSitterDiagnosticError(
+          "METADATA_FIELD_PATH_OUT_OF_BOUNDS",
           `Field path '${path}' is out of bounds on rule '${ruleName}'`,
+          { path: metadataPath },
         );
       }
-      return walkResolvedPath(expression.items[head], rest, path, ruleName);
+      return walkResolvedPath(
+        expression.items[head],
+        rest,
+        path,
+        ruleName,
+        metadataPath,
+      );
     case "choice":
       if (head >= expression.options.length) {
-        throw new Error(
+        treeSitterDiagnosticError(
+          "METADATA_FIELD_PATH_OUT_OF_BOUNDS",
           `Field path '${path}' is out of bounds on rule '${ruleName}'`,
+          { path: metadataPath },
         );
       }
-      return walkResolvedPath(expression.options[head], rest, path, ruleName);
+      return walkResolvedPath(
+        expression.options[head],
+        rest,
+        path,
+        ruleName,
+        metadataPath,
+      );
     case "optional":
     case "repeat":
     case "repeat1":
       if (head !== 0) {
-        throw new Error(
+        treeSitterDiagnosticError(
+          "METADATA_FIELD_PATH_OUT_OF_BOUNDS",
           `Field path '${path}' is out of bounds on rule '${ruleName}'`,
+          { path: metadataPath },
         );
       }
-      return walkResolvedPath(expression.expression, rest, path, ruleName);
+      return walkResolvedPath(
+        expression.expression,
+        rest,
+        path,
+        ruleName,
+        metadataPath,
+      );
     case "separated":
       if (head === 0) {
-        return walkResolvedPath(expression.item, rest, path, ruleName);
+        return walkResolvedPath(
+          expression.item,
+          rest,
+          path,
+          ruleName,
+          metadataPath,
+        );
       }
       if (head === 1) {
-        return walkResolvedPath(expression.separator, rest, path, ruleName);
+        return walkResolvedPath(
+          expression.separator,
+          rest,
+          path,
+          ruleName,
+          metadataPath,
+        );
       }
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_FIELD_PATH_OUT_OF_BOUNDS",
         `Field path '${path}' is out of bounds on rule '${ruleName}'`,
+        { path: metadataPath },
       );
     case "ref":
     case "literal":
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_FIELD_PATH_LEAF",
         `Field path '${path}' descends through a leaf on rule '${ruleName}'`,
+        { path: metadataPath },
       );
   }
 }
@@ -2051,6 +2267,7 @@ function normalizeRuleMetadata(
   expression?: EbnfExpression,
   ruleName?: string,
   metadataVersion?: TreeSitterMetadata["version"],
+  metadataPath?: string,
 ): NormalizedRuleMetadata {
   const paths = new Map<string, TreeSitterPathMetadata>();
   if (!metadata) return { paths };
@@ -2062,9 +2279,16 @@ function normalizeRuleMetadata(
         path,
         ruleName,
         metadataVersion,
+        `${metadataPath ?? `metadata.rules.${ruleName}`}.fields.${path}`,
       )
       : path;
-    mergePathMetadata(paths, resolvedPath, { field }, ruleName ?? "<unknown>");
+    mergePathMetadata(
+      paths,
+      resolvedPath,
+      { field },
+      ruleName ?? "<unknown>",
+      `${metadataPath ?? `metadata.rules.${ruleName}`}.fields.${path}`,
+    );
   }
   if (metadata.wrap) {
     mergePathMetadata(
@@ -2072,6 +2296,7 @@ function normalizeRuleMetadata(
       "",
       { wrap: metadata.wrap },
       ruleName ?? "<unknown>",
+      `${metadataPath ?? `metadata.rules.${ruleName}`}.wrap`,
     );
   }
   for (const [path, pathMeta] of Object.entries(metadata.paths ?? {})) {
@@ -2081,9 +2306,16 @@ function normalizeRuleMetadata(
         path,
         ruleName,
         metadataVersion,
+        `${metadataPath ?? `metadata.rules.${ruleName}`}.paths.${path}`,
       )
       : path;
-    mergePathMetadata(paths, resolvedPath, pathMeta, ruleName ?? "<unknown>");
+    mergePathMetadata(
+      paths,
+      resolvedPath,
+      pathMeta,
+      ruleName ?? "<unknown>",
+      `${metadataPath ?? `metadata.rules.${ruleName}`}.paths.${path}`,
+    );
   }
   return { paths, token: metadata.token };
 }
@@ -2093,14 +2325,17 @@ function mergePathMetadata(
   path: string,
   incoming: TreeSitterPathMetadata,
   ruleName: string,
+  metadataPath?: string,
 ): void {
   const existing = paths.get(path) ?? {};
   if (
     existing.field && incoming.field &&
     existing.field !== incoming.field
   ) {
-    throw new Error(
+    treeSitterDiagnosticError(
+      "METADATA_PATH_CONFLICT",
       `Conflicting field metadata on rule '${ruleName}' path '${path}'`,
+      { path: metadataPath },
     );
   }
   paths.set(path, { ...existing, ...incoming });
@@ -2163,20 +2398,25 @@ function validateRuleMetadata(
   expression: EbnfExpression,
   ruleName: string,
   metadataVersion?: TreeSitterMetadata["version"],
+  metadataPath = `metadata.rules.${ruleName}`,
 ): void {
   if (
     metadataVersion === 1 &&
     metadata.fields &&
     Object.keys(metadata.fields).length > 0
   ) {
-    throw new Error(
+    treeSitterDiagnosticError(
+      "METADATA_LEGACY_FIELDS",
       `Rule '${ruleName}' uses legacy fields metadata; use named EBNF fields`,
+      { path: `${metadataPath}.fields`, span: expression.span },
     );
   }
   if (metadata.token) {
     if (expression.kind !== "literal") {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_INVALID_TOKEN_RULE",
         `Rule '${ruleName}' token metadata requires a literal rule`,
+        { path: `${metadataPath}.token`, span: expression.span },
       );
     }
     if (
@@ -2184,8 +2424,10 @@ function validateRuleMetadata(
       metadata.fields?.[""] ||
       Object.prototype.hasOwnProperty.call(metadata.paths ?? {}, "")
     ) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_TOKEN_PATH_CONFLICT",
         `Rule '${ruleName}' cannot combine token metadata with root path metadata`,
+        { path: `${metadataPath}.token`, span: expression.span },
       );
     }
   }
@@ -2194,53 +2436,84 @@ function validateRuleMetadata(
     expression,
     ruleName,
     metadataVersion,
+    metadataPath,
   );
   for (const [path, pathMeta] of normalized.paths) {
-    const target = resolveExpressionAtPath(expression, path, ruleName);
+    const metadataPathForPath = `${metadataPath}.paths.${path}`;
+    const target = resolveExpressionAtPath(
+      expression,
+      path,
+      ruleName,
+      metadataPathForPath,
+    );
     if (pathMeta.wrap) {
-      validateWrap(pathMeta.wrap, `${ruleName}.${path || "<root>"}`);
+      validateWrap(
+        pathMeta.wrap,
+        `${ruleName}.${path || "<root>"}`,
+        `${metadataPathForPath}.wrap`,
+      );
     }
     if (pathMeta.alias_ref && !isValidSymbolName(pathMeta.alias_ref)) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_INVALID_ALIAS",
         `Invalid alias '${pathMeta.alias_ref}' on rule '${ruleName}'`,
+        { path: `${metadataPathForPath}.alias_ref`, span: target.span },
       );
     }
     if (pathMeta.alias_node && !isValidSymbolName(pathMeta.alias_node)) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_INVALID_ALIAS",
         `Invalid alias '${pathMeta.alias_node}' on rule '${ruleName}'`,
+        { path: `${metadataPathForPath}.alias_node`, span: target.span },
       );
     }
     if (pathMeta.alias_ref && pathMeta.alias_node) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_PATH_CONFLICT",
         `Rule '${ruleName}' path '${path}' cannot use both alias_ref and alias_node`,
+        { path: metadataPathForPath, span: target.span },
       );
     }
     if (pathMeta.hidden_path && pathMeta.field) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_PATH_CONFLICT",
         `Rule '${ruleName}' path '${path}' cannot be both hidden and fielded`,
+        { path: metadataPathForPath, span: target.span },
       );
     }
     if (pathMeta.hidden_path && (pathMeta.alias_ref || pathMeta.alias_node)) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_PATH_CONFLICT",
         `Rule '${ruleName}' path '${path}' cannot be both hidden and aliased`,
+        { path: metadataPathForPath, span: target.span },
       );
     }
     if (pathMeta.inline_path && (pathMeta.alias_ref || pathMeta.alias_node)) {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_PATH_CONFLICT",
         `Rule '${ruleName}' path '${path}' cannot inline and alias at same time`,
+        { path: metadataPathForPath, span: target.span },
       );
     }
     if ((pathMeta.alias_ref || pathMeta.inline_path) && target.kind !== "ref") {
-      throw new Error(`Rule '${ruleName}' path '${path}' must target a ref`);
+      treeSitterDiagnosticError(
+        "METADATA_PATH_TARGET_MISMATCH",
+        `Rule '${ruleName}' path '${path}' must target a ref`,
+        { path: metadataPathForPath, span: target.span },
+      );
     }
     if (pathMeta.alias_node && target.kind === "ref") {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_PATH_TARGET_MISMATCH",
         `Rule '${ruleName}' path '${path}' must target a non-ref for alias_node`,
+        { path: metadataPathForPath, span: target.span },
       );
     }
     if (pathMeta.hidden_path && path !== "" && target.kind !== "ref") {
-      throw new Error(
+      treeSitterDiagnosticError(
+        "METADATA_PATH_TARGET_MISMATCH",
         `Rule '${ruleName}' path '${path}' must target a ref for hidden_path`,
+        { path: metadataPathForPath, span: target.span },
       );
     }
   }
@@ -2255,7 +2528,30 @@ function formatRuleKey(name: string): string {
 }
 
 function formatRegexLiteral(pattern: string): string {
-  return `/${pattern.replaceAll("/", "\\/")}/`;
+  let rendered = "";
+  let backslashRun = 0;
+  let inCharacterClass = false;
+  for (const char of pattern) {
+    const escaped = backslashRun % 2 === 1;
+    if (char === "/" && !escaped && !inCharacterClass) {
+      rendered += "\\/";
+    } else {
+      rendered += char;
+    }
+
+    if (char === "\\" && !escaped) {
+      backslashRun++;
+      continue;
+    }
+    if (char === "\\" && escaped) {
+      backslashRun++;
+      continue;
+    }
+    if (char === "[" && !escaped) inCharacterClass = true;
+    if (char === "]" && !escaped) inCharacterClass = false;
+    backslashRun = 0;
+  }
+  return `/${rendered}/`;
 }
 
 function renderTokenDeclaration(token: EbnfTokenDeclaration): string {

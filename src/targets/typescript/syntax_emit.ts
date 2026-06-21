@@ -210,6 +210,8 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
     "  fields: unknown;",
     "}",
     "",
+    "export type EmptyFields = Record<string, never>;",
+    "",
   ];
 
   for (const schema of fieldSchemas) {
@@ -217,12 +219,17 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
       `export interface ${schema.nodeType} extends RuleNodeBase<${
         quote(schema.ruleName)
       }> {`,
-      "  fields: {",
     );
-    for (const field of schema.fields) {
-      lines.push(`    ${safeProperty(field.name)}: ${field.type};`);
+    if (schema.fields.length === 0) {
+      lines.push("  fields: EmptyFields;");
+    } else {
+      lines.push("  fields: {");
+      for (const field of schema.fields) {
+        lines.push(`    ${safeProperty(field.name)}: ${field.type};`);
+      }
+      lines.push("  };");
     }
-    lines.push("  };", "}", "");
+    lines.push("}", "");
   }
 
   lines.push(
