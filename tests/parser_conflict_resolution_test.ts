@@ -139,6 +139,10 @@ Deno.test("generated deterministic parser omits branch-only helpers", () => {
     result.bundle.files.find((file) => file.path === "typescript/parser.ts")
       ?.content ?? "";
   assertIncludes(parserSource, "function findAction(");
+  assertIncludes(parserSource, "function parserAction(");
+  assertIncludes(parserSource, "function parserGoto(");
+  assertNotIncludes(parserSource, "const ACTIONS");
+  assertNotIncludes(parserSource, "const GOTOS");
   assertNotIncludes(parserSource, "MAX_PARSE_BRANCHES");
   assertNotIncludes(parserSource, "interface ParseBranch");
   assertNotIncludes(parserSource, "function findActions(");

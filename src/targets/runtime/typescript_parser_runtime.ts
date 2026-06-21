@@ -2,12 +2,30 @@ import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { BnfGrammar, ReducerSpec } from "../typescript/bnf.ts";
 import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
 import { collectRuleFieldSchemas } from "./field_schema.ts";
+import { emitRuntimeLanguageTypeScriptFunction } from "./language.ts";
+import {
+  createParserTableRuntimeProgram,
+  RUNTIME_ACTION_ACCEPT,
+  RUNTIME_ACTION_KIND_MASK,
+  RUNTIME_ACTION_NONE,
+  RUNTIME_ACTION_PAYLOAD_MASK,
+  RUNTIME_ACTION_REDUCE,
+  RUNTIME_ACTION_SHIFT,
+  RUNTIME_NO_GOTO,
+} from "./language_sources.ts";
 
 export type ParserEmitMode = "typescript" | "wasm";
 
 export interface ParserEmitOptions {
   mode?: ParserEmitMode;
 }
+
+type EncodedAction =
+  | readonly [terminal: number, kind: 1, state: number]
+  | readonly [terminal: number, kind: 2, production: number]
+  | readonly [terminal: number, kind: 3];
+
+type GotoEntry = readonly [nonterminal: number, state: number];
 
 export function emitParser(
   analyzed: AnalyzedGrammar,
@@ -24,6 +42,12 @@ export function emitParser(
     nonterminal,
     target,
   ]);
+  const tableRuntimeProgram = emitTypeScriptTables && !emitBranchRuntime
+    ? createParserTableRuntimeProgram({
+      actionRows: parserRuntimeActionRows(actionRows),
+      gotoRows,
+    })
+    : null;
   const productions = bnf.productions.map((production) => ({
     lhs: production.lhs,
     rhsLength: production.rhs.length,
@@ -83,10 +107,12 @@ ${
       triviaTokenKinds,
       ruleNames,
       fieldSchemas,
-      emitTypeScriptTables,
+      emitTypeScriptTables: emitTypeScriptTables && emitBranchRuntime,
       emitBranchRuntime,
     })
   }
+
+${tableRuntimeProgram ? parserTableRuntime(tableRuntimeProgram) : ""}
 
 ${parseEntryPoints(mode)}
 
@@ -218,8 +244,8 @@ interface ParseFailure {
 
 function commonConstants(values: {
   bnf: BnfGrammar;
-  actionRows: unknown[];
-  gotoRows: unknown[];
+  actionRows: readonly (readonly EncodedAction[])[];
+  gotoRows: readonly (readonly GotoEntry[])[];
   productions: unknown[];
   expectedRows: readonly (readonly string[])[];
   namedTerminals: Array<readonly [string, number]>;
@@ -284,6 +310,20 @@ const RULE_FIELD_SCHEMAS: readonly (RuntimeRuleFieldSchema | undefined)[] = (() 
   }
   return schemas;
 })();`;
+}
+
+function parserTableRuntime(
+  program: ReturnType<typeof createParserTableRuntimeProgram>,
+): string {
+  return `const ACTION_NONE = ${RUNTIME_ACTION_NONE};
+const ACTION_SHIFT = ${RUNTIME_ACTION_SHIFT};
+const ACTION_REDUCE = ${RUNTIME_ACTION_REDUCE};
+const ACTION_ACCEPT = ${RUNTIME_ACTION_ACCEPT};
+const ACTION_KIND_MASK = ${RUNTIME_ACTION_KIND_MASK};
+const ACTION_PAYLOAD_MASK = ${RUNTIME_ACTION_PAYLOAD_MASK};
+const NO_GOTO = ${RUNTIME_NO_GOTO};
+
+${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
 }
 
 function parseEntryPoints(mode: ParserEmitMode): string {
@@ -419,20 +459,19 @@ function deterministicParseRuntime(): string {
 }
 
 function findAction(state: number, terminal: number): RuntimeAction | undefined {
-  for (const entry of ACTIONS[state] ?? []) {
-    if (entry[0] !== terminal) continue;
-    if (entry[1] === 1) return { kind: "shift", state: entry[2] };
-    if (entry[1] === 2) return { kind: "reduce", production: entry[2] };
-    return { kind: "accept" };
-  }
+  const encoded = parserAction(state, terminal);
+  if (encoded === ACTION_NONE) return undefined;
+  const kind = encoded & ACTION_KIND_MASK;
+  const payload = encoded & ACTION_PAYLOAD_MASK;
+  if (kind === ACTION_SHIFT) return { kind: "shift", state: payload };
+  if (kind === ACTION_REDUCE) return { kind: "reduce", production: payload };
+  if (kind === ACTION_ACCEPT) return { kind: "accept" };
   return undefined;
 }
 
 function findGoto(state: number, nonterminal: number): number | undefined {
-  for (const entry of GOTOS[state] ?? []) {
-    if (entry[0] === nonterminal) return entry[1];
-  }
-  return undefined;
+  const next = parserGoto(state, nonterminal);
+  return next === NO_GOTO ? undefined : next;
 }`;
 }
 
@@ -1568,10 +1607,10 @@ function combineTokenRanges(
 
 function bnfTableRows<T>(
   table: ReadonlyMap<number, ReadonlyMap<number, T>>,
-  encode: (key: number, value: T) => unknown,
-): unknown[] {
+  encode: (key: number, value: T) => GotoEntry,
+): GotoEntry[][] {
   const maxState = Math.max(-1, ...table.keys());
-  const rows: unknown[] = [];
+  const rows: GotoEntry[][] = [];
   for (let state = 0; state <= maxState; state++) {
     const entries = [...(table.get(state)?.entries() ?? [])]
       .sort(([left], [right]) => left - right)
@@ -1583,9 +1622,9 @@ function bnfTableRows<T>(
 
 function bnfActionTableRows(
   table: ReadonlyMap<number, ReadonlyMap<number, LrActionSet>>,
-): unknown[] {
+): EncodedAction[][] {
   const maxState = Math.max(-1, ...table.keys());
-  const rows: unknown[] = [];
+  const rows: EncodedAction[][] = [];
   for (let state = 0; state <= maxState; state++) {
     const entries = [...(table.get(state)?.entries() ?? [])]
       .sort(([left], [right]) => left - right)
@@ -1597,10 +1636,38 @@ function bnfActionTableRows(
   return rows;
 }
 
-function actionEntry(terminal: number, action: LrAction): unknown {
+function actionEntry(terminal: number, action: LrAction): EncodedAction {
   if (action.kind === "shift") return [terminal, 1, action.state];
   if (action.kind === "reduce") return [terminal, 2, action.production];
   return [terminal, 3];
+}
+
+function parserRuntimeActionRows(
+  rows: readonly (readonly EncodedAction[])[],
+): readonly (readonly (readonly [key: number, value: number])[])[] {
+  return rows.map((row) =>
+    row.map((entry) => [entry[0], encodeParserRuntimeAction(entry)] as const)
+  );
+}
+
+function encodeParserRuntimeAction(action: EncodedAction): number {
+  if (action[1] === 1) {
+    assertParserRuntimePayload(action[2]);
+    return RUNTIME_ACTION_SHIFT + action[2];
+  }
+  if (action[1] === 2) {
+    assertParserRuntimePayload(action[2]);
+    return RUNTIME_ACTION_REDUCE + action[2];
+  }
+  return RUNTIME_ACTION_ACCEPT;
+}
+
+function assertParserRuntimePayload(payload: number): void {
+  if (payload < 0 || payload > RUNTIME_ACTION_PAYLOAD_MASK) {
+    throw new Error(
+      `Parser runtime action payload ${payload} exceeds the encoded action limit.`,
+    );
+  }
 }
 
 function expectedTerminalRows(

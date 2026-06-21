@@ -12,6 +12,11 @@ import {
 } from "../src/targets/runtime/language_manifest.ts";
 import {
   createLexerRuntimeProgram,
+  createParserTableRuntimeProgram,
+  RUNTIME_ACTION_ACCEPT,
+  RUNTIME_ACTION_REDUCE,
+  RUNTIME_ACTION_SHIFT,
+  RUNTIME_NO_GOTO,
   RUNTIME_NO_TRANSITION,
   UTF16_CODE_POINT_WIDTH_PROGRAM,
 } from "../src/targets/runtime/language_sources.ts";
@@ -39,6 +44,26 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     ],
     asciiTransitions: null,
   });
+  const parserTableRuntimeProgram = createParserTableRuntimeProgram({
+    actionRows: [
+      [
+        [1, RUNTIME_ACTION_SHIFT + 7],
+        [3, RUNTIME_ACTION_REDUCE + 2],
+        [5, RUNTIME_ACTION_ACCEPT],
+      ],
+      [],
+    ],
+    gotoRows: [
+      [
+        [8, 13],
+      ],
+      [],
+    ],
+  });
+  const parserGotoRuntimeProgram = {
+    ...parserTableRuntimeProgram,
+    entry: "parserGoto",
+  };
   const cases: readonly RuntimeConformanceCase[] = [
     {
       name: "u32 addition wraps",
@@ -331,6 +356,42 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       program: rangeOnlyLexerRuntimeProgram,
       args: [0, 0x41],
       expected: { kind: "value", value: 4 },
+    },
+    {
+      name: "parser table lookup finds shift actions",
+      program: parserTableRuntimeProgram,
+      args: [0, 1],
+      expected: { kind: "value", value: RUNTIME_ACTION_SHIFT + 7 },
+    },
+    {
+      name: "parser table lookup finds reduce actions",
+      program: parserTableRuntimeProgram,
+      args: [0, 3],
+      expected: { kind: "value", value: RUNTIME_ACTION_REDUCE + 2 },
+    },
+    {
+      name: "parser table lookup finds accept actions",
+      program: parserTableRuntimeProgram,
+      args: [0, 5],
+      expected: { kind: "value", value: RUNTIME_ACTION_ACCEPT },
+    },
+    {
+      name: "parser table lookup reports missing actions",
+      program: parserTableRuntimeProgram,
+      args: [0, 4],
+      expected: { kind: "value", value: 0 },
+    },
+    {
+      name: "parser goto lookup finds target states",
+      program: parserGotoRuntimeProgram,
+      args: [0, 8],
+      expected: { kind: "value", value: 13 },
+    },
+    {
+      name: "parser goto lookup reports missing entries",
+      program: parserGotoRuntimeProgram,
+      args: [0, 9],
+      expected: { kind: "value", value: RUNTIME_NO_GOTO },
     },
     {
       name: "early return skips later traps",
