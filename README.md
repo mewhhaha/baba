@@ -1,27 +1,29 @@
 # baba
 
-`baba` compiles an explicit EBNF language specification into predictable syntax
-infrastructure: a Tree-sitter grammar and queries, plus an optional standalone
-TypeScript or WebAssembly-backed lexer, parser, and typed concrete syntax tree.
+Baba is a syntax-runtime generator for small languages and DSLs. You describe a
+language's concrete syntax once in explicit EBNF, add optional Tree-sitter
+metadata, and Baba emits the parser artifacts that a tooling project can check
+in.
 
-Version 1.1.1 is still intentionally narrow:
+The same grammar can produce:
 
-- parse explicit EBNF with `token` and `skip` declarations;
-- validate grammar and Tree-sitter metadata;
-- generate `grammar.js`;
-- generate non-empty Tree-sitter query fragments under `queries/generated-*`;
-- optionally generate a self-contained TypeScript lexer, LR(1) parser, and CST
-  under `typescript/`;
-- optionally generate a WebAssembly-backed lexer/parser adapter under `wasm/`;
-- apply generated bundles with manifest-based ownership protection.
+- a Tree-sitter `grammar.js` and generated query fragments;
+- a standalone TypeScript DFA lexer, LR(1) parser, and typed concrete syntax
+  tree;
+- a WebAssembly-backed lexer/parser adapter with the same TypeScript API.
 
-It does not generate semantic analysis, name resolution, type checking,
-lowering, code generation, formatter policy, LSP behavior, editor extension
-projects, package metadata, or language-specific scanner syntax. If a language
-needs comments, strings, numbers, layout, fenced blocks, or embedded languages,
-declare those tokens/rules explicitly. Scanner-produced symbols must be declared
-with `externals` metadata and implemented outside baba; the TypeScript and Wasm
-targets report reachable external tokens as unsupported.
+This is useful when a grammar needs to support editor highlighting, tests,
+command-line tools, or browser tooling without maintaining separate parser
+implementations by hand.
+
+Baba deliberately stops at syntax. It does not generate semantic analysis, name
+resolution, type checking, lowering, code generation, formatter policy, LSP
+behavior, editor extension projects, package metadata, or language-specific
+scanner syntax. If a language needs comments, strings, numbers, layout, fenced
+blocks, or embedded languages, declare those tokens and rules explicitly.
+Scanner-produced symbols must be declared with `externals` metadata and
+implemented outside Baba; the TypeScript and Wasm targets report reachable
+external tokens as unsupported.
 
 ## Quick Start
 
@@ -36,47 +38,30 @@ module = "fn" ident "(" ")" block ;
 block = "{" integer "}" ;
 ```
 
-Generate Tree-sitter artifacts:
+Run the published CLI:
 
 ```sh
-deno run --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
+deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --out generated \
-  --name tiny
-```
-
-Generate the standalone TypeScript lexer/parser target:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --out generated \
-  --target typescript
-```
-
-Generate the WebAssembly-backed lexer/parser target:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --out generated \
-  --target wasm
-```
-
-Generate every target:
-
-```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --out generated \
+  --name tiny \
   --target all
 ```
 
-From this repository:
+From a local checkout, use the repository entrypoint instead:
 
 ```sh
 deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
   --out generated \
-  --name tiny
+  --name tiny \
+  --target all
 ```
 
-That writes:
+`--allow-read` lets the CLI load the grammar and optional metadata.
+`--allow-write` lets it write the generated bundle.
+
+## Generated Output
+
+The default target writes Tree-sitter artifacts:
 
 ```text
 generated/
@@ -87,7 +72,16 @@ generated/
   .baba-manifest.json
 ```
 
-With `--target all` or `--target typescript`, the bundle also includes:
+Use `--target all`, `--target typescript`, or `--target wasm` to include parser
+runtimes:
+
+```sh
+deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
+  --out generated \
+  --target all
+```
+
+The TypeScript runtime is written under `typescript/`:
 
 ```text
 generated/
@@ -98,8 +92,8 @@ generated/
     mod.ts
 ```
 
-With `--target all` or `--target wasm`, the bundle also includes a generated
-TypeScript adapter with embedded Wasm bytes:
+The Wasm runtime is written under `wasm/` as a TypeScript adapter around
+embedded Wasm bytes:
 
 ```text
 generated/
@@ -123,23 +117,24 @@ Both generated parser runtimes export the same main TypeScript API:
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia
   channels.
 
-The Wasm target emits a TypeScript adapter around embedded Wasm bytes and also
-exports `wasmBytes` from `wasm/mod.ts`.
+The Wasm target also exports `wasmBytes` from `wasm/mod.ts`.
 
 Only query files with content are written. Regenerating through `applyBundle()`
 removes previously owned generated query fragments that become empty. Ordinary
-`queries/*.scm` files are user-owned and are never written by baba.
+`queries/*.scm` files are user-owned and are never written by Baba.
+
+## CLI
 
 List outputs without writing:
 
 ```sh
-deno run --allow-read src/cli.ts grammar.ebnf --list-files
+deno x --allow-read jsr:@mewhhaha/baba/cli grammar.ebnf --list-files
 ```
 
 Pass Tree-sitter metadata:
 
 ```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --out generated \
   --name tiny \
   --root module \
@@ -149,10 +144,10 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
 `--meta` is an alias for `--metadata`. `--ts-meta` remains as a deprecated
 alias.
 
-Useful parser-runtime options:
+Select and configure parser-runtime targets:
 
 ```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --target all \
   --typescript-dir ts \
   --wasm-dir wasm \
@@ -172,10 +167,10 @@ apply to both the TypeScript and Wasm parser runtimes.
 acceptance differences. When multiple targets are selected, portability defaults
 to `strict`; otherwise it defaults to `warn`.
 
-Useful TypeScript-output diagnostics:
+Inspect generated TypeScript target size and parser table statistics:
 
 ```sh
-deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --target typescript \
   --generated-byte-limit 1000000 \
   --parser-stats
