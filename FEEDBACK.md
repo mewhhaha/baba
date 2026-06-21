@@ -78,6 +78,11 @@ runtime language:
 - Added direct TypeScript/Wasm runtime-language conformance coverage for the
   generated DFA transition helper, including ASCII fast-table hits/misses, range
   fallback, non-BMP code points, and range-only operation.
+- Moved generated TypeScript lexer longest-match accept/candidate selection onto
+  runtime-language `lexerScan*` helpers backed by generated DFA accept tables
+  and scratch memory. Generated TypeScript still decodes JavaScript strings and
+  emits token objects, but it no longer carries a standalone `DFA_ACCEPTS` table
+  or accept-tracking loop.
 - Moved generated deterministic TypeScript parser action/goto table lookup onto
   a runtime-language source program backed by read-only `u32` tables, replacing
   the previous generated `findAction()`/`findGoto()` table scans for unambiguous
@@ -104,12 +109,13 @@ Still unresolved:
 
 - The P0 source-of-truth milestone remains open: TypeScript and Wasm runtime
   execution now has a clearer shared runtime packaging boundary and generated
-  lexer/parser table helpers plus deterministic TypeScript parser trace control
-  flow from the runtime language, but conflict branch scheduling, lexical token
-  selection, Wasm parser control flow, and reduction/CST algorithms are still
-  not mechanically emitted from one runtime-language implementation. That
-  requires a larger runtime compiler/artifact boundary before the release can
-  fully satisfy "one runtime implementation, two execution targets."
+  lexer/parser table helpers plus deterministic TypeScript lexer candidate
+  selection and parser trace control flow from the runtime language, but
+  conflict branch scheduling, Wasm parser control flow, generated token object
+  emission/diagnostics, and reduction/CST algorithms are still not mechanically
+  emitted from one runtime-language implementation. That requires a larger
+  runtime compiler/artifact boundary before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

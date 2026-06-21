@@ -32,6 +32,8 @@
   source program backed by read-only `u32` tables.
 - Added TypeScript/Wasm runtime-language conformance coverage for the generated
   DFA transition helper.
+- Added runtime-language lexer scan helpers for longest-match accept tracking,
+  with TypeScript/Wasm conformance coverage for accepting candidate selection.
 - Moved generated deterministic TypeScript parser action/goto table lookup onto
   a runtime-language source program backed by read-only `u32` tables.
 - Moved generated conflict-parser TypeScript goto lookup onto the same
@@ -59,6 +61,9 @@
 - Deterministic generated TypeScript parsers now drive LR shift/reduce/accept
   control flow through a runtime-language `parserTrace` helper and replay the
   resulting action trace to construct the CST.
+- Generated TypeScript lexers now use runtime-language `lexerScan*` helpers for
+  DFA accept tracking instead of carrying a generated `DFA_ACCEPTS` table and
+  accept loop.
 - The Wasm target now packages its core bytecode runtime emitter from
   `src/targets/runtime/` instead of carrying it directly under
   `src/targets/wasm/`.

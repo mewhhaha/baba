@@ -7,6 +7,7 @@ import type {
 } from "./language.ts";
 
 export const RUNTIME_NO_TRANSITION = 0xffff_ffff;
+export const RUNTIME_NO_ACCEPT = RUNTIME_NO_TRANSITION;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -25,6 +26,12 @@ const TRACE_STATUS_OK = 0;
 const TRACE_STATUS_UNEXPECTED = 1;
 const TRACE_STATUS_INTERNAL = 2;
 
+const LEXER_SCAN_STATE = 0;
+const LEXER_SCAN_LENGTH = 1;
+const LEXER_SCAN_BEST_SPEC = 2;
+const LEXER_SCAN_BEST_END = 3;
+const LEXER_SCAN_DONE = 4;
+
 export type LexerRuntimeTransition = readonly [
   start: number,
   end: number,
@@ -34,6 +41,7 @@ export type LexerRuntimeTransition = readonly [
 export interface LexerRuntimeProgramInput {
   readonly transitions: readonly (readonly LexerRuntimeTransition[])[];
   readonly asciiTransitions: readonly (readonly number[])[] | null;
+  readonly accepts?: readonly number[];
 }
 
 export type ParserRuntimeLookupEntry = readonly [key: number, value: number];
@@ -114,13 +122,32 @@ export function createLexerRuntimeProgram(
     });
   }
 
+  if (input.accepts) {
+    tables.push({
+      name: "dfaAccepts",
+      type: "u32" as const,
+      values: input.accepts.map((accept) =>
+        accept < 0 ? RUNTIME_NO_ACCEPT : accept
+      ),
+    });
+  }
+
   return {
     name: "lexer_runtime",
     entry: "dfaTransition",
+    scratchMemoryWords: input.accepts ? 5 : undefined,
     tables,
     functions: [
       UTF16_CODE_POINT_WIDTH_FUNCTION,
       dfaTransitionFunction(input.asciiTransitions !== null),
+      ...(input.accepts
+        ? [
+          lexerScanResetFunction(),
+          lexerScanAdvanceFunction(),
+          lexerScanBestSpecFunction(),
+          lexerScanBestEndFunction(),
+        ]
+        : []),
     ],
   };
 }
@@ -321,6 +348,104 @@ function asciiFastPath(): readonly RuntimeStatement[] {
       },
     ],
   }];
+}
+
+function lexerScanResetFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerScanReset",
+    result: "u32",
+    body: [
+      storeScratch(u32(LEXER_SCAN_STATE), u32(0)),
+      storeScratch(u32(LEXER_SCAN_LENGTH), u32(0)),
+      storeScratch(u32(LEXER_SCAN_BEST_SPEC), u32(RUNTIME_NO_ACCEPT)),
+      storeScratch(u32(LEXER_SCAN_BEST_END), u32(0)),
+      storeScratch(u32(LEXER_SCAN_DONE), u32(0)),
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function lexerScanAdvanceFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerScanAdvance",
+    parameters: [
+      { name: "codePoint", type: "u32" },
+    ],
+    locals: [
+      { name: "state", type: "u32" },
+      { name: "target", type: "u32" },
+      { name: "length", type: "u32" },
+      { name: "accept", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(loadScratch(u32(LEXER_SCAN_DONE)), u32(0)),
+        consequent: [],
+        alternate: [{ kind: "return", expression: u32(0) }],
+      },
+      setLocal("state", loadScratch(u32(LEXER_SCAN_STATE))),
+      setLocal(
+        "target",
+        call("dfaTransition", [local("state"), local("codePoint")]),
+      ),
+      {
+        kind: "if",
+        condition: eq(local("target"), u32(RUNTIME_NO_TRANSITION)),
+        consequent: [
+          storeScratch(u32(LEXER_SCAN_DONE), u32(1)),
+          { kind: "return", expression: u32(0) },
+        ],
+      },
+      storeScratch(u32(LEXER_SCAN_STATE), local("target")),
+      setLocal(
+        "length",
+        add(
+          loadScratch(u32(LEXER_SCAN_LENGTH)),
+          call("utf16CodePointWidth", [local("codePoint")]),
+        ),
+      ),
+      storeScratch(u32(LEXER_SCAN_LENGTH), local("length")),
+      setLocal("accept", load("dfaAccepts", local("target"))),
+      {
+        kind: "if",
+        condition: eq(local("accept"), u32(RUNTIME_NO_ACCEPT)),
+        consequent: [],
+        alternate: [
+          storeScratch(u32(LEXER_SCAN_BEST_SPEC), local("accept")),
+          storeScratch(u32(LEXER_SCAN_BEST_END), local("length")),
+        ],
+      },
+      { kind: "return", expression: u32(1) },
+    ],
+  };
+}
+
+function lexerScanBestSpecFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerScanBestSpec",
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: loadScratch(u32(LEXER_SCAN_BEST_SPEC)),
+      },
+    ],
+  };
+}
+
+function lexerScanBestEndFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerScanBestEnd",
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: loadScratch(u32(LEXER_SCAN_BEST_END)),
+      },
+    ],
+  };
 }
 
 function flattenLookupTable(

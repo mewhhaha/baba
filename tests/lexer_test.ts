@@ -336,8 +336,11 @@ Deno.test("TypeScript lexer uses generated DFA tables for many short tokens", as
     await denoCheck(`${dir}/typescript/mod.ts`);
     const lexerSource = await Deno.readTextFile(`${dir}/typescript/lexer.ts`);
     assertIncludes(lexerSource, "function dfaTransition");
+    assertIncludes(lexerSource, "function lexerScanAdvance");
     assertIncludes(lexerSource, "__baba_table_dfaTransitionRows");
     assertIncludes(lexerSource, "__baba_table_dfaAsciiTransitions");
+    assertIncludes(lexerSource, "__baba_table_dfaAccepts");
+    assertNotIncludes(lexerSource, "const DFA_ACCEPTS");
     assertNotIncludes(lexerSource, "function transition");
     assertNotIncludes(lexerSource, "new RegExp");
     assertNotIncludes(lexerSource, "longestRegexPrefix");

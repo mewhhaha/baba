@@ -23,15 +23,17 @@ compiler-source drift separately from the generated parser runtime identity.
 The first runtime-language-backed parser helpers are used by generated
 TypeScript lexers and parsers: `utf16CodePointWidth` advances over UTF-16 code
 points, `dfaTransition` performs DFA transition lookup from generated read-only
-tables, deterministic parsers use `parserAction`/`parserGoto` for parser table
-lookup, and conflict parsers use generated `parserActionAt`/`parserGoto` helpers
-for multi-action and goto lookup. Deterministic TypeScript parsers also use a
-runtime-language `parserTrace` helper backed by growable scratch memory for LR
-shift/reduce/accept control flow; TypeScript code still replays that trace to
-build the CST. The same runtime-language source shape is also compiled to Wasm
-in conformance tests. Because generated parser runtime code depends on
-runtime-language compiler output, the checked runtime implementation manifest
-includes both runtime language sources and the Stage-0 compiler.
+tables, and `lexerScan*` helpers track longest-match accepting candidates from
+generated DFA accept tables. Deterministic parsers use `parserAction`/
+`parserGoto` for parser table lookup, and conflict parsers use generated
+`parserActionAt`/`parserGoto` helpers for multi-action and goto lookup.
+Deterministic TypeScript parsers also use a runtime-language `parserTrace`
+helper backed by growable scratch memory for LR shift/reduce/accept control
+flow; TypeScript code still replays that trace to build the CST. The same
+runtime-language source shape is also compiled to Wasm in conformance tests.
+Because generated parser runtime code depends on runtime-language compiler
+output, the checked runtime implementation manifest includes both runtime
+language sources and the Stage-0 compiler.
 
 ## Current Executable Subset
 

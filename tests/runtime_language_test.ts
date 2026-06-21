@@ -47,6 +47,71 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     ],
     asciiTransitions: null,
   });
+  const lexerScanBaseProgram = createLexerRuntimeProgram({
+    transitions: [
+      [
+        [0x41, 0x41, 1],
+      ],
+      [
+        [0x42, 0x42, 2],
+      ],
+      [],
+    ],
+    asciiTransitions: null,
+    accepts: [-1, 5, 7],
+  });
+  const lexerScanRuntimeProgram: RuntimeLanguageProgram = {
+    ...lexerScanBaseProgram,
+    name: "lexer_scan_conformance",
+    entry: "main",
+    functions: [
+      ...lexerScanBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "result", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("result", call("lexerScanReset", [])),
+          setLocal("result", call("lexerScanAdvance", [u32(0x41)])),
+          {
+            kind: "if",
+            condition: eq(local("result"), u32(1)),
+            consequent: [
+              setLocal("result", u32(10)),
+            ],
+          },
+          setLocal("result", call("lexerScanAdvance", [u32(0x42)])),
+          {
+            kind: "if",
+            condition: eq(local("result"), u32(1)),
+            consequent: [
+              setLocal("result", add(local("result"), u32(100))),
+            ],
+          },
+          setLocal("result", call("lexerScanAdvance", [u32(0x43)])),
+          {
+            kind: "if",
+            condition: eq(local("result"), u32(0)),
+            consequent: [
+              setLocal("result", add(local("result"), u32(1000))),
+            ],
+          },
+          {
+            kind: "return",
+            expression: add(
+              local("result"),
+              add(
+                mul(call("lexerScanBestSpec", []), u32(10)),
+                call("lexerScanBestEnd", []),
+              ),
+            ),
+          },
+        ],
+      },
+    ],
+  };
   const parserTableRuntimeProgram = createParserTableRuntimeProgram({
     actionRows: [
       [
@@ -604,6 +669,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 4 },
     },
     {
+      name: "lexer scan helper tracks longest accepting candidate",
+      program: lexerScanRuntimeProgram,
+      expected: { kind: "value", value: 1072 },
+    },
+    {
       name: "parser table lookup finds shift actions",
       program: parserTableRuntimeProgram,
       args: [0, 1],
@@ -797,6 +867,10 @@ function ensureScratch(words: RuntimeExpression) {
 
 function add(left: RuntimeExpression, right: RuntimeExpression) {
   return { kind: "addU32" as const, left, right };
+}
+
+function mul(left: RuntimeExpression, right: RuntimeExpression) {
+  return { kind: "mulU32" as const, left, right };
 }
 
 function sub(left: RuntimeExpression, right: RuntimeExpression) {

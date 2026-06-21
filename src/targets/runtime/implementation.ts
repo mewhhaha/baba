@@ -23,12 +23,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/typescript_lexer_runtime.ts",
       role: "typescript-lexer-runtime",
-      hash: "fnv1a64:b0f88c2cbaae0031",
+      hash: "fnv1a64:03aa7d6d6b482212",
     },
     {
       path: "src/targets/runtime/language_sources.ts",
       role: "runtime-language-source",
-      hash: "fnv1a64:7603337b99a3f98c",
+      hash: "fnv1a64:a16a7a0bd12991f3",
     },
     {
       path: "src/targets/runtime/language.ts",
@@ -47,7 +47,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:4e1562e429c53f32" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:c75a71f499fc774d" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,
