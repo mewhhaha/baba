@@ -104,6 +104,9 @@ runtime language:
   TypeScript now feeds terminal IDs into that helper and replays the resulting
   action trace to build the CST, with TypeScript/Wasm conformance coverage for
   the trace helper.
+- Added a resolved runtime-language IR boundary (`RuntimeLanguageIrProgram`) so
+  TypeScript and Wasm runtime compiler backends consume the same validated
+  entry/function/table/scratch metadata before target-specific emission.
 
 Still unresolved:
 
@@ -113,8 +116,9 @@ Still unresolved:
   selection and parser trace control flow from the runtime language, but
   conflict branch scheduling, Wasm parser control flow, generated token object
   emission/diagnostics, and reduction/CST algorithms are still not mechanically
-  emitted from one runtime-language implementation. That requires a larger
-  runtime compiler/artifact boundary before the release can fully satisfy "one
+  emitted from one runtime-language implementation. The compiler now has a
+  shared resolved program IR, but it still needs a lower control-flow/value IR
+  and generated runtime artifacts before the release can fully satisfy "one
   runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm

@@ -177,7 +177,10 @@ one runtime-language source; that remains the next runtime compiler boundary.
 The initial private runtime-language semantics are documented in
 `docs/runtime-language.md`. Its Stage-0 executable subset currently covers
 32-bit scalar control, table helpers, growable scratch memory, and deterministic
-lexer-scan/parser-trace conformance.
+lexer-scan/parser-trace conformance. The Stage-0 compiler lowers validated
+runtime-language programs to one resolved IR before the TypeScript and Wasm
+backends emit target artifacts; target-specific statement/expression emission is
+still separate.
 
 Use `--target kit` when another tool wants Baba's parser data without generated
 TypeScript source:

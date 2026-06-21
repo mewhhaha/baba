@@ -20,6 +20,14 @@ Wasm adapter ABI version.
 source hash before it checks regenerated example artifacts. This catches
 compiler-source drift separately from the generated parser runtime identity.
 
+The Stage-0 compiler lowers each validated runtime-language program once to a
+resolved `RuntimeLanguageIrProgram` before emitting TypeScript or Wasm. That IR
+records the entry function, function/table lookup maps, scratch-memory shape,
+and original typed source program. Statement and expression lowering still
+happens in each target backend; a lower control-flow IR remains a future step
+before Baba can claim the full parser runtime is emitted from one
+runtime-language implementation.
+
 The first runtime-language-backed parser helpers are used by generated
 TypeScript lexers and parsers: `utf16CodePointWidth` advances over UTF-16 code
 points, `dfaTransition` performs DFA transition lookup from generated read-only

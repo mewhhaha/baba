@@ -46,6 +46,9 @@
 - Added a runtime-language parser trace helper for deterministic LR parser
   control flow, with TypeScript/Wasm conformance coverage for emitted action
   traces.
+- Added a resolved runtime-language IR boundary so TypeScript and Wasm runtime
+  compiler backends consume one validated program model with resolved entry,
+  function, table, and scratch-memory metadata.
 
 ### Changed
 

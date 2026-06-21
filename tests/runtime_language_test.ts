@@ -1,4 +1,5 @@
 import {
+  compileRuntimeLanguageIr,
   compileRuntimeLanguageWasm,
   emitRuntimeLanguageTypeScript,
   emitRuntimeLanguageTypeScriptFunction,
@@ -789,6 +790,44 @@ Deno.test("runtime language can emit standalone TypeScript helper functions", ()
   );
   assertEquals(source.includes("function utf16CodePointWidth"), true);
   assertEquals(source.includes("runtimeLanguageVersion"), false);
+});
+
+Deno.test("runtime language lowers to a resolved IR", () => {
+  const program: RuntimeLanguageProgram = {
+    name: "ir_fixture",
+    entry: "main",
+    scratchMemoryWords: 2,
+    tables: [{
+      name: "values",
+      type: "u32",
+      values: [1, 2],
+    }],
+    functions: [{
+      name: "main",
+      result: "u32",
+      body: [{
+        kind: "return",
+        expression: {
+          kind: "loadTableU32",
+          table: "values",
+          index: u32(1),
+        },
+      }],
+    }],
+  };
+
+  const ir = compileRuntimeLanguageIr(program);
+
+  assertEquals(ir.source, program);
+  assertEquals(ir.name, "ir_fixture");
+  assertEquals(ir.entry, "main");
+  assertEquals(ir.entryFunction.name, "main");
+  assertEquals(ir.functions.length, 1);
+  assertEquals(ir.functionMap.get("main")?.name, "main");
+  assertEquals(ir.tables.length, 1);
+  assertEquals(ir.tableMap.get("values")?.values[1], 2);
+  assertEquals(ir.hasScratchMemory, true);
+  assertEquals(ir.scratchMemoryWords, 2);
 });
 
 Deno.test("runtime language compiler manifest is current", async () => {
