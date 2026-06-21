@@ -67,6 +67,10 @@ export interface ParserGotoRuntimeProgramInput {
   readonly gotoRows: readonly (readonly ParserRuntimeLookupEntry[])[];
 }
 
+export interface ParserExpectedRuntimeProgramInput {
+  readonly rowLengths: readonly number[];
+}
+
 const UTF16_CODE_POINT_WIDTH_FUNCTION: RuntimeLanguageFunction = {
   name: "utf16CodePointWidth",
   parameters: [{ name: "codePoint", type: "u32" }],
@@ -269,6 +273,31 @@ export function createParserGotoRuntimeProgram(
         gotoTable.entriesTable,
         RUNTIME_NO_GOTO,
       ),
+    ],
+  };
+}
+
+export function createParserExpectedRuntimeProgram(
+  input: ParserExpectedRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  const rows: number[] = [];
+  let cursor = 0;
+  for (const length of input.rowLengths) {
+    rows.push(cursor);
+    cursor += length;
+  }
+  rows.push(cursor);
+  return {
+    name: "parser_expected_runtime",
+    entry: "parserExpectedStart",
+    tables: [{
+      name: "parserExpectedRows",
+      type: "u32",
+      values: rows,
+    }],
+    functions: [
+      parserExpectedStartFunction(input.rowLengths.length),
+      parserExpectedEndFunction(input.rowLengths.length),
     ],
   };
 }
@@ -870,6 +899,58 @@ function parserTraceActionFunction(): RuntimeLanguageFunction {
         kind: "return",
         expression: loadScratch(add(local("traceBase"), local("index"))),
       },
+    ],
+  };
+}
+
+function parserExpectedStartFunction(
+  rowCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserExpectedStart",
+    parameters: [
+      { name: "state", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("state"), u32(rowCount)),
+        consequent: [{
+          kind: "return",
+          expression: load("parserExpectedRows", local("state")),
+        }],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserExpectedEndFunction(
+  rowCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserExpectedEnd",
+    parameters: [
+      { name: "state", type: "u32" },
+    ],
+    locals: [
+      { name: "index", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("state"), u32(rowCount)),
+        consequent: [
+          setLocal("index", add(local("state"), u32(1))),
+          {
+            kind: "return",
+            expression: load("parserExpectedRows", local("index")),
+          },
+        ],
+      },
+      { kind: "return", expression: u32(0) },
     ],
   };
 }

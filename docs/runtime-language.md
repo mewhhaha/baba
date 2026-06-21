@@ -39,6 +39,8 @@ tables, and `lexerScan*` helpers track longest-match accepting candidates from
 generated DFA accept tables. Deterministic parsers use `parserAction`/
 `parserGoto` for parser table lookup, and conflict parsers use generated
 `parserActionAt`/`parserGoto` helpers for multi-action and goto lookup.
+Generated parsers also use `parserExpectedStart`/`parserExpectedEnd` helpers to
+map parser states to flattened expected-terminal display ranges for diagnostics.
 Deterministic TypeScript parsers also use a runtime-language `parserTrace`
 helper backed by growable scratch memory for LR shift/reduce/accept control
 flow; TypeScript code still replays that trace to build the CST. The same

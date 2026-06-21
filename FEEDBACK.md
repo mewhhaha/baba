@@ -112,19 +112,24 @@ runtime language:
   programs. `bootstrap:check` now recompiles those helpers to TypeScript and
   Wasm and verifies source, TypeScript artifact, Wasm artifact, and aggregate
   manifest hashes.
+- Moved generated parser expected-terminal state lookup onto runtime-language
+  `parserExpectedStart`/`parserExpectedEnd` helpers, so TypeScript and
+  Wasm-adapter parse diagnostics consume the same flattened expected-range
+  runtime helper.
 
 Still unresolved:
 
 - The P0 source-of-truth milestone remains open: TypeScript and Wasm runtime
   execution now has a clearer shared runtime packaging boundary and generated
   lexer/parser table helpers plus deterministic TypeScript lexer candidate
-  selection and parser trace control flow from the runtime language, but
-  conflict branch scheduling, Wasm parser control flow, generated token object
-  emission/diagnostics, and reduction/CST algorithms are still not mechanically
-  emitted from one runtime-language implementation. The compiler now has a
-  shared lowered control-flow/value IR and checked helper artifact hashes, but
-  it still needs broader parser-runtime lowering before the release can fully
-  satisfy "one runtime implementation, two execution targets."
+  selection, expected-terminal diagnostic ranges, and parser trace control flow
+  from the runtime language, but conflict branch scheduling, Wasm parser control
+  flow, generated token object emission/diagnostics, and reduction/CST
+  algorithms are still not mechanically emitted from one runtime-language
+  implementation. The compiler now has a shared lowered control-flow/value IR
+  and checked helper artifact hashes, but it still needs broader parser-runtime
+  lowering before the release can fully satisfy "one runtime implementation, two
+  execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

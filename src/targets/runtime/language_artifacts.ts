@@ -9,6 +9,7 @@ import { RUNTIME_LANGUAGE_COMPILER_METADATA } from "./language_manifest.ts";
 import {
   createLexerRuntimeProgram,
   createParserConflictTableRuntimeProgram,
+  createParserExpectedRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
@@ -122,6 +123,12 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
       }),
     },
     {
+      name: "parser_expected_runtime",
+      program: createParserExpectedRuntimeProgram({
+        rowLengths: [2, 0, 3],
+      }),
+    },
+    {
       name: "parser_trace_runtime",
       program: createParserTraceRuntimeProgram({
         actionRows: [
@@ -186,6 +193,13 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
       wasmHash: "fnv1a64:be349707b45efa01",
     },
     {
+      name: "parser_expected_runtime",
+      entry: "parserExpectedStart",
+      sourceHash: "fnv1a64:f25dda65b1620774",
+      typescriptHash: "fnv1a64:c87c76fe3f7d14fd",
+      wasmHash: "fnv1a64:d0e99b8fb067ed2d",
+    },
+    {
       name: "parser_trace_runtime",
       entry: "parserTrace",
       sourceHash: "fnv1a64:ecc4d26e2e7e3ead",
@@ -195,7 +209,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:f2b68f5e6de472d0" as const;
+  "fnv1a64:d754c3cea0a56158" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

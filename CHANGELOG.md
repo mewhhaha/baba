@@ -52,6 +52,8 @@
 - Added a checked runtime-language artifact manifest for canonical helper
   programs, including source, TypeScript output, and Wasm output hashes verified
   by `bootstrap:check`.
+- Added runtime-language parser expected-terminal range helpers and use them in
+  generated TypeScript and Wasm-adapter parse diagnostics.
 
 ### Changed
 

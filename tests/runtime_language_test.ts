@@ -19,6 +19,7 @@ import {
 import {
   createLexerRuntimeProgram,
   createParserConflictTableRuntimeProgram,
+  createParserExpectedRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
@@ -142,6 +143,37 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       [],
     ],
   });
+  const parserExpectedBaseProgram = createParserExpectedRuntimeProgram({
+    rowLengths: [2, 0, 3],
+  });
+  const parserExpectedRuntimeProgram: RuntimeLanguageProgram = {
+    ...parserExpectedBaseProgram,
+    name: "parser_expected_conformance",
+    entry: "main",
+    functions: [
+      ...parserExpectedBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserExpectedEnd", [u32(0)]), u32(100)),
+            add(
+              mul(call("parserExpectedStart", [u32(2)]), u32(10)),
+              add(
+                call("parserExpectedEnd", [u32(2)]),
+                add(
+                  call("parserExpectedStart", [u32(99)]),
+                  call("parserExpectedEnd", [u32(99)]),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserConflictTableRuntimeProgram =
     createParserConflictTableRuntimeProgram({
       actionRows: [
@@ -738,6 +770,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       program: parserGotoRuntimeProgram,
       args: [0, 9],
       expected: { kind: "value", value: RUNTIME_NO_GOTO },
+    },
+    {
+      name: "parser expected lookup returns flattened row ranges",
+      program: parserExpectedRuntimeProgram,
+      expected: { kind: "value", value: 225 },
     },
     {
       name: "parser trace runtime emits deterministic action traces",
