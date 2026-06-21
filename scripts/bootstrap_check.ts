@@ -9,6 +9,11 @@ import {
   hashRuntimeImplementationSource,
   RUNTIME_IMPLEMENTATION_METADATA,
 } from "../src/targets/runtime/implementation.ts";
+import {
+  hashRuntimeLanguageCompilerManifest,
+  hashRuntimeLanguageCompilerSource,
+  RUNTIME_LANGUAGE_COMPILER_METADATA,
+} from "../src/targets/runtime/language_manifest.ts";
 
 interface ExampleConfig {
   dir: string;
@@ -51,6 +56,7 @@ export async function runBootstrapCheck(
   mode: "check" | "write" = "check",
 ): Promise<void> {
   await verifyRuntimeImplementationMetadata();
+  await verifyRuntimeLanguageCompilerMetadata();
   for (const example of EXAMPLES) {
     if (mode === "write") {
       await writeExample(example);
@@ -87,6 +93,35 @@ async function verifyRuntimeImplementationMetadata(): Promise<void> {
     );
   }
   console.log("verified runtime implementation manifest");
+}
+
+async function verifyRuntimeLanguageCompilerMetadata(): Promise<void> {
+  const actualSources = [];
+  for (const source of RUNTIME_LANGUAGE_COMPILER_METADATA.sources) {
+    const content = await Deno.readTextFile(source.path);
+    const hash = hashRuntimeLanguageCompilerSource(content);
+    if (hash !== source.hash) {
+      throw new Error(
+        [
+          `Runtime-language compiler source hash is stale for ${source.path}.`,
+          `expected in manifest: ${source.hash}`,
+          `actual: ${hash}`,
+        ].join("\n"),
+      );
+    }
+    actualSources.push({ ...source, hash });
+  }
+  const manifestHash = hashRuntimeLanguageCompilerManifest(actualSources);
+  if (manifestHash !== RUNTIME_LANGUAGE_COMPILER_METADATA.hash) {
+    throw new Error(
+      [
+        "Runtime-language compiler manifest hash is stale.",
+        `expected in manifest: ${RUNTIME_LANGUAGE_COMPILER_METADATA.hash}`,
+        `actual: ${manifestHash}`,
+      ].join("\n"),
+    );
+  }
+  console.log("verified runtime-language compiler manifest");
 }
 
 async function writeExample(example: ExampleConfig): Promise<void> {

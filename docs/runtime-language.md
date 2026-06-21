@@ -9,11 +9,16 @@ language.
 
 - Runtime language version: `1`
 - Semantics tag: `baba-runtime-language-v1`
+- Compiler manifest format: `baba-runtime-language-compiler` version `1`
 
 The runtime implementation metadata exported by generated parsers identifies the
 checked-in runtime source family. Runtime-language versioning is separate from
 the Baba package version, parser-plan version, parser-kit schema version, and
 Wasm adapter ABI version.
+
+`deno task bootstrap:check` verifies the Stage-0 runtime-language compiler
+source hash before it checks regenerated example artifacts. This catches
+compiler-source drift separately from the generated parser runtime identity.
 
 ## Current Executable Subset
 

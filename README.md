@@ -595,6 +595,6 @@ deno task bootstrap
 into a temporary directory and byte-compares them with `examples/*/generated`.
 `bootstrap` rewrites those generated files through Baba's manifest-aware
 `applyBundle()` path. These tasks cover the current Stage-0 generated runtime
-artifacts and verify the checked-in runtime implementation source manifest. A
-future runtime-language compiler should extend the same check with compiler
-source and artifact hashes.
+artifacts and verify the checked-in runtime implementation source manifest. They
+also verify the Stage-0 runtime-language compiler source manifest so compiler
+drift is tracked independently from generated parser runtime identity.

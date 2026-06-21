@@ -4,6 +4,11 @@ import {
   type RuntimeExpression,
   RuntimeLanguageProgram,
 } from "../src/targets/runtime/language.ts";
+import {
+  hashRuntimeLanguageCompilerManifest,
+  hashRuntimeLanguageCompilerSource,
+  RUNTIME_LANGUAGE_COMPILER_METADATA,
+} from "../src/targets/runtime/language_manifest.ts";
 import { assertEquals } from "./helpers.ts";
 
 Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
@@ -96,6 +101,26 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       `${testCase.name} Wasm result`,
     );
   }
+});
+
+Deno.test("runtime language compiler manifest is current", async () => {
+  const sources = [];
+  for (const source of RUNTIME_LANGUAGE_COMPILER_METADATA.sources) {
+    const content = await Deno.readTextFile(source.path);
+    sources.push({
+      ...source,
+      hash: hashRuntimeLanguageCompilerSource(content),
+    });
+  }
+
+  assertEquals(
+    JSON.stringify(sources),
+    JSON.stringify(RUNTIME_LANGUAGE_COMPILER_METADATA.sources),
+  );
+  assertEquals(
+    hashRuntimeLanguageCompilerManifest(sources),
+    RUNTIME_LANGUAGE_COMPILER_METADATA.hash,
+  );
 });
 
 interface RuntimeConformanceCase {

@@ -56,6 +56,9 @@ runtime language:
   executable `u32` subset, TypeScript and Wasm emitters, conformance tests, and
   `docs/runtime-language.md`. This is a compiler foundation step; the parser
   runtime is not yet lowered through it.
+- Added a checked Stage-0 runtime-language compiler source manifest to
+  `bootstrap:check`, separate from generated parser runtime implementation
+  identity.
 
 Still unresolved:
 
