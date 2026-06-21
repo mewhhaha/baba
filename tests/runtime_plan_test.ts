@@ -1,6 +1,12 @@
 import { analyzeGrammar } from "../src/compiler/analyze.ts";
 import { planRuntimeParserTarget } from "../src/targets/runtime/plan.ts";
-import { assert, assertEquals, parseGrammar } from "./helpers.ts";
+import {
+  assert,
+  assertEquals,
+  assertIncludes,
+  assertNotIncludes,
+  parseGrammar,
+} from "./helpers.ts";
 
 Deno.test("runtime planner exposes a versioned portable parser plan", () => {
   const grammar = parseGrammar(`
@@ -40,4 +46,53 @@ Deno.test("runtime planner exposes a versioned portable parser plan", () => {
   assertEquals(plan.parser.productions[0].reducer.kind, "start");
   assertEquals(plan.cst.rootNodeType, "ModuleNode");
   assertEquals(plan.cst.rules[0].fields[0].name, "name");
+});
+
+Deno.test("TypeScript target emitters package shared runtime source", async () => {
+  const forbiddenRuntimeMarkers = [
+    "DFA_TRANSITIONS",
+    "function bestCandidate",
+    "function parseTokenList",
+    "function reduceProduction",
+    "function tokenToTerminal",
+    "function validateTokenStream",
+    "function acceptedParseResult",
+  ];
+  for await (const entry of Deno.readDir("src/targets/typescript")) {
+    if (!entry.isFile || !entry.name.endsWith(".ts")) continue;
+    const source = await Deno.readTextFile(
+      `src/targets/typescript/${entry.name}`,
+    );
+    for (const marker of forbiddenRuntimeMarkers) {
+      assertNotIncludes(source, marker);
+    }
+  }
+
+  const lexerRuntimeSource = await Deno.readTextFile(
+    "src/targets/runtime/typescript_lexer_runtime.ts",
+  );
+  assertIncludes(lexerRuntimeSource, "function bestCandidate");
+  assertIncludes(lexerRuntimeSource, "DFA_TRANSITIONS");
+
+  const parserRuntimeSource = await Deno.readTextFile(
+    "src/targets/runtime/typescript_parser_runtime.ts",
+  );
+  assertIncludes(parserRuntimeSource, "function parseTokenList");
+  assertIncludes(parserRuntimeSource, "function reduceProduction");
+});
+
+Deno.test("Wasm target packages shared core runtime source", async () => {
+  const wasmTargetSource = await Deno.readTextFile(
+    "src/targets/wasm/module_emit.ts",
+  );
+  assertNotIncludes(wasmTargetSource, "function lexOneFunction");
+  assertNotIncludes(wasmTargetSource, "function parseTraceFunction");
+  assertNotIncludes(wasmTargetSource, "function emitWasmModule");
+
+  const wasmRuntimeSource = await Deno.readTextFile(
+    "src/targets/runtime/wasm_core_runtime.ts",
+  );
+  assertIncludes(wasmRuntimeSource, "function lexOneFunction");
+  assertIncludes(wasmRuntimeSource, "function parseTraceFunction");
+  assertIncludes(wasmRuntimeSource, "function emitWasmModule");
 });

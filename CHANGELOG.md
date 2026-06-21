@@ -23,6 +23,12 @@
 - Standalone parser targets now share a versioned runtime parser planning layer
   for lexer DFA construction, BNF lowering, LR tables, field schema collection,
   reducer metadata, and diagnostics.
+- TypeScript target emitters now package shared runtime source from
+  `src/targets/runtime/` instead of carrying lexer/parser execution templates
+  directly under `src/targets/typescript/`.
+- The Wasm target now packages its core bytecode runtime emitter from
+  `src/targets/runtime/` instead of carrying it directly under
+  `src/targets/wasm/`.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical

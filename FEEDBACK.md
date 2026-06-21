@@ -40,14 +40,23 @@ runtime language:
   checked-in example runtime artifact regeneration. This covers the current
   Stage-0 generated artifacts; future runtime-language compiler sources still
   need their own source/artifact hash manifest.
+- Moved the TypeScript lexer/parser runtime source emitters into
+  `src/targets/runtime/`, leaving `src/targets/typescript/` to package grammar
+  tables, generated type declarations, and runtime reexports. A regression test
+  now rejects DFA traversal, LR execution, reduction, CST construction, and
+  token-stream validation markers under the TypeScript target directory.
+- Moved the Wasm core bytecode runtime emitter into `src/targets/runtime/`,
+  leaving the Wasm target module emitter as a packaging reexport with regression
+  coverage for the boundary.
 
 Still unresolved:
 
 - The P0 source-of-truth milestone remains open: TypeScript and Wasm runtime
-  execution are not yet mechanically emitted from one runtime-language
-  implementation. That requires a larger runtime compiler/artifact boundary
-  before the release can fully satisfy "one runtime implementation, two
-  execution targets."
+  execution now has a clearer shared runtime packaging boundary, but the
+  TypeScript runtime artifact and Wasm runtime are still not mechanically
+  emitted from one runtime-language implementation. That requires a larger
+  runtime compiler/artifact boundary before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a
