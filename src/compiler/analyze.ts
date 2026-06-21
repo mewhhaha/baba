@@ -18,6 +18,9 @@ import type {
   RuleId,
   TokenId,
 } from "./ir.ts";
+import type { RegexAst } from "./regex/ast.ts";
+import { isRegexNullable } from "./regex/nullable.ts";
+import { parsePortableRegex } from "./regex/parser.ts";
 
 /** Builds the shared resolved grammar model used by target planners. */
 export function analyzeGrammar(
@@ -157,15 +160,20 @@ export function analyzeGrammar(
     expression: analyzeExpression(rule.expression),
     span: rule.span,
   }));
-  const tokens: AnalyzedToken[] = grammar.tokens.map((token, id) => ({
-    id,
-    name: token.name,
-    kind: token.kind,
-    pattern: token.pattern,
-    priority: token.priority ?? 0,
-    declarationOrder: id,
-    span: token.span,
-  }));
+  const tokens: AnalyzedToken[] = grammar.tokens.map((token, id) => {
+    const regex = analyzeTokenRegex(token.pattern);
+    return {
+      id,
+      name: token.name,
+      kind: token.kind,
+      patternSource: token.pattern,
+      pattern: regex.pattern,
+      nullable: regex.nullable,
+      priority: token.priority ?? 0,
+      declarationOrder: id,
+      span: token.span,
+    };
+  });
 
   const rootRule = rulesByName.get(rootRuleName) ?? 0;
   const reachableRules = collectReachableRules(rules, rootRule);
@@ -212,6 +220,17 @@ export function analyzeGrammar(
     reachableExternals,
     diagnostics,
   };
+}
+
+function analyzeTokenRegex(
+  patternSource: string,
+): { pattern: RegexAst; nullable: boolean } {
+  try {
+    const pattern = parsePortableRegex(patternSource);
+    return { pattern, nullable: isRegexNullable(pattern) };
+  } catch {
+    return { pattern: { kind: "empty" }, nullable: true };
+  }
 }
 
 export function visitAnalyzedExpression(

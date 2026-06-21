@@ -132,6 +132,16 @@ export interface TypeScriptTargetOptions {
   preserveTrivia?: boolean;
   /** Maximum generated lexer DFA state count. Defaults to 50,000. */
   lexerStateLimit?: number;
+  /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
+  regexAstNodeLimit?: number;
+  /** Maximum regex bounded-repeat expansion count. Defaults to 10,000. */
+  regexBoundedRepeatLimit?: number;
+  /** Maximum regex NFA state count per planning operation. Defaults to 100,000. */
+  regexNfaStateLimit?: number;
+  /** Maximum regex DFA state count per planning operation. Defaults to 50,000. */
+  regexDfaStateLimit?: number;
+  /** Maximum DFA product states explored during overlap analysis. Defaults to 250,000. */
+  regexOverlapStateLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
   /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
@@ -152,6 +162,16 @@ export interface WasmTargetOptions {
   preserveTrivia?: boolean;
   /** Maximum generated lexer DFA state count. Defaults to 50,000. */
   lexerStateLimit?: number;
+  /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
+  regexAstNodeLimit?: number;
+  /** Maximum regex bounded-repeat expansion count. Defaults to 10,000. */
+  regexBoundedRepeatLimit?: number;
+  /** Maximum regex NFA state count per planning operation. Defaults to 100,000. */
+  regexNfaStateLimit?: number;
+  /** Maximum regex DFA state count per planning operation. Defaults to 50,000. */
+  regexDfaStateLimit?: number;
+  /** Maximum DFA product states explored during overlap analysis. Defaults to 250,000. */
+  regexOverlapStateLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
   /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
@@ -170,6 +190,16 @@ export interface KitTargetOptions {
   preserveTrivia?: boolean;
   /** Maximum generated lexer DFA state count. Defaults to 50,000. */
   lexerStateLimit?: number;
+  /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
+  regexAstNodeLimit?: number;
+  /** Maximum regex bounded-repeat expansion count. Defaults to 10,000. */
+  regexBoundedRepeatLimit?: number;
+  /** Maximum regex NFA state count per planning operation. Defaults to 100,000. */
+  regexNfaStateLimit?: number;
+  /** Maximum regex DFA state count per planning operation. Defaults to 50,000. */
+  regexDfaStateLimit?: number;
+  /** Maximum DFA product states explored during overlap analysis. Defaults to 250,000. */
+  regexOverlapStateLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
   /** Maximum total LR(1) item count across all states. Defaults to unlimited. */

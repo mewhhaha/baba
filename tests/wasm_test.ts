@@ -33,9 +33,28 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
   try {
     await applyBundle(result.bundle, { root: dir });
     await denoCheck(`${dir}/wasm/mod.ts`);
-    assertIncludes(await Deno.readTextFile(`${dir}/wasm/wasm.ts`), "lex_all");
+    const wasmSource = await Deno.readTextFile(`${dir}/wasm/wasm.ts`);
+    assertIncludes(wasmSource, "lex_all");
+    assertIncludes(wasmSource, "const MAX_WASM_PAGES = 65535");
+    assertIncludes(wasmSource, "memory.grow(requiredPages - currentPages)");
     const mod = await import(`file://${dir}/wasm/mod.ts`);
-    new WebAssembly.Module(mod.wasmBytes);
+    const wasmModule = new WebAssembly.Module(mod.wasmBytes);
+    const wasmInstance = new WebAssembly.Instance(wasmModule, {});
+    const wasmExports = wasmInstance.exports as unknown as {
+      abi_version(): number;
+      plan_version(): number;
+      reset(): void;
+    };
+    assertEquals(wasmExports.abi_version(), 1);
+    assertEquals(wasmExports.plan_version(), 1);
+    wasmExports.reset();
+    assertEquals(mod.wasmTargetKind, "javascript-hosted-core-wasm");
+    assertEquals(mod.wasmAbiVersion, 1);
+    assertEquals(mod.parserPlanFormat, "baba-parser-plan");
+    assertEquals(mod.parserPlanVersion, 1);
+    assertEquals(mod.parserPlanSemantics, "baba-portable-v1");
+    assert(mod.parserPlanHash.startsWith("fnv1a64:"));
+    assert(typeof mod.reset === "function");
 
     const lexed = mod.lex("let x = 42; // ok");
     assertEquals(
@@ -85,6 +104,36 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
   }
 });
 
+Deno.test("Wasm runtime reset keeps repeated parses within high-water memory", async () => {
+  const result = compile(
+    `
+    token A = /a/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = A* ;
+  `,
+    { targets: ["wasm"] },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    const mod = await import(`file://${dir}/wasm/mod.ts`);
+    const large = `${"a ".repeat(10_000)}`;
+    assertEquals(mod.parse(large).ok, true);
+    const highWaterBytes = mod.memory.buffer.byteLength;
+
+    mod.reset();
+    for (let index = 0; index < 1_000; index++) {
+      assertEquals(mod.parse("a a a").ok, true);
+    }
+    assertEquals(mod.memory.buffer.byteLength, highWaterBytes);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("Wasm parser reports trailing input through trace replay", async () => {
   const result = compile(`module = "a" ;`, { targets: ["wasm"] });
   assertEquals(result.diagnostics.length, 0);
@@ -118,6 +167,10 @@ Deno.test("Wasm runtime validates parse trace input bounds", async () => {
       () => runtime.createParseTraceInput(0),
       "terminalCapacity must be a positive integer",
     );
+    assertThrowsIncludes(
+      () => runtime.createParseTraceInput(0x2000_0000),
+      "trace capacity exceeds the 32-bit Wasm address space",
+    );
     const input = runtime.createParseTraceInput(1);
     assertThrowsIncludes(
       () => runtime.parseTrace(input, 2),
@@ -130,6 +183,28 @@ Deno.test("Wasm runtime validates parse trace input bounds", async () => {
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+});
+
+Deno.test("Wasm target generates deterministic runtime bytes", () => {
+  const source = `
+    token ID = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = "let" name:ID ";" ;
+  `;
+  const first = compile(source, { targets: ["wasm"] });
+  const second = compile(source, { targets: ["wasm"] });
+  assertEquals(first.diagnostics.length, 0);
+  assertEquals(second.diagnostics.length, 0);
+  assert(first.bundle);
+  assert(second.bundle);
+
+  const firstWasmSource = first.bundle.files.find((file) =>
+    file.path === "wasm/wasm.ts"
+  )?.content;
+  const secondWasmSource = second.bundle.files.find((file) =>
+    file.path === "wasm/wasm.ts"
+  )?.content;
+  assertEquals(firstWasmSource, secondWasmSource);
 });
 
 Deno.test("Wasm lexer preserves UTF-16 offsets for non-BMP literals", async () => {

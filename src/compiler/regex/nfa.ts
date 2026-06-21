@@ -4,6 +4,8 @@ import {
   normalizeRanges,
   type RegexAst,
 } from "./ast.ts";
+import type { RegexCompilerLimits } from "./limits.ts";
+import { RegexResourceLimitError } from "./limits.ts";
 
 export interface NfaTransition {
   ranges: readonly CharRange[];
@@ -26,8 +28,12 @@ interface Fragment {
   end: number;
 }
 
-export function buildRegexNfa(ast: RegexAst, accept = 0): Nfa {
-  const builder = new NfaBuilder();
+export function buildRegexNfa(
+  ast: RegexAst,
+  accept = 0,
+  limits: RegexCompilerLimits = {},
+): Nfa {
+  const builder = new NfaBuilder(limits);
   const fragment = builder.build(ast);
   builder.states[fragment.end].accepts.push(accept);
   return { start: fragment.start, states: builder.states };
@@ -35,8 +41,9 @@ export function buildRegexNfa(ast: RegexAst, accept = 0): Nfa {
 
 export function buildCombinedNfa(
   specs: readonly { ast: RegexAst; accept: number }[],
+  limits: RegexCompilerLimits = {},
 ): Nfa {
-  const builder = new NfaBuilder();
+  const builder = new NfaBuilder(limits);
   const start = builder.state();
   for (const spec of specs) {
     const fragment = builder.build(spec.ast);
@@ -49,7 +56,17 @@ export function buildCombinedNfa(
 class NfaBuilder {
   readonly states: NfaState[] = [];
 
+  constructor(private readonly limits: RegexCompilerLimits) {}
+
   state(): number {
+    const limit = this.limits.nfaStateLimit;
+    if (limit !== undefined && this.states.length >= limit) {
+      throw new RegexResourceLimitError(
+        "REGEX_NFA_STATE_LIMIT",
+        `Regex NFA state limit exceeded (${limit}).`,
+        limit,
+      );
+    }
     const id = this.states.length;
     this.states.push({ epsilon: [], transitions: [], accepts: [] });
     return id;
@@ -121,6 +138,15 @@ class NfaBuilder {
     min: number,
     max: number | null,
   ): Fragment {
+    const repeatLimit = this.limits.boundedRepeatLimit;
+    const finiteExpansion = max ?? min;
+    if (repeatLimit !== undefined && finiteExpansion > repeatLimit) {
+      throw new RegexResourceLimitError(
+        "REGEX_REPEAT_EXPANSION_LIMIT",
+        `Regex bounded repeat expands ${finiteExpansion} copies, exceeding the configured limit (${repeatLimit}).`,
+        repeatLimit,
+      );
+    }
     const required: Fragment[] = [];
     for (let index = 0; index < min; index++) {
       required.push(this.build(expression));

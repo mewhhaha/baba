@@ -1,4 +1,6 @@
 import type { Dfa, DfaTransition } from "./dfa.ts";
+import type { RegexCompilerLimits } from "./limits.ts";
+import { RegexResourceLimitError } from "./limits.ts";
 
 export interface DfaIntersectionWitness {
   text: string;
@@ -9,6 +11,7 @@ export interface DfaIntersectionWitness {
 export function dfaIntersectionWitness(
   left: Dfa,
   right: Dfa,
+  limits: RegexCompilerLimits = {},
 ): DfaIntersectionWitness | null {
   const queue: Array<{ left: number; right: number; text: string }> = [{
     left: left.start,
@@ -20,6 +23,14 @@ export function dfaIntersectionWitness(
     const item = queue[index];
     const key = `${item.left}/${item.right}`;
     if (visited.has(key)) continue;
+    const limit = limits.overlapProductStateLimit;
+    if (limit !== undefined && visited.size >= limit) {
+      throw new RegexResourceLimitError(
+        "REGEX_OVERLAP_WORK_LIMIT",
+        `Regex overlap product-state limit exceeded (${limit}).`,
+        limit,
+      );
+    }
     visited.add(key);
     const leftState = left.states[item.left];
     const rightState = right.states[item.right];

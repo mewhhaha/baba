@@ -10,7 +10,8 @@ The same grammar can produce:
 - a Tree-sitter `grammar.js` and generated query fragments;
 - a standalone TypeScript DFA lexer, LR(1) parser, and typed concrete syntax
   tree;
-- a WebAssembly-backed lexer/parser adapter with the same TypeScript API;
+- a JavaScript-hosted core WebAssembly lexer/parser adapter with the same
+  TypeScript API;
 - a generic parser-kit JSON artifact for compiler and tooling consumers.
 
 This is useful when a grammar needs to support editor highlighting, tests,
@@ -93,8 +94,8 @@ generated/
     mod.ts
 ```
 
-The Wasm runtime is written under `wasm/` as a TypeScript adapter around
-embedded Wasm bytes:
+The Wasm runtime is written under `wasm/` as a JavaScript-hosted TypeScript
+adapter around embedded core WebAssembly bytes:
 
 ```text
 generated/
@@ -108,9 +109,14 @@ generated/
 
 Both generated parser runtimes export the same main TypeScript API:
 
+- `parserPlanFormat`, `parserPlanVersion`, `parserPlanSemantics`, and
+  `parserPlanHash`, identifying the portable parser-plan contract and exact plan
+  data used by the generated tables;
 - `lex(source)` for DFA tokenization;
 - `parse(source)` returning a discriminated `ParseResult`;
-- strict `parseTokens(source, tokens)` validation for external token streams;
+- strict `parseTokens(source, tokens)` validation for external token streams:
+  Baba lexes the complete source once, compares supplied tokens against that
+  canonical tokenization, and permits omitted trivia only;
 - low-level `parseTokensUnchecked(source, tokens)` when validation is not
   wanted;
 - `positionAt(source, offset)` and `createSourceMap(source)` for UTF-16
@@ -118,7 +124,41 @@ Both generated parser runtimes export the same main TypeScript API:
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia
   channels.
 
-The Wasm target also exports `wasmBytes` from `wasm/mod.ts`.
+The Wasm target also exports `wasmTargetKind`, `wasmBytes`, `wasmAbiVersion`,
+`memory`, and `reset()` from `wasm/mod.ts`. `wasmTargetKind` is currently
+`"javascript-hosted-core-wasm"`; Baba does not yet emit a WASI library, Wasm
+Component/WIT package, browser-only package, or host-neutral parser ABI. The
+embedded core module exports `abi_version() -> i32`, `plan_version() -> i32`,
+and `reset() -> void`; the JavaScript adapter exposes their current values as
+constants and calls core `reset()` when adapter `reset()` is invoked. The
+generated JavaScript adapter copies source text into Wasm memory as UTF-16 code
+units, so all public spans are UTF-16 offsets matching the TypeScript target.
+Parse and lex results remain ordinary JavaScript objects. Low-level typed-array
+views returned by `wasm.ts` helpers are tied to the current `WebAssembly.Memory`
+buffer; call `reset()` to clear cached input ownership before reusing the
+adapter across independent runs. Repeated parses reuse memory up to the previous
+high-water mark, and adapter-side offset arithmetic is checked against the
+32-bit Wasm address space. The core module declares a maximum of 65,535 Wasm
+pages; the adapter checks the same page limit before calling `memory.grow()`.
+
+Internally, standalone parser targets lower the analyzed grammar once into a
+versioned portable parser plan:
+
+```ts
+{
+  format: "baba-parser-plan",
+  version: 1,
+  semantics: "baba-portable-v1"
+}
+```
+
+That plan contains the deterministic lexer DFA, BNF productions and reducers, LR
+ACTION/GOTO tables, token/literal metadata, and CST field schema consumed by the
+TypeScript, Wasm, and parser-kit planning paths. It is separate from Baba's
+package version, metadata schema version, parser-kit schema version, and Wasm
+adapter ABI version. Generated TypeScript, generated Wasm adapters, and
+parser-kit JSON all expose the same `parserPlanHash` or `portablePlan.hash` when
+they were built from the same portable parser plan.
 
 Use `--target kit` when another tool wants Baba's parser data without generated
 TypeScript source:
@@ -137,13 +177,14 @@ generated/
     parser-kit.json
 ```
 
-`parser-kit.json` uses schema version 1. The default `full` profile includes
-grammar/root metadata, token and literal metadata, the lexer DFA, BNF
-terminals/nonterminals and productions, reducer descriptors, LR ACTION/GOTO
-tables including declared multi-action conflicts, LR item/lookahead detail,
-field schemas, display names, source spans, and production origins. It is a
-consumer-neutral data artifact; Baba does not generate compiler-specific export
-names, host ABI tables, or language-specific memory layouts.
+`parser-kit.json` uses schema version 1 and includes a `portablePlan` metadata
+block with `format`, `version`, `semantics`, and `hash`. The default `full`
+profile includes grammar/root metadata, token and literal metadata, the lexer
+DFA, BNF terminals/nonterminals and productions, reducer descriptors, LR
+ACTION/GOTO tables including declared multi-action conflicts, LR item/lookahead
+detail, field schemas, display names, source spans, and production origins. It
+is a consumer-neutral data artifact; Baba does not generate compiler-specific
+export names, host ABI tables, or language-specific memory layouts.
 
 Use the `runtime` profile when a consumer only needs `lexWithKit()` and
 `parseWithKit()`:
@@ -186,6 +227,17 @@ List outputs without writing:
 deno x --allow-read jsr:@mewhhaha/baba/cli grammar.ebnf --list-files
 ```
 
+Explain target support without writing files:
+
+```sh
+deno x --allow-read jsr:@mewhhaha/baba/cli check grammar.ebnf \
+  --explain-targets
+```
+
+The report lists Tree-sitter, TypeScript, Wasm, and kit support independently
+and includes target capability diagnostics such as external scanner usage,
+portable token overlap, or target-specific metadata limits.
+
 Pass Tree-sitter metadata:
 
 ```sh
@@ -208,6 +260,11 @@ deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --wasm-dir wasm \
   --discard-trivia \
   --lexer-state-limit 50000 \
+  --regex-ast-node-limit 100000 \
+  --regex-bounded-repeat-limit 10000 \
+  --regex-nfa-state-limit 100000 \
+  --regex-dfa-state-limit 50000 \
+  --regex-overlap-state-limit 250000 \
   --parser-state-limit 20000 \
   --parser-item-limit 200000 \
   --parser-table-entry-limit 200000
@@ -219,11 +276,17 @@ when `--target kit` is selected. `--kit-profile full|runtime` controls the
 parser-kit detail level and defaults to `full`. `--preserve-trivia` and
 `--discard-trivia` control whether skip matches are emitted as trivia tokens by
 generated runtimes and kit helper lexing. `--lexer-state-limit`,
-`--parser-state-limit`, `--parser-item-limit`, and `--parser-table-entry-limit`
-apply to the TypeScript, Wasm, and kit parser-runtime planning path.
-`--portability strict|warn|off` controls diagnostics for known cross-target
-acceptance differences. When Tree-sitter is selected with another target,
-portability defaults to `strict`; otherwise it defaults to `warn`.
+`--regex-ast-node-limit`, `--regex-bounded-repeat-limit`,
+`--regex-nfa-state-limit`, `--regex-dfa-state-limit`,
+`--regex-overlap-state-limit`, `--parser-state-limit`, `--parser-item-limit`,
+and `--parser-table-entry-limit` apply to the TypeScript, Wasm, and kit
+parser-runtime planning path. Regex limit diagnostics identify the compiler
+phase, for example `TS_REGEX_NFA_STATE_LIMIT`, `TS_REGEX_DFA_STATE_LIMIT`,
+`TS_REGEX_OVERLAP_WORK_LIMIT`, `TS_REGEX_AST_NODE_LIMIT`, or
+`TS_REGEX_REPEAT_EXPANSION_LIMIT`. `--portability strict|warn|off` controls
+diagnostics for known cross-target acceptance differences. When Tree-sitter is
+selected with another target, portability defaults to `strict`; otherwise it
+defaults to `warn`.
 
 `--target all` intentionally does not include `kit`; request it explicitly with
 `--target kit` to avoid unplanned JSON artifact churn in existing generated
@@ -351,12 +414,17 @@ names and must be declared before use.
 
 Token and skip regexes use Baba's portable regex subset. Shorthand classes,
 Unicode property escapes, anchors, lookaround, lazy quantifiers, backreferences,
-inline flags, and target-specific escape forms are rejected. Overlapping token
-languages must either be disjoint or use explicit priority. On equal-length
-matches, higher priority wins; literals win ties at the same priority; then
-declaration order breaks remaining ties. Regexes that need a literal slash may
-escape it, such as `skip line_comment = /\/\/[^\n\r]*/ ;`; generated Tree-sitter
-grammars preserve that pattern as a valid JavaScript regex literal.
+inline flags, and target-specific escape forms are rejected by compiler
+analysis, not by JavaScript's `RegExp` parser.
+
+For standalone TypeScript, Wasm, and kit parsers, reachable named token
+languages must be disjoint. Priority-resolved token/token overlaps are rejected
+because a global portable lexer could hide a token that another parser state
+expects. A higher-priority main token may overlap trivia; trivia that would win
+over a reachable main token is rejected. Reachable literals cannot be hidden by
+priority token or trivia matches. Tree-sitter-only output may still use explicit
+priority for Tree-sitter lexical precedence. Regexes that need a literal slash
+may escape it, such as `skip line_comment = /\/\/[^\n\r]*/ ;`.
 
 Rules unreachable from the selected root are omitted from generated outputs and
 reported as `UNREACHABLE_RULE` warnings.
@@ -448,7 +516,9 @@ separate from Tree-sitter shaping metadata:
 involved. For reduce/reduce conflicts, add `reduce` with the rule or expression
 text that should win. When generation reports an LR conflict, the diagnostic
 includes candidate `resolutions` metadata shaped for the conflicting rules and
-lookahead token.
+lookahead token. It also includes a conflict witness prefix: a short token
+sequence that reaches the conflicted parser state, followed by the conflicting
+lookahead as the final symbol.
 
 `conflicts` declares local grammar ambiguities that the generated TypeScript and
 Wasm parsers may explore with bounded branch search. This is useful for grammars
@@ -495,3 +565,17 @@ deno task test
 deno task bench:wasm -- --samples 5
 deno task publish:dry-run
 ```
+
+Use the bootstrap tasks to keep checked-in generated examples reproducible:
+
+```sh
+deno task bootstrap:check
+deno task bootstrap
+```
+
+`bootstrap:check` regenerates the Baba-owned files for the checked-in examples
+into a temporary directory and byte-compares them with `examples/*/generated`.
+`bootstrap` rewrites those generated files through Baba's manifest-aware
+`applyBundle()` path. These tasks cover the current Stage-0 generated runtime
+artifacts; a future runtime-language compiler should extend the same check with
+runtime source and artifact hashes.

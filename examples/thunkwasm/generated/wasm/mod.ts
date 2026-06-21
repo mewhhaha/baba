@@ -2,4 +2,4 @@
 export * from "./syntax.ts";
 export { lex } from "./lexer.ts";
 export { parse, parseTokens, parseTokensUnchecked } from "./parser.ts";
-export { wasmBytes } from "./wasm.ts";
+export { memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, wasmAbiVersion, wasmBytes, wasmTargetKind } from "./wasm.ts";

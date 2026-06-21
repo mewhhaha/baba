@@ -1,4 +1,5 @@
 import type { Diagnostic, SourceSpan } from "../ast.ts";
+import type { RegexAst } from "./regex/ast.ts";
 
 export type RuleId = number;
 export type TokenId = number;
@@ -30,7 +31,9 @@ export interface AnalyzedToken {
   id: TokenId;
   name: string;
   kind: "token" | "skip";
-  pattern: string;
+  patternSource: string;
+  pattern: RegexAst;
+  nullable: boolean;
   priority: number;
   declarationOrder: number;
   span: SourceSpan;

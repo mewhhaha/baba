@@ -53,6 +53,7 @@ Deno.test("generates standalone TypeScript lexer and parser", async () => {
     await applyBundle(result.bundle, { root: dir });
     await denoCheck(`${dir}/typescript/mod.ts`);
     const mod = await import(`file://${dir}/typescript/mod.ts`);
+    assertEquals(mod.parserPlanVersion, 1);
     const lexed = mod.lex("let x = 42; // ok");
     assertEquals(
       lexed.tokens
@@ -177,36 +178,27 @@ Deno.test("TypeScript lexer warns for overlapping skip declarations", () => {
   assertEquals(result.diagnostics[0].severity, "warning");
 });
 
-Deno.test("Lexical priority resolves intentional token overlaps", async () => {
+Deno.test("Lexical priority resolves Tree-sitter token overlaps but not portable ones", () => {
   const source = `
     token IDENT priority 0 = /[A-Za-z_][A-Za-z0-9_]*/ ;
     token TYPE_IDENT priority 10 = /[A-Z][A-Za-z0-9_]*/ ;
     module = typed:TYPE_IDENT | plain:IDENT ;
   `;
-  const result = compile(source, { targets: ["tree-sitter", "typescript"] });
-  assertEquals(result.diagnostics.length, 0);
-  assert(result.bundle);
-  const grammar = result.bundle.files.find((file) => file.path === "grammar.js")
-    ?.content ?? "";
+  const treeSitter = compile(source, { targets: ["tree-sitter"] });
+  assertEquals(treeSitter.diagnostics.length, 0);
+  assert(treeSitter.bundle);
+  const grammar =
+    treeSitter.bundle.files.find((file) => file.path === "grammar.js")
+      ?.content ?? "";
   assertIncludes(
     grammar,
-    "TYPE_IDENT: $ => token(prec(10, /[A-Z][A-Za-z0-9_]*/))",
+    "TYPE_IDENT: $ => token(prec(10, /[A-Z][0-9A-Z_a-z]*/))",
   );
 
-  const dir = await Deno.makeTempDir();
-  try {
-    await applyBundle(result.bundle, { root: dir });
-    await denoCheck(`${dir}/typescript/mod.ts`);
-    const mod = await import(`file://${dir}/typescript/mod.ts`);
-    const typed = mod.parse("TypeName");
-    assertEquals(typed.ok, true);
-    assertEquals(typed.root.fields.typed.kind, "TYPE_IDENT");
-    const plain = mod.parse("value");
-    assertEquals(plain.ok, true);
-    assertEquals(plain.root.fields.plain.kind, "IDENT");
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
+  const portable = compile(source, { targets: ["typescript"] });
+  assertEquals(portable.bundle, undefined);
+  assertEquals(portable.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertIncludes(portable.diagnostics[0].message, "portable global lexer");
 });
 
 Deno.test("Lexical priority can keep a token above overlapping trivia", async () => {
@@ -230,6 +222,20 @@ Deno.test("Lexical priority can keep a token above overlapping trivia", async ()
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+});
+
+Deno.test("Lexical priority cannot let trivia shadow a reachable token", () => {
+  const result = compile(
+    `
+    skip IGNORED_X priority 10 = /x/ ;
+    token X priority 0 = /x/ ;
+    module = X ;
+  `,
+    { targets: ["typescript"] },
+  );
+  assertEquals(result.bundle, undefined);
+  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertIncludes(result.diagnostics[0].message, "cannot reach the parser");
 });
 
 Deno.test("Lexical priority cannot hide a reachable literal", () => {
@@ -330,6 +336,7 @@ Deno.test("TypeScript lexer uses generated DFA tables for many short tokens", as
     await denoCheck(`${dir}/typescript/mod.ts`);
     const lexerSource = await Deno.readTextFile(`${dir}/typescript/lexer.ts`);
     assertIncludes(lexerSource, "DFA_TRANSITIONS");
+    assertIncludes(lexerSource, "DFA_ASCII_TRANSITIONS");
     assertNotIncludes(lexerSource, "new RegExp");
     assertNotIncludes(lexerSource, "longestRegexPrefix");
     const mod = await import(`file://${dir}/typescript/mod.ts`);
@@ -397,6 +404,65 @@ Deno.test("TypeScript target rejects nonportable regex shorthand classes", () =>
   );
   assertEquals(result.bundle, undefined);
   assertEquals(result.diagnostics[0].code, "INVALID_TOKEN_REGEX");
+});
+
+Deno.test("TypeScript target reports regex resource limits", () => {
+  const ast = compile(
+    `
+    token MANY = /(a|b|c|d)/ ;
+    module = MANY ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { regexAstNodeLimit: 3 },
+    },
+  );
+  assertEquals(ast.bundle, undefined);
+  assertEquals(ast.diagnostics[0].code, "TS_REGEX_AST_NODE_LIMIT");
+  assertIncludes(ast.diagnostics[0].message, "regex AST has");
+
+  const repeat = compile(
+    `
+    token MANY = /a{11}/ ;
+    module = MANY ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { regexBoundedRepeatLimit: 10 },
+    },
+  );
+  assertEquals(repeat.bundle, undefined);
+  assertEquals(
+    repeat.diagnostics[0].code,
+    "TS_REGEX_REPEAT_EXPANSION_LIMIT",
+  );
+
+  const nfa = compile(
+    `
+    token WORD = /abcdef/ ;
+    module = WORD ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { regexNfaStateLimit: 3 },
+    },
+  );
+  assertEquals(nfa.bundle, undefined);
+  assertEquals(nfa.diagnostics[0].code, "TS_REGEX_NFA_STATE_LIMIT");
+
+  const overlap = compile(
+    `
+    token AB = /ab/ ;
+    token AC = /ac/ ;
+    module = AB | AC ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { regexOverlapStateLimit: 1 },
+    },
+  );
+  assertEquals(overlap.bundle, undefined);
+  assertEquals(overlap.diagnostics[0].code, "TS_REGEX_OVERLAP_WORK_LIMIT");
 });
 
 Deno.test("TypeScript lexer treats non-BMP characters as single dot tokens", async () => {

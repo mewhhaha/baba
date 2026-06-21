@@ -51,6 +51,15 @@ Deno.test("generates Tree-sitter grammar and query bundle only", () => {
   assertEquals(bundle.cleanupPaths, undefined);
 });
 
+Deno.test("analyzed Tree-sitter generation does not reconstruct EBNF", async () => {
+  const source = await Deno.readTextFile(
+    new URL("../src/generate.ts", import.meta.url),
+  );
+  assertIncludes(source, "interface TreeSitterPlan");
+  assertIncludes(source, "createAnalyzedTreeSitterPlan");
+  assertNotIncludes(source, "ebnfGrammarFromAnalysis");
+});
+
 Deno.test("TypeScript target diagnoses conflicts without blocking Tree-sitter", () => {
   const source = `
     token IDENT = /[a-z]+/ ;
@@ -111,9 +120,9 @@ Deno.test("Tree-sitter grammar lowering uses explicit declarations only", () => 
   assertIncludes(grammar, "module: $ => seq(");
   assertIncludes(grammar, 'field("name", $.ident)');
   assertIncludes(grammar, 'field("body", $.block)');
-  assertIncludes(grammar, "ident: $ => token(/[A-Za-z_][A-Za-z0-9_]*/),");
+  assertIncludes(grammar, "ident: $ => token(/[A-Z_a-z][0-9A-Z_a-z]*/),");
   assertIncludes(grammar, "integer: $ => token(/[0-9]+/),");
-  assertIncludes(grammar, "whitespace: $ => /[ \\t\\r\\n]+/,");
+  assertIncludes(grammar, "whitespace: $ => /[\\t-\\n\\r ]+/,");
   assertNotIncludes(grammar, "line_comment:");
   assertNotIncludes(grammar, "fenced_text:");
   assertNotIncludes(grammar, "number: $ =>");
@@ -159,6 +168,16 @@ Deno.test("Tree-sitter regex literals preserve escaped slash patterns", async ()
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+});
+
+Deno.test("Tree-sitter regex literals are emitted from Baba regex AST", () => {
+  const grammar = generateTreeSitterGrammar(`
+    token A = /(a)/ ;
+    module = A ;
+  `);
+
+  assertIncludes(grammar, "A: $ => token(/a/)");
+  assertNotIncludes(grammar, "/(a)/");
 });
 
 Deno.test("Tree-sitter and TypeScript agree on explicit whitespace", async () => {

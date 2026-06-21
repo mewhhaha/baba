@@ -287,12 +287,6 @@ class Parser {
     }
     this.expectText("=");
     const patternToken = this.expectKind("regex", "Expected regex literal");
-    try {
-      new RegExp(patternToken.text);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw this.errorAt(patternToken, `Invalid regex literal: ${message}`);
-    }
     const semicolon = this.expectText(";");
     return {
       kind,

@@ -67,6 +67,12 @@ interface FirstAnalysis {
   productionsByLhs: ReadonlyMap<number, readonly BnfProduction[]>;
 }
 
+interface LrTransitionEdge {
+  from: number;
+  to: number;
+  symbol: BnfSymbol;
+}
+
 export function buildCanonicalLr1Table(
   grammar: BnfGrammar,
   options: {
@@ -83,6 +89,7 @@ export function buildCanonicalLr1Table(
   const transitions = new Map<string, number>();
   const states: LrState[] = [];
   const queue: LrState[] = [];
+  const transitionEdges: LrTransitionEdge[] = [];
   let totalCoreItems = 0;
   let totalItems = 0;
 
@@ -136,6 +143,11 @@ export function buildCanonicalLr1Table(
       const target = gotoItems(grammar, analysis, state.items, symbol);
       const targetState = addState(target);
       transitions.set(transitionKey(state.id, symbol), targetState.id);
+      transitionEdges.push({
+        from: state.id,
+        to: targetState.id,
+        symbol,
+      });
     }
   }
 
@@ -171,7 +183,15 @@ export function buildCanonicalLr1Table(
       row.set(terminal, resolved);
       return;
     }
-    diagnostics.push(conflictDiagnostic(grammar, state, terminal, nextActions));
+    diagnostics.push(
+      conflictDiagnostic(
+        grammar,
+        state,
+        terminal,
+        nextActions,
+        transitionEdges,
+      ),
+    );
   };
 
   const setGoto = (state: number, nonterminal: number, target: number) => {
@@ -413,6 +433,7 @@ function conflictDiagnostic(
   state: LrState,
   terminal: number,
   actions: readonly LrAction[],
+  transitionEdges: readonly LrTransitionEdge[],
 ): Diagnostic {
   const context = conflictContext(grammar, state, terminal, actions);
   const terminalName = grammar.terminals[terminal]?.display ?? String(terminal);
@@ -440,6 +461,7 @@ function conflictDiagnostic(
       "Reduction interpretation",
       context.reductionProductions,
     ),
+    ...conflictWitnessLines(grammar, state, terminal, transitionEdges),
     ...metadataSuggestionLines(grammar, context, isShiftReduce),
   ].filter((line, index, lines) => line !== "" || lines[index - 1] !== "");
   const primaryOrigin = origins[0];
@@ -454,6 +476,24 @@ function conflictDiagnostic(
       span: origin.span,
     })),
   };
+}
+
+function conflictWitnessLines(
+  grammar: BnfGrammar,
+  state: LrState,
+  terminal: number,
+  transitionEdges: readonly LrTransitionEdge[],
+): string[] {
+  const path = shortestStatePath(transitionEdges, state.id);
+  if (!path) return [];
+  const symbols = [...path.map((edge) => edge.symbol), {
+    kind: "terminal" as const,
+    id: terminal,
+  }];
+  return [
+    `Conflict witness prefix: ${formatWitnessSequence(grammar, symbols)}`,
+    "The final symbol is the conflicting lookahead.",
+  ];
 }
 
 function metadataSuggestionLines(
@@ -497,6 +537,115 @@ function metadataSuggestionLines(
     );
   }
   return lines;
+}
+
+function shortestStatePath(
+  edges: readonly LrTransitionEdge[],
+  targetState: number,
+): LrTransitionEdge[] | undefined {
+  if (targetState === 0) return [];
+  const edgesBySource = new Map<number, LrTransitionEdge[]>();
+  for (const edge of edges) {
+    const entries = edgesBySource.get(edge.from) ?? [];
+    entries.push(edge);
+    edgesBySource.set(edge.from, entries);
+  }
+
+  const queue: Array<{ state: number; path: LrTransitionEdge[] }> = [
+    { state: 0, path: [] },
+  ];
+  const seen = new Set<number>([0]);
+  for (let index = 0; index < queue.length; index++) {
+    const current = queue[index];
+    for (const edge of edgesBySource.get(current.state) ?? []) {
+      if (seen.has(edge.to)) continue;
+      const path = [...current.path, edge];
+      if (edge.to === targetState) return path;
+      seen.add(edge.to);
+      queue.push({ state: edge.to, path });
+    }
+  }
+  return undefined;
+}
+
+function formatWitnessSequence(
+  grammar: BnfGrammar,
+  symbols: readonly BnfSymbol[],
+): string {
+  const shortest = shortestTerminalSequences(grammar);
+  const terminals: number[] = [];
+  const fallback: string[] = [];
+  for (const symbol of symbols) {
+    if (symbol.kind === "terminal") {
+      terminals.push(symbol.id);
+      continue;
+    }
+    const derived = shortest.get(symbol.id);
+    if (derived) {
+      terminals.push(...derived);
+    } else {
+      fallback.push(nonterminalDisplay(grammar, symbol.id));
+    }
+  }
+  const displayed = terminals.map((terminal) =>
+    grammar.terminals[terminal]?.display ?? String(terminal)
+  );
+  displayed.push(...fallback);
+  return displayed.length > 0 ? displayed.join(" ") : "ε";
+}
+
+function shortestTerminalSequences(
+  grammar: BnfGrammar,
+): ReadonlyMap<number, readonly number[]> {
+  const best = new Map<number, readonly number[]>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const production of grammar.productions) {
+      const sequence = productionTerminalSequence(production, best);
+      if (!sequence) continue;
+      const existing = best.get(production.lhs);
+      if (
+        existing === undefined ||
+        sequence.length < existing.length ||
+        (sequence.length === existing.length &&
+          compareNumberArrays(sequence, existing) < 0)
+      ) {
+        best.set(production.lhs, sequence);
+        changed = true;
+      }
+    }
+  }
+  return best;
+}
+
+function productionTerminalSequence(
+  production: BnfProduction,
+  best: ReadonlyMap<number, readonly number[]>,
+): number[] | undefined {
+  const sequence: number[] = [];
+  for (const symbol of production.rhs) {
+    if (symbol.kind === "terminal") {
+      sequence.push(symbol.id);
+      continue;
+    }
+    const derived = best.get(symbol.id);
+    if (!derived) return undefined;
+    sequence.push(...derived);
+  }
+  return sequence;
+}
+
+function compareNumberArrays(
+  left: readonly number[],
+  right: readonly number[],
+): number {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    const delta = left[index] - right[index];
+    if (delta !== 0) return delta;
+  }
+  return left.length - right.length;
 }
 
 function resolveConflict(
@@ -670,6 +819,10 @@ function terminalMetadataValue(grammar: BnfGrammar, terminal: number): string {
   } catch {
     return display;
   }
+}
+
+function nonterminalDisplay(grammar: BnfGrammar, nonterminal: number): string {
+  return grammar.nonterminals[nonterminal]?.name ?? String(nonterminal);
 }
 
 function reduceCandidates(context: ConflictContext): string[] {

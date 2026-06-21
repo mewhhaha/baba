@@ -2,7 +2,6 @@ import type {
   Diagnostic,
   EbnfExpression,
   EbnfGrammar,
-  EbnfTokenDeclaration,
   SourceSpan,
   TreeSitterCaptureMetadata,
   TreeSitterCaptureQueryEntry,
@@ -17,13 +16,10 @@ import type {
   TreeSitterRuleWrap,
 } from "./ast.ts";
 import { analyzeGrammar } from "./compiler/analyze.ts";
-import {
-  collectGrammarDiagnostics,
-  collectReachabilityDiagnostics,
-  validateEbnfGrammar,
-} from "./compiler/diagnostics.ts";
+import { validateEbnfGrammar } from "./compiler/diagnostics.ts";
 import type { AnalyzedExpression, AnalyzedGrammar } from "./compiler/ir.ts";
 import { parsePortableRegex } from "./compiler/regex/parser.ts";
+import { emitPortableRegexSource } from "./compiler/regex/emit.ts";
 import { BabaError } from "./errors.ts";
 import { parseEbnf } from "./parser.ts";
 
@@ -48,6 +44,34 @@ function treeSitterDiagnosticError(
   });
 }
 
+type TreeSitterExpression = EbnfExpression | AnalyzedExpression;
+
+interface TreeSitterPlan {
+  readonly name: string;
+  readonly rootRuleName: string;
+  readonly rootRuleSpan: SourceSpan;
+  readonly rules: readonly TreeSitterRulePlan[];
+  readonly tokens: readonly TreeSitterTokenPlan[];
+  readonly reachableRules: ReadonlySet<string>;
+  readonly reachableTokens: ReadonlySet<string>;
+  readonly reachableLiterals: ReadonlySet<string>;
+  readonly externals: readonly string[];
+}
+
+interface TreeSitterRulePlan {
+  readonly name: string;
+  readonly expression: TreeSitterExpression;
+  readonly span: SourceSpan;
+}
+
+interface TreeSitterTokenPlan {
+  readonly name: string;
+  readonly kind: "token" | "skip";
+  readonly pattern: string;
+  readonly priority: number;
+  readonly span: SourceSpan;
+}
+
 /** Collects literal terminal strings referenced by grammar rules. */
 export function collectTerminals(grammar: EbnfGrammar): string[] {
   const terminals = new Set<string>();
@@ -55,104 +79,86 @@ export function collectTerminals(grammar: EbnfGrammar): string[] {
   return [...terminals].sort();
 }
 
-/** Reconstructs the public EBNF AST shape from shared compiler analysis. */
-export function ebnfGrammarFromAnalysis(
+function createAnalyzedTreeSitterPlan(
   analyzed: AnalyzedGrammar,
-): EbnfGrammar {
-  const tokens = analyzed.tokens.map((token) => ({
-    kind: token.kind,
-    name: token.name,
-    pattern: token.pattern,
-    priority: token.priority === 0 ? undefined : token.priority,
-    span: token.span,
-  }));
-  const rules = analyzed.rules.map((rule) => ({
-    name: rule.name,
-    expression: ebnfExpressionFromAnalysis(rule.expression),
-    span: rule.span,
-  }));
+): TreeSitterPlan {
+  const rootRule = analyzed.rules[analyzed.rootRule];
   return {
-    tokens,
-    rules,
-    span: grammarSpan([
-      ...tokens.map((token) => token.span),
-      ...rules.map((rule) => rule.span),
-    ]),
+    name: analyzed.name,
+    rootRuleName: rootRule?.name ?? "module",
+    rootRuleSpan: rootRule?.span ?? { start: 0, end: 0, line: 1, column: 1 },
+    rules: analyzed.rules.map((rule) => ({
+      name: rule.name,
+      expression: rule.expression,
+      span: rule.span,
+    })),
+    tokens: analyzed.tokens.map((token) => ({
+      name: token.name,
+      kind: token.kind,
+      pattern: emitPortableRegexSource(token.pattern),
+      priority: token.priority,
+      span: token.span,
+    })),
+    reachableRules: new Set(
+      [...analyzed.reachableRules].map((ruleId) => analyzed.rules[ruleId].name),
+    ),
+    reachableTokens: new Set(
+      [...analyzed.reachableTokens].map((tokenId) =>
+        analyzed.tokens[tokenId].name
+      ),
+    ),
+    reachableLiterals: new Set(
+      [...analyzed.reachableLiterals].map((literalId) =>
+        analyzed.literals[literalId].value
+      ),
+    ),
+    externals: [...analyzed.externals.map((external) => external.name)],
   };
 }
 
-function ebnfExpressionFromAnalysis(
-  expression: AnalyzedExpression,
-): EbnfExpression {
-  switch (expression.kind) {
-    case "field":
-      return {
-        kind: "field",
-        name: expression.name,
-        expression: ebnfExpressionFromAnalysis(expression.expression),
-        span: expression.span,
-      };
-    case "ref":
-      return { kind: "ref", name: expression.name, span: expression.span };
-    case "literal":
-      return {
-        kind: "literal",
-        value: expression.value,
-        span: expression.span,
-      };
-    case "sequence":
-      return {
-        kind: "sequence",
-        items: expression.items.map(ebnfExpressionFromAnalysis),
-        span: expression.span,
-      };
-    case "choice":
-      return {
-        kind: "choice",
-        options: expression.options.map(ebnfExpressionFromAnalysis),
-        span: expression.span,
-      };
-    case "optional":
-      return {
-        kind: "optional",
-        expression: ebnfExpressionFromAnalysis(expression.expression),
-        span: expression.span,
-      };
-    case "repeat":
-      return {
-        kind: "repeat",
-        expression: ebnfExpressionFromAnalysis(expression.expression),
-        span: expression.span,
-      };
-    case "repeat1":
-      return {
-        kind: "repeat1",
-        expression: ebnfExpressionFromAnalysis(expression.expression),
-        span: expression.span,
-      };
-    case "separated":
-      return {
-        kind: "separated",
-        item: ebnfExpressionFromAnalysis(expression.item),
-        separator: ebnfExpressionFromAnalysis(expression.separator),
-        span: expression.span,
-      };
+function createGrammarTreeSitterPlan(
+  grammar: EbnfGrammar,
+  rootRuleName: string,
+  metadata: TreeSitterMetadata = {},
+): TreeSitterPlan {
+  const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
+  if (!rootRule) {
+    treeSitterDiagnosticError(
+      "TREE_SITTER_UNKNOWN_ROOT_RULE",
+      `Unknown root rule '${rootRuleName}'`,
+    );
   }
-}
-
-function grammarSpan(spans: readonly SourceSpan[]): SourceSpan {
-  if (spans.length === 0) {
-    return { start: 0, end: 0, line: 1, column: 1 };
-  }
-  const first = spans.reduce((best, span) =>
-    span.start < best.start ? span : best
+  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
+  const reachableRefs = collectReachableRefs(grammar, reachableRules);
+  const reachableLiterals = new Set(
+    collectReachableTerminals(grammar, reachableRules),
   );
-  const last = spans.reduce((best, span) => span.end > best.end ? span : best);
   return {
-    start: first.start,
-    end: last.end,
-    line: first.line,
-    column: first.column,
+    name: "grammar",
+    rootRuleName,
+    rootRuleSpan: rootRule.span,
+    rules: grammar.rules.map((rule) => ({
+      name: rule.name,
+      expression: rule.expression,
+      span: rule.span,
+    })),
+    tokens: grammar.tokens.map((token) => ({
+      name: token.name,
+      kind: token.kind,
+      pattern: token.pattern,
+      priority: token.priority ?? 0,
+      span: token.span,
+    })),
+    reachableRules,
+    reachableTokens: new Set(
+      grammar.tokens
+        .filter((token) =>
+          token.kind === "token" && reachableRefs.has(token.name)
+        )
+        .map((token) => token.name),
+    ),
+    reachableLiterals,
+    externals: [...(metadata.externals ?? [])],
   };
 }
 
@@ -174,6 +180,13 @@ export function validateTreeSitterBackendCapabilities(
       );
     }
   }
+}
+
+/** Validates Tree-sitter backend limits that require shared analysis. */
+export function validateAnalyzedTreeSitterBackendCapabilities(
+  analyzed: AnalyzedGrammar,
+): void {
+  void analyzed;
 }
 
 export { parseTreeSitterMetadata } from "./metadata.ts";
@@ -199,7 +212,16 @@ export function generateTreeSitterGrammar(
       externals: options.metadata?.externals,
     });
   }
-  validateTreeSitterBackendCapabilities(grammar);
+  const analyzed = analyzeGrammar(grammar, {
+    name,
+    rootRule: rootRuleName,
+    metadata: options.metadata,
+  });
+  if (options.skipValidation) {
+    validateTreeSitterBackendCapabilities(grammar);
+  } else {
+    validateAnalyzedTreeSitterBackendCapabilities(analyzed);
+  }
   const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
   if (!rootRule) {
     treeSitterDiagnosticError(
@@ -217,11 +239,7 @@ export function generateTreeSitterGrammar(
   }
 
   return generateAnalyzedTreeSitterGrammar(
-    analyzeGrammar(grammar, {
-      name,
-      rootRule: rootRuleName,
-      metadata: options.metadata,
-    }),
+    analyzed,
     { name, metadata: options.metadata },
   );
 }
@@ -234,17 +252,14 @@ export function generateAnalyzedTreeSitterGrammar(
     metadata?: TreeSitterMetadata;
   } = {},
 ): string {
-  const grammar = ebnfGrammarFromAnalysis(analyzed);
-  const rootRuleName = analyzed.rules[analyzed.rootRule]?.name ?? "module";
   const metadata = options.metadata ?? {};
-  const context = createRenderContext(grammar, rootRuleName, metadata);
-  const rootRefExpression = sourceFileExpression(grammar, rootRuleName);
-  const reachableRules = new Set(
-    [...analyzed.reachableRules].map((ruleId) => analyzed.rules[ruleId].name),
+  const plan = createAnalyzedTreeSitterPlan(analyzed);
+  const context = createRenderContext(
+    plan.rules,
+    sourceFileExpression(plan),
+    metadata,
   );
-  const tokenIdsByName = new Map(
-    analyzed.tokens.map((token) => [token.name, token.id]),
-  );
+  const rootRefExpression = sourceFileExpression(plan);
   const ruleLines = [
     `    source_file: $ => ${
       renderRuleExpression(
@@ -254,8 +269,8 @@ export function generateAnalyzedTreeSitterGrammar(
         context,
       )
     },`,
-    ...grammar.rules
-      .filter((rule) => reachableRules.has(rule.name))
+    ...plan.rules
+      .filter((rule) => plan.reachableRules.has(rule.name))
       .map((rule) => {
         const rendered = renderRuleExpression(
           rule.name,
@@ -265,9 +280,8 @@ export function generateAnalyzedTreeSitterGrammar(
         );
         return `    ${formatRuleKey(rule.name)}: $ => ${rendered},`;
       }),
-    ...grammar.tokens.filter((token) =>
-      token.kind === "skip" ||
-      analyzed.reachableTokens.has(tokenIdsByName.get(token.name) ?? -1)
+    ...plan.tokens.filter((token) =>
+      token.kind === "skip" || plan.reachableTokens.has(token.name)
     ).map((token) => {
       const rendered = renderTokenDeclaration(token);
       return `    ${formatRuleKey(token.name)}: $ => ${rendered},`;
@@ -280,13 +294,13 @@ export function generateAnalyzedTreeSitterGrammar(
   const headerLines = [
     `// Generated by @mewhhaha/baba. Do not edit by hand.`,
     "export default grammar({",
-    `  name: ${JSON.stringify(options.name ?? analyzed.name)},`,
+    `  name: ${JSON.stringify(options.name ?? plan.name)},`,
     "",
   ];
 
   const extras = [
     ...(metadata.extras ?? []),
-    ...grammar.tokens
+    ...plan.tokens
       .filter((token) => token.kind === "skip")
       .map((token): TreeSitterExtra => ({ kind: "rule", name: token.name })),
   ];
@@ -356,11 +370,21 @@ export function generateTreeSitterRainbowsQuery(
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
 
+  return generateTreeSitterRainbowsQueryFromPlan(
+    createGrammarTreeSitterPlan(grammar, rootRuleName, metadata),
+    metadata,
+  );
+}
+
+function generateTreeSitterRainbowsQueryFromPlan(
+  plan: TreeSitterPlan,
+  metadata: TreeSitterMetadata,
+): string {
   const rainbow = metadata.queries?.rainbows;
   const patterns = rainbow?.patterns ?? [];
   const scopes = rainbow?.scopes ?? [];
   const brackets = rainbow?.brackets ??
-    collectDefaultRainbowBrackets(grammar, rootRuleName);
+    collectDefaultRainbowBrackets(plan);
   const lines: string[] = [...patterns];
   if (patterns.length > 0 && (scopes.length > 0 || brackets.length > 0)) {
     lines.push("");
@@ -405,6 +429,12 @@ export function generateTreeSitterInjectionsQuery(
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
 
+  return generateTreeSitterInjectionsQueryFromMetadata(metadata);
+}
+
+function generateTreeSitterInjectionsQueryFromMetadata(
+  metadata: TreeSitterMetadata,
+): string {
   const injections = metadata.queries?.injections ?? [];
   if (injections.length === 0) return "";
 
@@ -447,10 +477,19 @@ export function generateTreeSitterHighlightsQuery(
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
 
+  return generateTreeSitterHighlightsQueryFromPlan(
+    createGrammarTreeSitterPlan(grammar, rootRuleName, metadata),
+    metadata,
+  );
+}
+
+function generateTreeSitterHighlightsQueryFromPlan(
+  plan: TreeSitterPlan,
+  metadata: TreeSitterMetadata,
+): string {
   const explicit = resolveHighlightCaptureSelectors(
     metadata.queries?.highlights?.entries ?? [],
-    grammar,
-    rootRuleName,
+    plan,
   );
   const explicitSelectors = new Set(
     explicit.filter(isCaptureMetadata).map(captureSelectorKey),
@@ -463,9 +502,8 @@ export function generateTreeSitterHighlightsQuery(
   const lines = [
     ...renderCaptureQueryEntries(explicit),
     ...defaultHighlightQueryEntries(
-      grammar,
+      plan,
       explicitSelectors,
-      rootRuleName,
     ),
   ];
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
@@ -495,9 +533,8 @@ export function collectTreeSitterHighlightDiagnostics(
     validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
   }
   return uncoveredSuppressedHighlightDiagnostics(
-    grammar,
+    createGrammarTreeSitterPlan(grammar, rootRuleName, metadata),
     metadata,
-    rootRuleName,
   );
 }
 
@@ -508,13 +545,10 @@ export function collectAnalyzedTreeSitterHighlightDiagnostics(
     metadata?: TreeSitterMetadata;
   } = {},
 ): Diagnostic[] {
-  const grammar = ebnfGrammarFromAnalysis(analyzed);
-  const rootRuleName = analyzed.rules[analyzed.rootRule]?.name ?? "module";
-  return collectTreeSitterHighlightDiagnostics(grammar, {
-    rootRule: rootRuleName,
-    metadata: options.metadata,
-    skipValidation: true,
-  });
+  return uncoveredSuppressedHighlightDiagnostics(
+    createAnalyzedTreeSitterPlan(analyzed),
+    options.metadata ?? {},
+  );
 }
 
 /** Generates a metadata-driven tree-sitter locals query. */
@@ -711,13 +745,21 @@ export function generateAnalyzedTreeSitterQueries(
     metadata?: TreeSitterMetadata;
   } = {},
 ): Record<string, string> {
-  const grammar = ebnfGrammarFromAnalysis(analyzed);
-  const rootRuleName = analyzed.rules[analyzed.rootRule]?.name ?? "module";
-  return generateTreeSitterQueries(grammar, {
-    rootRule: rootRuleName,
-    metadata: options.metadata,
-    skipValidation: true,
-  });
+  const plan = createAnalyzedTreeSitterPlan(analyzed);
+  const metadata = options.metadata ?? {};
+  return {
+    "highlights.scm": generateTreeSitterHighlightsQueryFromPlan(
+      plan,
+      metadata,
+    ),
+    "locals.scm": renderCaptureQuery(metadata.queries?.locals ?? []),
+    "folds.scm": renderCaptureQuery(metadata.queries?.folds ?? []),
+    "indents.scm": renderCaptureQuery(metadata.queries?.indents ?? []),
+    "tags.scm": renderCaptureQuery(metadata.queries?.tags ?? []),
+    "textobjects.scm": renderCaptureQuery(metadata.queries?.textobjects ?? []),
+    "rainbows.scm": generateTreeSitterRainbowsQueryFromPlan(plan, metadata),
+    "injections.scm": generateTreeSitterInjectionsQueryFromMetadata(metadata),
+  };
 }
 
 function renderCaptureQuery(captures: TreeSitterCaptureQueryEntry[]): string {
@@ -743,15 +785,12 @@ function captureSelectorKey(
 
 function resolveHighlightCaptureSelectors(
   captures: TreeSitterCaptureQueryEntry[],
-  grammar: EbnfGrammar,
-  rootRuleName: string,
+  plan: TreeSitterPlan,
 ): TreeSitterCaptureQueryEntry[] {
-  const reachable = collectReachableRuleNames(grammar, rootRuleName);
   const anonymousLiterals = collectAnonymousLiteralTerminals(
-    grammar,
-    reachable,
+    plan,
   );
-  const singleLiteralRules = collectSingleLiteralRules(grammar, reachable);
+  const singleLiteralRules = collectSingleLiteralRules(plan);
   return captures.map((capture) => {
     if (isRawQueryEntry(capture)) return capture;
     if (!capture.literal || anonymousLiterals.has(capture.literal)) {
@@ -776,17 +815,12 @@ function isCaptureMetadata(
 }
 
 function defaultHighlightQueryEntries(
-  grammar: EbnfGrammar,
+  plan: TreeSitterPlan,
   explicitSelectors: Set<string>,
-  rootRuleName: string,
 ): string[] {
   const lines: string[] = [];
-  const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
-  const terminals = collectReachableTerminals(grammar, reachableRules);
-  const namedLiteralTerminals = collectNamedLiteralRuleTerminals(
-    grammar,
-    reachableRules,
-  );
+  const terminals = [...plan.reachableLiterals].sort();
+  const namedLiteralTerminals = collectNamedLiteralRuleTerminals(plan);
   const pushLiteral = (literal: string, capture: string) => {
     if (explicitSelectors.has(`literal:${literal}`)) return;
     lines.push(`${JSON.stringify(literal)} @${capture}`);
@@ -816,24 +850,20 @@ function defaultHighlightQueryEntries(
   return lines;
 }
 
-function collectExpressionRefs(expression: EbnfExpression): string[] {
+function collectExpressionRefs(expression: TreeSitterExpression): string[] {
   const refs: string[] = [];
   collectExpressionRefsInto(expression, refs);
   return refs;
 }
 
 function sourceFileExpression(
-  grammar: EbnfGrammar,
-  rootRuleName: string,
-): EbnfExpression {
-  const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
-  if (!rootRule) {
-    treeSitterDiagnosticError(
-      "TREE_SITTER_UNKNOWN_ROOT_RULE",
-      `Unknown root rule '${rootRuleName}'`,
-    );
-  }
-  return { kind: "ref", name: rootRuleName, span: rootRule.span };
+  plan: TreeSitterPlan,
+): TreeSitterExpression {
+  return {
+    kind: "ref",
+    name: plan.rootRuleName,
+    span: plan.rootRuleSpan,
+  };
 }
 
 function collectReachableRuleNames(
@@ -869,7 +899,7 @@ function collectReachableRefs(
 }
 
 function collectExpressionRefsInto(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   refs: string[],
 ): void {
   switch (expression.kind) {
@@ -916,19 +946,18 @@ function collectReachableTerminals(
 }
 
 function collectNamedLiteralRuleTerminals(
-  grammar: EbnfGrammar,
-  reachableRules?: Set<string>,
+  plan: TreeSitterPlan,
 ): Set<string> {
   const terminals = new Set<string>();
-  for (const rule of grammar.rules) {
-    if (reachableRules && !reachableRules.has(rule.name)) continue;
+  for (const rule of plan.rules) {
+    if (!plan.reachableRules.has(rule.name)) continue;
     collectLiteralOnlyExpressionTerminals(rule.expression, terminals);
   }
   return terminals;
 }
 
 function collectLiteralOnlyExpressionTerminals(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   terminals: Set<string>,
 ): boolean {
   switch (expression.kind) {
@@ -956,12 +985,11 @@ function collectLiteralOnlyExpressionTerminals(
 }
 
 function collectSingleLiteralRules(
-  grammar: EbnfGrammar,
-  reachableRules?: Set<string>,
+  plan: TreeSitterPlan,
 ): Map<string, string> {
   const rules = new Map<string, string>();
-  for (const rule of grammar.rules) {
-    if (reachableRules && !reachableRules.has(rule.name)) continue;
+  for (const rule of plan.rules) {
+    if (!plan.reachableRules.has(rule.name)) continue;
     if (rule.expression.kind === "literal") {
       rules.set(rule.expression.value, rule.name);
     }
@@ -970,12 +998,11 @@ function collectSingleLiteralRules(
 }
 
 function collectAnonymousLiteralTerminals(
-  grammar: EbnfGrammar,
-  reachableRules?: Set<string>,
+  plan: TreeSitterPlan,
 ): Set<string> {
   const terminals = new Set<string>();
-  for (const rule of grammar.rules) {
-    if (reachableRules && !reachableRules.has(rule.name)) continue;
+  for (const rule of plan.rules) {
+    if (!plan.reachableRules.has(rule.name)) continue;
     if (rule.expression.kind === "literal") continue;
     collectLiteralTerminals(rule.expression, terminals);
   }
@@ -983,7 +1010,7 @@ function collectAnonymousLiteralTerminals(
 }
 
 function collectLiteralTerminals(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   terminals: Set<string>,
 ): void {
   switch (expression.kind) {
@@ -1023,6 +1050,7 @@ function validateTreeSitterMetadataSemantics(
   metadata?: TreeSitterMetadata,
 ): void {
   if (!metadata) return;
+  const plan = createGrammarTreeSitterPlan(grammar, rootRuleName, metadata);
   const reachableRules = collectReachableRuleNames(grammar, rootRuleName);
   const symbolSets = collectGeneratedSymbolSets(
     grammar,
@@ -1134,7 +1162,7 @@ function validateTreeSitterMetadataSemantics(
       validateWrap(ruleMeta.wrap, ruleName, `${rulePath}.wrap`);
     }
     const expression = ruleName === "source_file"
-      ? sourceFileExpression(grammar, rootRuleName)
+      ? sourceFileExpression(plan)
       : grammar.rules.find((rule) => rule.name === ruleName)?.expression;
     if (!expression) {
       treeSitterDiagnosticError(
@@ -1372,9 +1400,8 @@ function validateCaptureSelectorsMetadata(
 }
 
 function uncoveredSuppressedHighlightDiagnostics(
-  grammar: EbnfGrammar,
+  plan: TreeSitterPlan,
   metadata: TreeSitterMetadata,
-  rootRuleName: string,
 ): Diagnostic[] {
   const suppress = metadata.queries?.highlights?.defaults?.suppress ?? [];
   if (suppress.length === 0) return [];
@@ -1395,9 +1422,8 @@ function uncoveredSuppressedHighlightDiagnostics(
 
   const diagnostics: Diagnostic[] = [];
   const contexts = collectSuppressedHighlightContexts(
-    grammar,
+    plan,
     suppress,
-    rootRuleName,
   );
   for (const context of contexts) {
     const selectorKey = captureSelectorKey(context.selector);
@@ -1417,9 +1443,8 @@ function uncoveredSuppressedHighlightDiagnostics(
 }
 
 function collectSuppressedHighlightContexts(
-  grammar: EbnfGrammar,
+  plan: TreeSitterPlan,
   suppress: TreeSitterCaptureSelectorMetadata[],
-  rootRuleName: string,
 ): Array<{ parent: string; selector: TreeSitterCaptureSelectorMetadata }> {
   const suppressedNodes = new Map(
     suppress.filter((selector) => selector.node).map((selector) => [
@@ -1437,9 +1462,8 @@ function collectSuppressedHighlightContexts(
     { parent: string; selector: TreeSitterCaptureSelectorMetadata }
   > = [];
   const seen = new Set<string>();
-  const reachable = collectReachableRuleNames(grammar, rootRuleName);
-  for (const rule of grammar.rules) {
-    if (!reachable.has(rule.name)) continue;
+  for (const rule of plan.rules) {
+    if (!plan.reachableRules.has(rule.name)) continue;
     collectSuppressedHighlightContextsInto(
       rule.expression,
       rule.name,
@@ -1458,7 +1482,7 @@ function collectSuppressedHighlightContexts(
 }
 
 function collectSuppressedHighlightContextsInto(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   parent: string,
   suppressedNodes: Map<string | undefined, TreeSitterCaptureSelectorMetadata>,
   suppressedLiterals: Map<
@@ -1510,14 +1534,16 @@ function pushSuppressedHighlightContext(
   contexts.push({ parent, selector });
 }
 
-function expressionChildren(expression: EbnfExpression): EbnfExpression[] {
+function expressionChildren(
+  expression: TreeSitterExpression,
+): TreeSitterExpression[] {
   switch (expression.kind) {
     case "field":
       return [expression.expression];
     case "sequence":
-      return expression.items;
+      return [...expression.items];
     case "choice":
-      return expression.options;
+      return [...expression.options];
     case "optional":
     case "repeat":
     case "repeat1":
@@ -1669,15 +1695,9 @@ function collectGeneratedSymbolSets(
 }
 
 function collectDefaultRainbowBrackets(
-  grammar: EbnfGrammar,
-  rootRuleName: string,
+  plan: TreeSitterPlan,
 ): string[] {
-  const terminals = new Set(
-    collectReachableTerminals(
-      grammar,
-      collectReachableRuleNames(grammar, rootRuleName),
-    ),
-  );
+  const terminals = plan.reachableLiterals;
   return ["(", ")", "[", "]", "{", "}"].filter((token) => terminals.has(token));
 }
 
@@ -1734,7 +1754,7 @@ function validateWrap(
 }
 
 function resolveMetadataPathSelector(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   selector: string,
   ruleName: string,
   metadataVersion?: TreeSitterMetadata["version"],
@@ -1773,7 +1793,7 @@ function resolveMetadataPathSelector(
 }
 
 function collectNamedFieldPaths(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
 ): Map<string, string[]> {
   const paths = new Map<string, string[]>();
   collectNamedFieldPathsInto(expression, [], paths);
@@ -1781,7 +1801,7 @@ function collectNamedFieldPaths(
 }
 
 function collectNamedFieldPathsInto(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   path: number[],
   paths: Map<string, string[]>,
 ): void {
@@ -1847,22 +1867,22 @@ function parsePathSegments(
 }
 
 function resolveExpressionAtPath(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   path: string,
   ruleName: string,
   metadataPath?: string,
-): EbnfExpression {
+): TreeSitterExpression {
   const segments = parsePathSegments(path, ruleName, metadataPath);
   return walkResolvedPath(expression, segments, path, ruleName, metadataPath);
 }
 
 function walkResolvedPath(
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   segments: number[],
   path: string,
   ruleName: string,
   metadataPath?: string,
-): EbnfExpression {
+): TreeSitterExpression {
   if (segments.length === 0) return expression;
   const [head, ...rest] = segments;
   switch (expression.kind) {
@@ -1947,7 +1967,7 @@ function walkResolvedPath(
           metadataPath,
         );
       }
-      treeSitterDiagnosticError(
+      return treeSitterDiagnosticError(
         "METADATA_FIELD_PATH_OUT_OF_BOUNDS",
         `Field path '${path}' is out of bounds on rule '${ruleName}'`,
         { path: metadataPath },
@@ -1964,7 +1984,7 @@ function walkResolvedPath(
 
 function renderRuleExpression(
   ruleName: string,
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   metadata?: TreeSitterRuleMetadata,
   context?: RenderContext,
   inlineStack = new Set<string>(),
@@ -1995,7 +2015,7 @@ function renderRuleExpression(
 
 function renderExpression(
   ruleName: string,
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   path: number[],
   metadata: NormalizedRuleMetadata,
   context: RenderContext,
@@ -2028,7 +2048,7 @@ function renderExpression(
 
 function renderRawExpression(
   ruleName: string,
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   path: number[],
   metadata: NormalizedRuleMetadata,
   context: RenderContext,
@@ -2178,7 +2198,7 @@ function applyToken(rendered: string, token?: TreeSitterRuleToken): string {
 
 function renderRefExpression(
   ruleName: string,
-  expression: Extract<EbnfExpression, { kind: "ref" }>,
+  expression: Extract<TreeSitterExpression, { kind: "ref" }>,
   pathMeta: TreeSitterPathMetadata | undefined,
   context: RenderContext,
   inlineStack: Set<string>,
@@ -2214,7 +2234,7 @@ function renderRefExpression(
 function resolveRenderableRef(
   name: string,
   context: RenderContext,
-): EbnfExpression {
+): TreeSitterExpression {
   const target = context.ruleExpressions.get(name);
   if (!target) throw new Error(`Cannot inline unknown rule '${name}'`);
   return target;
@@ -2258,13 +2278,13 @@ interface NormalizedRuleMetadata {
 interface RenderContext {
   metadata: TreeSitterMetadata;
   normalizedRules: Map<string, NormalizedRuleMetadata>;
-  ruleExpressions: Map<string, EbnfExpression>;
+  ruleExpressions: Map<string, TreeSitterExpression>;
   helperRules: Map<string, string>;
 }
 
 function normalizeRuleMetadata(
   metadata?: TreeSitterRuleMetadata,
-  expression?: EbnfExpression,
+  expression?: TreeSitterExpression,
   ruleName?: string,
   metadataVersion?: TreeSitterMetadata["version"],
   metadataPath?: string,
@@ -2342,18 +2362,15 @@ function mergePathMetadata(
 }
 
 function createRenderContext(
-  grammar: EbnfGrammar,
-  rootRuleName: string,
+  rules: readonly TreeSitterRulePlan[],
+  sourceFile: TreeSitterExpression,
   metadata: TreeSitterMetadata,
 ): RenderContext {
-  const ruleExpressions = new Map<string, EbnfExpression>();
-  for (const rule of grammar.rules) {
+  const ruleExpressions = new Map<string, TreeSitterExpression>();
+  for (const rule of rules) {
     ruleExpressions.set(rule.name, rule.expression);
   }
-  ruleExpressions.set(
-    "source_file",
-    sourceFileExpression(grammar, rootRuleName),
-  );
+  ruleExpressions.set("source_file", sourceFile);
 
   const normalizedRules = new Map<string, NormalizedRuleMetadata>();
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
@@ -2395,7 +2412,7 @@ function collectInlineRules(metadata: TreeSitterMetadata): string[] {
 
 function validateRuleMetadata(
   metadata: TreeSitterRuleMetadata,
-  expression: EbnfExpression,
+  expression: TreeSitterExpression,
   ruleName: string,
   metadataVersion?: TreeSitterMetadata["version"],
   metadataPath = `metadata.rules.${ruleName}`,
@@ -2554,7 +2571,7 @@ function formatRegexLiteral(pattern: string): string {
   return `/${rendered}/`;
 }
 
-function renderTokenDeclaration(token: EbnfTokenDeclaration): string {
+function renderTokenDeclaration(token: TreeSitterTokenPlan): string {
   const regex = formatRegexLiteral(token.pattern);
   const priority = token.priority ?? 0;
   const rendered = priority === 0 ? regex : `prec(${priority}, ${regex})`;
@@ -2566,7 +2583,7 @@ function pathKey(path: number[]): string {
   return path.join(".");
 }
 
-function visit(expression: EbnfExpression, terminals: Set<string>): void {
+function visit(expression: TreeSitterExpression, terminals: Set<string>): void {
   switch (expression.kind) {
     case "field":
       visit(expression.expression, terminals);
@@ -2590,39 +2607,6 @@ function visit(expression: EbnfExpression, terminals: Set<string>): void {
     case "separated":
       visit(expression.item, terminals);
       visit(expression.separator, terminals);
-      return;
-  }
-}
-
-function visitRefExpressions(
-  expression: EbnfExpression,
-  callback: (ref: Extract<EbnfExpression, { kind: "ref" }>) => void,
-): void {
-  switch (expression.kind) {
-    case "field":
-      visitRefExpressions(expression.expression, callback);
-      return;
-    case "ref":
-      callback(expression);
-      return;
-    case "literal":
-      return;
-    case "sequence":
-      for (const item of expression.items) visitRefExpressions(item, callback);
-      return;
-    case "choice":
-      for (const option of expression.options) {
-        visitRefExpressions(option, callback);
-      }
-      return;
-    case "optional":
-    case "repeat":
-    case "repeat1":
-      visitRefExpressions(expression.expression, callback);
-      return;
-    case "separated":
-      visitRefExpressions(expression.item, callback);
-      visitRefExpressions(expression.separator, callback);
       return;
   }
 }

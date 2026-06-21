@@ -5,12 +5,30 @@
 ### Added
 
 - Added the compact parser-kit `runtime` profile for helper-only consumers.
+- Added portable parser-plan v1 metadata and hashes to generated TypeScript,
+  generated Wasm, and parser-kit outputs.
+- Added `check --explain-targets` capability reporting.
+- Added regex compiler resource limits for parsed AST size, bounded repeat
+  expansion, NFA/DFA construction, and overlap analysis.
+- Added Wasm ABI/version/reset exports and repeated-parse memory reuse coverage.
+- Added bootstrap reproducibility tasks for checked-in generated examples.
+- Added TypeScript/Wasm/kit parity coverage for parser plans, conflict branches,
+  token streams, spans, and CST token ranges.
 
 ### Changed
 
 - Parser-kit JSON defaults to the schema-rich `full` profile; the `runtime`
   profile emits minified JSON and omits LR item/lookahead and production
   origin/span detail not needed by `lexWithKit()` or `parseWithKit()`.
+- Standalone parser targets now share a versioned runtime parser planning layer
+  for lexer DFA construction, BNF lowering, LR tables, field schema collection,
+  reducer metadata, and diagnostics.
+- Portable regex validation now uses Baba's regex parser instead of JavaScript
+  `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
+- `parseTokens()` now validates external token streams against one canonical
+  whole-source lex rather than relexing gaps independently.
+- The Wasm target is documented as a JavaScript-hosted core Wasm adapter rather
+  than a host-neutral Wasm ABI.
 
 ## 1.4.0
 

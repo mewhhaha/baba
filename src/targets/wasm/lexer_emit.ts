@@ -70,6 +70,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
 
 export interface WasmParseStream {
   tokens: readonly Token[];
+  tokenIndices: readonly number[];
   input: ParseTraceInput;
   terminalCount: number;
 }
@@ -99,6 +100,9 @@ function lexInternal(
     : includeParseStream
     ? new Array(records.length / 3 + 1)
     : [];
+  const streamTokenIndices: number[] = includeParseStream
+    ? new Array(records.length / 3 + 1)
+    : [];
   const duplicateStreamTokens = streamTokens !== tokens;
   let streamTokenCount = 0;
   const parseTerminals = includeParseStream
@@ -122,6 +126,7 @@ function lexInternal(
             channel: "main",
           };
           tokens[tokenCount] = token;
+          if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
           tokenCount++;
           if (includeParseStream) {
             if (duplicateStreamTokens) {
@@ -152,6 +157,7 @@ function lexInternal(
               channel: "main",
             };
             tokens[tokenCount] = token;
+            if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
             tokenCount++;
             if (includeParseStream) {
               if (duplicateStreamTokens) {
@@ -189,6 +195,7 @@ function lexInternal(
     channel: "main",
   };
   tokens[tokenCount] = eofToken;
+  if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
   tokenCount++;
   tokens.length = tokenCount;
   if (includeParseStream) {
@@ -199,6 +206,7 @@ function lexInternal(
     }
     parseTerminals![terminalCount] = 0;
     terminalCount++;
+    streamTokenIndices.length = terminalCount;
     const parseInput = createParseTraceInput(terminalCount);
     parseInput.terminals.set(parseTerminals!.subarray(0, terminalCount));
     return {
@@ -207,6 +215,7 @@ function lexInternal(
       diagnostics,
       parseStream: {
         tokens: streamTokens,
+        tokenIndices: streamTokenIndices,
         input: parseInput,
         terminalCount,
       },

@@ -58,6 +58,14 @@ Deno.test("TypeScript parser resolves declared shift/reduce conflicts determinis
   assertIncludes(unresolved.diagnostics[0].message, '"prefer": "shift"');
   assertIncludes(
     unresolved.diagnostics[0].message,
+    'Conflict witness prefix: ID "["',
+  );
+  assertIncludes(
+    unresolved.diagnostics[0].message,
+    "The final symbol is the conflicting lookahead.",
+  );
+  assertIncludes(
+    unresolved.diagnostics[0].message,
     "metadata.parser.conflicts",
   );
 
@@ -111,6 +119,10 @@ Deno.test("TypeScript parser reduce/reduce diagnostics suggest reduce candidates
   assertIncludes(result.diagnostics[0].message, "metadata.parser.resolutions");
   assertIncludes(result.diagnostics[0].message, '"prefer": "reduce"');
   assertIncludes(result.diagnostics[0].message, '"reduce": "left = \\"x\\""');
+  assertIncludes(
+    result.diagnostics[0].message,
+    'Conflict witness prefix: "x" EOF',
+  );
   assertIncludes(
     result.diagnostics[0].message,
     'Candidate reduce values: "left = \\"x\\"", "right = \\"x\\""',
@@ -230,6 +242,10 @@ Deno.test("Wasm parser restores saved reduce branch after shifted branch fails",
   assertEquals(
     unresolved.diagnostics[0].code,
     "WASM_PARSER_SHIFT_REDUCE_CONFLICT",
+  );
+  assertIncludes(
+    unresolved.diagnostics[0].message,
+    'Conflict witness prefix: "a" "b"',
   );
 
   const metadata = parseMetadata(JSON.stringify({

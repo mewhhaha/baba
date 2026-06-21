@@ -4,6 +4,10 @@ import {
   normalizeRanges,
   type RegexAst,
 } from "./ast.ts";
+import {
+  enforceRegexAstNodeLimit,
+  type RegexCompilerLimits,
+} from "./limits.ts";
 
 export class RegexSyntaxError extends Error {
   constructor(message: string, readonly index: number) {
@@ -12,12 +16,16 @@ export class RegexSyntaxError extends Error {
   }
 }
 
-export function parsePortableRegex(pattern: string): RegexAst {
+export function parsePortableRegex(
+  pattern: string,
+  limits: RegexCompilerLimits = {},
+): RegexAst {
   const parser = new RegexParser(pattern);
   const ast = parser.parseChoice();
   if (!parser.atEnd()) {
     throw parser.error(`Unexpected ${JSON.stringify(parser.peek())}`);
   }
+  enforceRegexAstNodeLimit(ast, limits);
   return ast;
 }
 

@@ -37,8 +37,8 @@ export default grammar({
     stream: $ => seq("[", field("values", optional($.integer_values)), "]"),
     integer_values: $ => seq(field("head", $.INTEGER), field("tail", repeat($.integer_tail))),
     integer_tail: $ => seq(",", field("value", $.INTEGER)),
-    IDENT: $ => token(/[A-Za-z_][A-Za-z0-9_]*/),
+    IDENT: $ => token(/[A-Z_a-z][0-9A-Z_a-z]*/),
     INTEGER: $ => token(/-?[0-9]+/),
-    WS: $ => /[ \t\r\n]+/,
+    WS: $ => /[\t-\n\r ]+/,
   },
 });

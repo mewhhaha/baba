@@ -36,6 +36,7 @@ const conflictGrammar = `
 Deno.test("TypeScript and Wasm runtimes match deterministic parser behavior", async () => {
   const runtimes = await buildParityRuntimes(deterministicGrammar);
   try {
+    assertPlanMetadataParity(runtimes);
     for (
       const source of [
         "let alpha = 42; if beta; emoji 😀;",
@@ -165,6 +166,20 @@ function assertRuntimeParity(runtimes: ParityRuntimes, source: string): void {
   );
 }
 
+function assertPlanMetadataParity(runtimes: ParityRuntimes): void {
+  assertEquals(runtimes.ts.parserPlanFormat, "baba-parser-plan");
+  assertEquals(runtimes.ts.parserPlanVersion, 1);
+  assertEquals(runtimes.ts.parserPlanSemantics, "baba-portable-v1");
+  assertEquals(runtimes.ts.parserPlanFormat, runtimes.wasm.parserPlanFormat);
+  assertEquals(runtimes.ts.parserPlanVersion, runtimes.wasm.parserPlanVersion);
+  assertEquals(
+    runtimes.ts.parserPlanSemantics,
+    runtimes.wasm.parserPlanSemantics,
+  );
+  assertEquals(runtimes.ts.parserPlanHash, runtimes.wasm.parserPlanHash);
+  assert(runtimes.ts.parserPlanHash.startsWith("fnv1a64:"));
+}
+
 function normalizeLexResult(result: RuntimeLexResult): unknown {
   return {
     source: result.source,
@@ -188,6 +203,7 @@ function normalizeNode(node: RuntimeRuleNode): unknown {
     type: node.type,
     name: node.name,
     span: node.span,
+    tokenRange: node.tokenRange,
     children: node.children.map(normalizeElement),
     fields: normalizeFields(node.fields),
   };
@@ -254,6 +270,10 @@ interface ParityRuntimes {
 }
 
 interface RuntimeModule {
+  parserPlanFormat: "baba-parser-plan";
+  parserPlanVersion: number;
+  parserPlanSemantics: "baba-portable-v1";
+  parserPlanHash: string;
   lex(source: string, options?: { preserveTrivia?: boolean }): RuntimeLexResult;
   parse(
     source: string,
@@ -289,6 +309,7 @@ interface RuntimeRuleNode {
   type: "rule";
   name: string;
   span: RuntimeSpan;
+  tokenRange: { start: number; end: number };
   children: RuntimeSyntaxElement[];
   fields: Record<string, unknown>;
 }

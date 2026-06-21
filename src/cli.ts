@@ -34,6 +34,7 @@ interface Options {
   wasm: WasmTargetOptions;
   kit: KitTargetOptions;
   listFiles: boolean;
+  explainTargets: boolean;
   diagnosticFormat: "text" | "json";
   help: boolean;
 }
@@ -86,6 +87,10 @@ export async function main(args: string[]): Promise<void> {
     ? parseMetadata(await Deno.readTextFile(options.metadataPath))
     : undefined;
   const grammar = parseGrammar(source);
+  if (options.explainTargets) {
+    emitTargetExplanation(grammar, metadata, options);
+    return;
+  }
   const result = compile(grammar, {
     name: options.name,
     rootRule: options.rootRule,
@@ -126,6 +131,7 @@ function parseArgs(args: string[]): Options {
     wasm: {},
     kit: {},
     listFiles: false,
+    explainTargets: false,
     diagnosticFormat: "text",
     help: false,
   };
@@ -256,6 +262,50 @@ function parseArgs(args: string[]): Options {
         options.wasm.lexerStateLimit = options.typescript.lexerStateLimit;
         options.kit.lexerStateLimit = options.typescript.lexerStateLimit;
         break;
+      case "--regex-ast-node-limit":
+        options.typescript.regexAstNodeLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        options.wasm.regexAstNodeLimit = options.typescript.regexAstNodeLimit;
+        options.kit.regexAstNodeLimit = options.typescript.regexAstNodeLimit;
+        break;
+      case "--regex-bounded-repeat-limit":
+        options.typescript.regexBoundedRepeatLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        options.wasm.regexBoundedRepeatLimit =
+          options.typescript.regexBoundedRepeatLimit;
+        options.kit.regexBoundedRepeatLimit =
+          options.typescript.regexBoundedRepeatLimit;
+        break;
+      case "--regex-nfa-state-limit":
+        options.typescript.regexNfaStateLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        options.wasm.regexNfaStateLimit = options.typescript.regexNfaStateLimit;
+        options.kit.regexNfaStateLimit = options.typescript.regexNfaStateLimit;
+        break;
+      case "--regex-dfa-state-limit":
+        options.typescript.regexDfaStateLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        options.wasm.regexDfaStateLimit = options.typescript.regexDfaStateLimit;
+        options.kit.regexDfaStateLimit = options.typescript.regexDfaStateLimit;
+        break;
+      case "--regex-overlap-state-limit":
+        options.typescript.regexOverlapStateLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        options.wasm.regexOverlapStateLimit =
+          options.typescript.regexOverlapStateLimit;
+        options.kit.regexOverlapStateLimit =
+          options.typescript.regexOverlapStateLimit;
+        break;
       case "--parser-state-limit":
         options.typescript.parserStateLimit = parsePositiveIntegerArg(
           args[++i],
@@ -325,6 +375,9 @@ function parseArgs(args: string[]): Options {
       case "--list-files":
         options.listFiles = true;
         break;
+      case "--explain-targets":
+        options.explainTargets = true;
+        break;
       case "--diagnostic-format": {
         const format = args[++i];
         if (!format) {
@@ -389,6 +442,11 @@ Options:
   --preserve-trivia  Preserve skip matches as trivia tokens
   --discard-trivia   Omit skip matches from generated lexer output
   --lexer-state-limit  Maximum TypeScript lexer DFA state count
+  --regex-ast-node-limit       Maximum parsed regex AST node count
+  --regex-bounded-repeat-limit  Maximum regex bounded-repeat expansion
+  --regex-nfa-state-limit       Maximum regex NFA state count
+  --regex-dfa-state-limit       Maximum regex DFA state count
+  --regex-overlap-state-limit   Maximum overlap-analysis product states
   --parser-state-limit  Maximum TypeScript LR state count
   --parser-item-limit   Maximum total TypeScript LR item count
   --parser-table-entry-limit  Maximum TypeScript ACTION/GOTO entry count
@@ -400,6 +458,7 @@ Options:
   --meta        Alias for --metadata
   --ts-meta     Deprecated alias for --metadata
   --diagnostic-format  Diagnostic output format: text or json. Defaults to text
+  --explain-targets  Print target support and portability diagnostics
   --list-files  Print generated file paths without writing output files`;
 }
 
@@ -433,6 +492,118 @@ function hasWasmOptions(options: WasmTargetOptions): boolean {
 
 function hasKitOptions(options: KitTargetOptions): boolean {
   return Object.keys(options).length > 0;
+}
+
+interface TargetExplanation {
+  target: GenerateTarget;
+  label: string;
+  diagnostics: readonly Diagnostic[];
+}
+
+function emitTargetExplanation(
+  grammar: ReturnType<typeof parseGrammar>,
+  metadata: ReturnType<typeof parseMetadata> | undefined,
+  options: Options,
+): void {
+  const reports = explainTargets(grammar, metadata, options);
+  console.log("Target support:");
+  for (const report of reports) {
+    const errors = report.diagnostics.filter((diagnostic) =>
+      (diagnostic.severity ?? "error") === "error"
+    );
+    const warnings = report.diagnostics.filter((diagnostic) =>
+      (diagnostic.severity ?? "error") === "warning"
+    );
+    const status = errors.length > 0
+      ? "unsupported"
+      : warnings.length > 0
+      ? "supported with warnings"
+      : "supported";
+    console.log(`${report.label}: ${status}`);
+  }
+
+  const targetDiagnostics = uniqueDiagnostics(
+    reports.flatMap((report) =>
+      report.diagnostics.map((diagnostic) => ({
+        target: report.label,
+        diagnostic,
+      }))
+    ),
+  );
+
+  console.log("");
+  console.log("Portable guarantees:");
+  if (
+    reports
+      .filter((report) => report.target !== "tree-sitter")
+      .every((report) => !hasErrors(report.diagnostics))
+  ) {
+    console.log("  ✓ TypeScript, Wasm, and kit share portable parser plan v1");
+  }
+  if (
+    !hasErrors(reports.find((report) => report.target === "kit")!.diagnostics)
+  ) {
+    console.log("  ✓ parser-kit schema v1 is available");
+  }
+  if (targetDiagnostics.length === 0) {
+    console.log("  ✓ no target capability diagnostics");
+    return;
+  }
+  for (const { target, diagnostic } of targetDiagnostics) {
+    const mark = (diagnostic.severity ?? "error") === "error" ? "✗" : "!";
+    console.log(
+      `  ${mark} ${target}: ${diagnostic.code}: ${diagnostic.message}`,
+    );
+  }
+}
+
+function explainTargets(
+  grammar: ReturnType<typeof parseGrammar>,
+  metadata: ReturnType<typeof parseMetadata> | undefined,
+  options: Options,
+): TargetExplanation[] {
+  const targets: Array<[GenerateTarget, string]> = [
+    ["tree-sitter", "Tree-sitter"],
+    ["typescript", "TypeScript"],
+    ["wasm", "Wasm"],
+    ["kit", "Kit"],
+  ];
+  return targets.map(([target, label]) => {
+    const result = compile(grammar, {
+      name: options.name,
+      rootRule: options.rootRule,
+      metadata,
+      targets: [target],
+      portability: options.portability,
+      typescript: hasTypeScriptOptions(options.typescript)
+        ? options.typescript
+        : undefined,
+      wasm: hasWasmOptions(options.wasm) ? options.wasm : undefined,
+      kit: hasKitOptions(options.kit) ? options.kit : undefined,
+    });
+    return { target, label, diagnostics: result.diagnostics };
+  });
+}
+
+function uniqueDiagnostics(
+  entries: readonly {
+    target: string;
+    diagnostic: Diagnostic;
+  }[],
+): Array<{ target: string; diagnostic: Diagnostic }> {
+  const seen = new Set<string>();
+  const unique: Array<{ target: string; diagnostic: Diagnostic }> = [];
+  for (const entry of entries) {
+    const key = [
+      entry.diagnostic.code,
+      entry.diagnostic.message,
+      entry.diagnostic.severity ?? "error",
+    ].join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(entry);
+  }
+  return unique;
 }
 
 function diagnosticFormatFromArgs(

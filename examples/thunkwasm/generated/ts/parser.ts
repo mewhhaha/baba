@@ -52,11 +52,22 @@ interface Fragment {
   children: SyntaxElement[];
   fields: FieldCapture[];
   span: Span | null;
+  tokenRange: TokenRange | null;
 }
 
 interface FieldCapture {
   name: string;
   value: unknown;
+}
+
+interface TokenRange {
+  start: number;
+  end: number;
+}
+
+interface ShiftedToken {
+  token: Token;
+  tokenIndex: number;
 }
 
 interface FieldConfig {
@@ -169,7 +180,7 @@ function parseTokenList(
 
     if (action.kind === "shift") {
       states.push(action.state);
-      values.push(token);
+      values.push(shiftedToken(token, index));
       index++;
       continue;
     }
@@ -189,6 +200,7 @@ function parseTokenList(
         production.reducer,
         rhsValues,
         token.span.start,
+        index,
       );
     } catch (error) {
       return {
@@ -239,6 +251,7 @@ function reduceProduction(
   reducer: ReducerSpec,
   rhs: readonly unknown[],
   offset: number,
+  tokenIndex: number,
 ): unknown {
   switch (reducer.kind) {
     case "start":
@@ -249,24 +262,25 @@ function reduceProduction(
         type: "rule",
         name: RULE_NAMES[reducer.ruleId],
         span: fragment.span ?? spanFromChildren(fragment.children) ?? { start: 0, end: 0 },
+        tokenRange: fragment.tokenRange ?? tokenRangeFromChildren(fragment.children) ?? { start: tokenIndex, end: tokenIndex },
         children: fragment.children,
         fields: buildFields(reducer.ruleId, fragment.fields),
       };
       return node as unknown as AnyRuleNode;
     }
     case "terminal":
-      return tokenFragment(rhs[0] as MainNamedToken | LiteralToken);
+      return tokenFragment(rhs[0] as ShiftedToken);
     case "ruleRef":
       return ruleFragment(rhs[0] as AnyRuleNode);
     case "identity":
     case "optionalSome":
       return toFragment(rhs[0]);
     case "sequence":
-      return sequenceFragment(rhs, offset);
+      return sequenceFragment(rhs, offset, tokenIndex);
     case "optionalEmpty":
-      return emptyFragment(null, offset);
+      return emptyFragment(null, offset, tokenIndex);
     case "repeatEmpty":
-      return emptyFragment([], offset);
+      return emptyFragment([], offset, tokenIndex);
     case "repeatAppend":
     case "repeat1Append":
       return appendFragment(toFragment(rhs[0]), toFragment(rhs[1]));
@@ -294,12 +308,17 @@ function reduceProduction(
   }
 }
 
-function tokenFragment(token: MainNamedToken | LiteralToken): Fragment {
+function tokenFragment(shifted: ShiftedToken): Fragment {
+  const token = shifted.token;
+  if (!isMainSyntaxToken(token)) {
+    throw new Error("Expected shifted main syntax token.");
+  }
   return {
     value: token,
     children: [token],
     fields: [],
     span: token.span,
+    tokenRange: { start: shifted.tokenIndex, end: shifted.tokenIndex + 1 },
   };
 }
 
@@ -309,35 +328,48 @@ function ruleFragment(node: AnyRuleNode): Fragment {
     children: [node],
     fields: [],
     span: node.span,
+    tokenRange: node.tokenRange,
   };
 }
 
-function sequenceFragment(values: readonly unknown[], offset: number): Fragment {
+function sequenceFragment(
+  values: readonly unknown[],
+  offset: number,
+  tokenIndex: number,
+): Fragment {
   const fragmentValues: unknown[] = [];
   const children: SyntaxElement[] = [];
   const fields: FieldCapture[] = [];
   let span: Span | null = null;
+  let tokenRange: TokenRange | null = null;
   for (const value of values) {
     const part = toFragment(value);
     fragmentValues.push(part.value);
     appendAll(children, part.children);
     appendAll(fields, part.fields);
     span = combineSpans(span, part.span);
+    tokenRange = combineTokenRanges(tokenRange, part.tokenRange);
   }
   return {
     value: fragmentValues,
     children,
     fields,
     span: span ?? { start: offset, end: offset },
+    tokenRange: tokenRange ?? { start: tokenIndex, end: tokenIndex },
   };
 }
 
-function emptyFragment(value: unknown, offset: number): Fragment {
+function emptyFragment(
+  value: unknown,
+  offset: number,
+  tokenIndex: number,
+): Fragment {
   return {
     value,
     children: [],
     fields: [],
     span: { start: offset, end: offset },
+    tokenRange: { start: tokenIndex, end: tokenIndex },
   };
 }
 
@@ -351,6 +383,7 @@ function appendFragment(list: Fragment, item: Fragment): Fragment {
     children: list.children,
     fields: list.fields,
     span: combineSpans(list.span, item.span),
+    tokenRange: combineTokenRanges(list.tokenRange, item.tokenRange),
   };
 }
 
@@ -370,13 +403,17 @@ function appendSeparatedFragment(
     children: list.children,
     fields: list.fields,
     span: combineSpans(combineSpans(list.span, separator.span), item.span),
+    tokenRange: combineTokenRanges(
+      combineTokenRanges(list.tokenRange, separator.tokenRange),
+      item.tokenRange,
+    ),
   };
 }
 
 function toFragment(value: unknown): Fragment {
   if (isFragment(value)) return value;
   if (isRuleNode(value)) return ruleFragment(value);
-  if (isMainSyntaxToken(value)) return tokenFragment(value);
+  if (isShiftedToken(value)) return tokenFragment(value);
   throw new Error("Expected parser reduction fragment, rule node, or token.");
 }
 
@@ -564,10 +601,21 @@ function lexicalTokenDiagnostic(token: Token): ParseDiagnostic {
   };
 }
 
+function shiftedToken(token: Token, tokenIndex: number): ShiftedToken {
+  return { token, tokenIndex };
+}
+
 function isRuleNode(value: unknown): value is AnyRuleNode {
   return !!value &&
     typeof value === "object" &&
     (value as { type?: unknown }).type === "rule";
+}
+
+function isShiftedToken(value: unknown): value is ShiftedToken {
+  return !!value &&
+    typeof value === "object" &&
+    "token" in value &&
+    "tokenIndex" in value;
 }
 
 function isFragment(value: unknown): value is Fragment {
@@ -575,7 +623,8 @@ function isFragment(value: unknown): value is Fragment {
     typeof value === "object" &&
     "value" in value &&
     "children" in value &&
-    "fields" in value;
+    "fields" in value &&
+    "tokenRange" in value;
 }
 
 function isMainSyntaxToken(
@@ -595,6 +644,9 @@ function validateTokenStream(
   tokens: readonly Token[],
 ): ParseDiagnostic[] {
   const diagnostics: ParseDiagnostic[] = [];
+  const canonical = lex(source, { preserveTrivia: true });
+  const canonicalTokens = canonical.tokens;
+  let canonicalIndex = 0;
   let previousEnd = 0;
   let eofIndex = -1;
 
@@ -616,7 +668,11 @@ function validateTokenStream(
     }
 
     if (span.start > previousEnd) {
-      const gapDiagnostic = validateSourceGap(source, previousEnd, span.start);
+      const gapDiagnostic = validateSourceGap(
+        canonicalTokens,
+        previousEnd,
+        span.start,
+      );
       if (gapDiagnostic) diagnostics.push(gapDiagnostic);
     }
 
@@ -629,6 +685,19 @@ function validateTokenStream(
     previousEnd = Math.max(previousEnd, span.end);
 
     if (token.type === "eof") {
+      const matched = matchCanonicalToken(
+        canonicalTokens,
+        canonicalIndex,
+        token,
+      );
+      if (matched < 0) {
+        diagnostics.push(invalidTokenStream(
+          `Token at index ${index} does not match canonical lexer output.`,
+          span,
+        ));
+      } else {
+        canonicalIndex = matched + 1;
+      }
       if (eofIndex !== -1) {
         diagnostics.push(invalidTokenStream(
           "Token stream contains more than one EOF token.",
@@ -707,6 +776,19 @@ function validateTokenStream(
     } else {
       diagnostics.push(invalidTokenStream("Token has an unknown type.", span));
     }
+    const matched = matchCanonicalToken(
+      canonicalTokens,
+      canonicalIndex,
+      token,
+    );
+    if (matched < 0) {
+      diagnostics.push(invalidTokenStream(
+        `Token at index ${index} does not match canonical lexer output.`,
+        span,
+      ));
+    } else {
+      canonicalIndex = matched + 1;
+    }
   }
 
   if (eofIndex !== -1 && eofIndex !== tokens.length - 1) {
@@ -716,37 +798,74 @@ function validateTokenStream(
     ));
   }
   if (previousEnd < source.length && eofIndex === -1) {
-    const gapDiagnostic = validateSourceGap(source, previousEnd, source.length);
+    const gapDiagnostic = validateSourceGap(
+      canonicalTokens,
+      previousEnd,
+      source.length,
+    );
     if (gapDiagnostic) diagnostics.push(gapDiagnostic);
   }
   return diagnostics;
 }
 
 function validateSourceGap(
-  source: string,
+  canonicalTokens: readonly Token[],
   start: number,
   end: number,
 ): ParseDiagnostic | null {
   if (start === end) return null;
-  const text = source.slice(start, end);
-  const lexed = lex(text, { preserveTrivia: true });
-  const nonEofTokens = lexed.tokens.filter((token) => token.type !== "eof");
-  if (
-    lexed.diagnostics.length === 0 &&
-    nonEofTokens.length > 0 &&
-    nonEofTokens.every((token) =>
-      token.type === "named" &&
-      token.channel === "trivia" &&
-      token.span.start >= 0 &&
-      token.span.end <= text.length
-    )
-  ) {
-    return null;
+  for (const token of canonicalTokens) {
+    if (token.type === "eof") continue;
+    if (token.span.end <= start) continue;
+    if (token.span.start >= end) break;
+    if (
+      token.type !== "named" ||
+      token.channel !== "trivia" ||
+      token.span.start < start ||
+      token.span.end > end
+    ) {
+      return invalidTokenStream(
+        "Token stream omits nontrivia source text.",
+        { start, end },
+      );
+    }
   }
-  return invalidTokenStream(
-    "Token stream omits nontrivia source text.",
-    { start, end },
-  );
+  return null;
+}
+
+function matchCanonicalToken(
+  canonicalTokens: readonly Token[],
+  startIndex: number,
+  token: Token,
+): number {
+  for (let index = startIndex; index < canonicalTokens.length; index++) {
+    const canonical = canonicalTokens[index];
+    if (canonical.type !== "eof" && isTriviaToken(canonical)) {
+      if (sameToken(canonical, token)) return index;
+      if (canonical.span.end <= token.span.start) continue;
+    }
+    return sameToken(canonical, token) ? index : -1;
+  }
+  return -1;
+}
+
+function sameToken(left: Token, right: Token): boolean {
+  if (
+    left.type !== right.type ||
+    left.text !== right.text ||
+    left.channel !== right.channel ||
+    left.span.start !== right.span.start ||
+    left.span.end !== right.span.end
+  ) {
+    return false;
+  }
+  if (left.type === "named" && right.type === "named") {
+    return left.kind === right.kind;
+  }
+  if (left.type === "literal" && right.type === "literal") {
+    return left.literal === right.literal;
+  }
+  return true;
 }
 
 function invalidTokenStream(message: string, span: Span): ParseDiagnostic {
@@ -814,7 +933,30 @@ function spanFromChildren(children: readonly SyntaxElement[]): Span | null {
   );
 }
 
+function tokenRangeFromChildren(
+  children: readonly SyntaxElement[],
+): TokenRange | null {
+  return children.reduce<TokenRange | null>((range, child) => {
+    if (child.type === "rule") {
+      return combineTokenRanges(range, child.tokenRange);
+    }
+    return range;
+  }, null);
+}
+
 function combineSpans(left: Span | null, right: Span | null): Span | null {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    start: Math.min(left.start, right.start),
+    end: Math.max(left.end, right.end),
+  };
+}
+
+function combineTokenRanges(
+  left: TokenRange | null,
+  right: TokenRange | null,
+): TokenRange | null {
   if (!left) return right;
   if (!right) return left;
   return {

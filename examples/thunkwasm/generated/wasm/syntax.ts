@@ -234,6 +234,7 @@ export interface RuleNodeBase<N extends RuleName = RuleName> {
   type: "rule";
   name: N;
   span: Span;
+  tokenRange: { start: number; end: number };
   children: readonly SyntaxElement[];
   fields: unknown;
 }

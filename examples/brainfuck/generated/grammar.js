@@ -19,6 +19,6 @@ export default grammar({
     fork: $ => seq("{", field("body", repeat($.instruction)), "}"),
     join: $ => "!",
     INTEGER: $ => token(/[0-9]+/),
-    ignored: $ => /[^\+\-<>.,\[\]\{\}!0-9]+/,
+    ignored: $ => /[^!+-.0-9<>[\]{}]+/,
   },
 });

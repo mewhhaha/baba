@@ -1,5 +1,6 @@
 import type { RegexAst } from "./ast.ts";
 import { buildDfa, type Dfa } from "./dfa.ts";
+import type { RegexCompilerLimits } from "./limits.ts";
 import { buildCombinedNfa } from "./nfa.ts";
 
 export interface LexerRegexSpec {
@@ -9,11 +10,15 @@ export interface LexerRegexSpec {
   order: number;
 }
 
-export function buildLexerDfa(specs: readonly LexerRegexSpec[]): Dfa {
+export function buildLexerDfa(
+  specs: readonly LexerRegexSpec[],
+  limits: RegexCompilerLimits = {},
+): Dfa {
   const nfa = buildCombinedNfa(
     specs.map((spec, index) => ({ ast: spec.ast, accept: index })),
+    limits,
   );
-  return buildDfa(nfa, (accepts) => chooseAccept(specs, accepts));
+  return buildDfa(nfa, (accepts) => chooseAccept(specs, accepts), limits);
 }
 
 function chooseAccept(

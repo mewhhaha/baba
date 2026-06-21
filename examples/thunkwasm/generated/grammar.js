@@ -51,8 +51,8 @@ export default grammar({
     variable: $ => field("name", $.IDENT),
     tick: $ => seq("tick", "(", field("value", $.expr), ")"),
     group: $ => seq("(", field("body", $.expr), ")"),
-    IDENT: $ => token(/[A-Za-z_][A-Za-z0-9_]*/),
+    IDENT: $ => token(/[A-Z_a-z][0-9A-Z_a-z]*/),
     INTEGER: $ => token(/[0-9]+/),
-    WS: $ => /[ \t\r\n]+/,
+    WS: $ => /[\t-\n\r ]+/,
   },
 });

@@ -7,7 +7,7 @@ import type {
 } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { LookaheadBitset, LrAction } from "../typescript/lr1.ts";
-import { collectRuleFieldSchemas } from "../typescript/syntax_emit.ts";
+import { collectRuleFieldSchemas } from "../runtime/field_schema.ts";
 import {
   planRuntimeParserTarget,
   type RuntimeParserPlan,
@@ -25,6 +25,7 @@ import type {
 export interface KitPlan {
   analyzed: AnalyzedGrammar;
   runtime: RuntimeParserPlan;
+  portable: RuntimeParserPlan["portable"];
   kit: ParserKit;
   directory: string;
   diagnostics: readonly Diagnostic[];
@@ -57,6 +58,7 @@ export function planKitTarget(
   return {
     analyzed,
     runtime: runtimePlan,
+    portable: runtimePlan.portable,
     kit,
     directory: options.directory ?? "kit",
     diagnostics,
@@ -89,6 +91,7 @@ function createParserKit(
     schemaVersion: 1,
     generator: "@mewhhaha/baba",
     profile,
+    portablePlan: { ...runtime.portableMetadata },
     grammar: {
       name: analyzed.name,
       rootRule: analyzed.rules[analyzed.rootRule]?.name ?? "module",
@@ -109,7 +112,7 @@ function createParserKit(
         name: token.name,
         kind: token.kind,
         channel: token.kind === "skip" ? "trivia" : "main",
-        pattern: token.pattern,
+        pattern: token.patternSource,
         priority: token.priority,
         declarationOrder: token.declarationOrder,
         reachable: token.kind === "skip" ||
@@ -342,6 +345,11 @@ function runtimePlanningOptions(
 ): RuntimeParserPlanningOptions {
   return {
     lexerStateLimit: options.lexerStateLimit,
+    regexAstNodeLimit: options.regexAstNodeLimit,
+    regexBoundedRepeatLimit: options.regexBoundedRepeatLimit,
+    regexNfaStateLimit: options.regexNfaStateLimit,
+    regexDfaStateLimit: options.regexDfaStateLimit,
+    regexOverlapStateLimit: options.regexOverlapStateLimit,
     parserStateLimit: options.parserStateLimit,
     parserItemLimit: options.parserItemLimit,
     parserTableEntryLimit: options.parserTableEntryLimit,

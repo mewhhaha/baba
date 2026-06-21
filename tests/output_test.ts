@@ -129,6 +129,59 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
     });
     assertIncludes(targetLogs.join("\n"), "typescript/mod.ts");
 
+    let explainLogs: string[] = [];
+    await captureConsoleError(async () => {
+      explainLogs = await captureConsoleLog(() =>
+        main([
+          "check",
+          grammarPath,
+          "--explain-targets",
+        ])
+      );
+    });
+    assertIncludes(explainLogs.join("\n"), "Target support:");
+    assertIncludes(explainLogs.join("\n"), "Tree-sitter: supported");
+    assertIncludes(explainLogs.join("\n"), "Kit: supported");
+    assertIncludes(
+      explainLogs.join("\n"),
+      "TypeScript, Wasm, and kit share portable parser plan v1",
+    );
+
+    const externalMetadataPath = `${dir}/externals.json`;
+    await Deno.writeTextFile(
+      externalMetadataPath,
+      JSON.stringify({ version: 1, externals: ["INDENT"] }),
+    );
+    const externalGrammarPath = `${dir}/external.ebnf`;
+    await Deno.writeTextFile(
+      externalGrammarPath,
+      `
+        token ident = /[a-z]+/ ;
+        module = INDENT ident ;
+      `,
+    );
+    let externalExplainLogs: string[] = [];
+    await captureConsoleError(async () => {
+      externalExplainLogs = await captureConsoleLog(() =>
+        main([
+          "check",
+          externalGrammarPath,
+          "--metadata",
+          externalMetadataPath,
+          "--explain-targets",
+        ])
+      );
+    });
+    assertIncludes(externalExplainLogs.join("\n"), "Tree-sitter: supported");
+    assertIncludes(
+      externalExplainLogs.join("\n"),
+      "TypeScript: unsupported",
+    );
+    assertIncludes(
+      externalExplainLogs.join("\n"),
+      "TS_EXTERNAL_TOKENS_UNSUPPORTED",
+    );
+
     const tsOutDir = `${dir}/ts-out`;
     let tsErrors: string[] = [];
     await captureConsoleLog(async () => {
@@ -143,6 +196,16 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
           "--ts-out",
           "ts",
           "--discard-trivia",
+          "--regex-ast-node-limit",
+          "1000",
+          "--regex-bounded-repeat-limit",
+          "100",
+          "--regex-nfa-state-limit",
+          "1000",
+          "--regex-dfa-state-limit",
+          "1000",
+          "--regex-overlap-state-limit",
+          "1000",
           "--parser-state-limit",
           "100",
           "--parser-item-limit",

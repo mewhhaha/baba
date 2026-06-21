@@ -54,6 +54,20 @@ Deno.test("compileParserKit returns stable parser-kit data", () => {
 
   const kit = result.kit;
   assertEquals(validateParserKit(kit).length, 0);
+  assertEquals(kit.portablePlan.format, "baba-parser-plan");
+  assertEquals(kit.portablePlan.version, 1);
+  assertEquals(kit.portablePlan.semantics, "baba-portable-v1");
+  assert(kit.portablePlan.hash.startsWith("fnv1a64:"));
+  assertEquals(kit.portablePlan.hash.length, "fnv1a64:".length + 16);
+  const invalidPortablePlanKit = structuredClone(kit) as unknown as {
+    portablePlan: { hash: unknown };
+  };
+  invalidPortablePlanKit.portablePlan.hash = 1;
+  assert(
+    validateParserKit(invalidPortablePlanKit).some((issue) =>
+      issue.path === "$.portablePlan.hash"
+    ),
+  );
   const invalidKit = structuredClone(kit) as unknown as {
     lexer: { dfa: { accepts: unknown } };
   };
@@ -334,6 +348,10 @@ Deno.test("parser-kit helpers match generated TypeScript runtime behavior", asyn
     deterministicGrammar,
   );
   try {
+    assertEquals(kit.portablePlan.format, ts.parserPlanFormat);
+    assertEquals(kit.portablePlan.version, ts.parserPlanVersion);
+    assertEquals(kit.portablePlan.semantics, ts.parserPlanSemantics);
+    assertEquals(kit.portablePlan.hash, ts.parserPlanHash);
     for (
       const source of [
         "let alpha = 42; if beta; emoji 😀;",
@@ -460,6 +478,7 @@ function normalizeNode(node: RuntimeRuleNode | KitRuleNode): unknown {
     type: node.type,
     name: node.name,
     span: node.span,
+    tokenRange: node.tokenRange,
     children: node.children.map(normalizeElement),
     fields: normalizeFields(node.fields),
   };
@@ -528,6 +547,10 @@ interface KitParityRuntime {
 }
 
 interface RuntimeModule {
+  parserPlanFormat: "baba-parser-plan";
+  parserPlanVersion: number;
+  parserPlanSemantics: "baba-portable-v1";
+  parserPlanHash: string;
   lex(source: string, options?: { preserveTrivia?: boolean }): RuntimeLexResult;
   parse(
     source: string,
@@ -563,6 +586,7 @@ interface RuntimeRuleNode {
   type: "rule";
   name: string;
   span: { start: number; end: number };
+  tokenRange: { start: number; end: number };
   children: RuntimeSyntaxElement[];
   fields: Record<string, unknown>;
 }

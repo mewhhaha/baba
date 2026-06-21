@@ -22,6 +22,8 @@ interface DataLayout {
 }
 
 const PAGE_SIZE = 65_536;
+const MAX_WASM_PAGES = 65_535;
+const WASM_ABI_VERSION = 1;
 const I32 = 0x7f;
 const FUNC = 0x60;
 const EMPTY_BLOCK = 0x40;
@@ -34,15 +36,29 @@ export function emitWasmModule(
   dfa: Dfa,
   bnf: BnfGrammar,
   lr: LrTable,
+  parserPlanVersion = 1,
 ): WasmModuleImage {
   const layout = buildDataLayout(dfa, bnf, lr);
   const initialPages = Math.max(1, Math.ceil(layout.inputBase / PAGE_SIZE));
+  if (initialPages > MAX_WASM_PAGES) {
+    throw new Error(
+      `Wasm static data needs ${initialPages} pages, exceeding the maximum ${MAX_WASM_PAGES}.`,
+    );
+  }
   const sections = [
     section(1, typeSection()),
     section(3, functionSection()),
     section(5, memorySection(initialPages)),
     section(7, exportSection()),
-    section(10, codeSection(layout, dfa.states.length, lr.states.length)),
+    section(
+      10,
+      codeSection(
+        layout,
+        dfa.states.length,
+        lr.states.length,
+        parserPlanVersion,
+      ),
+    ),
     section(11, dataSection(layout.bytes)),
   ];
   return {
@@ -211,6 +227,16 @@ function typeSection(): number[] {
       ...vec([I32, I32, I32, I32, I32, I32, I32, I32, I32]),
       ...vec([I32]),
     ],
+    [
+      FUNC,
+      ...vec([]),
+      ...vec([I32]),
+    ],
+    [
+      FUNC,
+      ...vec([]),
+      ...vec([]),
+    ],
   ]);
 }
 
@@ -222,11 +248,14 @@ function functionSection(): number[] {
     u32(0),
     u32(1),
     u32(2),
+    u32(3),
+    u32(3),
+    u32(4),
   ]);
 }
 
 function memorySection(initialPages: number): number[] {
-  return vec([[0x00, ...u32(initialPages)]]);
+  return vec([[0x01, ...u32(initialPages), ...u32(MAX_WASM_PAGES)]]);
 }
 
 function exportSection(): number[] {
@@ -237,6 +266,9 @@ function exportSection(): number[] {
     exportEntry("parser_goto", 0x00, 3),
     exportEntry("lex_all", 0x00, 4),
     exportEntry("parse_trace", 0x00, 5),
+    exportEntry("abi_version", 0x00, 6),
+    exportEntry("plan_version", 0x00, 7),
+    exportEntry("reset", 0x00, 8),
   ]);
 }
 
@@ -244,6 +276,7 @@ function codeSection(
   layout: DataLayout,
   dfaStateCount: number,
   parserStateCount: number,
+  parserPlanVersion: number,
 ): number[] {
   return vec([
     functionBody(3, transitionFunction(layout, dfaStateCount)),
@@ -268,7 +301,18 @@ function codeSection(
     ),
     functionBody(15, lexAllFunction(layout)),
     functionBody(23, parseTraceFunction(layout)),
+    functionBody(0, versionFunction(WASM_ABI_VERSION)),
+    functionBody(0, versionFunction(parserPlanVersion)),
+    functionBody(0, resetFunction()),
   ]);
+}
+
+function versionFunction(version: number): number[] {
+  return i32(version);
+}
+
+function resetFunction(): number[] {
+  return [];
 }
 
 function dataSection(data: Uint8Array): number[] {

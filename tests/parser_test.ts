@@ -171,6 +171,44 @@ void diagnostics;
   }
 });
 
+Deno.test("TypeScript CST nodes expose public token ranges", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    skip COMMENT = /#[^\\n]*/ ;
+    module = items:item+ ;
+    item = value:IDENT ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("a # comment\nb", { preserveTrivia: true });
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.tokenRange.start, 0);
+    assertEquals(parsed.root.tokenRange.end, 5);
+    const items = parsed.root.fields.items;
+    assertEquals(items[0].tokenRange.start, 0);
+    assertEquals(items[0].tokenRange.end, 1);
+    assertEquals(items[1].tokenRange.start, 4);
+    assertEquals(items[1].tokenRange.end, 5);
+    assertEquals(
+      parsed.tokens
+        .slice(parsed.root.tokenRange.start, parsed.root.tokenRange.end)
+        .map((token: { channel: string }) => token.channel)
+        .join(","),
+      "main,trivia,trivia,trivia,main",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("TypeScript target rejects nonportable character class escapes", () => {
   for (const pattern of ["[\\s]+", "[\\d]+", "[\\p{L}]+"]) {
     const result = compile(
@@ -183,6 +221,18 @@ Deno.test("TypeScript target rejects nonportable character class escapes", () =>
     assertEquals(result.bundle, undefined);
     assertEquals(result.diagnostics[0].code, "INVALID_TOKEN_REGEX");
   }
+});
+
+Deno.test("EBNF parser captures regex text for compiler validation", () => {
+  const grammar = parseEbnf(`
+    token VALUE = /a{2,1}/ ;
+    module = VALUE ;
+  `);
+
+  assertEquals(grammar.tokens[0].pattern, "a{2,1}");
+  const result = compile(grammar, { targets: ["typescript"] });
+  assertEquals(result.bundle, undefined);
+  assertEquals(result.diagnostics[0].code, "INVALID_TOKEN_REGEX");
 });
 
 Deno.test("TypeScript parser derives optional separated-list fields", async () => {
@@ -276,7 +326,10 @@ Deno.test("TypeScript parser ignores trivia in parseTokens and rejects unknown t
       lexed.tokens.at(-1),
     ]);
     assertEquals(unknown.ok, false);
-    assertEquals(unknown.diagnostics[0].code, "PARSE_LEXICAL_ERROR");
+    assertEquals(
+      unknown.diagnostics[0].code,
+      "PARSE_INVALID_TOKEN_STREAM",
+    );
 
     const eofBeforeMore = mod.parseTokens("if value", [
       lexed.tokens.at(-1),

@@ -9,6 +9,10 @@ import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
 import type { LrTable } from "../typescript/lr1.ts";
+import type {
+  PortableParserPlanMetadata,
+  PortableParserPlanV1,
+} from "../runtime/portable_plan.ts";
 import { emitSyntax } from "../typescript/syntax_emit.ts";
 import {
   planRuntimeParserTarget,
@@ -25,6 +29,8 @@ export interface WasmPlan {
   bnf: BnfGrammar;
   lr: LrTable;
   dfa: Dfa;
+  portable: PortableParserPlanV1;
+  portableMetadata: PortableParserPlanMetadata;
   wasm: WasmModuleImage;
   directory: string;
   preserveTrivia: boolean;
@@ -53,12 +59,15 @@ export function planWasmTarget(
     runtimePlan.dfa,
     runtimePlan.bnf,
     runtimePlan.lr,
+    runtimePlan.portable.version,
   );
   return {
     analyzed,
     bnf: runtimePlan.bnf,
     lr: runtimePlan.lr,
     dfa: runtimePlan.dfa,
+    portable: runtimePlan.portable,
+    portableMetadata: runtimePlan.portableMetadata,
     wasm,
     directory: options.directory ?? "wasm",
     preserveTrivia: options.preserveTrivia ?? true,
@@ -79,7 +88,7 @@ export function emitWasmTarget(
     },
     {
       path: `${dir}/wasm.ts`,
-      content: emitWasmRuntime(plan.wasm),
+      content: emitWasmRuntime(plan.wasm, plan.portableMetadata),
       kind: "source",
     },
     {
@@ -105,7 +114,7 @@ function wasmModSource(): string {
 export * from "./syntax.ts";
 export { lex } from "./lexer.ts";
 export { parse, parseTokens, parseTokensUnchecked } from "./parser.ts";
-export { wasmBytes } from "./wasm.ts";
+export { memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, wasmAbiVersion, wasmBytes, wasmTargetKind } from "./wasm.ts";
 `;
 }
 
@@ -114,6 +123,11 @@ function runtimePlanningOptions(
 ): RuntimeParserPlanningOptions {
   return {
     lexerStateLimit: options.lexerStateLimit,
+    regexAstNodeLimit: options.regexAstNodeLimit,
+    regexBoundedRepeatLimit: options.regexBoundedRepeatLimit,
+    regexNfaStateLimit: options.regexNfaStateLimit,
+    regexDfaStateLimit: options.regexDfaStateLimit,
+    regexOverlapStateLimit: options.regexOverlapStateLimit,
     parserStateLimit: options.parserStateLimit,
     parserItemLimit: options.parserItemLimit,
     parserTableEntryLimit: options.parserTableEntryLimit,

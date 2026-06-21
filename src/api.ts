@@ -15,6 +15,7 @@ import type {
 } from "./ast.ts";
 import {
   collectAnalyzedTreeSitterHighlightDiagnostics,
+  validateAnalyzedTreeSitterBackendCapabilities,
   validateTreeSitterBackendCapabilities,
   validateTreeSitterGenerationMetadataSemantics,
 } from "./generate.ts";
@@ -83,6 +84,7 @@ export function validateGrammar(
       grammar,
       options.rootRule ?? grammar.rules[0]?.name ?? "module",
       options.metadata ?? {},
+      analyzed,
     ));
   }
   if (targets.includes("typescript")) {
@@ -224,7 +226,12 @@ export function compile(
 
   if (!hasErrors(diagnostics) && targets.includes("tree-sitter")) {
     diagnostics.push(
-      ...treeSitterValidationDiagnostics(grammar, rootRuleName, metadata),
+      ...treeSitterValidationDiagnostics(
+        grammar,
+        rootRuleName,
+        metadata,
+        analyzed,
+      ),
     );
   }
   if (typeScriptPlan) diagnostics.push(...typeScriptPlan.diagnostics);
@@ -343,6 +350,7 @@ function treeSitterValidationDiagnostics(
   grammar: EbnfGrammar,
   rootRuleName: string,
   metadata: BabaMetadata,
+  analyzed?: ReturnType<typeof analyzeGrammar>,
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   try {
@@ -360,7 +368,8 @@ function treeSitterValidationDiagnostics(
     });
   }
   try {
-    validateTreeSitterBackendCapabilities(grammar);
+    if (analyzed) validateAnalyzedTreeSitterBackendCapabilities(analyzed);
+    else validateTreeSitterBackendCapabilities(grammar);
   } catch (error) {
     const diagnostic = toBabaError(error, "BACKEND_CAPABILITY_ERROR")
       .toDiagnostic();

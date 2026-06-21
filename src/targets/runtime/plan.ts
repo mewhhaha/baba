@@ -3,25 +3,41 @@ import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { RegexAst } from "../../compiler/regex/ast.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
 import {
+  enforceRegexAstNodeLimit,
+  type RegexCompilerLimits,
+  RegexResourceLimitError,
+} from "../../compiler/regex/limits.ts";
+import {
   buildLexerDfa,
   type LexerRegexSpec,
 } from "../../compiler/regex/lexer.ts";
-import { isRegexNullable } from "../../compiler/regex/nullable.ts";
-import { regexOverlapWitness } from "../../compiler/regex/overlap.ts";
-import { parsePortableRegex } from "../../compiler/regex/parser.ts";
+import { dfaOverlapWitness, regexDfa } from "../../compiler/regex/overlap.ts";
 import { type BnfGrammar, lowerToBnf } from "../typescript/bnf.ts";
 import { buildCanonicalLr1Table, type LrTable } from "../typescript/lr1.ts";
+import {
+  createPortableParserPlanV1,
+  type PortableParserPlanMetadata,
+  portableParserPlanMetadata,
+  type PortableParserPlanV1,
+} from "./portable_plan.ts";
 
 export interface RuntimeParserPlan {
   analyzed: AnalyzedGrammar;
   bnf: BnfGrammar;
   lr: LrTable;
   dfa: Dfa;
+  portable: PortableParserPlanV1;
+  portableMetadata: PortableParserPlanMetadata;
   diagnostics: readonly Diagnostic[];
 }
 
 export interface RuntimeParserPlanningOptions {
   lexerStateLimit?: number;
+  regexBoundedRepeatLimit?: number;
+  regexAstNodeLimit?: number;
+  regexNfaStateLimit?: number;
+  regexDfaStateLimit?: number;
+  regexOverlapStateLimit?: number;
   parserStateLimit?: number;
   parserItemLimit?: number;
   parserTableEntryLimit?: number;
@@ -34,10 +50,16 @@ export interface RuntimeParserTargetConfig {
 }
 
 const DEFAULT_LEXER_STATE_LIMIT = 50_000;
+const DEFAULT_REGEX_AST_NODE_LIMIT = 100_000;
+const DEFAULT_REGEX_BOUNDED_REPEAT_LIMIT = 10_000;
+const DEFAULT_REGEX_NFA_STATE_LIMIT = 100_000;
+const DEFAULT_REGEX_DFA_STATE_LIMIT = 50_000;
+const DEFAULT_REGEX_OVERLAP_STATE_LIMIT = 250_000;
 
 interface RuntimeRegexAnalysis {
   diagnostics: readonly Diagnostic[];
   astByTokenId: ReadonlyMap<number, RegexAst>;
+  dfaByTokenId: ReadonlyMap<number, Dfa>;
 }
 
 interface RuntimeDfaAnalysis {
@@ -52,22 +74,27 @@ export function planRuntimeParserTarget(
   portability: PortabilityMode = "warn",
   config: RuntimeParserTargetConfig,
 ): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } {
-  const regexAnalysis = analyzeRuntimeRegexes(analyzed, config);
+  const optionDiagnostics = runtimeOptionsDiagnostics(options, config);
+  if (hasErrors(optionDiagnostics)) return { diagnostics: optionDiagnostics };
+  const regexLimits = runtimeRegexLimits(options);
+  const regexAnalysis = analyzeRuntimeRegexes(analyzed, regexLimits, config);
   const diagnostics: Diagnostic[] = [
-    ...runtimeCapabilityDiagnostics(analyzed, metadata, portability, config),
+    ...optionDiagnostics,
     ...regexAnalysis.diagnostics,
+    ...runtimeCapabilityDiagnostics(analyzed, metadata, portability, config),
     ...runtimeLiteralDiagnostics(analyzed, config),
     ...runtimeTokenOverlapDiagnostics(
       analyzed,
-      regexAnalysis.astByTokenId,
+      regexAnalysis.dfaByTokenId,
+      regexLimits,
       config,
     ),
     ...runtimeLiteralOverlapDiagnostics(
       analyzed,
-      regexAnalysis.astByTokenId,
+      regexAnalysis.dfaByTokenId,
+      regexLimits,
       config,
     ),
-    ...runtimeOptionsDiagnostics(options, config),
   ];
   if (hasErrors(diagnostics)) return { diagnostics };
 
@@ -75,6 +102,7 @@ export function planRuntimeParserTarget(
     analyzed,
     regexAnalysis.astByTokenId,
     options,
+    regexLimits,
     config,
   );
   diagnostics.push(...dfaAnalysis.diagnostics);
@@ -102,11 +130,20 @@ export function planRuntimeParserTarget(
   );
   if (hasErrors(diagnostics)) return { diagnostics };
 
+  const portable = createPortableParserPlanV1(
+    analyzed,
+    bnf,
+    lr,
+    dfaAnalysis.dfa,
+  );
+
   return {
     analyzed,
     bnf,
     lr,
     dfa: dfaAnalysis.dfa,
+    portable,
+    portableMetadata: portableParserPlanMetadata(portable),
     diagnostics,
   };
 }
@@ -225,46 +262,36 @@ function runtimeCapabilityDiagnostics(
 
 function analyzeRuntimeRegexes(
   analyzed: AnalyzedGrammar,
+  limits: RegexCompilerLimits,
   config: RuntimeParserTargetConfig,
 ): RuntimeRegexAnalysis {
   const diagnostics: Diagnostic[] = [];
   const astByTokenId = new Map<number, RegexAst>();
+  const dfaByTokenId = new Map<number, Dfa>();
   for (const token of analyzed.tokens) {
     if (token.kind === "token" && !analyzed.reachableTokens.has(token.id)) {
       continue;
     }
-    let ast: RegexAst;
+    astByTokenId.set(token.id, token.pattern);
     try {
-      ast = parsePortableRegex(token.pattern);
+      enforceRegexAstNodeLimit(token.pattern, limits);
+      dfaByTokenId.set(token.id, regexDfa(token.pattern, limits));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      diagnostics.push({
-        code: `${config.codePrefix}_LEXER_UNSUPPORTED_REGEX`,
-        severity: "error",
-        backend: config.backend,
-        message:
-          `Token '${token.name}' is outside Baba's portable regex subset: ${message}`,
-        span: token.span,
-      });
-      continue;
-    }
-    astByTokenId.set(token.id, ast);
-    if (isRegexNullable(ast)) {
-      diagnostics.push({
-        code: `${config.codePrefix}_LEXER_EMPTY_TOKEN`,
-        severity: "error",
-        backend: config.backend,
-        message: `Token '${token.name}' must not match empty text.`,
-        span: token.span,
-      });
+      const diagnostic = regexLimitDiagnostic(error, config, token.span);
+      if (diagnostic) {
+        diagnostics.push(diagnostic);
+        continue;
+      }
+      throw error;
     }
   }
-  return { diagnostics, astByTokenId };
+  return { diagnostics, astByTokenId, dfaByTokenId };
 }
 
 function runtimeTokenOverlapDiagnostics(
   analyzed: AnalyzedGrammar,
-  astByTokenId: ReadonlyMap<number, RegexAst>,
+  dfaByTokenId: ReadonlyMap<number, Dfa>,
+  limits: RegexCompilerLimits,
   config: RuntimeParserTargetConfig,
 ): Diagnostic[] {
   const tokens = analyzed.tokens.filter((token) =>
@@ -280,17 +307,77 @@ function runtimeTokenOverlapDiagnostics(
     ) {
       const left = tokens[leftIndex];
       const right = tokens[rightIndex];
-      const leftAst = astByTokenId.get(left.id);
-      const rightAst = astByTokenId.get(right.id);
-      if (!leftAst || !rightAst) continue;
-      const witness = regexOverlapWitness(leftAst, rightAst);
+      const leftDfa = dfaByTokenId.get(left.id);
+      const rightDfa = dfaByTokenId.get(right.id);
+      if (!leftDfa || !rightDfa) continue;
+      let witness: string | null;
+      try {
+        witness = dfaOverlapWitness(leftDfa, rightDfa, limits);
+      } catch (error) {
+        const diagnostic = regexLimitDiagnostic(error, config, right.span);
+        if (diagnostic) {
+          diagnostics.push(diagnostic);
+          continue;
+        }
+        throw error;
+      }
       if (!witness) continue;
-      if (left.priority !== right.priority) continue;
-      const selected = left.declarationOrder < right.declarationOrder
-        ? left
-        : right;
+      const selected = selectNamedToken(left, right);
       const shadowed = selected === left ? right : left;
       const skipOnly = left.kind === "skip" && right.kind === "skip";
+      if (left.priority !== right.priority) {
+        if (skipOnly) {
+          diagnostics.push({
+            code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
+            severity: "warning",
+            backend: config.backend,
+            message: `${tokenLabel(left)} and ${
+              tokenLabel(right)
+            } can both match ${
+              JSON.stringify(witness)
+            }. Priority ${selected.priority} selects ${
+              tokenLabel(selected)
+            } before ${tokenLabel(shadowed)} for this trivia input.`,
+            span: shadowed.span,
+          });
+          continue;
+        }
+        if (selected.kind === "skip") {
+          diagnostics.push({
+            code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
+            severity: "error",
+            backend: config.backend,
+            message: `${tokenLabel(left)} and ${
+              tokenLabel(right)
+            } can both match ${
+              JSON.stringify(witness)
+            }. Priority ${selected.priority} selects ${
+              tokenLabel(selected)
+            } before ${tokenLabel(shadowed)}, so ${
+              tokenLabel(shadowed)
+            } cannot reach the parser for this input.`,
+            span: selected.span,
+          });
+          continue;
+        }
+        if (shadowed.kind === "skip") continue;
+        diagnostics.push({
+          code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
+          severity: "error",
+          backend: config.backend,
+          message: `${tokenLabel(left)} and ${
+            tokenLabel(right)
+          } can both match ${
+            JSON.stringify(witness)
+          }. Priority ${selected.priority} selects ${
+            tokenLabel(selected)
+          } before ${tokenLabel(shadowed)} with the portable global lexer, so ${
+            tokenLabel(shadowed)
+          } may be unavailable in parser states that expect it.`,
+          span: shadowed.span,
+        });
+        continue;
+      }
       diagnostics.push({
         code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
         severity: skipOnly ? "warning" : "error",
@@ -327,7 +414,8 @@ function runtimeLiteralDiagnostics(
 
 function runtimeLiteralOverlapDiagnostics(
   analyzed: AnalyzedGrammar,
-  astByTokenId: ReadonlyMap<number, RegexAst>,
+  dfaByTokenId: ReadonlyMap<number, Dfa>,
+  limits: RegexCompilerLimits,
   config: RuntimeParserTargetConfig,
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
@@ -339,11 +427,39 @@ function runtimeLiteralOverlapDiagnostics(
   const literals = analyzed.literals.filter((literal) =>
     analyzed.reachableLiterals.has(literal.id)
   );
+  const dfaByLiteralId = new Map<number, Dfa>();
+  for (const literal of literals) {
+    try {
+      dfaByLiteralId.set(
+        literal.id,
+        regexDfa(literalAst(literal.value), limits),
+      );
+    } catch (error) {
+      const diagnostic = regexLimitDiagnostic(error, config, literal.span);
+      if (diagnostic) {
+        diagnostics.push(diagnostic);
+        continue;
+      }
+      throw error;
+    }
+  }
   for (const token of tokens) {
-    const tokenAst = astByTokenId.get(token.id);
-    if (!tokenAst) continue;
+    const tokenDfa = dfaByTokenId.get(token.id);
+    if (!tokenDfa) continue;
     for (const literal of literals) {
-      const witness = regexOverlapWitness(tokenAst, literalAst(literal.value));
+      const literalDfa = dfaByLiteralId.get(literal.id);
+      if (!literalDfa) continue;
+      let witness: string | null;
+      try {
+        witness = dfaOverlapWitness(tokenDfa, literalDfa, limits);
+      } catch (error) {
+        const diagnostic = regexLimitDiagnostic(error, config, token.span);
+        if (diagnostic) {
+          diagnostics.push(diagnostic);
+          continue;
+        }
+        throw error;
+      }
       if (!witness) continue;
       if (token.kind === "skip") {
         diagnostics.push({
@@ -381,10 +497,18 @@ function runtimeLexerDfaDiagnostics(
   analyzed: AnalyzedGrammar,
   astByTokenId: ReadonlyMap<number, RegexAst>,
   options: RuntimeParserPlanningOptions,
+  limits: RegexCompilerLimits,
   config: RuntimeParserTargetConfig,
 ): RuntimeDfaAnalysis {
   const limit = options.lexerStateLimit ?? DEFAULT_LEXER_STATE_LIMIT;
-  const dfa = buildLexerDfa(runtimeLexerSpecs(analyzed, astByTokenId));
+  let dfa: Dfa;
+  try {
+    dfa = buildLexerDfa(runtimeLexerSpecs(analyzed, astByTokenId), limits);
+  } catch (error) {
+    const diagnostic = regexLimitDiagnostic(error, config);
+    if (diagnostic) return { diagnostics: [diagnostic] };
+    throw error;
+  }
   if (dfa.states.length <= limit) return { diagnostics: [], dfa };
   return {
     diagnostics: [{
@@ -402,18 +526,48 @@ function runtimeOptionsDiagnostics(
   config: RuntimeParserTargetConfig,
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  if (
-    options.lexerStateLimit !== undefined &&
-    (!Number.isInteger(options.lexerStateLimit) ||
-      options.lexerStateLimit < 1)
-  ) {
-    diagnostics.push({
-      code: `${config.codePrefix}_LEXER_STATE_LIMIT`,
-      severity: "error",
-      backend: config.backend,
-      message: "lexerStateLimit must be a positive integer.",
-    });
-  }
+  validatePositiveIntegerOption(
+    diagnostics,
+    options.lexerStateLimit,
+    "lexerStateLimit",
+    `${config.codePrefix}_LEXER_STATE_LIMIT`,
+    config,
+  );
+  validatePositiveIntegerOption(
+    diagnostics,
+    options.regexAstNodeLimit,
+    "regexAstNodeLimit",
+    `${config.codePrefix}_REGEX_AST_NODE_LIMIT`,
+    config,
+  );
+  validatePositiveIntegerOption(
+    diagnostics,
+    options.regexBoundedRepeatLimit,
+    "regexBoundedRepeatLimit",
+    `${config.codePrefix}_REGEX_REPEAT_EXPANSION_LIMIT`,
+    config,
+  );
+  validatePositiveIntegerOption(
+    diagnostics,
+    options.regexNfaStateLimit,
+    "regexNfaStateLimit",
+    `${config.codePrefix}_REGEX_NFA_STATE_LIMIT`,
+    config,
+  );
+  validatePositiveIntegerOption(
+    diagnostics,
+    options.regexDfaStateLimit,
+    "regexDfaStateLimit",
+    `${config.codePrefix}_REGEX_DFA_STATE_LIMIT`,
+    config,
+  );
+  validatePositiveIntegerOption(
+    diagnostics,
+    options.regexOverlapStateLimit,
+    "regexOverlapStateLimit",
+    `${config.codePrefix}_REGEX_OVERLAP_WORK_LIMIT`,
+    config,
+  );
   if (
     options.parserStateLimit !== undefined &&
     (!Number.isInteger(options.parserStateLimit) ||
@@ -453,6 +607,56 @@ function runtimeOptionsDiagnostics(
   return diagnostics;
 }
 
+function validatePositiveIntegerOption(
+  diagnostics: Diagnostic[],
+  value: number | undefined,
+  name: string,
+  code: string,
+  config: RuntimeParserTargetConfig,
+): void {
+  if (
+    value !== undefined &&
+    (!Number.isInteger(value) || value < 1)
+  ) {
+    diagnostics.push({
+      code,
+      severity: "error",
+      backend: config.backend,
+      message: `${name} must be a positive integer.`,
+    });
+  }
+}
+
+function runtimeRegexLimits(
+  options: RuntimeParserPlanningOptions,
+): RegexCompilerLimits {
+  return {
+    astNodeLimit: options.regexAstNodeLimit ?? DEFAULT_REGEX_AST_NODE_LIMIT,
+    boundedRepeatLimit: options.regexBoundedRepeatLimit ??
+      DEFAULT_REGEX_BOUNDED_REPEAT_LIMIT,
+    nfaStateLimit: options.regexNfaStateLimit ?? DEFAULT_REGEX_NFA_STATE_LIMIT,
+    dfaStateLimit: options.regexDfaStateLimit ?? DEFAULT_REGEX_DFA_STATE_LIMIT,
+    overlapProductStateLimit: options.regexOverlapStateLimit ??
+      DEFAULT_REGEX_OVERLAP_STATE_LIMIT,
+  };
+}
+
+function regexLimitDiagnostic(
+  error: unknown,
+  config: RuntimeParserTargetConfig,
+  span?: Diagnostic["span"],
+): Diagnostic | null {
+  if (!(error instanceof RegexResourceLimitError)) return null;
+  return {
+    code: `${config.codePrefix}_${error.code}`,
+    severity: "error",
+    backend: config.backend,
+    message:
+      `${config.label} regex planning exceeded a resource limit: ${error.message}`,
+    span,
+  };
+}
+
 function literalAst(value: string): RegexAst {
   const items: RegexAst[] = [];
   for (let index = 0; index < value.length;) {
@@ -481,6 +685,16 @@ function retargetRuntimeMessage(message: string, label: string): string {
 
 function tokenLabel(token: AnalyzedGrammar["tokens"][number]): string {
   return `${token.kind} ${token.name}`;
+}
+
+function selectNamedToken(
+  left: AnalyzedGrammar["tokens"][number],
+  right: AnalyzedGrammar["tokens"][number],
+): AnalyzedGrammar["tokens"][number] {
+  if (left.priority !== right.priority) {
+    return left.priority > right.priority ? left : right;
+  }
+  return left.declarationOrder < right.declarationOrder ? left : right;
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {

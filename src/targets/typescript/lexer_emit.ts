@@ -3,21 +3,21 @@ import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { RegexAst } from "../../compiler/regex/ast.ts";
 import { buildLexerDfa } from "../../compiler/regex/lexer.ts";
-import { parsePortableRegex } from "../../compiler/regex/parser.ts";
 
 export function emitLexer(
   analyzed: AnalyzedGrammar,
   options: TypeScriptTargetOptions = {},
   plannedDfa?: Dfa,
 ): string {
-  const namedSpecs = analyzed.tokens
+  const namedTokens = analyzed.tokens
     .filter((token) =>
       token.kind === "skip" ||
       (token.kind === "token" && analyzed.reachableTokens.has(token.id))
-    )
+    );
+  const namedSpecs = namedTokens
     .map((token) => ({
       kind: token.name,
-      pattern: token.pattern,
+      pattern: token.patternSource,
       channel: token.kind === "skip" ? "trivia" : "main",
       priority: token.priority,
       order: token.declarationOrder,
@@ -30,11 +30,11 @@ export function emitLexer(
       order: literal.sourceOrder,
     }));
   const lexerSpecs = [
-    ...namedSpecs.map((spec) => ({
-      ast: parsePortableRegex(spec.pattern),
+    ...namedTokens.map((token) => ({
+      ast: token.pattern,
       type: "named" as const,
-      priority: spec.priority,
-      order: spec.order,
+      priority: token.priority,
+      order: token.declarationOrder,
     })),
     ...literalSpecs.map((spec) => ({
       ast: literalAst(spec.literal),
@@ -51,6 +51,7 @@ export function emitLexer(
       transition.target,
     ])
   );
+  const asciiTransitions = buildAsciiTransitionRows(dfa);
   const accepts = dfa.states.map((state) => state.selectedAccept ?? -1);
   const preserveTrivia = options.preserveTrivia ?? true;
 
@@ -94,6 +95,10 @@ const DFA_TRANSITIONS: readonly (readonly (readonly [
   end: number,
   target: number,
 ])[])[] = ${JSON.stringify(transitions)};
+
+const DFA_ASCII_TRANSITIONS: readonly (readonly number[])[] | null = ${
+    JSON.stringify(asciiTransitions)
+  };
 
 const DFA_ACCEPTS: readonly number[] = ${JSON.stringify(accepts)};
 
@@ -195,8 +200,21 @@ function bestCandidate(source: string, offset: number): Candidate | null {
 }
 
 function transition(state: number, codePoint: number): number {
-  for (const [start, end, target] of DFA_TRANSITIONS[state] ?? []) {
-    if (start <= codePoint && codePoint <= end) return target;
+  const asciiRows = DFA_ASCII_TRANSITIONS;
+  if (asciiRows && codePoint < 128) return asciiRows[state]?.[codePoint] ?? -1;
+  const ranges = DFA_TRANSITIONS[state] ?? [];
+  let low = 0;
+  let high = ranges.length - 1;
+  while (low <= high) {
+    const midpoint = (low + high) >> 1;
+    const [start, end, target] = ranges[midpoint];
+    if (codePoint < start) {
+      high = midpoint - 1;
+    } else if (codePoint > end) {
+      low = midpoint + 1;
+    } else {
+      return target;
+    }
   }
   return -1;
 }
@@ -216,4 +234,20 @@ function literalAst(value: string): RegexAst {
   }
   if (items.length === 0) return { kind: "empty" };
   return items.length === 1 ? items[0] : { kind: "sequence", items };
+}
+
+function buildAsciiTransitionRows(dfa: Dfa): number[][] | null {
+  const cellCount = dfa.states.length * 128;
+  if (cellCount > 65_536) return null;
+  return dfa.states.map((state) => {
+    const row = new Array(128).fill(-1);
+    for (const transition of state.transitions) {
+      const start = Math.max(0, transition.start);
+      const end = Math.min(127, transition.end);
+      for (let codePoint = start; codePoint <= end; codePoint++) {
+        row[codePoint] = transition.target;
+      }
+    }
+    return row;
+  });
 }

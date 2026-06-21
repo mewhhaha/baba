@@ -69,3 +69,24 @@ export function isRegexNullable(ast: RegexAst): boolean {
       return ast.min === 0 || isRegexNullable(ast.expression);
   }
 }
+
+export function countRegexAstNodes(ast: RegexAst): number {
+  switch (ast.kind) {
+    case "empty":
+    case "literal":
+    case "dot":
+    case "class":
+      return 1;
+    case "sequence":
+      return 1 +
+        ast.items.reduce((sum, item) => sum + countRegexAstNodes(item), 0);
+    case "choice":
+      return 1 +
+        ast.options.reduce(
+          (sum, option) => sum + countRegexAstNodes(option),
+          0,
+        );
+    case "repeat":
+      return 1 + countRegexAstNodes(ast.expression);
+  }
+}

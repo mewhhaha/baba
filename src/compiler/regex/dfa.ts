@@ -1,4 +1,6 @@
 import { type CharRange, MAX_CODE_POINT } from "./ast.ts";
+import type { RegexCompilerLimits } from "./limits.ts";
+import { RegexResourceLimitError } from "./limits.ts";
 import type { Nfa } from "./nfa.ts";
 
 export interface DfaTransition extends CharRange {
@@ -21,6 +23,7 @@ export interface Dfa {
 export function buildDfa(
   nfa: Nfa,
   chooseAccept: (accepts: readonly number[]) => number | null = defaultAccept,
+  limits: RegexCompilerLimits = {},
 ): Dfa {
   const segments = collectAlphabetSegments(nfa);
   const states: DfaState[] = [];
@@ -40,6 +43,14 @@ export function buildDfa(
       ),
     ].sort((left, right) => left - right);
     const id = states.length;
+    const limit = limits.dfaStateLimit;
+    if (limit !== undefined && id >= limit) {
+      throw new RegexResourceLimitError(
+        "REGEX_DFA_STATE_LIMIT",
+        `Regex DFA state limit exceeded (${limit}).`,
+        limit,
+      );
+    }
     states.push({
       id,
       nfaStates: normalized,
