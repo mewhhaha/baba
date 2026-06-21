@@ -14,11 +14,6 @@ import type {
   Token,
 } from "./syntax.ts";
 
-type EncodedAction =
-  | readonly [terminal: number, kind: 1, state: number]
-  | readonly [terminal: number, kind: 2, production: number]
-  | readonly [terminal: number, kind: 3];
-
 type RuntimeAction =
   | { kind: "shift"; state: number }
   | { kind: "reduce"; production: number }

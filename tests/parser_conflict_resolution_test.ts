@@ -191,7 +191,9 @@ Deno.test("TypeScript parser branches through declared local grammar conflicts",
     assertIncludes(parserSource, "MAX_PARSE_BRANCHES");
     assertIncludes(parserSource, "interface ParseBranch");
     assertIncludes(parserSource, "function findActions(");
+    assertIncludes(parserSource, "function parserActionAt(");
     assertIncludes(parserSource, "function parserGoto(");
+    assertNotIncludes(parserSource, "const ACTIONS");
     assertNotIncludes(parserSource, "const GOTOS");
     await denoCheck(`${dir}/typescript/mod.ts`);
     const mod = await import(`file://${dir}/typescript/mod.ts`);

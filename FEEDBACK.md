@@ -85,13 +85,16 @@ runtime language:
 - Moved generated TypeScript conflict-parser goto lookup onto the same
   runtime-language table helper, so declared-conflict parsers no longer emit a
   separate generated `GOTOS` table or scan it by hand.
+- Moved generated TypeScript conflict-parser multi-action lookup onto a
+  runtime-language `parserActionAt` helper, so declared-conflict parsers no
+  longer emit a separate generated `ACTIONS` table or scan it by hand.
 
 Still unresolved:
 
 - The P0 source-of-truth milestone remains open: TypeScript and Wasm runtime
   execution now has a clearer shared runtime packaging boundary and generated
-  lexer/parser table helpers from the runtime language, but conflict action
-  branching, the main lexer/parser control flow, and reduction algorithms are
+  lexer/parser table helpers from the runtime language, but conflict branch
+  scheduling, the main lexer/parser control flow, and reduction algorithms are
   still not mechanically emitted from one runtime-language implementation. That
   requires a larger runtime compiler/artifact boundary before the release can
   fully satisfy "one runtime implementation, two execution targets."

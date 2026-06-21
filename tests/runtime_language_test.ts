@@ -12,6 +12,7 @@ import {
 } from "../src/targets/runtime/language_manifest.ts";
 import {
   createLexerRuntimeProgram,
+  createParserConflictTableRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserTableRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
@@ -69,6 +70,23 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       [],
     ],
   });
+  const parserConflictTableRuntimeProgram =
+    createParserConflictTableRuntimeProgram({
+      actionRows: [
+        [
+          [1, RUNTIME_ACTION_SHIFT + 7],
+          [1, RUNTIME_ACTION_REDUCE + 2],
+          [5, RUNTIME_ACTION_ACCEPT],
+        ],
+        [],
+      ],
+      gotoRows: [
+        [
+          [8, 13],
+        ],
+        [],
+      ],
+    });
   const cases: readonly RuntimeConformanceCase[] = [
     {
       name: "u32 addition wraps",
@@ -384,6 +402,30 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "parser table lookup reports missing actions",
       program: parserTableRuntimeProgram,
       args: [0, 4],
+      expected: { kind: "value", value: 0 },
+    },
+    {
+      name: "parser conflict lookup finds first action",
+      program: parserConflictTableRuntimeProgram,
+      args: [0, 1, 0],
+      expected: { kind: "value", value: RUNTIME_ACTION_SHIFT + 7 },
+    },
+    {
+      name: "parser conflict lookup finds second action",
+      program: parserConflictTableRuntimeProgram,
+      args: [0, 1, 1],
+      expected: { kind: "value", value: RUNTIME_ACTION_REDUCE + 2 },
+    },
+    {
+      name: "parser conflict lookup reports exhausted actions",
+      program: parserConflictTableRuntimeProgram,
+      args: [0, 1, 2],
+      expected: { kind: "value", value: 0 },
+    },
+    {
+      name: "parser conflict lookup reports missing terminals",
+      program: parserConflictTableRuntimeProgram,
+      args: [0, 3, 0],
       expected: { kind: "value", value: 0 },
     },
     {

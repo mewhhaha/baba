@@ -36,6 +36,8 @@
   a runtime-language source program backed by read-only `u32` tables.
 - Moved generated conflict-parser TypeScript goto lookup onto the same
   runtime-language table helper.
+- Moved generated conflict-parser TypeScript multi-action lookup onto a
+  runtime-language `parserActionAt` helper.
 
 ### Changed
 

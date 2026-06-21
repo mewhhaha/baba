@@ -7,7 +7,7 @@ import {
   type RuntimeLanguageProgram,
 } from "./language.ts";
 import {
-  createParserGotoRuntimeProgram,
+  createParserConflictTableRuntimeProgram,
   createParserTableRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_KIND_MASK,
@@ -48,7 +48,10 @@ export function emitParser(
   ]);
   const tableRuntimeProgram = emitTypeScriptTables
     ? emitBranchRuntime
-      ? createParserGotoRuntimeProgram({ gotoRows })
+      ? createParserConflictTableRuntimeProgram({
+        actionRows: parserRuntimeActionRows(actionRows),
+        gotoRows,
+      })
       : createParserTableRuntimeProgram({
         actionRows: parserRuntimeActionRows(actionRows),
         gotoRows,
@@ -103,7 +106,6 @@ ${emitBranchRuntime ? branchTypes() : ""}
 ${
     commonConstants({
       bnf,
-      actionRows,
       productions,
       expectedRows,
       namedTerminals,
@@ -112,18 +114,11 @@ ${
       triviaTokenKinds,
       ruleNames,
       fieldSchemas,
-      emitActionTable: emitTypeScriptTables && emitBranchRuntime,
       emitBranchRuntime,
     })
   }
 
-${
-    tableRuntimeProgram
-      ? parserTableRuntime(tableRuntimeProgram, {
-        emitActionConstants: !emitBranchRuntime,
-      })
-      : ""
-  }
+${tableRuntimeProgram ? parserTableRuntime(tableRuntimeProgram) : ""}
 
 ${parseEntryPoints(mode)}
 
@@ -161,12 +156,7 @@ import type {
 }
 
 function typeScriptActionTypes(): string {
-  return `type EncodedAction =
-  | readonly [terminal: number, kind: 1, state: number]
-  | readonly [terminal: number, kind: 2, production: number]
-  | readonly [terminal: number, kind: 3];
-
-type RuntimeAction =
+  return `type RuntimeAction =
   | { kind: "shift"; state: number }
   | { kind: "reduce"; production: number }
   | { kind: "accept" };
@@ -255,7 +245,6 @@ interface ParseFailure {
 
 function commonConstants(values: {
   bnf: BnfGrammar;
-  actionRows: readonly (readonly EncodedAction[])[];
   productions: unknown[];
   expectedRows: readonly (readonly string[])[];
   namedTerminals: Array<readonly [string, number]>;
@@ -264,18 +253,10 @@ function commonConstants(values: {
   triviaTokenKinds: string[];
   ruleNames: string[];
   fieldSchemas: unknown;
-  emitActionTable: boolean;
   emitBranchRuntime: boolean;
 }): string {
   return `const EOF_TERMINAL = ${values.bnf.eofTerminal};
-${
-    values.emitActionTable
-      ? `const ACTIONS: readonly (readonly EncodedAction[])[] = ${
-        JSON.stringify(values.actionRows)
-      };
-`
-      : ""
-  }const PRODUCTIONS: readonly Production[] = ${
+const PRODUCTIONS: readonly Production[] = ${
     JSON.stringify(values.productions)
   };
 const EXPECTED_TERMINALS: readonly (readonly string[])[] = ${
@@ -319,20 +300,14 @@ const RULE_FIELD_SCHEMAS: readonly (RuntimeRuleFieldSchema | undefined)[] = (() 
 })();`;
 }
 
-function parserTableRuntime(
-  program: RuntimeLanguageProgram,
-  options: { readonly emitActionConstants: boolean },
-): string {
-  const actionConstants = options.emitActionConstants
-    ? `const ACTION_NONE = ${RUNTIME_ACTION_NONE};
+function parserTableRuntime(program: RuntimeLanguageProgram): string {
+  return `const ACTION_NONE = ${RUNTIME_ACTION_NONE};
 const ACTION_SHIFT = ${RUNTIME_ACTION_SHIFT};
 const ACTION_REDUCE = ${RUNTIME_ACTION_REDUCE};
 const ACTION_ACCEPT = ${RUNTIME_ACTION_ACCEPT};
 const ACTION_KIND_MASK = ${RUNTIME_ACTION_KIND_MASK};
 const ACTION_PAYLOAD_MASK = ${RUNTIME_ACTION_PAYLOAD_MASK};
-`
-    : "";
-  return `${actionConstants}const NO_GOTO = ${RUNTIME_NO_GOTO};
+const NO_GOTO = ${RUNTIME_NO_GOTO};
 
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
 }
@@ -681,14 +656,19 @@ function betterFailure(
 
 function findActions(state: number, terminal: number): RuntimeAction[] {
   const actions: RuntimeAction[] = [];
-  for (const entry of ACTIONS[state] ?? []) {
-    if (entry[0] !== terminal) continue;
-    if (entry[1] === 1) {
-      actions.push({ kind: "shift", state: entry[2] });
-    } else if (entry[1] === 2) {
-      actions.push({ kind: "reduce", production: entry[2] });
-    } else {
+  for (let ordinal = 0; ; ordinal++) {
+    const encoded = parserActionAt(state, terminal, ordinal);
+    if (encoded === ACTION_NONE) break;
+    const kind = encoded & ACTION_KIND_MASK;
+    const payload = encoded & ACTION_PAYLOAD_MASK;
+    if (kind === ACTION_SHIFT) {
+      actions.push({ kind: "shift", state: payload });
+    } else if (kind === ACTION_REDUCE) {
+      actions.push({ kind: "reduce", production: payload });
+    } else if (kind === ACTION_ACCEPT) {
       actions.push({ kind: "accept" });
+    } else {
+      break;
     }
   }
   return actions;

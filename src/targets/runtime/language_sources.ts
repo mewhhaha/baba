@@ -33,6 +33,9 @@ export interface ParserTableRuntimeProgramInput {
   readonly gotoRows: readonly (readonly ParserRuntimeLookupEntry[])[];
 }
 
+export type ParserConflictTableRuntimeProgramInput =
+  ParserTableRuntimeProgramInput;
+
 export interface ParserGotoRuntimeProgramInput {
   readonly gotoRows: readonly (readonly ParserRuntimeLookupEntry[])[];
 }
@@ -118,6 +121,35 @@ export function createParserTableRuntimeProgram(
     functions: [
       tableLookupFunction(
         "parserAction",
+        actionTable.rowsTable,
+        actionTable.entriesTable,
+        RUNTIME_ACTION_NONE,
+      ),
+      tableLookupFunction(
+        "parserGoto",
+        gotoTable.rowsTable,
+        gotoTable.entriesTable,
+        RUNTIME_NO_GOTO,
+      ),
+    ],
+  };
+}
+
+export function createParserConflictTableRuntimeProgram(
+  input: ParserConflictTableRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  const actionTable = flattenLookupTable("parserAction", input.actionRows);
+  const gotoTable = flattenLookupTable("parserGoto", input.gotoRows);
+  return {
+    name: "parser_conflict_table_runtime",
+    entry: "parserActionAt",
+    tables: [
+      ...actionTable.tables,
+      ...gotoTable.tables,
+    ],
+    functions: [
+      tableLookupAtFunction(
+        "parserActionAt",
         actionTable.rowsTable,
         actionTable.entriesTable,
         RUNTIME_ACTION_NONE,
@@ -307,6 +339,90 @@ function tableLookupFunction(
                 condition: lt(local("entryKey"), local("key")),
                 consequent: [
                   setLocal("low", add(local("midpoint"), u32(1))),
+                ],
+                alternate: [
+                  setLocal("index", add(local("index"), u32(1))),
+                  {
+                    kind: "return",
+                    expression: load(entriesTable, local("index")),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      { kind: "return", expression: u32(missingValue) },
+    ],
+  };
+}
+
+function tableLookupAtFunction(
+  name: string,
+  rowsTable: string,
+  entriesTable: string,
+  missingValue: number,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "state", type: "u32" },
+      { name: "key", type: "u32" },
+      { name: "ordinal", type: "u32" },
+    ],
+    locals: [
+      { name: "index", type: "u32" },
+      { name: "rowEnd", type: "u32" },
+      { name: "low", type: "u32" },
+      { name: "high", type: "u32" },
+      { name: "midpoint", type: "u32" },
+      { name: "entryKey", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("index", local("state")),
+      setLocal("low", load(rowsTable, local("index"))),
+      setLocal("index", add(local("state"), u32(1))),
+      setLocal("rowEnd", load(rowsTable, local("index"))),
+      setLocal("high", local("rowEnd")),
+      {
+        kind: "while",
+        condition: lt(local("low"), local("high")),
+        body: [
+          setLocal("midpoint", shr(add(local("low"), local("high")), u32(1))),
+          setLocal("index", mul(local("midpoint"), u32(2))),
+          setLocal("entryKey", load(entriesTable, local("index"))),
+          {
+            kind: "if",
+            condition: lt(local("entryKey"), local("key")),
+            consequent: [
+              setLocal("low", add(local("midpoint"), u32(1))),
+            ],
+            alternate: [
+              setLocal("high", local("midpoint")),
+            ],
+          },
+        ],
+      },
+      setLocal("index", add(local("low"), local("ordinal"))),
+      {
+        kind: "if",
+        condition: lt(local("index"), local("rowEnd")),
+        consequent: [
+          setLocal("index", mul(local("index"), u32(2))),
+          setLocal("entryKey", load(entriesTable, local("index"))),
+          {
+            kind: "if",
+            condition: lt(local("key"), local("entryKey")),
+            consequent: [
+              { kind: "return", expression: u32(missingValue) },
+            ],
+            alternate: [
+              {
+                kind: "if",
+                condition: lt(local("entryKey"), local("key")),
+                consequent: [
+                  { kind: "return", expression: u32(missingValue) },
                 ],
                 alternate: [
                   setLocal("index", add(local("index"), u32(1))),

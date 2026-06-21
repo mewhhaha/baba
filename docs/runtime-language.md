@@ -24,11 +24,11 @@ The first runtime-language-backed parser helpers are used by generated
 TypeScript lexers and parsers: `utf16CodePointWidth` advances over UTF-16 code
 points, `dfaTransition` performs DFA transition lookup from generated read-only
 tables, deterministic parsers use `parserAction`/`parserGoto` for parser table
-lookup, and conflict parsers use the same generated `parserGoto` helper for goto
-lookup. The same runtime-language source shape is also compiled to Wasm in
-conformance tests. Because generated parser runtime code depends on
-runtime-language compiler output, the checked runtime implementation manifest
-includes both runtime language sources and the Stage-0 compiler.
+lookup, and conflict parsers use generated `parserActionAt`/`parserGoto` helpers
+for multi-action and goto lookup. The same runtime-language source shape is also
+compiled to Wasm in conformance tests. Because generated parser runtime code
+depends on runtime-language compiler output, the checked runtime implementation
+manifest includes both runtime language sources and the Stage-0 compiler.
 
 ## Current Executable Subset
 
