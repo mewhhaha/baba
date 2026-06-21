@@ -65,6 +65,7 @@ export type {
   ParserKitNonterminal,
   ParserKitProduction,
   ParserKitProductionOrigin,
+  ParserKitProfile,
   ParserKitReducerSpec,
   ParserKitRuleFieldSchema,
   ParserKitRuleInfo,

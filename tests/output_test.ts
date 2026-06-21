@@ -197,17 +197,27 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
         kitOutDir,
         "--kit-dir",
         "parser-data",
+        "--kit-profile",
+        "runtime",
         "--discard-trivia",
       ])
     );
+    const kitText = await Deno.readTextFile(
+      `${kitOutDir}/parser-data/parser-kit.json`,
+    );
+    assertNotIncludes(kitText, "\n  ");
     const kit = JSON.parse(
-      await Deno.readTextFile(`${kitOutDir}/parser-data/parser-kit.json`),
+      kitText,
     ) as {
+      profile?: string;
       schemaVersion?: number;
       lexer?: { defaultPreserveTrivia?: boolean };
+      lr?: { states?: Array<{ items?: unknown[] }> };
     };
     assertEquals(kit.schemaVersion, 1);
+    assertEquals(kit.profile, "runtime");
     assertEquals(kit.lexer?.defaultPreserveTrivia, false);
+    assertEquals(kit.lr?.states?.[0]?.items?.length, 0);
 
     const rootedGrammarPath = `${dir}/rooted.ebnf`;
     await Deno.writeTextFile(

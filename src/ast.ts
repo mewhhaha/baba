@@ -164,6 +164,8 @@ export interface WasmTargetOptions {
 export interface KitTargetOptions {
   /** Relative directory inside the generated bundle. Defaults to `kit`. */
   directory?: string;
+  /** Parser-kit detail profile. Defaults to `full`; use `runtime` for compact helper-only artifacts. */
+  profile?: "full" | "runtime";
   /** Preserve skip-token matches in reference helper lexing. Defaults to true. */
   preserveTrivia?: boolean;
   /** Maximum generated lexer DFA state count. Defaults to 50,000. */

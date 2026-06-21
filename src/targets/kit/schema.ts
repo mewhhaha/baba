@@ -3,6 +3,7 @@ export const PARSER_KIT_SCHEMA_VERSION = 1;
 export interface ParserKit {
   schemaVersion: 1;
   generator: "@mewhhaha/baba";
+  profile?: ParserKitProfile;
   grammar: ParserKitGrammarInfo;
   tokens: ParserKitTokenMetadata;
   lexer: ParserKitLexer;
@@ -11,6 +12,8 @@ export interface ParserKit {
   fields: ParserKitFieldMetadata;
   displayNames: ParserKitDisplayNames;
 }
+
+export type ParserKitProfile = "full" | "runtime";
 
 export interface ParserKitGrammarInfo {
   name: string;
@@ -390,6 +393,9 @@ export function validateParserKit(
       path: "$.generator",
       message: "Expected generator '@mewhhaha/baba'.",
     });
+  }
+  if (kit.profile !== undefined) {
+    requireEnum(kit.profile, ["full", "runtime"], "$.profile", issues);
   }
   requireObject(kit.grammar, "$.grammar", issues);
   requireObject(kit.tokens, "$.tokens", issues);

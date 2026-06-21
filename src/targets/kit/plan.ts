@@ -19,6 +19,7 @@ import type {
   ParserKitGotoEntry,
   ParserKitLexerSpec,
   ParserKitLrAction,
+  ParserKitProfile,
 } from "./schema.ts";
 
 export interface KitPlan {
@@ -51,6 +52,7 @@ export function planKitTarget(
     analyzed,
     runtimePlan,
     options.preserveTrivia ?? true,
+    options.profile ?? "full",
   );
   return {
     analyzed,
@@ -62,9 +64,12 @@ export function planKitTarget(
 }
 
 export function emitKitTarget(plan: KitPlan): GeneratedFile[] {
+  const content = plan.kit.profile === "runtime"
+    ? `${JSON.stringify(plan.kit)}\n`
+    : `${JSON.stringify(plan.kit, null, 2)}\n`;
   return [{
     path: `${plan.directory}/parser-kit.json`,
-    content: `${JSON.stringify(plan.kit, null, 2)}\n`,
+    content,
     kind: "config",
   }];
 }
@@ -73,14 +78,17 @@ function createParserKit(
   analyzed: AnalyzedGrammar,
   runtime: RuntimeParserPlan,
   preserveTrivia: boolean,
+  profile: ParserKitProfile,
 ): ParserKit {
   const fieldSchemas = collectRuleFieldSchemas(analyzed);
   const rootFieldSchema = fieldSchemas.find((schema) =>
     schema.ruleId === analyzed.rootRule
   );
+  const includeDebugDetails = profile === "full";
   return {
     schemaVersion: 1,
     generator: "@mewhhaha/baba",
+    profile,
     grammar: {
       name: analyzed.name,
       rootRule: analyzed.rules[analyzed.rootRule]?.name ?? "module",
@@ -144,22 +152,32 @@ function createParserKit(
         lhs: production.lhs,
         rhs: production.rhs.map((symbol) => ({ ...symbol })),
         reducer: { ...production.reducer },
-        span: production.span,
-        origin: production.origin,
+        ...(includeDebugDetails && production.span
+          ? { span: production.span }
+          : {}),
+        ...(includeDebugDetails && production.origin
+          ? { origin: production.origin }
+          : {}),
       })),
     },
     lr: {
       states: runtime.lr.states.map((state) => ({
         id: state.id,
-        items: state.items.map((item) => ({
-          production: item.production,
-          dot: item.dot,
-          lookaheads: lookaheadValues(item.lookaheads),
-        })),
+        items: includeDebugDetails
+          ? state.items.map((item) => ({
+            production: item.production,
+            dot: item.dot,
+            lookaheads: lookaheadValues(item.lookaheads),
+          }))
+          : [],
       })),
       actions: actionEntries(runtime.lr.actions),
       gotos: gotoEntries(runtime.lr.gotos),
-      stats: runtime.lr.stats,
+      stats: includeDebugDetails ? runtime.lr.stats : {
+        ...runtime.lr.stats,
+        coreItems: 0,
+        items: 0,
+      },
     },
     fields: {
       rootNodeType: rootFieldSchema?.nodeType ?? "RuleNode",
@@ -300,6 +318,20 @@ function kitOptionsDiagnostics(options: KitTargetOptions): Diagnostic[] {
       backend: "kit",
       message:
         `Invalid kit output directory '${directory}'. Use a relative directory without '.', '..', empty components, absolute paths, drive prefixes, or backslashes.`,
+    });
+  }
+  if (
+    options.profile !== undefined &&
+    options.profile !== "full" &&
+    options.profile !== "runtime"
+  ) {
+    diagnostics.push({
+      code: "KIT_GENERATION_ERROR",
+      severity: "error",
+      backend: "kit",
+      message: `Invalid kit profile '${
+        String(options.profile)
+      }'. Use 'full' or 'runtime'.`,
     });
   }
   return diagnostics;

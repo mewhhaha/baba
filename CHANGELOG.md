@@ -9,6 +9,7 @@
 - Added `compileParserKit()` and the public `@mewhhaha/baba/kit` module with
   ParserKit schema types, schema validation, token/terminal mapping helpers, and
   reference `lexWithKit()` / `parseWithKit()` helpers.
+- Added the compact parser-kit `runtime` profile for helper-only consumers.
 
 ### Changed
 
@@ -19,6 +20,9 @@
   set; generate the parser kit explicitly with `--target kit`.
 - Default portability diagnostics are strict only when Tree-sitter is selected
   with another target; runtime-only target combinations default to warnings.
+- Parser-kit JSON defaults to the schema-rich `full` profile; the `runtime`
+  profile emits minified JSON and omits LR item/lookahead and production
+  origin/span detail not needed by `lexWithKit()` or `parseWithKit()`.
 
 ## 1.3.0
 

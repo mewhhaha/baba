@@ -282,17 +282,46 @@ Deno.test("compileParserKit returns stable parser-kit data", () => {
     ),
   );
   assertEquals(kit.schemaVersion, 1);
+  assertEquals(kit.profile, "full");
   assertEquals(kit.grammar.name, "tiny");
   assertEquals(kit.grammar.rootRule, "module");
   assert(kit.lexer.dfa.transitions.length > 0);
   assert(kit.bnf.productions.length > 0);
   assert(kit.lr.actions.length > 0);
+  assert(kit.lr.states.some((state) => state.items.length > 0));
+  assert(kit.bnf.productions.some((production) => production.origin));
   assertEquals(kit.fields.rootNodeType, "ModuleNode");
 
   const mappings = terminalMappings(kit);
   assert(typeof mappings.named.IDENT === "number");
   assert(typeof mappings.literals["let"] === "number");
   assertEquals(mappings.eof, kit.bnf.eofTerminal);
+
+  const parsed = parseWithKit(kit, "let alpha = 42; emoji 😀;");
+  assert(parsed.ok);
+  assertEquals(parsed.root.name, "module");
+  assertEquals((parsed.root.fields.items as unknown[]).length, 2);
+});
+
+Deno.test("compileParserKit runtime profile omits debug details but still parses", () => {
+  const result = compileParserKit(deterministicGrammar, {
+    name: "tiny",
+    kit: { profile: "runtime" },
+  });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.kit);
+
+  const kit = result.kit;
+  assertEquals(validateParserKit(kit).length, 0);
+  assertEquals(kit.profile, "runtime");
+  assert(kit.lr.states.every((state) => state.items.length === 0));
+  assertEquals(kit.lr.stats.coreItems, 0);
+  assertEquals(kit.lr.stats.items, 0);
+  assert(
+    kit.bnf.productions.every((production) =>
+      !("origin" in production) && !("span" in production)
+    ),
+  );
 
   const parsed = parseWithKit(kit, "let alpha = 42; emoji 😀;");
   assert(parsed.ok);

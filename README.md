@@ -137,12 +137,36 @@ generated/
     parser-kit.json
 ```
 
-`parser-kit.json` uses schema version 1 and includes grammar/root metadata,
-token and literal metadata, the lexer DFA, BNF terminals/nonterminals and
-productions, reducer descriptors, LR ACTION/GOTO tables including declared
-multi-action conflicts, field schemas, display names, and source spans. It is a
+`parser-kit.json` uses schema version 1. The default `full` profile includes
+grammar/root metadata, token and literal metadata, the lexer DFA, BNF
+terminals/nonterminals and productions, reducer descriptors, LR ACTION/GOTO
+tables including declared multi-action conflicts, LR item/lookahead detail,
+field schemas, display names, source spans, and production origins. It is a
 consumer-neutral data artifact; Baba does not generate compiler-specific export
 names, host ABI tables, or language-specific memory layouts.
+
+Use the `runtime` profile when a consumer only needs `lexWithKit()` and
+`parseWithKit()`:
+
+```sh
+deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
+  --out generated \
+  --target kit \
+  --kit-profile runtime
+```
+
+The runtime profile emits minified JSON and omits LR item/lookahead detail,
+production source spans, and production origins while keeping the tables needed
+by the reference helpers.
+
+Parser-kit schema version 1 follows normal semver compatibility. Semver-minor
+releases may add optional fields, helper APIs, target options, diagnostics, or
+artifact profiles that preserve existing v1 field meanings. Schema-breaking
+changes require a new `schemaVersion`; examples include removing or renaming
+existing fields, changing existing field types or ID semantics, changing token
+or terminal mapping meaning, or making runtime helper inputs incompatible.
+Consumers should reject unsupported `schemaVersion` values and ignore unknown
+object fields they do not need.
 
 Generated parser code is specialized to the grammar. Deterministic TypeScript
 parsers omit branch-search helpers, while grammars with declared parser
@@ -191,14 +215,15 @@ deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
 
 `--ts-out` is an alias for `--typescript-dir`. `--wasm-dir` controls the Wasm
 target output directory. `--kit-dir` controls the parser-kit output directory
-when `--target kit` is selected. `--preserve-trivia` and `--discard-trivia`
-control whether skip matches are emitted as trivia tokens by generated runtimes
-and kit helper lexing. `--lexer-state-limit`, `--parser-state-limit`,
-`--parser-item-limit`, and `--parser-table-entry-limit` apply to the TypeScript,
-Wasm, and kit parser-runtime planning path. `--portability strict|warn|off`
-controls diagnostics for known cross-target acceptance differences. When
-Tree-sitter is selected with another target, portability defaults to `strict`;
-otherwise it defaults to `warn`.
+when `--target kit` is selected. `--kit-profile full|runtime` controls the
+parser-kit detail level and defaults to `full`. `--preserve-trivia` and
+`--discard-trivia` control whether skip matches are emitted as trivia tokens by
+generated runtimes and kit helper lexing. `--lexer-state-limit`,
+`--parser-state-limit`, `--parser-item-limit`, and `--parser-table-entry-limit`
+apply to the TypeScript, Wasm, and kit parser-runtime planning path.
+`--portability strict|warn|off` controls diagnostics for known cross-target
+acceptance differences. When Tree-sitter is selected with another target,
+portability defaults to `strict`; otherwise it defaults to `warn`.
 
 `--target all` intentionally does not include `kit`; request it explicitly with
 `--target kit` to avoid unplanned JSON artifact churn in existing generated
@@ -244,21 +269,43 @@ if (diagnostics.length === 0) {
 }
 ```
 
-Parser-kit consumers can compile and validate the generic artifact directly:
+Parser-kit consumers should generate JSON, load it, validate it, then call the
+reference helpers:
 
 ```ts
 import {
-  compileParserKit,
   lexWithKit,
+  type ParserKit,
   parseWithKit,
   validateParserKit,
 } from "jsr:@mewhhaha/baba/kit";
 
-const result = compileParserKit(grammar, { name: "tiny" });
-if (result.kit && validateParserKit(result.kit).length === 0) {
-  const lexed = lexWithKit(result.kit, "fn main() {}");
-  const parsed = parseWithKit(result.kit, lexed.source);
-  console.log(parsed.ok);
+const rawKit = JSON.parse(
+  await Deno.readTextFile("generated/kit/parser-kit.json"),
+);
+const issues = validateParserKit(rawKit);
+if (issues.length > 0) {
+  throw new Error(`${issues[0].path}: ${issues[0].message}`);
+}
+
+const kit = rawKit as ParserKit;
+const source = "fn main() {}";
+const lexed = lexWithKit(kit, source);
+const parsed = parseWithKit(kit, lexed.source);
+console.log(parsed.ok);
+```
+
+Build tools can also compile the artifact in memory:
+
+```ts
+import { compileParserKit } from "jsr:@mewhhaha/baba/kit";
+
+const result = compileParserKit(grammar, {
+  name: "tiny",
+  kit: { profile: "runtime" },
+});
+if (!result.kit) {
+  throw new Error(result.diagnostics[0]?.message ?? "Kit compilation failed");
 }
 ```
 

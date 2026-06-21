@@ -220,6 +220,24 @@ function parseArgs(args: string[]): Options {
         options.kit.directory = directory;
         break;
       }
+      case "--kit-profile":
+      case "--kit-mode": {
+        const profile = args[++i];
+        if (!profile) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: `Expected profile after ${arg}`,
+          });
+        }
+        if (profile !== "full" && profile !== "runtime") {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected kit profile full or runtime",
+          });
+        }
+        options.kit.profile = profile;
+        break;
+      }
       case "--preserve-trivia":
         options.typescript.preserveTrivia = true;
         options.wasm.preserveTrivia = true;
@@ -367,6 +385,7 @@ Options:
   --ts-out      Alias for --typescript-dir
   --wasm-dir    Wasm target output directory. Defaults to wasm
   --kit-dir     Parser-kit target output directory. Defaults to kit
+  --kit-profile Parser-kit detail profile: full or runtime. Defaults to full
   --preserve-trivia  Preserve skip matches as trivia tokens
   --discard-trivia   Omit skip matches from generated lexer output
   --lexer-state-limit  Maximum TypeScript lexer DFA state count
