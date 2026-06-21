@@ -192,10 +192,7 @@ export function createParserActionRuntimeProgram(): RuntimeLanguageProgram {
   return {
     name: "parser_action_runtime",
     entry: "parserActionKind",
-    functions: [
-      parserActionKindFunction(),
-      parserActionPayloadFunction(),
-    ],
+    functions: parserActionFunctions(),
   };
 }
 
@@ -226,6 +223,7 @@ export function createParserTraceRuntimeProgram(
         gotoTable.entriesTable,
         RUNTIME_NO_GOTO,
       ),
+      ...parserActionFunctions(),
       ...parserProductionFunctions(input.productions.length),
       parserTraceSetTerminalFunction(),
       parserTraceFunction(input.productions.length),
@@ -263,6 +261,7 @@ export function createParserConflictTableRuntimeProgram(
         gotoTable.entriesTable,
         RUNTIME_NO_GOTO,
       ),
+      ...parserActionFunctions(),
       ...parserProductionFunctions(input.productions.length),
     ],
   };
@@ -557,6 +556,13 @@ function parserProductionLoadFunction(
   };
 }
 
+function parserActionFunctions(): RuntimeLanguageFunction[] {
+  return [
+    parserActionKindFunction(),
+    parserActionPayloadFunction(),
+  ];
+}
+
 function parserActionKindFunction(): RuntimeLanguageFunction {
   return {
     name: "parserActionKind",
@@ -810,6 +816,8 @@ function parserTraceFunction(
       { name: "state", type: "u32" },
       { name: "terminal", type: "u32" },
       { name: "action", type: "u32" },
+      { name: "actionKind", type: "u32" },
+      { name: "actionPayload", type: "u32" },
       { name: "productionIndex", type: "u32" },
       { name: "lhs", type: "u32" },
       { name: "rhsLength", type: "u32" },
@@ -862,20 +870,25 @@ function parserTraceFunction(
             "action",
             call("parserAction", [local("state"), local("terminal")]),
           ),
+          setLocal(
+            "actionKind",
+            call("parserActionKind", [local("action")]),
+          ),
+          setLocal(
+            "actionPayload",
+            call("parserActionPayload", [local("action")]),
+          ),
           {
             kind: "if",
-            condition: eq(local("action"), u32(RUNTIME_ACTION_NONE)),
+            condition: eq(local("actionKind"), u32(RUNTIME_ACTION_NONE)),
             consequent: traceReturnStatements(TRACE_STATUS_UNEXPECTED),
           },
           {
             kind: "if",
-            condition: lt(local("action"), u32(RUNTIME_ACTION_REDUCE)),
+            condition: eq(local("actionKind"), u32(RUNTIME_ACTION_SHIFT)),
             consequent: [
               ...traceStoreActionStatements(),
-              setLocal(
-                "gotoState",
-                sub(local("action"), u32(RUNTIME_ACTION_SHIFT)),
-              ),
+              setLocal("gotoState", local("actionPayload")),
               {
                 kind: "if",
                 condition: lt(local("depth"), local("stackCapacity")),
@@ -897,12 +910,9 @@ function parserTraceFunction(
             ],
             alternate: [{
               kind: "if",
-              condition: lt(local("action"), u32(RUNTIME_ACTION_ACCEPT)),
+              condition: eq(local("actionKind"), u32(RUNTIME_ACTION_REDUCE)),
               consequent: [
-                setLocal(
-                  "productionIndex",
-                  sub(local("action"), u32(RUNTIME_ACTION_REDUCE)),
-                ),
+                setLocal("productionIndex", local("actionPayload")),
                 setLocal(
                   "lhs",
                   call("parserProductionLhs", [local("productionIndex")]),
@@ -963,7 +973,7 @@ function parserTraceFunction(
               ],
               alternate: [{
                 kind: "if",
-                condition: eq(local("action"), u32(RUNTIME_ACTION_ACCEPT)),
+                condition: eq(local("actionKind"), u32(RUNTIME_ACTION_ACCEPT)),
                 consequent: [
                   ...traceStoreActionStatements(),
                   ...traceReturnStatements(TRACE_STATUS_OK),

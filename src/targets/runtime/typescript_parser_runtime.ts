@@ -113,10 +113,7 @@ export function emitParser(
     .filter((token) => token.kind === "skip")
     .map((token) => token.name);
   const runtimeProgram = tableRuntimeProgram
-    ? mergeRuntimePrograms(
-      mergeRuntimePrograms(tableRuntimeProgram, actionRuntimeProgram),
-      expectedRuntimeProgram,
-    )
+    ? mergeRuntimePrograms(tableRuntimeProgram, expectedRuntimeProgram)
     : mergeRuntimePrograms(
       mergeRuntimePrograms(productionRuntimeProgram, actionRuntimeProgram),
       expectedRuntimeProgram,

@@ -44,14 +44,15 @@ map parser states to flattened expected-terminal display ranges for diagnostics.
 Reduction replay uses `parserProductionLhs`/`parserProductionRhsLength` helpers
 for production metadata lookups while generated TypeScript still owns reducer
 descriptor execution and CST construction. Generated parser action decoding uses
-`parserActionKind`/`parserActionPayload` helpers. Deterministic TypeScript
-parsers also use a runtime-language `parserTrace` helper backed by growable
-scratch memory for LR shift/reduce/accept control flow; TypeScript code still
-replays that trace to build the CST. The same runtime-language source shape is
-also compiled to Wasm in conformance tests. Because generated parser runtime
-code depends on runtime-language compiler output, the checked runtime
-implementation manifest includes both runtime language sources, the Stage-0
-compiler, and the checked runtime-language artifact manifest.
+`parserActionKind`/`parserActionPayload` helpers, and `parserTrace` uses the
+same helpers to classify encoded actions. Deterministic TypeScript parsers also
+use a runtime-language `parserTrace` helper backed by growable scratch memory
+for LR shift/reduce/accept control flow; TypeScript code still replays that
+trace to build the CST. The same runtime-language source shape is also compiled
+to Wasm in conformance tests. Because generated parser runtime code depends on
+runtime-language compiler output, the checked runtime implementation manifest
+includes both runtime language sources, the Stage-0 compiler, and the checked
+runtime-language artifact manifest.
 
 ## Current Executable Subset
 

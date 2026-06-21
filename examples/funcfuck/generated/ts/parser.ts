@@ -261,6 +261,16 @@ function parserGoto(state: number, key: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserActionKind(action: number): number {
+  return (((action) & (4278190080)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserActionPayload(action: number): number {
+  return (((action) & (16777215)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserProductionLhs(production: number): number {
   let offset = 0;
   if (((((production) | 0) < ((127) | 0) ? 1 : 0)) !== 0) {
@@ -302,6 +312,8 @@ function parserTrace(terminalCount: number): number {
   let state = 0;
   let terminal = 0;
   let action = 0;
+  let actionKind = 0;
+  let actionPayload = 0;
   let productionIndex = 0;
   let lhs = 0;
   let rhsLength = 0;
@@ -332,18 +344,20 @@ function parserTrace(terminalCount: number): number {
     state = (__baba_load_scratch(((stackBase) + (((depth) - (1)) >>> 0)) >>> 0) >>> 0) >>> 0;
     terminal = (__baba_load_scratch(((8) + (streamIndex)) >>> 0) >>> 0) >>> 0;
     action = (parserAction(state, terminal) >>> 0) >>> 0;
-    if (((((action) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    actionKind = (parserActionKind(action) >>> 0) >>> 0;
+    actionPayload = (parserActionPayload(action) >>> 0) >>> 0;
+    if (((((actionKind) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
       __baba_store_scratch(0, 1);
       __baba_store_scratch(1, state);
       __baba_store_scratch(2, streamIndex);
       __baba_store_scratch(3, traceCount);
       return (1) >>> 0;
     }
-    if (((((action) | 0) < ((33554432) | 0) ? 1 : 0)) !== 0) {
+    if (((((actionKind) >>> 0) === ((16777216) >>> 0) ? 1 : 0)) !== 0) {
       capacity = (__baba_ensure_scratch(((((traceBase) + (traceCount)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
       __baba_store_scratch(((traceBase) + (traceCount)) >>> 0, action);
       traceCount = (((traceCount) + (1)) >>> 0) >>> 0;
-      gotoState = (((action) - (16777216)) >>> 0) >>> 0;
+      gotoState = (actionPayload) >>> 0;
       if (((((depth) | 0) < ((stackCapacity) | 0) ? 1 : 0)) !== 0) {
       } else {
         __baba_store_scratch(0, 2);
@@ -357,8 +371,8 @@ function parserTrace(terminalCount: number): number {
       depth = (((depth) + (1)) >>> 0) >>> 0;
       streamIndex = (((streamIndex) + (1)) >>> 0) >>> 0;
     } else {
-      if (((((action) | 0) < ((50331648) | 0) ? 1 : 0)) !== 0) {
-        productionIndex = (((action) - (33554432)) >>> 0) >>> 0;
+      if (((((actionKind) >>> 0) === ((33554432) >>> 0) ? 1 : 0)) !== 0) {
+        productionIndex = (actionPayload) >>> 0;
         lhs = (parserProductionLhs(productionIndex) >>> 0) >>> 0;
         rhsLength = (parserProductionRhsLength(productionIndex) >>> 0) >>> 0;
         if (((((rhsLength) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
@@ -401,7 +415,7 @@ function parserTrace(terminalCount: number): number {
           depth = (((depth) + (1)) >>> 0) >>> 0;
         }
       } else {
-        if (((((action) >>> 0) === ((50331648) >>> 0) ? 1 : 0)) !== 0) {
+        if (((((actionKind) >>> 0) === ((50331648) >>> 0) ? 1 : 0)) !== 0) {
           capacity = (__baba_ensure_scratch(((((traceBase) + (traceCount)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
           __baba_store_scratch(((traceBase) + (traceCount)) >>> 0, action);
           traceCount = (((traceCount) + (1)) >>> 0) >>> 0;
@@ -447,16 +461,6 @@ function parserTraceAction(index: number): number {
   let traceBase = 0;
   traceBase = (__baba_load_scratch(4) >>> 0) >>> 0;
   return (__baba_load_scratch(((traceBase) + (index)) >>> 0) >>> 0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserActionKind(action: number): number {
-  return (((action) & (4278190080)) >>> 0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserActionPayload(action: number): number {
-  return (((action) & (16777215)) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
