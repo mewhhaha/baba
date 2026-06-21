@@ -10,10 +10,35 @@ import {
   hashRuntimeLanguageCompilerSource,
   RUNTIME_LANGUAGE_COMPILER_METADATA,
 } from "../src/targets/runtime/language_manifest.ts";
-import { UTF16_CODE_POINT_WIDTH_PROGRAM } from "../src/targets/runtime/language_sources.ts";
+import {
+  createLexerRuntimeProgram,
+  RUNTIME_NO_TRANSITION,
+  UTF16_CODE_POINT_WIDTH_PROGRAM,
+} from "../src/targets/runtime/language_sources.ts";
 import { assertEquals } from "./helpers.ts";
 
 Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
+  const lexerRuntimeProgram = createLexerRuntimeProgram({
+    transitions: [
+      [
+        [0x80, 0x90, 2],
+        [0x1f600, 0x1f600, 3],
+      ],
+      [],
+    ],
+    asciiTransitions: [
+      asciiRow([[0x41, 1]]),
+      asciiRow([]),
+    ],
+  });
+  const rangeOnlyLexerRuntimeProgram = createLexerRuntimeProgram({
+    transitions: [
+      [
+        [0x41, 0x41, 4],
+      ],
+    ],
+    asciiTransitions: null,
+  });
   const cases: readonly RuntimeConformanceCase[] = [
     {
       name: "u32 addition wraps",
@@ -272,6 +297,42 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 2 },
     },
     {
+      name: "DFA transition uses ASCII fast table hits",
+      program: lexerRuntimeProgram,
+      args: [0, 0x41],
+      expected: { kind: "value", value: 1 },
+    },
+    {
+      name: "DFA transition reports ASCII fast table misses",
+      program: lexerRuntimeProgram,
+      args: [0, 0x42],
+      expected: { kind: "value", value: RUNTIME_NO_TRANSITION },
+    },
+    {
+      name: "DFA transition finds non-ASCII range hits",
+      program: lexerRuntimeProgram,
+      args: [0, 0x85],
+      expected: { kind: "value", value: 2 },
+    },
+    {
+      name: "DFA transition finds non-BMP range hits",
+      program: lexerRuntimeProgram,
+      args: [0, 0x1f600],
+      expected: { kind: "value", value: 3 },
+    },
+    {
+      name: "DFA transition reports range misses",
+      program: lexerRuntimeProgram,
+      args: [0, 0x91],
+      expected: { kind: "value", value: RUNTIME_NO_TRANSITION },
+    },
+    {
+      name: "DFA transition supports range-only ASCII code points",
+      program: rangeOnlyLexerRuntimeProgram,
+      args: [0, 0x41],
+      expected: { kind: "value", value: 4 },
+    },
+    {
       name: "early return skips later traps",
       program: {
         name: "early_return",
@@ -376,6 +437,14 @@ function u32(value: number) {
 
 function local(name: string) {
   return { kind: "local" as const, name };
+}
+
+function asciiRow(
+  entries: readonly (readonly [codePoint: number, target: number])[],
+): number[] {
+  const row = Array.from({ length: 128 }, () => -1);
+  for (const [codePoint, target] of entries) row[codePoint] = target;
+  return row;
 }
 
 async function runTypeScript(

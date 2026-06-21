@@ -75,6 +75,9 @@ runtime language:
 - Moved generated TypeScript lexer DFA transition lookup onto a runtime-language
   source program backed by read-only `u32` tables, replacing the previous
   hand-written generated `transition()` helper.
+- Added direct TypeScript/Wasm runtime-language conformance coverage for the
+  generated DFA transition helper, including ASCII fast-table hits/misses, range
+  fallback, non-BMP code points, and range-only operation.
 
 Still unresolved:
 

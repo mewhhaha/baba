@@ -30,6 +30,8 @@
   table-load conformance coverage.
 - Moved generated TypeScript lexer DFA transition lookup onto a runtime-language
   source program backed by read-only `u32` tables.
+- Added TypeScript/Wasm runtime-language conformance coverage for the generated
+  DFA transition helper.
 
 ### Changed
 
