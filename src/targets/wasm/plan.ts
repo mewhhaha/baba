@@ -51,7 +51,6 @@ export function planWasmTarget(
   if (hasErrors(diagnostics) || !isTypeScriptPlan(typeScriptPlan)) {
     return { diagnostics };
   }
-
   const dfa = buildLexerDfa(lexerSpecs(analyzed));
   const wasm = emitWasmModule(dfa, typeScriptPlan.bnf, typeScriptPlan.lr);
   return {

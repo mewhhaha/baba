@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+- Added `parser.resolutions` metadata for explicit TypeScript LR conflict
+  resolution.
+- Added `parser.conflicts` metadata for bounded TypeScript parser branch
+  exploration through declared local ambiguities. Wasm bundles trace the same
+  declared conflict branches in the generated Wasm parser engine.
+
+### Changed
+
+- The TypeScript BNF lowering now avoids unnecessary helper reductions for
+  direct terminals and rule references in sequence/list positions, reducing
+  artificial LR conflicts.
+- The Wasm parse-trace engine now supports declared parser conflict branches
+  without falling back to the generated TypeScript parser loop.
+
 ## 1.1.0
 
 ### Added

@@ -302,10 +302,7 @@ function lowerExpression(
       addProduction(
         state,
         nonterminal,
-        expression.items.map((item) => ({
-          kind: "nonterminal" as const,
-          id: lowerExpression(state, rule, item),
-        })),
+        expression.items.map((item) => lowerRhsExpression(state, rule, item)),
         { kind: "sequence" },
         expression.span,
         origin,
@@ -317,7 +314,7 @@ function lowerExpression(
       }
       return nonterminal;
     case "optional": {
-      const child = lowerExpression(state, rule, expression.expression);
+      const child = lowerRhsExpression(state, rule, expression.expression);
       addProduction(
         state,
         nonterminal,
@@ -329,7 +326,7 @@ function lowerExpression(
       addProduction(
         state,
         nonterminal,
-        [{ kind: "nonterminal", id: child }],
+        [child],
         { kind: "optionalSome" },
         expression.span,
         origin,
@@ -337,7 +334,7 @@ function lowerExpression(
       return nonterminal;
     }
     case "repeat": {
-      const child = lowerExpression(state, rule, expression.expression);
+      const child = lowerRhsExpression(state, rule, expression.expression);
       addProduction(
         state,
         nonterminal,
@@ -351,7 +348,7 @@ function lowerExpression(
         nonterminal,
         [
           { kind: "nonterminal", id: nonterminal },
-          { kind: "nonterminal", id: child },
+          child,
         ],
         { kind: "repeatAppend" },
         expression.span,
@@ -360,11 +357,11 @@ function lowerExpression(
       return nonterminal;
     }
     case "repeat1": {
-      const child = lowerExpression(state, rule, expression.expression);
+      const child = lowerRhsExpression(state, rule, expression.expression);
       addProduction(
         state,
         nonterminal,
-        [{ kind: "nonterminal", id: child }],
+        [child],
         { kind: "repeat1First" },
         expression.span,
         origin,
@@ -374,7 +371,7 @@ function lowerExpression(
         nonterminal,
         [
           { kind: "nonterminal", id: nonterminal },
-          { kind: "nonterminal", id: child },
+          child,
         ],
         { kind: "repeat1Append" },
         expression.span,
@@ -383,12 +380,12 @@ function lowerExpression(
       return nonterminal;
     }
     case "separated": {
-      const item = lowerExpression(state, rule, expression.item);
-      const separator = lowerExpression(state, rule, expression.separator);
+      const item = lowerRhsExpression(state, rule, expression.item);
+      const separator = lowerRhsExpression(state, rule, expression.separator);
       addProduction(
         state,
         nonterminal,
-        [{ kind: "nonterminal", id: item }],
+        [item],
         { kind: "separatedFirst" },
         expression.span,
         origin,
@@ -398,8 +395,8 @@ function lowerExpression(
         nonterminal,
         [
           { kind: "nonterminal", id: nonterminal },
-          { kind: "nonterminal", id: separator },
-          { kind: "nonterminal", id: item },
+          separator,
+          item,
         ],
         { kind: "separatedAppend" },
         expression.span,
@@ -476,10 +473,7 @@ function addChoiceOptionProductions(
       addProduction(
         state,
         lhs,
-        expression.items.map((item) => ({
-          kind: "nonterminal" as const,
-          id: lowerExpression(state, rule, item),
-        })),
+        expression.items.map((item) => lowerRhsExpression(state, rule, item)),
         { kind: "sequence" },
         expression.span,
         origin,
@@ -491,7 +485,7 @@ function addChoiceOptionProductions(
       }
       return;
     case "optional": {
-      const child = lowerExpression(state, rule, expression.expression);
+      const child = lowerRhsExpression(state, rule, expression.expression);
       addProduction(
         state,
         lhs,
@@ -503,7 +497,7 @@ function addChoiceOptionProductions(
       addProduction(
         state,
         lhs,
-        [{ kind: "nonterminal", id: child }],
+        [child],
         { kind: "optionalSome" },
         expression.span,
         origin,
@@ -523,6 +517,44 @@ function addChoiceOptionProductions(
       );
       return;
   }
+}
+
+function lowerRhsExpression(
+  state: LoweringState,
+  rule: AnalyzedRule,
+  expression: AnalyzedExpression,
+): BnfSymbol {
+  const direct = directRhsSymbol(state, expression);
+  if (direct) return direct;
+  return {
+    kind: "nonterminal",
+    id: lowerExpression(state, rule, expression),
+  };
+}
+
+function directRhsSymbol(
+  state: LoweringState,
+  expression: AnalyzedExpression,
+): BnfSymbol | undefined {
+  if (expression.kind === "literal") {
+    return {
+      kind: "terminal",
+      id: literalTerminal(state, expression.literalId),
+    };
+  }
+  if (expression.kind !== "ref") return undefined;
+  if (expression.reference.kind === "token") {
+    return {
+      kind: "terminal",
+      id: tokenTerminal(state, expression.reference.tokenId),
+    };
+  }
+  if (expression.reference.kind !== "rule") return undefined;
+  const rule = state.ruleNonterminals.get(expression.reference.ruleId);
+  return rule === undefined ? undefined : {
+    kind: "nonterminal",
+    id: rule,
+  };
 }
 
 function addProduction(

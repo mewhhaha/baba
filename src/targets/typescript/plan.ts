@@ -73,6 +73,8 @@ export function planTypeScriptTarget(
     stateLimit: options.parserStateLimit ?? 20_000,
     itemLimit: options.parserItemLimit,
     tableEntryLimit: options.parserTableEntryLimit,
+    conflictGroups: metadata.parser?.conflicts,
+    conflictResolutions: metadata.parser?.resolutions,
   });
   diagnostics.push(...lr.diagnostics);
   if (hasErrors(diagnostics)) return { diagnostics };

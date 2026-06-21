@@ -259,7 +259,7 @@ Deno.test("Tree-sitter backend rejects unsupported regex constructs", () => {
   );
 });
 
-Deno.test("metadata is Tree-sitter-only", () => {
+Deno.test("metadata rejects non-syntax feature blocks", () => {
   assertThrowsIncludes(
     () => parseMetadata(JSON.stringify({ formatter: { blocks: ["module"] } })),
     "Unknown metadata key 'formatter'",

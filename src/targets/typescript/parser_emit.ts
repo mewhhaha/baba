@@ -1,6 +1,6 @@
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { BnfGrammar, ReducerSpec } from "./bnf.ts";
-import type { LrAction, LrTable } from "./lr1.ts";
+import type { LrAction, LrActionSet, LrTable } from "./lr1.ts";
 import { collectRuleFieldSchemas } from "./syntax_emit.ts";
 
 export function emitParser(
@@ -8,7 +8,7 @@ export function emitParser(
   bnf: BnfGrammar,
   lr: LrTable,
 ): string {
-  const actionRows = bnfTableRows(lr.actions, actionEntry);
+  const actionRows = bnfActionTableRows(lr.actions);
   const gotoRows = bnfTableRows(lr.gotos, (nonterminal, target) => [
     nonterminal,
     target,
@@ -86,6 +86,23 @@ interface Production {
   reducer: ReducerSpec;
 }
 
+interface ParseBranch {
+  states: number[];
+  values: unknown[];
+  index: number;
+}
+
+type BranchAdvanceResult =
+  | { kind: "continue" }
+  | { kind: "forked" }
+  | { kind: "success"; result: ParseResult<RootNode> }
+  | { kind: "failure"; failure: ParseFailure };
+
+interface ParseFailure {
+  diagnostic: ParseDiagnostic;
+  offset: number;
+}
+
 type ReducerSpec =
   | { kind: "start" }
   | { kind: "rule"; ruleId: number }
@@ -144,6 +161,7 @@ const MAIN_TOKEN_KINDS = new Set<string>(${JSON.stringify(mainTokenKinds)});
 const TRIVIA_TOKEN_KINDS = new Set<string>(${JSON.stringify(triviaTokenKinds)});
 const RULE_NAMES: readonly string[] = ${JSON.stringify(ruleNames)};
 const EMPTY_PARSE_DIAGNOSTICS: readonly ParseDiagnostic[] = [];
+const MAX_PARSE_BRANCHES = 100000;
 const RULE_FIELD_SCHEMA_ENTRIES: readonly (
   readonly [
     ruleId: number,
@@ -210,112 +228,216 @@ function parseTokenList(
     };
   }
 
-  const states = [0];
-  const values: unknown[] = [null];
-  let index = 0;
+  const pending: ParseBranch[] = [{
+    states: [0],
+    values: [null],
+    index: 0,
+  }];
+  let bestFailure: ParseFailure | null = null;
+  let exploredBranches = 0;
 
-  while (true) {
-    index = skipTrivia(tokens, index);
-    const token = tokens[index] ?? eofToken(source.length);
-    const terminal = tokenToTerminal(token);
-    const state = states[states.length - 1];
-    const action = findAction(state, terminal);
-
-    if (!action) {
-      const expected = expectedTerminals(state);
-      const found = tokenDisplay(token);
-      const code = expected.includes("EOF") && found !== "EOF"
-        ? "PARSE_TRAILING_INPUT"
-        : "PARSE_UNEXPECTED_TOKEN";
+  while (pending.length > 0) {
+    const branch = pending.pop()!;
+    exploredBranches++;
+    if (exploredBranches > MAX_PARSE_BRANCHES) {
       return {
         ok: false,
         root: null,
         source,
         tokens,
         diagnostics: [{
-          code,
-          message: \`Unexpected token \${found}.\`,
-          span: token.span,
-          expected,
-          found,
-        }],
-      };
-    }
-
-    if (action.kind === "shift") {
-      states.push(action.state);
-      values.push(token);
-      index++;
-      continue;
-    }
-
-    if (action.kind === "accept") {
-      const accepted = values[values.length - 1];
-      const root = isRuleNode(accepted)
-        ? accepted as RootNode
-        : isFragment(accepted) && isRuleNode(accepted.value)
-        ? accepted.value as RootNode
-        : null;
-      if (root) {
-        return {
-          ok: true,
-          root,
-          source,
-          tokens,
-          diagnostics: [],
-        };
-      }
-      return {
-        ok: false,
-        root: null,
-        source,
-        tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Parser accepted without producing a root node.",
+          code: "PARSER_BRANCH_LIMIT",
+          message: "Parser exceeded the branch exploration limit.",
           span: { start: source.length, end: source.length },
         }],
       };
     }
 
-    const production = PRODUCTIONS[action.production];
-    const rhsValues = production.rhsLength === 0
-      ? []
-      : values.splice(values.length - production.rhsLength, production.rhsLength);
-    states.splice(states.length - production.rhsLength, production.rhsLength);
-    let reduced: unknown;
-    try {
-      reduced = reduceProduction(
-        production.reducer,
-        rhsValues,
-        token.span.start,
-      );
-    } catch (error) {
+    while (true) {
+      const advanced = advanceBranch(source, tokens, branch, pending);
+      if (advanced.kind === "continue") continue;
+      if (advanced.kind === "forked") break;
+      if (advanced.kind === "success") return advanced.result;
+      bestFailure = betterFailure(bestFailure, advanced.failure);
+      break;
+    }
+  }
+
+  return {
+    ok: false,
+    root: null,
+    source,
+    tokens,
+    diagnostics: [
+      bestFailure?.diagnostic ?? {
+        code: "PARSER_INTERNAL_ERROR",
+        message: "Parser exhausted all branches without a diagnostic.",
+        span: { start: source.length, end: source.length },
+      },
+    ],
+  };
+}
+
+function advanceBranch(
+  source: string,
+  tokens: readonly Token[],
+  branch: ParseBranch,
+  pending: ParseBranch[],
+): BranchAdvanceResult {
+  branch.index = skipTrivia(tokens, branch.index);
+  const token = tokens[branch.index] ?? eofToken(source.length);
+  const terminal = tokenToTerminal(token);
+  const state = branch.states[branch.states.length - 1];
+  const actions = findActions(state, terminal);
+
+  if (actions.length === 0) {
+    const expected = expectedTerminals(state);
+    const found = tokenDisplay(token);
+    const code = expected.includes("EOF") && found !== "EOF"
+      ? "PARSE_TRAILING_INPUT"
+      : "PARSE_UNEXPECTED_TOKEN";
+    return {
+      kind: "failure",
+      failure: {
+        offset: token.span.start,
+        diagnostic: {
+          code,
+          message: \`Unexpected token \${found}.\`,
+          span: token.span,
+          expected,
+          found,
+        },
+      },
+    };
+  }
+
+  if (actions.length > 1) {
+    for (let index = actions.length - 1; index >= 0; index--) {
+      const fork = cloneBranch(branch);
+      const advanced = applyAction(source, tokens, fork, token, actions[index]);
+      if (advanced.kind === "success" || advanced.kind === "failure") {
+        return advanced;
+      }
+      pending.push(fork);
+    }
+    return { kind: "forked" };
+  }
+
+  return applyAction(source, tokens, branch, token, actions[0]);
+}
+
+function applyAction(
+  source: string,
+  tokens: readonly Token[],
+  branch: ParseBranch,
+  token: Token,
+  action: RuntimeAction,
+): BranchAdvanceResult {
+  if (action.kind === "shift") {
+    branch.states.push(action.state);
+    branch.values.push(token);
+    branch.index++;
+    return { kind: "continue" };
+  }
+
+  if (action.kind === "accept") {
+    const accepted = branch.values[branch.values.length - 1];
+    const root = isRuleNode(accepted)
+      ? accepted as RootNode
+      : isFragment(accepted) && isRuleNode(accepted.value)
+      ? accepted.value as RootNode
+      : null;
+    if (root) {
       return {
-        ok: false,
-        root: null,
-        source,
-        tokens,
-        diagnostics: [internalParserDiagnostic(error, token.span)],
+        kind: "success",
+        result: {
+          ok: true,
+          root,
+          source,
+          tokens,
+          diagnostics: [],
+        },
       };
     }
-    const gotoState = findGoto(states[states.length - 1], production.lhs);
-    if (gotoState === undefined) {
-      return {
-        ok: false,
-        root: null,
-        source,
-        tokens,
-        diagnostics: [{
+    return {
+      kind: "failure",
+      failure: {
+        offset: source.length,
+        diagnostic: {
+          code: "PARSER_INTERNAL_ERROR",
+          message: "Parser accepted without producing a root node.",
+          span: { start: source.length, end: source.length },
+        },
+      },
+    };
+  }
+
+  const production = PRODUCTIONS[action.production];
+  const rhsValues = production.rhsLength === 0
+    ? []
+    : branch.values.splice(
+      branch.values.length - production.rhsLength,
+      production.rhsLength,
+    );
+  branch.states.splice(
+    branch.states.length - production.rhsLength,
+    production.rhsLength,
+  );
+  let reduced: unknown;
+  try {
+    reduced = reduceProduction(
+      production.reducer,
+      rhsValues,
+      token.span.start,
+    );
+  } catch (error) {
+    return {
+      kind: "failure",
+      failure: {
+        offset: token.span.start,
+        diagnostic: internalParserDiagnostic(error, token.span),
+      },
+    };
+  }
+  const gotoState = findGoto(
+    branch.states[branch.states.length - 1],
+    production.lhs,
+  );
+  if (gotoState === undefined) {
+    return {
+      kind: "failure",
+      failure: {
+        offset: currentSpan(token).start,
+        diagnostic: {
           code: "PARSER_INTERNAL_ERROR",
           message: "Parser table is missing a goto entry.",
           span: currentSpan(token),
-        }],
-      };
-    }
-    states.push(gotoState);
-    values.push(reduced);
+        },
+      },
+    };
   }
+  branch.states.push(gotoState);
+  branch.values.push(reduced);
+  return { kind: "continue" };
+}
+
+function cloneBranch(branch: ParseBranch): ParseBranch {
+  return {
+    states: [...branch.states],
+    values: [...branch.values],
+    index: branch.index,
+  };
+}
+
+function betterFailure(
+  current: ParseFailure | null,
+  candidate: ParseFailure,
+): ParseFailure {
+  if (!current || candidate.offset > current.offset) return candidate;
+  if (candidate.offset < current.offset) return current;
+  const currentExpected = current.diagnostic.expected?.length ?? 0;
+  const candidateExpected = candidate.diagnostic.expected?.length ?? 0;
+  return candidateExpected > currentExpected ? candidate : current;
 }
 
 function reduceProduction(
@@ -327,7 +449,7 @@ function reduceProduction(
     case "start":
       return rhs[0];
     case "rule": {
-      const fragment = asFragment(rhs[0]);
+      const fragment = toFragment(rhs[0]);
       const node = {
         type: "rule",
         name: RULE_NAMES[reducer.ruleId],
@@ -343,7 +465,7 @@ function reduceProduction(
       return ruleFragment(rhs[0] as AnyRuleNode);
     case "identity":
     case "optionalSome":
-      return asFragment(rhs[0]);
+      return toFragment(rhs[0]);
     case "sequence":
       return sequenceFragment(rhs, offset);
     case "optionalEmpty":
@@ -352,25 +474,25 @@ function reduceProduction(
       return emptyFragment([], offset);
     case "repeatAppend":
     case "repeat1Append":
-      return appendFragment(asFragment(rhs[0]), asFragment(rhs[1]));
+      return appendFragment(toFragment(rhs[0]), toFragment(rhs[1]));
     case "repeat1First": {
-      const item = asFragment(rhs[0]);
+      const item = toFragment(rhs[0]);
       item.value = [item.value];
       return item;
     }
     case "separatedFirst": {
-      const item = asFragment(rhs[0]);
+      const item = toFragment(rhs[0]);
       item.value = [item.value];
       return item;
     }
     case "separatedAppend":
       return appendSeparatedFragment(
-        asFragment(rhs[0]),
-        asFragment(rhs[1]),
-        asFragment(rhs[2]),
+        toFragment(rhs[0]),
+        toFragment(rhs[1]),
+        toFragment(rhs[2]),
       );
     case "field": {
-      const fragment = asFragment(rhs[0]);
+      const fragment = toFragment(rhs[0]);
       fragment.fields.push({ name: reducer.name, value: fragment.value });
       return fragment;
     }
@@ -401,7 +523,7 @@ function sequenceFragment(values: readonly unknown[], offset: number): Fragment 
   const fields: FieldCapture[] = [];
   let span: Span | null = null;
   for (const value of values) {
-    const part = asFragment(value);
+    const part = toFragment(value);
     fragmentValues.push(part.value);
     appendAll(children, part.children);
     appendAll(fields, part.fields);
@@ -459,6 +581,13 @@ function appendSeparatedFragment(
 function asFragment(value: unknown): Fragment {
   if (isFragment(value)) return value;
   throw new Error("Expected parser reduction fragment.");
+}
+
+function toFragment(value: unknown): Fragment {
+  if (isFragment(value)) return value;
+  if (isRuleNode(value)) return ruleFragment(value);
+  if (isMainSyntaxToken(value)) return tokenFragment(value);
+  throw new Error("Expected parser reduction fragment, rule node, or token.");
 }
 
 function asMutableArray(value: unknown): unknown[] {
@@ -562,14 +691,19 @@ function buildFields(
   return fields;
 }
 
-function findAction(state: number, terminal: number): RuntimeAction | null {
+function findActions(state: number, terminal: number): RuntimeAction[] {
+  const actions: RuntimeAction[] = [];
   for (const entry of ACTIONS[state] ?? []) {
     if (entry[0] !== terminal) continue;
-    if (entry[1] === 1) return { kind: "shift", state: entry[2] };
-    if (entry[1] === 2) return { kind: "reduce", production: entry[2] };
-    return { kind: "accept" };
+    if (entry[1] === 1) {
+      actions.push({ kind: "shift", state: entry[2] });
+    } else if (entry[1] === 2) {
+      actions.push({ kind: "reduce", production: entry[2] });
+    } else {
+      actions.push({ kind: "accept" });
+    }
   }
-  return null;
+  return actions;
 }
 
 function findGoto(state: number, nonterminal: number): number | undefined {
@@ -628,6 +762,18 @@ function isFragment(value: unknown): value is Fragment {
     "value" in value &&
     "children" in value &&
     "fields" in value;
+}
+
+function isMainSyntaxToken(
+  value: unknown,
+): value is MainNamedToken | LiteralToken {
+  return !!value &&
+    typeof value === "object" &&
+    (
+      (value as { type?: unknown }).type === "literal" ||
+      ((value as { type?: unknown; channel?: unknown }).type === "named" &&
+        (value as { channel?: unknown }).channel === "main")
+    );
 }
 
 function validateTokenStream(
@@ -882,6 +1028,22 @@ function bnfTableRows<T>(
     const entries = [...(table.get(state)?.entries() ?? [])]
       .sort(([left], [right]) => left - right)
       .map(([key, value]) => encode(key, value));
+    rows.push(entries);
+  }
+  return rows;
+}
+
+function bnfActionTableRows(
+  table: ReadonlyMap<number, ReadonlyMap<number, LrActionSet>>,
+): unknown[] {
+  const maxState = Math.max(-1, ...table.keys());
+  const rows: unknown[] = [];
+  for (let state = 0; state <= maxState; state++) {
+    const entries = [...(table.get(state)?.entries() ?? [])]
+      .sort(([left], [right]) => left - right)
+      .flatMap(([terminal, actions]) =>
+        actions.map((action) => actionEntry(terminal, action))
+      );
     rows.push(entries);
   }
   return rows;

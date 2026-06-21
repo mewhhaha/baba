@@ -259,7 +259,8 @@ reported as `UNREACHABLE_RULE` warnings.
 
 ## Metadata
 
-Metadata is Tree-sitter-specific JSON:
+Metadata is JSON for Tree-sitter output shaping, query generation, and
+standalone parser conflict policy:
 
 ```ebnf
 token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -308,10 +309,47 @@ Supported top-level keys:
 - `conflicts`
 - `inline`
 - `rules`
+- `parser`
 - `queries`
 
 Metadata does not contain formatter, LSP, editor, package, license, author, or
 binding configuration.
+
+### Parser Runtime Conflict Policy
+
+The `parser` metadata block applies to Baba's standalone parser runtimes. It is
+separate from Tree-sitter shaping metadata:
+
+```json
+{
+  "version": 1,
+  "parser": {
+    "resolutions": [
+      {
+        "rules": ["generic_expression", "qualified_identifier"],
+        "on": "[",
+        "prefer": "shift"
+      }
+    ],
+    "conflicts": [
+      ["tuple_type", "type_atom"],
+      ["unit_type", "type_atom"]
+    ]
+  }
+}
+```
+
+`resolutions` keep the generated LR table deterministic by selecting either a
+`shift` or `reduce` action when the listed rules and optional terminal are
+involved. For reduce/reduce conflicts, add `reduce` with the rule or expression
+text that should win.
+
+`conflicts` declares local grammar ambiguities that the generated TypeScript and
+Wasm parsers may explore with bounded branch search. This is useful for grammars
+that need Tree-sitter-like conflict handling but still want standalone parser
+runtimes. The Wasm target traces declared conflict branches inside its generated
+Wasm parser engine and replays the successful action trace in TypeScript to
+build the CST.
 
 External scanner symbols are declared in metadata:
 

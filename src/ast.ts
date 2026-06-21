@@ -66,7 +66,7 @@ export type EbnfExpression =
     span: SourceSpan;
   };
 
-/** Optional metadata for Tree-sitter generation and query emission. */
+/** Optional metadata for generation, query emission, and parser conflict policy. */
 export interface BabaMetadata {
   /** Metadata schema version. Omit for legacy callers; when present, must be 1. */
   version?: 1;
@@ -86,6 +86,8 @@ export interface BabaMetadata {
   queries?: TreeSitterQueriesMetadata;
   /** Per-rule tree-sitter shaping metadata. */
   rules?: Record<string, TreeSitterRuleMetadata>;
+  /** Standalone parser runtime conflict policy. */
+  parser?: ParserRuntimeMetadata;
 }
 
 /** @deprecated Use `BabaMetadata`. */
@@ -154,6 +156,26 @@ export interface WasmTargetOptions {
   parserItemLimit?: number;
   /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
   parserTableEntryLimit?: number;
+}
+
+/** Conflict policy for standalone parser runtimes. */
+export interface ParserRuntimeMetadata {
+  /** Conflict groups that may be explored by the TypeScript parser runtime. */
+  conflicts?: string[][];
+  /** Deterministic conflict resolutions applied while building LR tables. */
+  resolutions?: ParserConflictResolutionMetadata[];
+}
+
+/** One deterministic LR parser conflict resolution. */
+export interface ParserConflictResolutionMetadata {
+  /** Rule names or expression descriptions that must be involved. */
+  rules?: string[];
+  /** Terminal display or literal text that must trigger the conflict. */
+  on?: string;
+  /** Which LR action kind should win. */
+  prefer: "shift" | "reduce";
+  /** Rule name or expression text to select when more than one reduce action exists. */
+  reduce?: string;
 }
 
 /** Options for the stable high-level `generate` API. */

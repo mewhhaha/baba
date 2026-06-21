@@ -1,4 +1,7 @@
-import type { Diagnostic } from "../../ast.ts";
+import type {
+  Diagnostic,
+  ParserConflictResolutionMetadata,
+} from "../../ast.ts";
 import type {
   BnfGrammar,
   BnfProduction,
@@ -10,6 +13,8 @@ export type LrAction =
   | { kind: "shift"; state: number }
   | { kind: "reduce"; production: number }
   | { kind: "accept" };
+
+export type LrActionSet = readonly LrAction[];
 
 export interface LrItem {
   production: number;
@@ -29,7 +34,7 @@ export interface LrState {
 
 export interface LrTable {
   states: readonly LrState[];
-  actions: ReadonlyMap<number, ReadonlyMap<number, LrAction>>;
+  actions: ReadonlyMap<number, ReadonlyMap<number, LrActionSet>>;
   gotos: ReadonlyMap<number, ReadonlyMap<number, number>>;
   stats: LrPlanningStats;
   diagnostics: readonly Diagnostic[];
@@ -68,6 +73,8 @@ export function buildCanonicalLr1Table(
     stateLimit: number;
     itemLimit?: number;
     tableEntryLimit?: number;
+    conflictGroups?: readonly (readonly string[])[];
+    conflictResolutions?: readonly ParserConflictResolutionMetadata[];
   },
 ): LrTable {
   const analysis = analyzeFirst(grammar);
@@ -132,7 +139,7 @@ export function buildCanonicalLr1Table(
     }
   }
 
-  const actions = new Map<number, Map<number, LrAction>>();
+  const actions = new Map<number, Map<number, LrActionSet>>();
   const gotos = new Map<number, Map<number, number>>();
 
   const setAction = (
@@ -147,13 +154,24 @@ export function buildCanonicalLr1Table(
     }
     const existing = row.get(terminal);
     if (!existing) {
-      row.set(terminal, action);
+      row.set(terminal, [action]);
       return;
     }
-    if (sameAction(existing, action)) return;
-    diagnostics.push(
-      conflictDiagnostic(grammar, state, terminal, existing, action),
+    if (existing.some((candidate) => sameAction(candidate, action))) return;
+    const nextActions = [...existing, action];
+    const resolved = resolveConflict(
+      grammar,
+      state,
+      terminal,
+      nextActions,
+      options.conflictResolutions ?? [],
+      options.conflictGroups ?? [],
     );
+    if (resolved) {
+      row.set(terminal, resolved);
+      return;
+    }
+    diagnostics.push(conflictDiagnostic(grammar, state, terminal, nextActions));
   };
 
   const setGoto = (state: number, nonterminal: number, target: number) => {
@@ -192,7 +210,7 @@ export function buildCanonicalLr1Table(
     }
   }
 
-  const actionEntries = countEntries(actions);
+  const actionEntries = countActionEntries(actions);
   const gotoEntries = countEntries(gotos);
   const tableEntries = actionEntries + gotoEntries;
   if (
@@ -234,6 +252,16 @@ function countLookaheadEntries(items: readonly LrItem[]): number {
 function countEntries<K, V>(table: ReadonlyMap<K, ReadonlyMap<K, V>>): number {
   let count = 0;
   for (const row of table.values()) count += row.size;
+  return count;
+}
+
+function countActionEntries(
+  table: ReadonlyMap<number, ReadonlyMap<number, LrActionSet>>,
+): number {
+  let count = 0;
+  for (const row of table.values()) {
+    for (const actions of row.values()) count += actions.length;
+  }
   return count;
 }
 
@@ -384,11 +412,10 @@ function conflictDiagnostic(
   grammar: BnfGrammar,
   state: LrState,
   terminal: number,
-  left: LrAction,
-  right: LrAction,
+  actions: readonly LrAction[],
 ): Diagnostic {
   const terminalName = grammar.terminals[terminal]?.display ?? String(terminal);
-  const reductionProductions = [left, right]
+  const reductionProductions = actions
     .filter((action): action is { kind: "reduce"; production: number } =>
       action.kind === "reduce"
     )
@@ -436,6 +463,127 @@ function conflictDiagnostic(
       span: origin.span,
     })),
   };
+}
+
+function resolveConflict(
+  grammar: BnfGrammar,
+  state: LrState,
+  terminal: number,
+  actions: readonly LrAction[],
+  resolutions: readonly ParserConflictResolutionMetadata[],
+  conflictGroups: readonly (readonly string[])[],
+): LrActionSet | undefined {
+  const context = conflictContext(grammar, state, terminal, actions);
+  for (const resolution of resolutions) {
+    if (!resolutionMatches(grammar, context, resolution)) continue;
+    const selected = selectResolvedAction(context, resolution);
+    if (selected) return [selected];
+  }
+  for (const group of conflictGroups) {
+    if (originGroupMatches(context.origins, group)) {
+      return sortActions(actions);
+    }
+  }
+  return undefined;
+}
+
+interface ConflictContext {
+  terminal: number;
+  shiftProductions: readonly BnfProduction[];
+  reductionProductions: readonly BnfProduction[];
+  origins: readonly ProductionOrigin[];
+  actions: readonly LrAction[];
+}
+
+function conflictContext(
+  grammar: BnfGrammar,
+  state: LrState,
+  terminal: number,
+  actions: readonly LrAction[],
+): ConflictContext {
+  const reductionProductions = actions
+    .filter((action): action is { kind: "reduce"; production: number } =>
+      action.kind === "reduce"
+    )
+    .map((action) => grammar.productions[action.production]);
+  const shiftProductions = state.items
+    .filter((item) => {
+      const symbol = grammar.productions[item.production].rhs[item.dot];
+      return symbol?.kind === "terminal" && symbol.id === terminal;
+    })
+    .map((item) => grammar.productions[item.production]);
+  return {
+    terminal,
+    shiftProductions,
+    reductionProductions,
+    origins: uniqueOrigins([...shiftProductions, ...reductionProductions]),
+    actions,
+  };
+}
+
+function resolutionMatches(
+  grammar: BnfGrammar,
+  context: ConflictContext,
+  resolution: ParserConflictResolutionMetadata,
+): boolean {
+  if (
+    resolution.on !== undefined &&
+    !terminalMatches(grammar, context.terminal, resolution.on)
+  ) {
+    return false;
+  }
+  return originGroupMatches(context.origins, resolution.rules ?? []);
+}
+
+function terminalMatches(
+  grammar: BnfGrammar,
+  terminal: number,
+  expected: string,
+): boolean {
+  const display = grammar.terminals[terminal]?.display ?? String(terminal);
+  return display === expected || display === JSON.stringify(expected);
+}
+
+function originGroupMatches(
+  origins: readonly ProductionOrigin[],
+  group: readonly string[],
+): boolean {
+  return group.every((name) =>
+    origins.some((origin) =>
+      origin.ruleName === name || origin.description.includes(name)
+    )
+  );
+}
+
+function selectResolvedAction(
+  context: ConflictContext,
+  resolution: ParserConflictResolutionMetadata,
+): LrAction | undefined {
+  if (resolution.prefer === "shift") {
+    return context.actions.find((action) => action.kind === "shift");
+  }
+  const reductions = context.actions.filter((
+    action,
+  ): action is { kind: "reduce"; production: number } =>
+    action.kind === "reduce"
+  );
+  if (reductions.length <= 1 || resolution.reduce === undefined) {
+    return reductions[0];
+  }
+  const reduce = resolution.reduce;
+  return reductions.find((action) => {
+    const production = context.reductionProductions.find((candidate) =>
+      candidate.id === action.production
+    );
+    const origin = production?.origin;
+    return origin
+      ? origin.ruleName === reduce || origin.description.includes(reduce)
+      : false;
+  });
+}
+
+function sortActions(actions: readonly LrAction[]): LrActionSet {
+  return [...actions].sort(compareActions);
 }
 
 function uniqueOrigins(
@@ -497,6 +645,25 @@ function sameAction(left: LrAction, right: LrAction): boolean {
     return left.production === right.production;
   }
   return true;
+}
+
+function compareActions(left: LrAction, right: LrAction): number {
+  const leftRank = actionRank(left);
+  const rightRank = actionRank(right);
+  if (leftRank !== rightRank) return leftRank - rightRank;
+  if (left.kind === "shift" && right.kind === "shift") {
+    return left.state - right.state;
+  }
+  if (left.kind === "reduce" && right.kind === "reduce") {
+    return left.production - right.production;
+  }
+  return 0;
+}
+
+function actionRank(action: LrAction): number {
+  if (action.kind === "shift") return 0;
+  if (action.kind === "reduce") return 1;
+  return 2;
 }
 
 function transitionKey(state: number, symbol: BnfSymbol): string {
@@ -568,7 +735,7 @@ function freezeLookaheadBitset(
 function lookaheadValues(bitset: LookaheadBitset): number[] {
   const values: number[] = [];
   for (let wordIndex = 0; wordIndex < bitset.words.length; wordIndex++) {
-    let word = bitset.words[wordIndex] ?? 0;
+    const word = bitset.words[wordIndex] ?? 0;
     for (let bit = 0; bit < 32; bit++) {
       if ((word & (1 << bit)) !== 0) values.push(wordIndex * 32 + bit);
     }

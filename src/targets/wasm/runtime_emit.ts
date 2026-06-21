@@ -19,7 +19,7 @@ interface ParserWasmExports {
   memory: WebAssembly.Memory;
   lex_one(sourcePtr: number, sourceLength: number, offset: number, resultPtr: number): number;
   lex_all(sourcePtr: number, sourceLength: number, resultPtr: number, tokenPtr: number): number;
-  parse_trace(terminalsPtr: number, terminalCount: number, tracePtr: number, traceCapacity: number, stateStackPtr: number, errorPtr: number): number;
+  parse_trace(terminalsPtr: number, terminalCount: number, tracePtr: number, traceCapacity: number, stateStackPtr: number, errorPtr: number, branchPtr: number, branchCapacity: number, stateCapacity: number): number;
   parser_action(state: number, terminal: number): number;
   parser_goto(state: number, nonterminal: number): number;
 }
@@ -135,6 +135,7 @@ export function parseTrace(
     throw new RangeError("terminalCount exceeds parse input terminalCapacity.");
   }
   let traceCapacity = input.traceCapacity;
+  let branchCapacity = 0;
   while (true) {
     const tracePtr = align4(
       input.terminalsPtr + input.terminalCapacity * I32_BYTES,
@@ -142,7 +143,9 @@ export function parseTrace(
     const stateStackPtr = align4(tracePtr + traceCapacity * I32_BYTES);
     const stateCapacity = input.terminalCapacity + STATE_STACK_SLACK;
     const errorPtr = align4(stateStackPtr + stateCapacity * I32_BYTES);
-    ensureCapacity(errorPtr + 8);
+    const branchStride = 4 + stateCapacity + traceCapacity;
+    const branchPtr = align4(errorPtr + 8);
+    ensureCapacity(branchPtr + branchCapacity * branchStride * I32_BYTES);
 
     const count = wasm.parse_trace(
       input.terminalsPtr,
@@ -151,9 +154,18 @@ export function parseTrace(
       traceCapacity,
       stateStackPtr,
       errorPtr,
+      branchPtr,
+      branchCapacity,
+      stateCapacity,
     );
     if (count === -2) {
       traceCapacity *= 2;
+      continue;
+    }
+    if (count === -4) {
+      branchCapacity = branchCapacity === 0
+        ? Math.max(STATE_STACK_SLACK, terminalCount * 2)
+        : branchCapacity * 2;
       continue;
     }
     if (count < 0) {

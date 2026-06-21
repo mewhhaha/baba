@@ -1,6 +1,6 @@
 import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
-import type { LrAction, LrTable } from "../typescript/lr1.ts";
+import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
 
 export interface WasmModuleImage {
   bytes: Uint8Array;
@@ -146,9 +146,13 @@ function buildDataLayout(
 }
 
 function sortedActionEntries(
-  row: ReadonlyMap<number, LrAction> | undefined,
+  row: ReadonlyMap<number, LrActionSet> | undefined,
 ): Array<[number, LrAction]> {
-  return [...(row?.entries() ?? [])].sort((left, right) => left[0] - right[0]);
+  return [...(row?.entries() ?? [])]
+    .sort((left, right) => left[0] - right[0])
+    .flatMap(([terminal, actions]) =>
+      actions.map((action) => [terminal, action] as [number, LrAction])
+    );
 }
 
 function sortedNumberEntries(
@@ -204,7 +208,7 @@ function typeSection(): number[] {
     ],
     [
       FUNC,
-      ...vec([I32, I32, I32, I32, I32, I32]),
+      ...vec([I32, I32, I32, I32, I32, I32, I32, I32, I32]),
       ...vec([I32]),
     ],
   ]);
@@ -263,7 +267,7 @@ function codeSection(
       }),
     ),
     functionBody(15, lexAllFunction(layout)),
-    functionBody(11, parseTraceFunction(layout)),
+    functionBody(23, parseTraceFunction(layout)),
   ]);
 }
 
@@ -860,17 +864,32 @@ function parseTraceFunction(layout: DataLayout): number[] {
   const traceCapacity = 3;
   const stack = 4;
   const error = 5;
-  const depth = 6;
-  const streamIndex = 7;
-  const traceCount = 8;
-  const state = 9;
-  const terminal = 10;
-  const action = 11;
-  const kind = 12;
-  const payload = 13;
-  const rhsLength = 14;
-  const lhs = 15;
-  const gotoState = 16;
+  const branchBase = 6;
+  const branchCapacity = 7;
+  const stateCapacity = 8;
+  const depth = 9;
+  const streamIndex = 10;
+  const traceCount = 11;
+  const state = 12;
+  const terminal = 13;
+  const action = 14;
+  const kind = 15;
+  const payload = 16;
+  const rhsLength = 17;
+  const lhs = 18;
+  const gotoState = 19;
+  const branchStride = 20;
+  const branchCount = 21;
+  const actionIndex = 22;
+  const actionEnd = 23;
+  const actionBase = 24;
+  const matchedCount = 25;
+  const pendingAction = 26;
+  const frameBase = 27;
+  const copyIndex = 28;
+  const bestState = 29;
+  const bestIndex = 30;
+  const needRestore = 31;
   return [
     ...i32(1),
     ...set(depth),
@@ -878,6 +897,20 @@ function parseTraceFunction(layout: DataLayout): number[] {
     ...set(streamIndex),
     ...i32(0),
     ...set(traceCount),
+    ...i32(4),
+    ...get(stateCapacity),
+    0x6a,
+    ...get(traceCapacity),
+    0x6a,
+    ...set(branchStride),
+    ...i32(0),
+    ...set(branchCount),
+    ...i32(0),
+    ...set(bestState),
+    ...i32(-1),
+    ...set(bestIndex),
+    ...i32(0),
+    ...set(needRestore),
     ...get(stack),
     ...i32(0),
     ...store32(),
@@ -887,6 +920,42 @@ function parseTraceFunction(layout: DataLayout): number[] {
     0x03,
     EMPTY_BLOCK,
 
+    ...get(needRestore),
+    ...i32(0),
+    0x47,
+    0x04,
+    EMPTY_BLOCK,
+    ...i32(0),
+    ...set(needRestore),
+    ...get(branchCount),
+    ...i32(0),
+    0x46,
+    0x04,
+    EMPTY_BLOCK,
+    ...storeError(error, bestState, bestIndex),
+    ...i32(-1),
+    0x0f,
+    0x0b,
+    ...get(branchCount),
+    ...i32(1),
+    0x6b,
+    ...set(branchCount),
+    ...restoreBranchFrame({
+      branchBase,
+      branchCount,
+      branchStride,
+      frameBase,
+      stateCapacity,
+      traceCapacity,
+      stack,
+      trace,
+      action,
+      depth,
+      streamIndex,
+      traceCount,
+      copyIndex,
+    }),
+    0x05,
     ...get(streamIndex),
     ...get(terminalCount),
     0x4f,
@@ -894,29 +963,108 @@ function parseTraceFunction(layout: DataLayout): number[] {
     EMPTY_BLOCK,
     ...loadStackValue(stack, depth, -1),
     ...set(state),
-    ...storeError(error, state, streamIndex),
-    ...i32(-1),
-    0x0f,
+    ...updateBestFailure(bestIndex, bestState, streamIndex, state),
+    ...i32(1),
+    ...set(needRestore),
+    0x0c,
+    ...u32(2),
     0x0b,
 
     ...loadStackValue(stack, depth, -1),
     ...set(state),
     ...loadArrayValue(terminals, streamIndex),
     ...set(terminal),
-    ...get(state),
-    ...get(terminal),
-    0x10,
-    ...u32(2),
+    ...loadTableValue(layout.actionRows, state),
+    ...set(actionIndex),
+    ...loadTableValuePlusOne(layout.actionRows, state),
+    ...set(actionEnd),
+    ...i32(0),
+    ...set(matchedCount),
+    ...i32(0),
     ...set(action),
 
-    ...get(action),
+    0x02,
+    EMPTY_BLOCK,
+    0x03,
+    EMPTY_BLOCK,
+    ...get(actionIndex),
+    ...get(actionEnd),
+    0x4f,
+    0x0d,
+    ...u32(1),
+
+    ...i32(layout.actionPairs),
+    ...get(actionIndex),
+    ...i32(8),
+    0x6c,
+    0x6a,
+    ...set(actionBase),
+    ...get(actionBase),
+    ...load32(),
+    ...get(terminal),
+    0x46,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(actionBase),
+    ...i32(4),
+    0x6a,
+    ...load32(),
+    ...set(pendingAction),
+    ...get(matchedCount),
     ...i32(0),
     0x46,
     0x04,
     EMPTY_BLOCK,
-    ...storeError(error, state, streamIndex),
-    ...i32(-1),
-    0x0f,
+    ...get(pendingAction),
+    ...set(action),
+    0x05,
+    ...saveBranchFrame({
+      branchBase,
+      branchCapacity,
+      branchCount,
+      branchStride,
+      frameBase,
+      stateCapacity,
+      traceCapacity,
+      stack,
+      trace,
+      pendingAction,
+      depth,
+      streamIndex,
+      traceCount,
+      copyIndex,
+    }),
+    ...get(branchCount),
+    ...i32(1),
+    0x6a,
+    ...set(branchCount),
+    0x0b,
+    ...get(matchedCount),
+    ...i32(1),
+    0x6a,
+    ...set(matchedCount),
+    0x0b,
+
+    ...get(actionIndex),
+    ...i32(1),
+    0x6a,
+    ...set(actionIndex),
+    0x0c,
+    ...u32(0),
+    0x0b,
+    0x0b,
+
+    ...get(matchedCount),
+    ...i32(0),
+    0x46,
+    0x04,
+    EMPTY_BLOCK,
+    ...updateBestFailure(bestIndex, bestState, streamIndex, state),
+    ...i32(1),
+    ...set(needRestore),
+    0x0c,
+    ...u32(2),
+    0x0b,
     0x0b,
 
     ...get(action),
@@ -979,9 +1127,11 @@ function parseTraceFunction(layout: DataLayout): number[] {
     0x48,
     0x04,
     EMPTY_BLOCK,
-    ...storeError(error, state, streamIndex),
-    ...i32(-3),
-    0x0f,
+    ...updateBestFailure(bestIndex, bestState, streamIndex, state),
+    ...i32(1),
+    ...set(needRestore),
+    0x0c,
+    ...u32(2),
     0x0b,
     ...get(stack),
     ...get(depth),
@@ -1008,14 +1158,308 @@ function parseTraceFunction(layout: DataLayout): number[] {
     0x0f,
     0x0b,
 
-    ...storeError(error, state, streamIndex),
+    ...updateBestFailure(bestIndex, bestState, streamIndex, state),
+    ...i32(1),
+    ...set(needRestore),
+    0x0c,
+    ...u32(0),
+
+    0x0b,
+    0x0b,
+
     ...i32(-3),
+  ];
+}
+
+function saveBranchFrame(options: {
+  branchBase: number;
+  branchCapacity: number;
+  branchCount: number;
+  branchStride: number;
+  frameBase: number;
+  stateCapacity: number;
+  traceCapacity: number;
+  stack: number;
+  trace: number;
+  pendingAction: number;
+  depth: number;
+  streamIndex: number;
+  traceCount: number;
+  copyIndex: number;
+}): number[] {
+  return [
+    ...get(options.branchCount),
+    ...get(options.branchCapacity),
+    0x4f,
+    0x04,
+    EMPTY_BLOCK,
+    ...i32(-4),
     0x0f,
+    0x0b,
+    ...branchFrameBase(
+      options.branchBase,
+      options.branchCount,
+      options.branchStride,
+      options.frameBase,
+    ),
+    ...storeFrameSlot(options.frameBase, 0, options.pendingAction),
+    ...storeFrameSlot(options.frameBase, 1, options.depth),
+    ...storeFrameSlot(options.frameBase, 2, options.streamIndex),
+    ...storeFrameSlot(options.frameBase, 3, options.traceCount),
+    ...copyStackToFrame(
+      options.frameBase,
+      options.stateCapacity,
+      options.stack,
+      options.depth,
+      options.copyIndex,
+    ),
+    ...copyTraceToFrame(
+      options.frameBase,
+      options.stateCapacity,
+      options.trace,
+      options.traceCount,
+      options.copyIndex,
+    ),
+  ];
+}
 
+function restoreBranchFrame(options: {
+  branchBase: number;
+  branchCount: number;
+  branchStride: number;
+  frameBase: number;
+  stateCapacity: number;
+  traceCapacity: number;
+  stack: number;
+  trace: number;
+  action: number;
+  depth: number;
+  streamIndex: number;
+  traceCount: number;
+  copyIndex: number;
+}): number[] {
+  return [
+    ...branchFrameBase(
+      options.branchBase,
+      options.branchCount,
+      options.branchStride,
+      options.frameBase,
+    ),
+    ...loadFrameSlot(options.frameBase, 0),
+    ...set(options.action),
+    ...loadFrameSlot(options.frameBase, 1),
+    ...set(options.depth),
+    ...loadFrameSlot(options.frameBase, 2),
+    ...set(options.streamIndex),
+    ...loadFrameSlot(options.frameBase, 3),
+    ...set(options.traceCount),
+    ...copyFrameToStack(
+      options.frameBase,
+      options.stateCapacity,
+      options.stack,
+      options.depth,
+      options.copyIndex,
+    ),
+    ...copyFrameToTrace(
+      options.frameBase,
+      options.stateCapacity,
+      options.trace,
+      options.traceCount,
+      options.copyIndex,
+    ),
+  ];
+}
+
+function branchFrameBase(
+  branchBaseLocal: number,
+  branchCountLocal: number,
+  branchStrideLocal: number,
+  frameBaseLocal: number,
+): number[] {
+  return [
+    ...get(branchBaseLocal),
+    ...get(branchCountLocal),
+    ...get(branchStrideLocal),
+    0x6c,
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...set(frameBaseLocal),
+  ];
+}
+
+function storeFrameSlot(
+  frameBaseLocal: number,
+  slot: number,
+  valueLocal: number,
+): number[] {
+  return [
+    ...frameSlotAddress(frameBaseLocal, slot),
+    ...get(valueLocal),
+    ...store32(),
+  ];
+}
+
+function loadFrameSlot(frameBaseLocal: number, slot: number): number[] {
+  return [
+    ...frameSlotAddress(frameBaseLocal, slot),
+    ...load32(),
+  ];
+}
+
+function frameSlotAddress(frameBaseLocal: number, slot: number): number[] {
+  return [
+    ...get(frameBaseLocal),
+    ...i32(slot * 4),
+    0x6a,
+  ];
+}
+
+function copyStackToFrame(
+  frameBaseLocal: number,
+  _stateCapacityLocal: number,
+  stackLocal: number,
+  depthLocal: number,
+  copyIndexLocal: number,
+): number[] {
+  return copyLoop(copyIndexLocal, depthLocal, [
+    ...frameStackAddress(frameBaseLocal, copyIndexLocal),
+    ...loadArrayValue(stackLocal, copyIndexLocal),
+    ...store32(),
+  ]);
+}
+
+function copyFrameToStack(
+  frameBaseLocal: number,
+  _stateCapacityLocal: number,
+  stackLocal: number,
+  depthLocal: number,
+  copyIndexLocal: number,
+): number[] {
+  return copyLoop(copyIndexLocal, depthLocal, [
+    ...get(stackLocal),
+    ...get(copyIndexLocal),
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...frameStackAddress(frameBaseLocal, copyIndexLocal),
+    ...load32(),
+    ...store32(),
+  ]);
+}
+
+function copyTraceToFrame(
+  frameBaseLocal: number,
+  stateCapacityLocal: number,
+  traceLocal: number,
+  traceCountLocal: number,
+  copyIndexLocal: number,
+): number[] {
+  return copyLoop(copyIndexLocal, traceCountLocal, [
+    ...frameTraceAddress(frameBaseLocal, stateCapacityLocal, copyIndexLocal),
+    ...loadArrayValue(traceLocal, copyIndexLocal),
+    ...store32(),
+  ]);
+}
+
+function copyFrameToTrace(
+  frameBaseLocal: number,
+  stateCapacityLocal: number,
+  traceLocal: number,
+  traceCountLocal: number,
+  copyIndexLocal: number,
+): number[] {
+  return copyLoop(copyIndexLocal, traceCountLocal, [
+    ...get(traceLocal),
+    ...get(copyIndexLocal),
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...frameTraceAddress(frameBaseLocal, stateCapacityLocal, copyIndexLocal),
+    ...load32(),
+    ...store32(),
+  ]);
+}
+
+function frameStackAddress(
+  frameBaseLocal: number,
+  copyIndexLocal: number,
+): number[] {
+  return [
+    ...get(frameBaseLocal),
+    ...i32(4),
+    ...get(copyIndexLocal),
+    0x6a,
+    ...i32(4),
+    0x6c,
+    0x6a,
+  ];
+}
+
+function frameTraceAddress(
+  frameBaseLocal: number,
+  stateCapacityLocal: number,
+  copyIndexLocal: number,
+): number[] {
+  return [
+    ...get(frameBaseLocal),
+    ...i32(4),
+    ...get(stateCapacityLocal),
+    0x6a,
+    ...get(copyIndexLocal),
+    0x6a,
+    ...i32(4),
+    0x6c,
+    0x6a,
+  ];
+}
+
+function copyLoop(
+  copyIndexLocal: number,
+  countLocal: number,
+  body: readonly number[],
+): number[] {
+  return [
+    ...i32(0),
+    ...set(copyIndexLocal),
+    0x02,
+    EMPTY_BLOCK,
+    0x03,
+    EMPTY_BLOCK,
+    ...get(copyIndexLocal),
+    ...get(countLocal),
+    0x4f,
+    0x0d,
+    ...u32(1),
+    ...body,
+    ...get(copyIndexLocal),
+    ...i32(1),
+    0x6a,
+    ...set(copyIndexLocal),
+    0x0c,
+    ...u32(0),
     0x0b,
     0x0b,
+  ];
+}
 
-    ...i32(-3),
+function updateBestFailure(
+  bestIndexLocal: number,
+  bestStateLocal: number,
+  streamIndexLocal: number,
+  stateLocal: number,
+): number[] {
+  return [
+    ...get(streamIndexLocal),
+    ...get(bestIndexLocal),
+    0x4a,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(streamIndexLocal),
+    ...set(bestIndexLocal),
+    ...get(stateLocal),
+    ...set(bestStateLocal),
+    0x0b,
   ];
 }
 

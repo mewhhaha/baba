@@ -59,7 +59,7 @@ function replaceParseFunction(source: string): string {
 }
 
 function replaceLookupFunctions(source: string): string {
-  const start = source.indexOf("function findAction(");
+  const start = source.indexOf("function findActions(");
   const end = source.indexOf("function tokenToTerminal(", start);
   if (start === -1 || end === -1) {
     throw new Error("Could not locate generated parser lookup functions.");
