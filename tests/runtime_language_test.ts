@@ -59,6 +59,95 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 1 },
     },
     {
+      name: "parameters feed expressions",
+      program: {
+        name: "parameter_add",
+        entry: "main",
+        functions: [{
+          name: "main",
+          parameters: [{ name: "value", type: "u32" }],
+          result: "u32",
+          body: [{
+            kind: "return",
+            expression: {
+              kind: "addU32",
+              left: local("value"),
+              right: u32(1),
+            },
+          }],
+        }],
+      },
+      args: [41],
+      expected: { kind: "value", value: 42 },
+    },
+    {
+      name: "branches choose the matching block",
+      program: {
+        name: "branch",
+        entry: "main",
+        functions: [{
+          name: "main",
+          parameters: [{ name: "flag", type: "u32" }],
+          result: "u32",
+          body: [{
+            kind: "if",
+            condition: local("flag"),
+            consequent: [{ kind: "return", expression: u32(11) }],
+            alternate: [{ kind: "return", expression: u32(29) }],
+          }],
+        }],
+      },
+      args: [0],
+      expected: { kind: "value", value: 29 },
+    },
+    {
+      name: "locals mutate through loops",
+      program: {
+        name: "loop_sum",
+        entry: "main",
+        functions: [{
+          name: "main",
+          locals: [
+            { name: "index", type: "u32" },
+            { name: "sum", type: "u32" },
+          ],
+          result: "u32",
+          body: [
+            {
+              kind: "while",
+              condition: {
+                kind: "ltS32",
+                left: local("index"),
+                right: u32(5),
+              },
+              body: [
+                {
+                  kind: "setLocal",
+                  name: "sum",
+                  expression: {
+                    kind: "addU32",
+                    left: local("sum"),
+                    right: local("index"),
+                  },
+                },
+                {
+                  kind: "setLocal",
+                  name: "index",
+                  expression: {
+                    kind: "addU32",
+                    left: local("index"),
+                    right: u32(1),
+                  },
+                },
+              ],
+            },
+            { kind: "return", expression: local("sum") },
+          ],
+        }],
+      },
+      expected: { kind: "value", value: 10 },
+    },
+    {
       name: "early return skips later traps",
       program: {
         name: "early_return",
@@ -87,8 +176,8 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
 
   for (const testCase of cases) {
     const [typescript, wasm] = await Promise.all([
-      runTypeScript(testCase.program),
-      runWasm(testCase.program),
+      runTypeScript(testCase.program, testCase.args),
+      runWasm(testCase.program, testCase.args),
     ]);
     assertEquals(
       JSON.stringify(typescript),
@@ -126,6 +215,7 @@ Deno.test("runtime language compiler manifest is current", async () => {
 interface RuntimeConformanceCase {
   readonly name: string;
   readonly program: RuntimeLanguageProgram;
+  readonly args?: readonly number[];
   readonly expected: RuntimeResult;
 }
 
@@ -152,17 +242,22 @@ function u32(value: number) {
   return { kind: "u32" as const, value };
 }
 
+function local(name: string) {
+  return { kind: "local" as const, name };
+}
+
 async function runTypeScript(
   program: RuntimeLanguageProgram,
+  args: readonly number[] = [],
 ): Promise<RuntimeResult> {
   const directory = await Deno.makeTempDir();
   try {
     const path = `${directory}/runtime_language.ts`;
     await Deno.writeTextFile(path, emitRuntimeLanguageTypeScript(program));
     const module = await import(`file://${path}?${crypto.randomUUID()}`) as {
-      main: () => number;
+      main: (...args: readonly number[]) => number;
     };
-    return { kind: "value", value: module.main() >>> 0 };
+    return { kind: "value", value: module.main(...args) >>> 0 };
   } catch {
     return { kind: "trap" };
   } finally {
@@ -172,6 +267,7 @@ async function runTypeScript(
 
 async function runWasm(
   program: RuntimeLanguageProgram,
+  args: readonly number[] = [],
 ): Promise<RuntimeResult> {
   const bytes = compileRuntimeLanguageWasm(program);
   const instantiated = await WebAssembly.instantiate(bytes, {}) as
@@ -180,9 +276,9 @@ async function runWasm(
   const instance = "instance" in instantiated
     ? instantiated.instance
     : instantiated;
-  const main = instance.exports.main as () => number;
+  const main = instance.exports.main as (...args: readonly number[]) => number;
   try {
-    return { kind: "value", value: main() >>> 0 };
+    return { kind: "value", value: main(...args) >>> 0 };
   } catch {
     return { kind: "trap" };
   }

@@ -23,14 +23,17 @@ compiler-source drift separately from the generated parser runtime identity.
 ## Current Executable Subset
 
 The Stage-0 runtime-language compiler accepts typed programs made of `u32`
-functions with statement bodies. The first conformance subset supports:
+functions with statement bodies. The current conformance subset supports:
 
+- `u32` function parameters and locals;
 - `u32` constants;
+- local reads and assignments;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - `u32` equality, producing `0` or `1`;
 - signed less-than over the same 32-bit bits interpreted as `i32`;
 - left shift and unsigned right shift with counts masked to five bits;
+- structured `if`/`else` and `while`;
 - explicit traps;
 - early `return`.
 
@@ -48,13 +51,14 @@ execute both outputs and compare returned values or traps.
 - `return` exits the function immediately.
 - Explicit `trap` aborts execution.
 - Function results are currently `u32`.
+- Parameters and locals are currently `u32`.
+- Locals are initialized to zero before the first statement executes.
+- `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
 
 These rules must be specified before the parser runtime can be fully lowered:
 
-- local variables and assignment;
-- nested loops and structured branches;
 - records and record layout;
 - arrays/vectors, growth, bounds checks, and ownership;
 - text representation and Unicode iteration;

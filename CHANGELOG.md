@@ -20,6 +20,8 @@
   conformance tests for the initial `u32` executable subset.
 - Added a checked Stage-0 runtime-language compiler source manifest to
   `bootstrap:check`.
+- Expanded the private runtime-language conformance subset with `u32`
+  parameters, locals, assignments, branches, and loops.
 
 ### Changed
 

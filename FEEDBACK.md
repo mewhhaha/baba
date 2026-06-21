@@ -59,6 +59,9 @@ runtime language:
 - Added a checked Stage-0 runtime-language compiler source manifest to
   `bootstrap:check`, separate from generated parser runtime implementation
   identity.
+- Expanded the private runtime-language conformance subset with `u32`
+  parameters, locals, assignments, structured branches, and loops across both
+  TypeScript and Wasm backends.
 
 Still unresolved:
 
