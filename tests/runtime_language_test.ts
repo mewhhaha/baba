@@ -158,6 +158,30 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       ],
     }],
   };
+  const scratchGrowProgram: RuntimeLanguageProgram = {
+    name: "scratch_grow",
+    entry: "main",
+    scratchMemoryWords: 0,
+    functions: [{
+      name: "main",
+      locals: [
+        { name: "capacity", type: "u32" },
+      ],
+      result: "u32",
+      body: [
+        {
+          kind: "setLocal",
+          name: "capacity",
+          expression: ensureScratch(u32(4)),
+        },
+        storeScratch(u32(3), u32(55)),
+        {
+          kind: "return",
+          expression: add(local("capacity"), loadScratch(u32(3))),
+        },
+      ],
+    }],
+  };
   const cases: readonly RuntimeConformanceCase[] = [
     {
       name: "u32 addition wraps",
@@ -307,6 +331,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "scratch memory loads trap out of bounds",
       program: scratchLoadBoundsProgram,
       expected: { kind: "trap" },
+    },
+    {
+      name: "scratch memory grows before stack access",
+      program: scratchGrowProgram,
+      expected: { kind: "value", value: 59 },
     },
     {
       name: "functions call other functions",
@@ -639,6 +668,10 @@ function loadScratch(index: RuntimeExpression) {
 
 function storeScratch(index: RuntimeExpression, value: RuntimeExpression) {
   return { kind: "storeScratchU32" as const, index, value };
+}
+
+function ensureScratch(words: RuntimeExpression) {
+  return { kind: "ensureScratchWords" as const, words };
 }
 
 function add(left: RuntimeExpression, right: RuntimeExpression) {

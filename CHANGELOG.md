@@ -38,9 +38,9 @@
   runtime-language table helper.
 - Moved generated conflict-parser TypeScript multi-action lookup onto a
   runtime-language `parserActionAt` helper.
-- Added fixed-size checked `u32` scratch memory to the private runtime-language
+- Added growable checked `u32` scratch memory to the private runtime-language
   subset, with matching TypeScript/Wasm conformance coverage for stack-like
-  load/store behavior.
+  load/store behavior and explicit growth.
 
 ### Changed
 

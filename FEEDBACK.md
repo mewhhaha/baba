@@ -88,10 +88,11 @@ runtime language:
 - Moved generated TypeScript conflict-parser multi-action lookup onto a
   runtime-language `parserActionAt` helper, so declared-conflict parsers no
   longer emit a separate generated `ACTIONS` table or scan it by hand.
-- Added fixed-size checked `u32` scratch memory to the private runtime-language
+- Added growable checked `u32` scratch memory to the private runtime-language
   subset, with TypeScript/Wasm conformance coverage for stack-like load/store
-  behavior. This is the first mutable-memory substrate needed before parser
-  stacks and trace buffers can be lowered through the runtime language.
+  behavior and explicit growth. This is the first mutable-memory substrate
+  needed before parser stacks and trace buffers can be lowered through the
+  runtime language.
 
 Still unresolved:
 
