@@ -4,7 +4,7 @@
 infrastructure: a Tree-sitter grammar and queries, plus an optional standalone
 TypeScript or WebAssembly-backed lexer, parser, and typed concrete syntax tree.
 
-Version 1.1 is still intentionally narrow:
+Version 1.1.1 is still intentionally narrow:
 
 - parse explicit EBNF with `token` and `skip` declarations;
 - validate grammar and Tree-sitter metadata;
@@ -111,7 +111,7 @@ generated/
     mod.ts
 ```
 
-The generated TypeScript API is standalone and exports:
+Both generated parser runtimes export the same main TypeScript API:
 
 - `lex(source)` for DFA tokenization;
 - `parse(source)` returning a discriminated `ParseResult`;
@@ -122,6 +122,9 @@ The generated TypeScript API is standalone and exports:
   offset-to-line/column diagnostics;
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia
   channels.
+
+The Wasm target emits a TypeScript adapter around embedded Wasm bytes and also
+exports `wasmBytes` from `wasm/mod.ts`.
 
 Only query files with content are written. Regenerating through `applyBundle()`
 removes previously owned generated query fragments that become empty. Ordinary
@@ -146,28 +149,40 @@ deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
 `--meta` is an alias for `--metadata`. `--ts-meta` remains as a deprecated
 alias.
 
-Useful TypeScript-target options:
+Useful parser-runtime options:
 
 ```sh
 deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
-  --target typescript \
+  --target all \
   --typescript-dir ts \
+  --wasm-dir wasm \
   --discard-trivia \
   --lexer-state-limit 50000 \
   --parser-state-limit 20000 \
   --parser-item-limit 200000 \
-  --parser-table-entry-limit 200000 \
+  --parser-table-entry-limit 200000
+```
+
+`--ts-out` is an alias for `--typescript-dir`. `--wasm-dir` controls the Wasm
+target output directory. `--preserve-trivia` and `--discard-trivia` control
+whether skip matches are emitted as trivia tokens. `--lexer-state-limit`,
+`--parser-state-limit`, `--parser-item-limit`, and `--parser-table-entry-limit`
+apply to both the TypeScript and Wasm parser runtimes.
+`--portability strict|warn|off` controls diagnostics for known cross-target
+acceptance differences. When multiple targets are selected, portability defaults
+to `strict`; otherwise it defaults to `warn`.
+
+Useful TypeScript-output diagnostics:
+
+```sh
+deno run --allow-read --allow-write src/cli.ts grammar.ebnf \
+  --target typescript \
   --generated-byte-limit 1000000 \
   --parser-stats
 ```
 
-`--ts-out` is an alias for `--typescript-dir`. `--preserve-trivia` and
-`--discard-trivia` control whether skip matches are emitted as trivia tokens.
-`--wasm-dir` controls the Wasm target output directory. `--lexer-state-limit`
-caps generated TypeScript and Wasm lexer DFA states.
-`--portability strict|warn|off` controls diagnostics for known cross-target
-acceptance differences. When multiple targets are selected, portability defaults
-to `strict`; otherwise it defaults to `warn`.
+`--generated-byte-limit` and `--parser-stats` only inspect the generated
+TypeScript target output.
 
 ## Library API
 
@@ -328,5 +343,6 @@ deno fmt --check
 deno lint
 deno task check
 deno task test
-deno publish --dry-run --allow-dirty
+deno task bench:wasm -- --samples 5
+deno task publish:dry-run
 ```
