@@ -65,6 +65,10 @@ runtime language:
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source program, with the same source compiled through both
   TypeScript and Wasm conformance tests.
+- Added runtime-language function calls and multi-function TypeScript/Wasm
+  conformance coverage, and included the Stage-0 runtime-language compiler in
+  generated runtime implementation identity now that generated parser runtime
+  helpers depend on compiler output.
 
 Still unresolved:
 

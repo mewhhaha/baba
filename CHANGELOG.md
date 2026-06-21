@@ -24,6 +24,8 @@
   parameters, locals, assignments, branches, and loops.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source with TypeScript/Wasm conformance coverage.
+- Added runtime-language function calls and multi-function TypeScript/Wasm
+  conformance coverage.
 
 ### Changed
 

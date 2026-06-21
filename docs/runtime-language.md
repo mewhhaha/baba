@@ -22,7 +22,10 @@ compiler-source drift separately from the generated parser runtime identity.
 
 The first runtime-language-backed parser helper is `utf16CodePointWidth`, used
 by generated TypeScript lexers to advance over UTF-16 code points. The same
-runtime-language source is also compiled to Wasm in conformance tests.
+runtime-language source is also compiled to Wasm in conformance tests. Because
+generated parser runtime code depends on runtime-language compiler output, the
+checked runtime implementation manifest includes both runtime language sources
+and the Stage-0 compiler.
 
 ## Current Executable Subset
 
@@ -32,6 +35,7 @@ functions with statement bodies. The current conformance subset supports:
 - `u32` function parameters and locals;
 - `u32` constants;
 - local reads and assignments;
+- calls between `u32` functions;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - `u32` equality, producing `0` or `1`;
@@ -57,6 +61,8 @@ execute both outputs and compare returned values or traps.
 - Function results are currently `u32`.
 - Parameters and locals are currently `u32`.
 - Locals are initialized to zero before the first statement executes.
+- Function arguments evaluate left-to-right.
+- Calls trap if the callee traps.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset

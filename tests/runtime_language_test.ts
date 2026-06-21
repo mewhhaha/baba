@@ -150,6 +150,64 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 10 },
     },
     {
+      name: "functions call other functions",
+      program: {
+        name: "function_calls",
+        entry: "main",
+        functions: [
+          {
+            name: "main",
+            parameters: [{ name: "value", type: "u32" }],
+            result: "u32",
+            body: [{
+              kind: "return",
+              expression: {
+                kind: "addU32",
+                left: {
+                  kind: "call",
+                  function: "double",
+                  args: [local("value")],
+                },
+                right: {
+                  kind: "call",
+                  function: "increment",
+                  args: [local("value")],
+                },
+              },
+            }],
+          },
+          {
+            name: "double",
+            parameters: [{ name: "input", type: "u32" }],
+            result: "u32",
+            body: [{
+              kind: "return",
+              expression: {
+                kind: "addU32",
+                left: local("input"),
+                right: local("input"),
+              },
+            }],
+          },
+          {
+            name: "increment",
+            parameters: [{ name: "input", type: "u32" }],
+            result: "u32",
+            body: [{
+              kind: "return",
+              expression: {
+                kind: "addU32",
+                left: local("input"),
+                right: u32(1),
+              },
+            }],
+          },
+        ],
+      },
+      args: [7],
+      expected: { kind: "value", value: 22 },
+    },
+    {
       name: "UTF-16 helper returns one code unit below the astral plane",
       program: UTF16_CODE_POINT_WIDTH_PROGRAM,
       args: [0xffff],
