@@ -87,6 +87,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(parserRuntimeSource, "function parseTokenList");
   assertIncludes(parserRuntimeSource, "function reduceProduction");
+  assertIncludes(parserRuntimeSource, "createParserGotoRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createParserTableRuntimeProgram");
 });
 

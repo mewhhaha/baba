@@ -34,6 +34,8 @@
   DFA transition helper.
 - Moved generated deterministic TypeScript parser action/goto table lookup onto
   a runtime-language source program backed by read-only `u32` tables.
+- Moved generated conflict-parser TypeScript goto lookup onto the same
+  runtime-language table helper.
 
 ### Changed
 

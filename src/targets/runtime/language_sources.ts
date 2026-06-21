@@ -33,6 +33,10 @@ export interface ParserTableRuntimeProgramInput {
   readonly gotoRows: readonly (readonly ParserRuntimeLookupEntry[])[];
 }
 
+export interface ParserGotoRuntimeProgramInput {
+  readonly gotoRows: readonly (readonly ParserRuntimeLookupEntry[])[];
+}
+
 const UTF16_CODE_POINT_WIDTH_FUNCTION: RuntimeLanguageFunction = {
   name: "utf16CodePointWidth",
   parameters: [{ name: "codePoint", type: "u32" }],
@@ -118,6 +122,25 @@ export function createParserTableRuntimeProgram(
         actionTable.entriesTable,
         RUNTIME_ACTION_NONE,
       ),
+      tableLookupFunction(
+        "parserGoto",
+        gotoTable.rowsTable,
+        gotoTable.entriesTable,
+        RUNTIME_NO_GOTO,
+      ),
+    ],
+  };
+}
+
+export function createParserGotoRuntimeProgram(
+  input: ParserGotoRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  const gotoTable = flattenLookupTable("parserGoto", input.gotoRows);
+  return {
+    name: "parser_goto_runtime",
+    entry: "parserGoto",
+    tables: gotoTable.tables,
+    functions: [
       tableLookupFunction(
         "parserGoto",
         gotoTable.rowsTable,

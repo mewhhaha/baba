@@ -12,6 +12,7 @@ import {
 } from "../src/targets/runtime/language_manifest.ts";
 import {
   createLexerRuntimeProgram,
+  createParserGotoRuntimeProgram,
   createParserTableRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
@@ -60,10 +61,14 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       [],
     ],
   });
-  const parserGotoRuntimeProgram = {
-    ...parserTableRuntimeProgram,
-    entry: "parserGoto",
-  };
+  const parserGotoRuntimeProgram = createParserGotoRuntimeProgram({
+    gotoRows: [
+      [
+        [8, 13],
+      ],
+      [],
+    ],
+  });
   const cases: readonly RuntimeConformanceCase[] = [
     {
       name: "u32 addition wraps",

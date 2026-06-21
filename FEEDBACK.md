@@ -82,16 +82,19 @@ runtime language:
   a runtime-language source program backed by read-only `u32` tables, replacing
   the previous generated `findAction()`/`findGoto()` table scans for unambiguous
   parsers.
+- Moved generated TypeScript conflict-parser goto lookup onto the same
+  runtime-language table helper, so declared-conflict parsers no longer emit a
+  separate generated `GOTOS` table or scan it by hand.
 
 Still unresolved:
 
 - The P0 source-of-truth milestone remains open: TypeScript and Wasm runtime
   execution now has a clearer shared runtime packaging boundary and generated
-  lexer/parser table helpers from the runtime language, but the main
-  lexer/parser control flow and reduction algorithms are still not mechanically
-  emitted from one runtime-language implementation. That requires a larger
-  runtime compiler/artifact boundary before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  lexer/parser table helpers from the runtime language, but conflict action
+  branching, the main lexer/parser control flow, and reduction algorithms are
+  still not mechanically emitted from one runtime-language implementation. That
+  requires a larger runtime compiler/artifact boundary before the release can
+  fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

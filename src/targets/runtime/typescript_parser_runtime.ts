@@ -2,8 +2,12 @@ import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { BnfGrammar, ReducerSpec } from "../typescript/bnf.ts";
 import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
 import { collectRuleFieldSchemas } from "./field_schema.ts";
-import { emitRuntimeLanguageTypeScriptFunction } from "./language.ts";
 import {
+  emitRuntimeLanguageTypeScriptFunction,
+  type RuntimeLanguageProgram,
+} from "./language.ts";
+import {
+  createParserGotoRuntimeProgram,
   createParserTableRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_KIND_MASK,
@@ -42,11 +46,13 @@ export function emitParser(
     nonterminal,
     target,
   ]);
-  const tableRuntimeProgram = emitTypeScriptTables && !emitBranchRuntime
-    ? createParserTableRuntimeProgram({
-      actionRows: parserRuntimeActionRows(actionRows),
-      gotoRows,
-    })
+  const tableRuntimeProgram = emitTypeScriptTables
+    ? emitBranchRuntime
+      ? createParserGotoRuntimeProgram({ gotoRows })
+      : createParserTableRuntimeProgram({
+        actionRows: parserRuntimeActionRows(actionRows),
+        gotoRows,
+      })
     : null;
   const productions = bnf.productions.map((production) => ({
     lhs: production.lhs,
@@ -98,7 +104,6 @@ ${
     commonConstants({
       bnf,
       actionRows,
-      gotoRows,
       productions,
       expectedRows,
       namedTerminals,
@@ -107,12 +112,18 @@ ${
       triviaTokenKinds,
       ruleNames,
       fieldSchemas,
-      emitTypeScriptTables: emitTypeScriptTables && emitBranchRuntime,
+      emitActionTable: emitTypeScriptTables && emitBranchRuntime,
       emitBranchRuntime,
     })
   }
 
-${tableRuntimeProgram ? parserTableRuntime(tableRuntimeProgram) : ""}
+${
+    tableRuntimeProgram
+      ? parserTableRuntime(tableRuntimeProgram, {
+        emitActionConstants: !emitBranchRuntime,
+      })
+      : ""
+  }
 
 ${parseEntryPoints(mode)}
 
@@ -245,7 +256,6 @@ interface ParseFailure {
 function commonConstants(values: {
   bnf: BnfGrammar;
   actionRows: readonly (readonly EncodedAction[])[];
-  gotoRows: readonly (readonly GotoEntry[])[];
   productions: unknown[];
   expectedRows: readonly (readonly string[])[];
   namedTerminals: Array<readonly [string, number]>;
@@ -254,17 +264,14 @@ function commonConstants(values: {
   triviaTokenKinds: string[];
   ruleNames: string[];
   fieldSchemas: unknown;
-  emitTypeScriptTables: boolean;
+  emitActionTable: boolean;
   emitBranchRuntime: boolean;
 }): string {
   return `const EOF_TERMINAL = ${values.bnf.eofTerminal};
 ${
-    values.emitTypeScriptTables
+    values.emitActionTable
       ? `const ACTIONS: readonly (readonly EncodedAction[])[] = ${
         JSON.stringify(values.actionRows)
-      };
-const GOTOS: readonly (readonly (readonly [nonterminal: number, state: number])[])[] = ${
-        JSON.stringify(values.gotoRows)
       };
 `
       : ""
@@ -313,15 +320,19 @@ const RULE_FIELD_SCHEMAS: readonly (RuntimeRuleFieldSchema | undefined)[] = (() 
 }
 
 function parserTableRuntime(
-  program: ReturnType<typeof createParserTableRuntimeProgram>,
+  program: RuntimeLanguageProgram,
+  options: { readonly emitActionConstants: boolean },
 ): string {
-  return `const ACTION_NONE = ${RUNTIME_ACTION_NONE};
+  const actionConstants = options.emitActionConstants
+    ? `const ACTION_NONE = ${RUNTIME_ACTION_NONE};
 const ACTION_SHIFT = ${RUNTIME_ACTION_SHIFT};
 const ACTION_REDUCE = ${RUNTIME_ACTION_REDUCE};
 const ACTION_ACCEPT = ${RUNTIME_ACTION_ACCEPT};
 const ACTION_KIND_MASK = ${RUNTIME_ACTION_KIND_MASK};
 const ACTION_PAYLOAD_MASK = ${RUNTIME_ACTION_PAYLOAD_MASK};
-const NO_GOTO = ${RUNTIME_NO_GOTO};
+`
+    : "";
+  return `${actionConstants}const NO_GOTO = ${RUNTIME_NO_GOTO};
 
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
 }
@@ -684,10 +695,8 @@ function findActions(state: number, terminal: number): RuntimeAction[] {
 }
 
 function findGoto(state: number, nonterminal: number): number | undefined {
-  for (const entry of GOTOS[state] ?? []) {
-    if (entry[0] === nonterminal) return entry[1];
-  }
-  return undefined;
+  const next = parserGoto(state, nonterminal);
+  return next === NO_GOTO ? undefined : next;
 }`;
 }
 
