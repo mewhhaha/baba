@@ -4,6 +4,7 @@ export const RUNTIME_LANGUAGE_SEMANTICS = "baba-runtime-language-v1" as const;
 export interface RuntimeLanguageProgram {
   readonly name: string;
   readonly entry: string;
+  readonly scratchMemoryWords?: number;
   readonly tables?: readonly RuntimeLanguageTable[];
   readonly functions: readonly RuntimeLanguageFunction[];
 }
@@ -43,6 +44,11 @@ export type RuntimeStatement =
     readonly expression: RuntimeExpression;
   }
   | {
+    readonly kind: "storeScratchU32";
+    readonly index: RuntimeExpression;
+    readonly value: RuntimeExpression;
+  }
+  | {
     readonly kind: "if";
     readonly condition: RuntimeExpression;
     readonly consequent: readonly RuntimeStatement[];
@@ -74,6 +80,10 @@ export type RuntimeExpression =
     readonly index: RuntimeExpression;
   }
   | {
+    readonly kind: "loadScratchU32";
+    readonly index: RuntimeExpression;
+  }
+  | {
     readonly kind:
       | "addU32"
       | "subU32"
@@ -93,6 +103,9 @@ export class RuntimeLanguageTrap extends Error {
     this.name = "RuntimeLanguageTrap";
   }
 }
+
+const WASM_PAGE_SIZE = 65_536;
+const MAX_WASM_PAGES = 65_535;
 
 export interface RuntimeLanguageTypeScriptFunctionOptions {
   readonly exported?: boolean;
@@ -126,6 +139,7 @@ function emitTypeScriptRuntime(
 ): string {
   const functions = runtimeLanguageFunctions(program);
   const tables = runtimeLanguageTables(program);
+  const scratchMemoryWords = runtimeLanguageScratchMemoryWords(program);
   return `class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
     super(message);
@@ -142,6 +156,9 @@ function divU32(left: number, right: number): number {
 ${tables.map(emitTypeScriptTable).join("\n")}
 ${tables.map((table) => emitTypeScriptTableLoader(table)).join("\n")}${
     tables.length > 0 ? "\n" : ""
+  }
+${emitTypeScriptScratchMemory(scratchMemoryWords)}${
+    scratchMemoryWords > 0 ? "\n" : ""
   }
 ${
     functions.map((fn) =>
@@ -168,6 +185,28 @@ function emitTypeScriptTableLoader(table: RuntimeLanguageTable): string {
     throw new RuntimeLanguageTrap("table index out of bounds");
   }
   return ${tableName}[normalized] >>> 0;
+}
+`;
+}
+
+function emitTypeScriptScratchMemory(words: number): string {
+  if (words === 0) return "";
+  return `const __baba_scratch = new Uint32Array(${words});
+
+function __baba_load_scratch(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_scratch.length) {
+    throw new RuntimeLanguageTrap("scratch memory index out of bounds");
+  }
+  return __baba_scratch[normalized] >>> 0;
+}
+
+function __baba_store_scratch(index: number, value: number): void {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_scratch.length) {
+    throw new RuntimeLanguageTrap("scratch memory index out of bounds");
+  }
+  __baba_scratch[normalized] = value >>> 0;
 }
 `;
 }
@@ -207,7 +246,12 @@ export function compileRuntimeLanguageWasm(
   validateRuntimeLanguageProgram(program);
   const functions = runtimeLanguageFunctions(program);
   const tables = runtimeLanguageTables(program);
+  const scratchMemoryWords = runtimeLanguageScratchMemoryWords(program);
   const tableLayout = buildRuntimeTableLayout(tables);
+  const scratchMemory = buildRuntimeScratchMemory(
+    tableLayout.bytes.length,
+    scratchMemoryWords,
+  );
   const tableLoaders = tables.map((table) => ({
     table,
     name: runtimeTableLoaderIdentifier(table),
@@ -216,6 +260,12 @@ export function compileRuntimeLanguageWasm(
   const allFunctions = [
     ...functions.map((fn) => ({ kind: "program" as const, fn })),
     ...tableLoaders.map((loader) => ({ kind: "tableLoader" as const, loader })),
+    ...(scratchMemory
+      ? [
+        { kind: "scratchLoad" as const, scratch: scratchMemory },
+        { kind: "scratchStore" as const, scratch: scratchMemory },
+      ]
+      : []),
   ];
   const functionIndexes = new Map(
     functions.map((fn, index) => [fn.name, index]),
@@ -226,29 +276,50 @@ export function compileRuntimeLanguageWasm(
       functions.length + index,
     ]),
   );
+  const scratchIndexes = scratchMemory
+    ? {
+      load: functions.length + tableLoaders.length,
+      store: functions.length + tableLoaders.length + 1,
+    }
+    : null;
   const entryIndex = functionIndex(program.entry, functionIndexes);
   const bodies = allFunctions.map((item) => {
     const body = item.kind === "program"
-      ? wasmProgramFunctionBody(item.fn, functionIndexes, tableLoaderIndexes)
-      : wasmTableLoaderBody(item.loader);
+      ? wasmProgramFunctionBody(
+        item.fn,
+        functionIndexes,
+        tableLoaderIndexes,
+        scratchIndexes,
+      )
+      : item.kind === "tableLoader"
+      ? wasmTableLoaderBody(item.loader)
+      : item.kind === "scratchLoad"
+      ? wasmScratchLoaderBody(item.scratch)
+      : wasmScratchStoreBody(item.scratch);
     return [...u32(body.length), ...body];
   });
+  const memoryBytes = Math.max(
+    tableLayout.bytes.length,
+    scratchMemory ? scratchMemory.offset + scratchMemory.words * 4 : 0,
+  );
   const sections = [
     section(1, [
       ...u32(allFunctions.length),
       ...allFunctions.flatMap((item) =>
         item.kind === "program"
           ? wasmFunctionType(item.fn)
-          : wasmTableLoaderType()
+          : item.kind === "tableLoader"
+          ? wasmTableLoaderType()
+          : item.kind === "scratchLoad"
+          ? wasmScratchLoaderType()
+          : wasmScratchStoreType()
       ),
     ]),
     section(3, [
       ...u32(allFunctions.length),
       ...allFunctions.map((_, index) => u32(index)).flat(),
     ]),
-    ...(tables.length > 0
-      ? [section(5, memorySection(tableLayout.bytes))]
-      : []),
+    ...(memoryBytes > 0 ? [section(5, memorySection(memoryBytes))] : []),
     section(7, [
       ...u32(1),
       ...name(program.entry),
@@ -259,7 +330,9 @@ export function compileRuntimeLanguageWasm(
       ...u32(allFunctions.length),
       ...bodies.flat(),
     ]),
-    ...(tables.length > 0 ? [section(11, dataSection(tableLayout.bytes))] : []),
+    ...(tableLayout.bytes.length > 0
+      ? [section(11, dataSection(tableLayout.bytes))]
+      : []),
   ];
   return new Uint8Array([
     0x00,
@@ -316,6 +389,7 @@ function validateRuntimeLanguageProgram(program: RuntimeLanguageProgram): void {
   runtimeLanguageEntryFunction(program);
   const functions = runtimeLanguageFunctions(program);
   const tables = runtimeLanguageTables(program);
+  const hasScratchMemory = runtimeLanguageScratchMemoryWords(program) > 0;
   const tableNames = new Set<string>();
   for (const table of tables) {
     validateRuntimeLanguageTable(table);
@@ -350,7 +424,13 @@ function validateRuntimeLanguageProgram(program: RuntimeLanguageProgram): void {
       ...functionLocals(fn).map((local) => local.name),
     ]);
     for (const statement of fn.body) {
-      validateStatement(statement, locals, functionMap, tableNames);
+      validateStatement(
+        statement,
+        locals,
+        functionMap,
+        tableNames,
+        hasScratchMemory,
+      );
     }
   }
 }
@@ -377,30 +457,76 @@ function validateStatement(
   locals: ReadonlySet<string>,
   functions: ReadonlyMap<string, RuntimeLanguageFunction>,
   tables: ReadonlySet<string>,
+  hasScratchMemory: boolean,
 ): void {
   switch (statement.kind) {
     case "trap":
       return;
     case "return":
-      validateExpression(statement.expression, locals, functions, tables);
+      validateExpression(
+        statement.expression,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
       return;
     case "setLocal":
       assertKnownLocal(statement.name, locals);
-      validateExpression(statement.expression, locals, functions, tables);
+      validateExpression(
+        statement.expression,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
+      return;
+    case "storeScratchU32":
+      if (!hasScratchMemory) {
+        throw new Error(
+          "Runtime-language scratch memory store requires scratchMemoryWords.",
+        );
+      }
+      validateExpression(
+        statement.index,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
+      validateExpression(
+        statement.value,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
       return;
     case "if":
-      validateExpression(statement.condition, locals, functions, tables);
+      validateExpression(
+        statement.condition,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
       for (const item of statement.consequent) {
-        validateStatement(item, locals, functions, tables);
+        validateStatement(item, locals, functions, tables, hasScratchMemory);
       }
       for (const item of statement.alternate ?? []) {
-        validateStatement(item, locals, functions, tables);
+        validateStatement(item, locals, functions, tables, hasScratchMemory);
       }
       return;
     case "while":
-      validateExpression(statement.condition, locals, functions, tables);
+      validateExpression(
+        statement.condition,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
       for (const item of statement.body) {
-        validateStatement(item, locals, functions, tables);
+        validateStatement(item, locals, functions, tables, hasScratchMemory);
       }
       return;
   }
@@ -411,6 +537,7 @@ function validateExpression(
   locals: ReadonlySet<string>,
   functions: ReadonlyMap<string, RuntimeLanguageFunction>,
   tables: ReadonlySet<string>,
+  hasScratchMemory: boolean,
 ): void {
   switch (expression.kind) {
     case "u32":
@@ -427,7 +554,13 @@ function validateExpression(
       }
       validateCallExpression(expression, target);
       for (const argument of expression.args) {
-        validateExpression(argument, locals, functions, tables);
+        validateExpression(
+          argument,
+          locals,
+          functions,
+          tables,
+          hasScratchMemory,
+        );
       }
       return;
     }
@@ -439,9 +572,35 @@ function validateExpression(
       }
       validateSimpleTableIndex(expression.index, locals);
       return;
+    case "loadScratchU32":
+      if (!hasScratchMemory) {
+        throw new Error(
+          "Runtime-language scratch memory load requires scratchMemoryWords.",
+        );
+      }
+      validateExpression(
+        expression.index,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
+      return;
     default:
-      validateExpression(expression.left, locals, functions, tables);
-      validateExpression(expression.right, locals, functions, tables);
+      validateExpression(
+        expression.left,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
+      validateExpression(
+        expression.right,
+        locals,
+        functions,
+        tables,
+        hasScratchMemory,
+      );
       return;
   }
 }
@@ -464,6 +623,10 @@ function emitTypeScriptStatement(
       return `${indent}${identifier(statement.name)} = (${
         emitTypeScriptExpression(statement.expression, locals, program)
       }) >>> 0;`;
+    case "storeScratchU32":
+      return `${indent}__baba_store_scratch(${
+        emitTypeScriptExpression(statement.index, locals, program)
+      }, ${emitTypeScriptExpression(statement.value, locals, program)});`;
     case "if":
       return emitTypeScriptIf(statement, locals, program, indent);
     case "while":
@@ -556,6 +719,10 @@ function emitTypeScriptExpression(
         emitTypeScriptExpression(expression.index, locals, program)
       }) >>> 0`;
     }
+    case "loadScratchU32":
+      return `__baba_load_scratch(${
+        emitTypeScriptExpression(expression.index, locals, program)
+      }) >>> 0`;
     case "addU32":
       return `((${
         emitTypeScriptExpression(expression.left, locals, program)
@@ -610,34 +777,72 @@ function emitWasmStatement(
   locals: ReadonlyMap<string, number>,
   functions: ReadonlyMap<string, number>,
   tables: ReadonlyMap<string, number>,
+  scratch: RuntimeScratchIndexes | null,
 ): number[] {
   switch (statement.kind) {
     case "trap":
       return [0x00];
     case "return":
       return [
-        ...emitWasmExpression(statement.expression, locals, functions, tables),
+        ...emitWasmExpression(
+          statement.expression,
+          locals,
+          functions,
+          tables,
+          scratch,
+        ),
         0x0f,
       ];
     case "setLocal":
       return [
-        ...emitWasmExpression(statement.expression, locals, functions, tables),
+        ...emitWasmExpression(
+          statement.expression,
+          locals,
+          functions,
+          tables,
+          scratch,
+        ),
         0x21,
         ...u32(localIndex(statement.name, locals)),
       ];
+    case "storeScratchU32":
+      return [
+        ...emitWasmExpression(
+          statement.index,
+          locals,
+          functions,
+          tables,
+          scratch,
+        ),
+        ...emitWasmExpression(
+          statement.value,
+          locals,
+          functions,
+          tables,
+          scratch,
+        ),
+        0x10,
+        ...u32(scratchStoreIndex(scratch)),
+      ];
     case "if":
       return [
-        ...emitWasmExpression(statement.condition, locals, functions, tables),
+        ...emitWasmExpression(
+          statement.condition,
+          locals,
+          functions,
+          tables,
+          scratch,
+        ),
         0x04,
         0x40,
         ...statement.consequent.flatMap((item) =>
-          emitWasmStatement(item, locals, functions, tables)
+          emitWasmStatement(item, locals, functions, tables, scratch)
         ),
         ...(statement.alternate && statement.alternate.length > 0
           ? [
             0x05,
             ...statement.alternate.flatMap((item) =>
-              emitWasmStatement(item, locals, functions, tables)
+              emitWasmStatement(item, locals, functions, tables, scratch)
             ),
           ]
           : []),
@@ -649,12 +854,18 @@ function emitWasmStatement(
         0x40,
         0x03,
         0x40,
-        ...emitWasmExpression(statement.condition, locals, functions, tables),
+        ...emitWasmExpression(
+          statement.condition,
+          locals,
+          functions,
+          tables,
+          scratch,
+        ),
         0x45,
         0x0d,
         ...u32(1),
         ...statement.body.flatMap((item) =>
-          emitWasmStatement(item, locals, functions, tables)
+          emitWasmStatement(item, locals, functions, tables, scratch)
         ),
         0x0c,
         ...u32(0),
@@ -669,6 +880,7 @@ function emitWasmExpression(
   locals: ReadonlyMap<string, number>,
   functions: ReadonlyMap<string, number>,
   tables: ReadonlyMap<string, number>,
+  scratch: RuntimeScratchIndexes | null,
 ): number[] {
   switch (expression.kind) {
     case "u32":
@@ -678,33 +890,107 @@ function emitWasmExpression(
     case "call":
       return [
         ...expression.args.flatMap((argument) =>
-          emitWasmExpression(argument, locals, functions, tables)
+          emitWasmExpression(argument, locals, functions, tables, scratch)
         ),
         0x10,
         ...u32(functionIndex(expression.function, functions)),
       ];
     case "loadTableU32":
       return [
-        ...emitWasmExpression(expression.index, locals, functions, tables),
+        ...emitWasmExpression(
+          expression.index,
+          locals,
+          functions,
+          tables,
+          scratch,
+        ),
         0x10,
         ...u32(tableLoaderIndex(expression.table, tables)),
       ];
+    case "loadScratchU32":
+      return [
+        ...emitWasmExpression(
+          expression.index,
+          locals,
+          functions,
+          tables,
+          scratch,
+        ),
+        0x10,
+        ...u32(scratchLoadIndex(scratch)),
+      ];
     case "addU32":
-      return binaryExpression(expression, locals, functions, tables, 0x6a);
+      return binaryExpression(
+        expression,
+        locals,
+        functions,
+        tables,
+        scratch,
+        0x6a,
+      );
     case "subU32":
-      return binaryExpression(expression, locals, functions, tables, 0x6b);
+      return binaryExpression(
+        expression,
+        locals,
+        functions,
+        tables,
+        scratch,
+        0x6b,
+      );
     case "mulU32":
-      return binaryExpression(expression, locals, functions, tables, 0x6c);
+      return binaryExpression(
+        expression,
+        locals,
+        functions,
+        tables,
+        scratch,
+        0x6c,
+      );
     case "divU32":
-      return binaryExpression(expression, locals, functions, tables, 0x6e);
+      return binaryExpression(
+        expression,
+        locals,
+        functions,
+        tables,
+        scratch,
+        0x6e,
+      );
     case "eqU32":
-      return binaryExpression(expression, locals, functions, tables, 0x46);
+      return binaryExpression(
+        expression,
+        locals,
+        functions,
+        tables,
+        scratch,
+        0x46,
+      );
     case "ltS32":
-      return binaryExpression(expression, locals, functions, tables, 0x48);
+      return binaryExpression(
+        expression,
+        locals,
+        functions,
+        tables,
+        scratch,
+        0x48,
+      );
     case "shlU32":
-      return binaryExpression(expression, locals, functions, tables, 0x74);
+      return binaryExpression(
+        expression,
+        locals,
+        functions,
+        tables,
+        scratch,
+        0x74,
+      );
     case "shrU32":
-      return binaryExpression(expression, locals, functions, tables, 0x76);
+      return binaryExpression(
+        expression,
+        locals,
+        functions,
+        tables,
+        scratch,
+        0x76,
+      );
   }
 }
 
@@ -716,11 +1002,12 @@ function binaryExpression(
   locals: ReadonlyMap<string, number>,
   functions: ReadonlyMap<string, number>,
   tables: ReadonlyMap<string, number>,
+  scratch: RuntimeScratchIndexes | null,
   opcode: number,
 ): number[] {
   return [
-    ...emitWasmExpression(expression.left, locals, functions, tables),
-    ...emitWasmExpression(expression.right, locals, functions, tables),
+    ...emitWasmExpression(expression.left, locals, functions, tables, scratch),
+    ...emitWasmExpression(expression.right, locals, functions, tables, scratch),
     opcode,
   ];
 }
@@ -729,6 +1016,7 @@ function wasmProgramFunctionBody(
   fn: RuntimeLanguageFunction,
   functions: ReadonlyMap<string, number>,
   tables: ReadonlyMap<string, number>,
+  scratch: RuntimeScratchIndexes | null,
 ): number[] {
   const localIndexes = localIndexMap(
     functionParameters(fn),
@@ -737,7 +1025,7 @@ function wasmProgramFunctionBody(
   return [
     ...localDeclarations(functionLocals(fn)),
     ...fn.body.flatMap((statement) =>
-      emitWasmStatement(statement, localIndexes, functions, tables)
+      emitWasmStatement(statement, localIndexes, functions, tables, scratch)
     ),
     0x00,
     0x0b,
@@ -775,10 +1063,82 @@ function wasmTableLoaderBody(
   ];
 }
 
+function wasmScratchLoaderBody(
+  scratch: RuntimeScratchMemory,
+): number[] {
+  return [
+    0x00,
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(scratch.words),
+    0x4f,
+    0x04,
+    0x40,
+    0x00,
+    0x0b,
+    0x41,
+    ...i32(scratch.offset),
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(2),
+    0x74,
+    0x6a,
+    0x28,
+    ...u32(2),
+    ...u32(0),
+    0x0f,
+    0x00,
+    0x0b,
+  ];
+}
+
+function wasmScratchStoreBody(
+  scratch: RuntimeScratchMemory,
+): number[] {
+  return [
+    0x00,
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(scratch.words),
+    0x4f,
+    0x04,
+    0x40,
+    0x00,
+    0x0b,
+    0x41,
+    ...i32(scratch.offset),
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(2),
+    0x74,
+    0x6a,
+    0x20,
+    ...u32(1),
+    0x36,
+    ...u32(2),
+    ...u32(0),
+    0x0b,
+  ];
+}
+
 interface RuntimeTableLoader {
   readonly table: RuntimeLanguageTable;
   readonly name: string;
   readonly offset: number;
+}
+
+interface RuntimeScratchMemory {
+  readonly words: number;
+  readonly offset: number;
+}
+
+interface RuntimeScratchIndexes {
+  readonly load: number;
+  readonly store: number;
 }
 
 interface RuntimeTableLayout {
@@ -805,11 +1165,26 @@ function buildRuntimeTableLayout(
   return { offsets, bytes: Uint8Array.from(bytes) };
 }
 
-function memorySection(data: Uint8Array): number[] {
+function buildRuntimeScratchMemory(
+  tableBytes: number,
+  words: number,
+): RuntimeScratchMemory | null {
+  if (words === 0) return null;
+  const offset = align(tableBytes, 4);
+  const byteLength = offset + words * 4;
+  if (byteLength > MAX_WASM_PAGES * WASM_PAGE_SIZE) {
+    throw new Error(
+      `Runtime-language scratch memory needs ${byteLength} bytes, exceeding the maximum Wasm memory size.`,
+    );
+  }
+  return { words, offset };
+}
+
+function memorySection(byteLength: number): number[] {
   return [
     ...u32(1),
     0x00,
-    ...u32(Math.max(1, Math.ceil(data.length / 65_536))),
+    ...u32(Math.max(1, Math.ceil(byteLength / WASM_PAGE_SIZE))),
   ];
 }
 
@@ -823,6 +1198,10 @@ function dataSection(data: Uint8Array): number[] {
     ...u32(data.length),
     ...data,
   ];
+}
+
+function align(value: number, alignment: number): number {
+  return Math.ceil(value / alignment) * alignment;
 }
 
 function functionParameters(
@@ -841,6 +1220,23 @@ function runtimeLanguageTables(
   program: RuntimeLanguageProgram,
 ): readonly RuntimeLanguageTable[] {
   return program.tables ?? [];
+}
+
+function runtimeLanguageScratchMemoryWords(
+  program: RuntimeLanguageProgram,
+): number {
+  const words = program.scratchMemoryWords ?? 0;
+  if (!Number.isInteger(words) || words < 0) {
+    throw new Error(
+      `Runtime-language program '${program.name}' has invalid scratchMemoryWords '${words}'.`,
+    );
+  }
+  if (words > Math.floor(MAX_WASM_PAGES * WASM_PAGE_SIZE / 4)) {
+    throw new Error(
+      `Runtime-language program '${program.name}' scratchMemoryWords exceeds the maximum Wasm memory size.`,
+    );
+  }
+  return words;
 }
 
 function runtimeLanguageTable(
@@ -928,6 +1324,20 @@ function tableLoaderIndex(
   return index;
 }
 
+function scratchLoadIndex(scratch: RuntimeScratchIndexes | null): number {
+  if (!scratch) {
+    throw new Error("Runtime-language scratch memory load is not available.");
+  }
+  return scratch.load;
+}
+
+function scratchStoreIndex(scratch: RuntimeScratchIndexes | null): number {
+  if (!scratch) {
+    throw new Error("Runtime-language scratch memory store is not available.");
+  }
+  return scratch.store;
+}
+
 function assertKnownLocal(
   name: string,
   locals: ReadonlySet<string>,
@@ -971,6 +1381,26 @@ function wasmTableLoaderType(): number[] {
     0x7f,
     0x01,
     0x7f,
+  ];
+}
+
+function wasmScratchLoaderType(): number[] {
+  return [
+    0x60,
+    ...u32(1),
+    0x7f,
+    0x01,
+    0x7f,
+  ];
+}
+
+function wasmScratchStoreType(): number[] {
+  return [
+    0x60,
+    ...u32(2),
+    0x7f,
+    0x7f,
+    0x00,
   ];
 }
 

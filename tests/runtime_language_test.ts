@@ -87,6 +87,77 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         [],
       ],
     });
+  const scratchStackProgram: RuntimeLanguageProgram = {
+    name: "scratch_stack",
+    entry: "main",
+    scratchMemoryWords: 4,
+    functions: [{
+      name: "main",
+      locals: [
+        { name: "stackTop", type: "u32" },
+        { name: "sum", type: "u32" },
+      ],
+      result: "u32",
+      body: [
+        storeScratch(local("stackTop"), u32(11)),
+        {
+          kind: "setLocal",
+          name: "stackTop",
+          expression: add(local("stackTop"), u32(1)),
+        },
+        storeScratch(local("stackTop"), u32(31)),
+        {
+          kind: "setLocal",
+          name: "stackTop",
+          expression: add(local("stackTop"), u32(1)),
+        },
+        {
+          kind: "setLocal",
+          name: "stackTop",
+          expression: sub(local("stackTop"), u32(1)),
+        },
+        {
+          kind: "setLocal",
+          name: "sum",
+          expression: loadScratch(local("stackTop")),
+        },
+        {
+          kind: "setLocal",
+          name: "stackTop",
+          expression: sub(local("stackTop"), u32(1)),
+        },
+        {
+          kind: "return",
+          expression: add(local("sum"), loadScratch(local("stackTop"))),
+        },
+      ],
+    }],
+  };
+  const scratchBoundsProgram: RuntimeLanguageProgram = {
+    name: "scratch_bounds",
+    entry: "main",
+    scratchMemoryWords: 1,
+    functions: [{
+      name: "main",
+      result: "u32",
+      body: [
+        storeScratch(u32(1), u32(99)),
+        { kind: "return", expression: u32(0) },
+      ],
+    }],
+  };
+  const scratchLoadBoundsProgram: RuntimeLanguageProgram = {
+    name: "scratch_load_bounds",
+    entry: "main",
+    scratchMemoryWords: 1,
+    functions: [{
+      name: "main",
+      result: "u32",
+      body: [
+        { kind: "return", expression: loadScratch(u32(1)) },
+      ],
+    }],
+  };
   const cases: readonly RuntimeConformanceCase[] = [
     {
       name: "u32 addition wraps",
@@ -221,6 +292,21 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         }],
       },
       expected: { kind: "value", value: 10 },
+    },
+    {
+      name: "scratch memory supports stack-like load and store",
+      program: scratchStackProgram,
+      expected: { kind: "value", value: 42 },
+    },
+    {
+      name: "scratch memory stores trap out of bounds",
+      program: scratchBoundsProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "scratch memory loads trap out of bounds",
+      program: scratchLoadBoundsProgram,
+      expected: { kind: "trap" },
     },
     {
       name: "functions call other functions",
@@ -545,6 +631,22 @@ function u32(value: number) {
 
 function local(name: string) {
   return { kind: "local" as const, name };
+}
+
+function loadScratch(index: RuntimeExpression) {
+  return { kind: "loadScratchU32" as const, index };
+}
+
+function storeScratch(index: RuntimeExpression, value: RuntimeExpression) {
+  return { kind: "storeScratchU32" as const, index, value };
+}
+
+function add(left: RuntimeExpression, right: RuntimeExpression) {
+  return { kind: "addU32" as const, left, right };
+}
+
+function sub(left: RuntimeExpression, right: RuntimeExpression) {
+  return { kind: "subU32" as const, left, right };
 }
 
 function asciiRow(

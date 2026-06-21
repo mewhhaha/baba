@@ -161,6 +161,7 @@ function __baba_load_parserGotoEntries(index: number): number {
 }
 
 
+
 function parserAction(state: number, key: number): number {
   let index = 0;
   let low = 0;

@@ -88,16 +88,21 @@ runtime language:
 - Moved generated TypeScript conflict-parser multi-action lookup onto a
   runtime-language `parserActionAt` helper, so declared-conflict parsers no
   longer emit a separate generated `ACTIONS` table or scan it by hand.
+- Added fixed-size checked `u32` scratch memory to the private runtime-language
+  subset, with TypeScript/Wasm conformance coverage for stack-like load/store
+  behavior. This is the first mutable-memory substrate needed before parser
+  stacks and trace buffers can be lowered through the runtime language.
 
 Still unresolved:
 
 - The P0 source-of-truth milestone remains open: TypeScript and Wasm runtime
   execution now has a clearer shared runtime packaging boundary and generated
-  lexer/parser table helpers from the runtime language, but conflict branch
-  scheduling, the main lexer/parser control flow, and reduction algorithms are
-  still not mechanically emitted from one runtime-language implementation. That
-  requires a larger runtime compiler/artifact boundary before the release can
-  fully satisfy "one runtime implementation, two execution targets."
+  lexer/parser table helpers plus a checked mutable scratch-memory substrate
+  from the runtime language, but conflict branch scheduling, the main
+  lexer/parser control flow, and reduction algorithms are still not mechanically
+  emitted from one runtime-language implementation. That requires a larger
+  runtime compiler/artifact boundary before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a
