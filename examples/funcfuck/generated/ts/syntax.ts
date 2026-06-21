@@ -69,6 +69,7 @@ export interface ParseDiagnostic {
     | "PARSE_UNEXPECTED_TOKEN"
     | "PARSE_TRAILING_INPUT"
     | "PARSE_INVALID_TOKEN_STREAM"
+    | "PARSER_BRANCH_LIMIT"
     | "PARSER_INTERNAL_ERROR";
   message: string;
   span: Span;
