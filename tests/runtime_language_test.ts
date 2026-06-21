@@ -804,13 +804,14 @@ Deno.test("runtime language lowers to a resolved IR", () => {
     }],
     functions: [{
       name: "main",
+      parameters: [{ name: "slot", type: "u32" }],
       result: "u32",
       body: [{
         kind: "return",
         expression: {
           kind: "loadTableU32",
           table: "values",
-          index: u32(1),
+          index: local("slot"),
         },
       }],
     }],
@@ -828,6 +829,27 @@ Deno.test("runtime language lowers to a resolved IR", () => {
   assertEquals(ir.tableMap.get("values")?.values[1], 2);
   assertEquals(ir.hasScratchMemory, true);
   assertEquals(ir.scratchMemoryWords, 2);
+
+  const fn = ir.functions[0];
+  if (!fn) throw new Error("Expected lowered function.");
+  assertEquals(fn.source, program.functions[0]);
+  assertEquals(fn.body.length, 1);
+  const statement = fn.body[0];
+  if (statement?.kind !== "return") {
+    throw new Error("Expected lowered return statement.");
+  }
+  const expression = statement.expression;
+  if (expression.kind !== "loadTableU32") {
+    throw new Error("Expected lowered table load.");
+  }
+  assertEquals(expression.tableName, "values");
+  assertEquals(expression.tableIndex, 0);
+  assertEquals(expression.table.values[1], 2);
+  if (expression.index.kind !== "local") {
+    throw new Error("Expected lowered local table index.");
+  }
+  assertEquals(expression.index.variable.name, "slot");
+  assertEquals(expression.index.localIndex, 0);
 });
 
 Deno.test("runtime language compiler manifest is current", async () => {

@@ -105,8 +105,9 @@ runtime language:
   action trace to build the CST, with TypeScript/Wasm conformance coverage for
   the trace helper.
 - Added a resolved runtime-language IR boundary (`RuntimeLanguageIrProgram`) so
-  TypeScript and Wasm runtime compiler backends consume the same validated
-  entry/function/table/scratch metadata before target-specific emission.
+  TypeScript and Wasm runtime compiler backends consume the same lowered
+  control-flow/value nodes with resolved entry/function/table/local/scratch
+  metadata before target-specific emission.
 
 Still unresolved:
 
@@ -117,9 +118,9 @@ Still unresolved:
   conflict branch scheduling, Wasm parser control flow, generated token object
   emission/diagnostics, and reduction/CST algorithms are still not mechanically
   emitted from one runtime-language implementation. The compiler now has a
-  shared resolved program IR, but it still needs a lower control-flow/value IR
-  and generated runtime artifacts before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  shared lowered control-flow/value IR, but it still needs checked generated
+  runtime artifacts and broader parser-runtime lowering before the release can
+  fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a
