@@ -49,6 +49,9 @@
 - Added a resolved runtime-language IR boundary so TypeScript and Wasm runtime
   compiler backends consume one validated program model with resolved entry,
   function, table, scratch-memory, control-flow, and value metadata.
+- Added a checked runtime-language artifact manifest for canonical helper
+  programs, including source, TypeScript output, and Wasm output hashes verified
+  by `bootstrap:check`.
 
 ### Changed
 

@@ -168,11 +168,12 @@ Generated TypeScript, generated Wasm adapters, and parser-kit JSON also expose a
 runtime implementation identity with format `"baba-runtime-implementation"`,
 version `1`, semantics `"baba-runtime-portable-v1"`, and an aggregate source
 hash. This verifies that outputs were packaged against the same checked-in
-runtime source family. Deterministic TypeScript parser control flow now uses a
-runtime-language `parserTrace` helper, and generated TypeScript lexer candidate
-selection uses runtime-language `lexerScan*` helpers, but this identity is not
-yet a claim that the full TypeScript and Wasm parser runtimes were compiled from
-one runtime-language source; that remains the next runtime compiler boundary.
+runtime source family and checked runtime-language artifact manifest.
+Deterministic TypeScript parser control flow now uses a runtime-language
+`parserTrace` helper, and generated TypeScript lexer candidate selection uses
+runtime-language `lexerScan*` helpers, but this identity is not yet a claim that
+the full TypeScript and Wasm parser runtimes were compiled from one
+runtime-language source; that remains the next runtime compiler boundary.
 
 The initial private runtime-language semantics are documented in
 `docs/runtime-language.md`. Its Stage-0 executable subset currently covers
@@ -601,5 +602,6 @@ into a temporary directory and byte-compares them with `examples/*/generated`.
 `bootstrap` rewrites those generated files through Baba's manifest-aware
 `applyBundle()` path. These tasks cover the current Stage-0 generated runtime
 artifacts and verify the checked-in runtime implementation source manifest. They
-also verify the Stage-0 runtime-language compiler source manifest so compiler
-drift is tracked independently from generated parser runtime identity.
+also verify the Stage-0 runtime-language compiler source manifest and checked
+runtime-language helper artifact hashes so compiler drift is tracked
+independently from generated parser runtime identity.

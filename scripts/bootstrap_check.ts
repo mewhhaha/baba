@@ -14,6 +14,11 @@ import {
   hashRuntimeLanguageCompilerSource,
   RUNTIME_LANGUAGE_COMPILER_METADATA,
 } from "../src/targets/runtime/language_manifest.ts";
+import {
+  computeRuntimeLanguageArtifactMetadata,
+  hashRuntimeLanguageArtifactsManifest,
+  RUNTIME_LANGUAGE_ARTIFACTS_METADATA,
+} from "../src/targets/runtime/language_artifacts.ts";
 
 interface ExampleConfig {
   dir: string;
@@ -57,6 +62,7 @@ export async function runBootstrapCheck(
 ): Promise<void> {
   await verifyRuntimeImplementationMetadata();
   await verifyRuntimeLanguageCompilerMetadata();
+  verifyRuntimeLanguageArtifactMetadata();
   for (const example of EXAMPLES) {
     if (mode === "write") {
       await writeExample(example);
@@ -122,6 +128,35 @@ async function verifyRuntimeLanguageCompilerMetadata(): Promise<void> {
     );
   }
   console.log("verified runtime-language compiler manifest");
+}
+
+function verifyRuntimeLanguageArtifactMetadata(): void {
+  const artifacts = computeRuntimeLanguageArtifactMetadata();
+  if (
+    JSON.stringify(artifacts) !==
+      JSON.stringify(RUNTIME_LANGUAGE_ARTIFACTS_METADATA.artifacts)
+  ) {
+    throw new Error(
+      [
+        "Runtime-language artifact metadata is stale.",
+        `expected in manifest: ${
+          JSON.stringify(RUNTIME_LANGUAGE_ARTIFACTS_METADATA.artifacts)
+        }`,
+        `actual: ${JSON.stringify(artifacts)}`,
+      ].join("\n"),
+    );
+  }
+  const manifestHash = hashRuntimeLanguageArtifactsManifest(artifacts);
+  if (manifestHash !== RUNTIME_LANGUAGE_ARTIFACTS_METADATA.hash) {
+    throw new Error(
+      [
+        "Runtime-language artifact manifest hash is stale.",
+        `expected in manifest: ${RUNTIME_LANGUAGE_ARTIFACTS_METADATA.hash}`,
+        `actual: ${manifestHash}`,
+      ].join("\n"),
+    );
+  }
+  console.log("verified runtime-language artifact manifest");
 }
 
 async function writeExample(example: ExampleConfig): Promise<void> {

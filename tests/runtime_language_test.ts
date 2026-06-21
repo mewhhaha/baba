@@ -7,6 +7,11 @@ import {
   RuntimeLanguageProgram,
 } from "../src/targets/runtime/language.ts";
 import {
+  computeRuntimeLanguageArtifactMetadata,
+  hashRuntimeLanguageArtifactsManifest,
+  RUNTIME_LANGUAGE_ARTIFACTS_METADATA,
+} from "../src/targets/runtime/language_artifacts.ts";
+import {
   hashRuntimeLanguageCompilerManifest,
   hashRuntimeLanguageCompilerSource,
   RUNTIME_LANGUAGE_COMPILER_METADATA,
@@ -869,6 +874,28 @@ Deno.test("runtime language compiler manifest is current", async () => {
   assertEquals(
     hashRuntimeLanguageCompilerManifest(sources),
     RUNTIME_LANGUAGE_COMPILER_METADATA.hash,
+  );
+});
+
+Deno.test("runtime language artifact manifest is current", () => {
+  assertEquals(
+    RUNTIME_LANGUAGE_ARTIFACTS_METADATA.format,
+    "baba-runtime-language-artifacts",
+  );
+  assertEquals(RUNTIME_LANGUAGE_ARTIFACTS_METADATA.version, 1);
+  assertEquals(
+    RUNTIME_LANGUAGE_ARTIFACTS_METADATA.compilerHash,
+    RUNTIME_LANGUAGE_COMPILER_METADATA.hash,
+  );
+
+  const artifacts = computeRuntimeLanguageArtifactMetadata();
+  assertEquals(
+    JSON.stringify(artifacts),
+    JSON.stringify(RUNTIME_LANGUAGE_ARTIFACTS_METADATA.artifacts),
+  );
+  assertEquals(
+    hashRuntimeLanguageArtifactsManifest(artifacts),
+    RUNTIME_LANGUAGE_ARTIFACTS_METADATA.hash,
   );
 });
 

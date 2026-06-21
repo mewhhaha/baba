@@ -38,8 +38,8 @@ runtime language:
   diagnostics.
 - Added `deno task bootstrap` and `deno task bootstrap:check` for deterministic
   checked-in example runtime artifact regeneration. This covers the current
-  Stage-0 generated artifacts; future runtime-language compiler sources still
-  need their own source/artifact hash manifest.
+  Stage-0 generated artifacts, runtime-language compiler source manifest, and
+  runtime-language helper artifact manifest.
 - Moved the TypeScript lexer/parser runtime source emitters into
   `src/targets/runtime/`, leaving `src/targets/typescript/` to package grammar
   tables, generated type declarations, and runtime reexports. A regression test
@@ -108,6 +108,10 @@ runtime language:
   TypeScript and Wasm runtime compiler backends consume the same lowered
   control-flow/value nodes with resolved entry/function/table/local/scratch
   metadata before target-specific emission.
+- Added a checked runtime-language artifact manifest for canonical helper
+  programs. `bootstrap:check` now recompiles those helpers to TypeScript and
+  Wasm and verifies source, TypeScript artifact, Wasm artifact, and aggregate
+  manifest hashes.
 
 Still unresolved:
 
@@ -118,9 +122,9 @@ Still unresolved:
   conflict branch scheduling, Wasm parser control flow, generated token object
   emission/diagnostics, and reduction/CST algorithms are still not mechanically
   emitted from one runtime-language implementation. The compiler now has a
-  shared lowered control-flow/value IR, but it still needs checked generated
-  runtime artifacts and broader parser-runtime lowering before the release can
-  fully satisfy "one runtime implementation, two execution targets."
+  shared lowered control-flow/value IR and checked helper artifact hashes, but
+  it still needs broader parser-runtime lowering before the release can fully
+  satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

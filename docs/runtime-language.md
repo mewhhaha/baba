@@ -10,6 +10,7 @@ through the language.
 - Runtime language version: `1`
 - Semantics tag: `baba-runtime-language-v1`
 - Compiler manifest format: `baba-runtime-language-compiler` version `1`
+- Artifact manifest format: `baba-runtime-language-artifacts` version `1`
 
 The runtime implementation metadata exported by generated parsers identifies the
 checked-in runtime source family. Runtime-language versioning is separate from
@@ -18,7 +19,9 @@ Wasm adapter ABI version.
 
 `deno task bootstrap:check` verifies the Stage-0 runtime-language compiler
 source hash before it checks regenerated example artifacts. This catches
-compiler-source drift separately from the generated parser runtime identity.
+compiler-source drift separately from the generated parser runtime identity. It
+also recompiles canonical runtime-language helper programs to TypeScript and
+Wasm and verifies checked source, TypeScript artifact, and Wasm artifact hashes.
 
 The Stage-0 compiler lowers each validated runtime-language program once to a
 resolved `RuntimeLanguageIrProgram` before emitting TypeScript or Wasm. That IR
@@ -42,7 +45,8 @@ flow; TypeScript code still replays that trace to build the CST. The same
 runtime-language source shape is also compiled to Wasm in conformance tests.
 Because generated parser runtime code depends on runtime-language compiler
 output, the checked runtime implementation manifest includes both runtime
-language sources and the Stage-0 compiler.
+language sources, the Stage-0 compiler, and the checked runtime-language
+artifact manifest.
 
 ## Current Executable Subset
 
