@@ -10,7 +10,8 @@ The same grammar can produce:
 - a Tree-sitter `grammar.js` and generated query fragments;
 - a standalone TypeScript DFA lexer, LR(1) parser, and typed concrete syntax
   tree;
-- a WebAssembly-backed lexer/parser adapter with the same TypeScript API.
+- a WebAssembly-backed lexer/parser adapter with the same TypeScript API;
+- a generic parser-kit JSON artifact for compiler and tooling consumers.
 
 This is useful when a grammar needs to support editor highlighting, tests,
 command-line tools, or browser tooling without maintaining separate parser
@@ -119,6 +120,30 @@ Both generated parser runtimes export the same main TypeScript API:
 
 The Wasm target also exports `wasmBytes` from `wasm/mod.ts`.
 
+Use `--target kit` when another tool wants Baba's parser data without generated
+TypeScript source:
+
+```sh
+deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
+  --out generated \
+  --target kit
+```
+
+The parser kit is written under `kit/` by default:
+
+```text
+generated/
+  kit/
+    parser-kit.json
+```
+
+`parser-kit.json` uses schema version 1 and includes grammar/root metadata,
+token and literal metadata, the lexer DFA, BNF terminals/nonterminals and
+productions, reducer descriptors, LR ACTION/GOTO tables including declared
+multi-action conflicts, field schemas, display names, and source spans. It is a
+consumer-neutral data artifact; Baba does not generate compiler-specific export
+names, host ABI tables, or language-specific memory layouts.
+
 Generated parser code is specialized to the grammar. Deterministic TypeScript
 parsers omit branch-search helpers, while grammars with declared parser
 conflicts include the bounded branch runtime. Wasm parser adapters use the same
@@ -165,13 +190,19 @@ deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
 ```
 
 `--ts-out` is an alias for `--typescript-dir`. `--wasm-dir` controls the Wasm
-target output directory. `--preserve-trivia` and `--discard-trivia` control
-whether skip matches are emitted as trivia tokens. `--lexer-state-limit`,
-`--parser-state-limit`, `--parser-item-limit`, and `--parser-table-entry-limit`
-apply to both the TypeScript and Wasm parser runtimes.
-`--portability strict|warn|off` controls diagnostics for known cross-target
-acceptance differences. When multiple targets are selected, portability defaults
-to `strict`; otherwise it defaults to `warn`.
+target output directory. `--kit-dir` controls the parser-kit output directory
+when `--target kit` is selected. `--preserve-trivia` and `--discard-trivia`
+control whether skip matches are emitted as trivia tokens by generated runtimes
+and kit helper lexing. `--lexer-state-limit`, `--parser-state-limit`,
+`--parser-item-limit`, and `--parser-table-entry-limit` apply to the TypeScript,
+Wasm, and kit parser-runtime planning path. `--portability strict|warn|off`
+controls diagnostics for known cross-target acceptance differences. When
+Tree-sitter is selected with another target, portability defaults to `strict`;
+otherwise it defaults to `warn`.
+
+`--target all` intentionally does not include `kit`; request it explicitly with
+`--target kit` to avoid unplanned JSON artifact churn in existing generated
+directories.
 
 Inspect generated TypeScript target size and parser table statistics:
 
@@ -210,6 +241,24 @@ if (diagnostics.length === 0) {
     console.warn(diagnostic.code, diagnostic.message);
   }
   await applyBundle(bundle, { root: "generated" });
+}
+```
+
+Parser-kit consumers can compile and validate the generic artifact directly:
+
+```ts
+import {
+  compileParserKit,
+  lexWithKit,
+  parseWithKit,
+  validateParserKit,
+} from "jsr:@mewhhaha/baba/kit";
+
+const result = compileParserKit(grammar, { name: "tiny" });
+if (result.kit && validateParserKit(result.kit).length === 0) {
+  const lexed = lexWithKit(result.kit, "fn main() {}");
+  const parsed = parseWithKit(result.kit, lexed.source);
+  console.log(parsed.ok);
 }
 ```
 

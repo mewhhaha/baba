@@ -3,8 +3,8 @@
 Examples are complete, reproducible projects built with Baba.
 
 - `brainfuck/`: generates Tree-sitter, TypeScript, and Wasm parser artifacts for
-  a counted, parallel Brainfuck dialect, then implements an interpreter using
-  the generated Wasm-backed parser.
+  a counted, parallel Brainfuck dialect, implements an interpreter using the
+  generated Wasm-backed parser, and includes a parser-kit consumer smoke test.
 - `funcfuck/`: generates parser artifacts for a small functional stream language
   based on composition, fanout, and named function definitions.
 - `thunkwasm/`: generates parser artifacts for a thunk-based functional

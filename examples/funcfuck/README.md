@@ -50,7 +50,7 @@ Step 2: write the starting files:
 The generated files under `generated/` are committed in this example so you can
 inspect them, but they should be treated as generated output.
 
-Step 3: generate both targets.
+Step 3: generate the parser artifacts.
 
 ```sh
 deno task generate

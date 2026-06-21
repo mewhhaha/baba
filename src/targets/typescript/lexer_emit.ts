@@ -1,5 +1,6 @@
 import type { TypeScriptTargetOptions } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
+import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { RegexAst } from "../../compiler/regex/ast.ts";
 import { buildLexerDfa } from "../../compiler/regex/lexer.ts";
 import { parsePortableRegex } from "../../compiler/regex/parser.ts";
@@ -7,6 +8,7 @@ import { parsePortableRegex } from "../../compiler/regex/parser.ts";
 export function emitLexer(
   analyzed: AnalyzedGrammar,
   options: TypeScriptTargetOptions = {},
+  plannedDfa?: Dfa,
 ): string {
   const namedSpecs = analyzed.tokens
     .filter((token) =>
@@ -41,7 +43,7 @@ export function emitLexer(
       order: spec.order,
     })),
   ];
-  const dfa = buildLexerDfa(lexerSpecs);
+  const dfa = plannedDfa ?? buildLexerDfa(lexerSpecs);
   const transitions = dfa.states.map((state) =>
     state.transitions.map((transition) => [
       transition.start,

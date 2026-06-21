@@ -1,3 +1,5 @@
+import type { ParserKit } from "./targets/kit/schema.ts";
+
 /** A parsed EBNF grammar with terminal declarations and grammar rules. */
 export interface EbnfGrammar {
   /** Explicit token and skip declarations from the grammar header. */
@@ -117,7 +119,7 @@ export interface Diagnostic {
 }
 
 /** Output target selected for a generation run. */
-export type GenerateTarget = "tree-sitter" | "typescript" | "wasm";
+export type GenerateTarget = "tree-sitter" | "typescript" | "wasm" | "kit";
 
 /** Cross-target portability diagnostic policy. */
 export type PortabilityMode = "strict" | "warn" | "off";
@@ -147,6 +149,22 @@ export interface WasmTargetOptions {
   /** Relative directory inside the generated bundle. Defaults to `wasm`. */
   directory?: string;
   /** Preserve skip-token matches as trivia tokens. Defaults to true. */
+  preserveTrivia?: boolean;
+  /** Maximum generated lexer DFA state count. Defaults to 50,000. */
+  lexerStateLimit?: number;
+  /** Maximum canonical LR(1) state count. Defaults to 20,000. */
+  parserStateLimit?: number;
+  /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
+  parserItemLimit?: number;
+  /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
+  parserTableEntryLimit?: number;
+}
+
+/** Options for the generic parser-kit target. */
+export interface KitTargetOptions {
+  /** Relative directory inside the generated bundle. Defaults to `kit`. */
+  directory?: string;
+  /** Preserve skip-token matches in reference helper lexing. Defaults to true. */
   preserveTrivia?: boolean;
   /** Maximum generated lexer DFA state count. Defaults to 50,000. */
   lexerStateLimit?: number;
@@ -188,12 +206,14 @@ export interface GenerateOptions {
   metadata?: BabaMetadata;
   /** Output targets. Defaults to ["tree-sitter"]. */
   targets?: readonly GenerateTarget[];
-  /** Cross-target portability policy. Defaults to strict for multiple targets, warn otherwise. */
+  /** Cross-target portability policy. Defaults to strict for Tree-sitter plus another target, warn otherwise. */
   portability?: PortabilityMode;
   /** Standalone TypeScript target options. */
   typescript?: TypeScriptTargetOptions;
   /** Standalone Wasm target options. */
   wasm?: WasmTargetOptions;
+  /** Generic parser-kit target options. */
+  kit?: KitTargetOptions;
 }
 
 /** Options for the nonthrowing compiler API. */
@@ -207,6 +227,28 @@ export interface CompileResult {
   bundle?: GeneratedBundle;
 }
 
+/** Options for compiling only a generic parser-kit artifact. */
+export interface CompileParserKitOptions {
+  /** Language/grammar name. */
+  name?: string;
+  /** Root grammar rule. Defaults to the first rule. */
+  rootRule?: string;
+  /** Optional generation metadata. */
+  metadata?: BabaMetadata;
+  /** Cross-target portability policy. Defaults to warn. */
+  portability?: PortabilityMode;
+  /** Parser-kit target options. */
+  kit?: KitTargetOptions;
+}
+
+/** Nonthrowing parser-kit compiler result. */
+export interface CompileParserKitResult {
+  /** All diagnostics collected while analyzing and planning the kit. */
+  diagnostics: readonly Diagnostic[];
+  /** Present only when no error diagnostics were produced. */
+  kit?: ParserKit;
+}
+
 /** Options for grammar and target validation without output generation. */
 export interface ValidateOptions {
   /** Root grammar rule. Defaults to the first rule. */
@@ -215,12 +257,14 @@ export interface ValidateOptions {
   metadata?: BabaMetadata;
   /** Output targets to validate. Defaults to ["tree-sitter"]. */
   targets?: readonly GenerateTarget[];
-  /** Cross-target portability policy. Defaults to strict for multiple targets, warn otherwise. */
+  /** Cross-target portability policy. Defaults to strict for Tree-sitter plus another target, warn otherwise. */
   portability?: PortabilityMode;
   /** Standalone TypeScript target options. */
   typescript?: TypeScriptTargetOptions;
   /** Standalone Wasm target options. */
   wasm?: WasmTargetOptions;
+  /** Generic parser-kit target options. */
+  kit?: KitTargetOptions;
 }
 
 /** One generated file. */

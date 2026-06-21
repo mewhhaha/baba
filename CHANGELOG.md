@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.4.0
+
+### Added
+
+- Added the generic parser-kit target with `--target kit`, `--kit-dir`, and
+  generated `kit/parser-kit.json` output.
+- Added `compileParserKit()` and the public `@mewhhaha/baba/kit` module with
+  ParserKit schema types, schema validation, token/terminal mapping helpers, and
+  reference `lexWithKit()` / `parseWithKit()` helpers.
+
+### Changed
+
+- TypeScript, Wasm, and kit planning now share the same standalone runtime
+  analysis for lexer DFA construction, BNF lowering, LR tables, reducer specs,
+  field schemas, diagnostics, and conflict policy.
+- `--target all` remains the existing Tree-sitter plus TypeScript/Wasm output
+  set; generate the parser kit explicitly with `--target kit`.
+- Default portability diagnostics are strict only when Tree-sitter is selected
+  with another target; runtime-only target combinations default to warnings.
+
 ## 1.3.0
 
 ### Added

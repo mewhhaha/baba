@@ -7,6 +7,7 @@
 import type {
   Diagnostic,
   GenerateTarget,
+  KitTargetOptions,
   PortabilityMode,
   TypeScriptTargetOptions,
   WasmTargetOptions,
@@ -31,6 +32,7 @@ interface Options {
   portability?: PortabilityMode;
   typescript: TypeScriptTargetOptions;
   wasm: WasmTargetOptions;
+  kit: KitTargetOptions;
   listFiles: boolean;
   diagnosticFormat: "text" | "json";
   help: boolean;
@@ -94,6 +96,7 @@ export async function main(args: string[]): Promise<void> {
       ? options.typescript
       : undefined,
     wasm: hasWasmOptions(options.wasm) ? options.wasm : undefined,
+    kit: hasKitOptions(options.kit) ? options.kit : undefined,
   });
   if (hasErrors(result.diagnostics)) {
     throw new CliDiagnosticsError(result.diagnostics, options.diagnosticFormat);
@@ -121,6 +124,7 @@ function parseArgs(args: string[]): Options {
     targets: [],
     typescript: {},
     wasm: {},
+    kit: {},
     listFiles: false,
     diagnosticFormat: "text",
     help: false,
@@ -205,13 +209,26 @@ function parseArgs(args: string[]): Options {
         options.wasm.directory = directory;
         break;
       }
+      case "--kit-dir": {
+        const directory = args[++i];
+        if (!directory) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: `Expected directory after ${arg}`,
+          });
+        }
+        options.kit.directory = directory;
+        break;
+      }
       case "--preserve-trivia":
         options.typescript.preserveTrivia = true;
         options.wasm.preserveTrivia = true;
+        options.kit.preserveTrivia = true;
         break;
       case "--discard-trivia":
         options.typescript.preserveTrivia = false;
         options.wasm.preserveTrivia = false;
+        options.kit.preserveTrivia = false;
         break;
       case "--lexer-state-limit":
         options.typescript.lexerStateLimit = parsePositiveIntegerArg(
@@ -219,6 +236,7 @@ function parseArgs(args: string[]): Options {
           arg,
         );
         options.wasm.lexerStateLimit = options.typescript.lexerStateLimit;
+        options.kit.lexerStateLimit = options.typescript.lexerStateLimit;
         break;
       case "--parser-state-limit":
         options.typescript.parserStateLimit = parsePositiveIntegerArg(
@@ -226,6 +244,7 @@ function parseArgs(args: string[]): Options {
           arg,
         );
         options.wasm.parserStateLimit = options.typescript.parserStateLimit;
+        options.kit.parserStateLimit = options.typescript.parserStateLimit;
         break;
       case "--parser-item-limit":
         options.typescript.parserItemLimit = parsePositiveIntegerArg(
@@ -233,6 +252,7 @@ function parseArgs(args: string[]): Options {
           arg,
         );
         options.wasm.parserItemLimit = options.typescript.parserItemLimit;
+        options.kit.parserItemLimit = options.typescript.parserItemLimit;
         break;
       case "--parser-table-entry-limit":
         options.typescript.parserTableEntryLimit = parsePositiveIntegerArg(
@@ -240,6 +260,8 @@ function parseArgs(args: string[]): Options {
           arg,
         );
         options.wasm.parserTableEntryLimit =
+          options.typescript.parserTableEntryLimit;
+        options.kit.parserTableEntryLimit =
           options.typescript.parserTableEntryLimit;
         break;
       case "--generated-byte-limit":
@@ -308,7 +330,7 @@ function parseArgs(args: string[]): Options {
         throw new BabaError({
           code: "REMOVED_CLI_OPTION",
           message:
-            `'${arg}' was removed in baba 1.0. Use --target tree-sitter, --target typescript, --target wasm, or --target all.`,
+            `'${arg}' was removed in baba 1.0. Use --target tree-sitter, --target typescript, --target wasm, --target kit, or --target all.`,
         });
       default:
         if (arg.startsWith("-")) {
@@ -340,10 +362,11 @@ Usage:
 Options:
   --name        Grammar/target name. Defaults to grammar
   --root        Root grammar rule. Defaults to the first grammar rule
-  --target      Output target: tree-sitter, typescript, wasm, or all. May repeat
+  --target      Output target: tree-sitter, typescript, wasm, kit, or all. May repeat
   --typescript-dir  TypeScript target output directory. Defaults to typescript
   --ts-out      Alias for --typescript-dir
   --wasm-dir    Wasm target output directory. Defaults to wasm
+  --kit-dir     Parser-kit target output directory. Defaults to kit
   --preserve-trivia  Preserve skip matches as trivia tokens
   --discard-trivia   Omit skip matches from generated lexer output
   --lexer-state-limit  Maximum TypeScript lexer DFA state count
@@ -389,6 +412,10 @@ function hasWasmOptions(options: WasmTargetOptions): boolean {
   return Object.keys(options).length > 0;
 }
 
+function hasKitOptions(options: KitTargetOptions): boolean {
+  return Object.keys(options).length > 0;
+}
+
 function diagnosticFormatFromArgs(
   args: readonly string[],
 ): Options["diagnosticFormat"] {
@@ -400,7 +427,8 @@ function diagnosticFormatFromArgs(
 function addTarget(options: Options, target: string): void {
   const targets: GenerateTarget[] = target === "all"
     ? ["tree-sitter", "typescript", "wasm"]
-    : target === "tree-sitter" || target === "typescript" || target === "wasm"
+    : target === "tree-sitter" || target === "typescript" ||
+        target === "wasm" || target === "kit"
     ? [target]
     : [];
   if (targets.length === 0) {

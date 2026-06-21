@@ -1,6 +1,8 @@
 import type {
   BabaMetadata,
   CompileOptions,
+  CompileParserKitOptions,
+  CompileParserKitResult,
   CompileResult,
   Diagnostic,
   EbnfGrammar,
@@ -32,6 +34,11 @@ import {
   planWasmTarget,
   type WasmPlan,
 } from "./targets/wasm/plan.ts";
+import {
+  emitKitTarget,
+  type KitPlan,
+  planKitTarget,
+} from "./targets/kit/plan.ts";
 export { applyBundle } from "./output.ts";
 
 /** Parses EBNF source into a grammar AST. */
@@ -110,6 +117,22 @@ export function validateGrammar(
       );
     }
   }
+  if (targets.includes("kit")) {
+    try {
+      diagnostics.push(
+        ...planKitTarget(
+          analyzed,
+          options.kit,
+          options.metadata,
+          portability,
+        ).diagnostics,
+      );
+    } catch (error) {
+      diagnostics.push(
+        toBabaError(error, "KIT_TARGET_INTERNAL_ERROR").toDiagnostic(),
+      );
+    }
+  }
   return diagnostics;
 }
 
@@ -151,6 +174,7 @@ export function compile(
     | { diagnostics: readonly Diagnostic[] }
     | undefined;
   let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
+  let kitPlan: KitPlan | { diagnostics: readonly Diagnostic[] } | undefined;
   if (targets.includes("typescript") && !hasErrors(diagnostics)) {
     try {
       typeScriptPlan = planTypeScriptTarget(
@@ -182,6 +206,21 @@ export function compile(
       });
     }
   }
+  if (targets.includes("kit") && !hasErrors(diagnostics)) {
+    try {
+      kitPlan = planKitTarget(
+        analyzed,
+        options.kit,
+        metadata,
+        portability,
+      );
+    } catch (error) {
+      diagnostics.push({
+        ...toBabaError(error, "KIT_TARGET_INTERNAL_ERROR").toDiagnostic(),
+        backend: "kit",
+      });
+    }
+  }
 
   if (!hasErrors(diagnostics) && targets.includes("tree-sitter")) {
     diagnostics.push(
@@ -190,6 +229,7 @@ export function compile(
   }
   if (typeScriptPlan) diagnostics.push(...typeScriptPlan.diagnostics);
   if (wasmPlan) diagnostics.push(...wasmPlan.diagnostics);
+  if (kitPlan) diagnostics.push(...kitPlan.diagnostics);
   if (hasErrors(diagnostics)) return { diagnostics };
 
   try {
@@ -211,6 +251,9 @@ export function compile(
     if (isWasmPlan(wasmPlan)) {
       files.push(...emitWasmTarget(wasmPlan, options.wasm));
     }
+    if (isKitPlan(kitPlan)) {
+      files.push(...emitKitTarget(kitPlan));
+    }
 
     diagnostics.push(...collectBundlePathDiagnostics(files));
     if (hasErrors(diagnostics)) return { diagnostics };
@@ -228,6 +271,51 @@ export function compile(
       ],
     };
   }
+}
+
+/** Compiles a grammar into a generic parser-kit artifact. */
+export function compileParserKit(
+  sourceOrGrammar: string | EbnfGrammar,
+  options: CompileParserKitOptions = {},
+): CompileParserKitResult {
+  let grammar: EbnfGrammar;
+  try {
+    grammar = typeof sourceOrGrammar === "string"
+      ? parseEbnf(sourceOrGrammar)
+      : sourceOrGrammar;
+  } catch (error) {
+    return {
+      diagnostics: [toBabaError(error, "EBNF_PARSE_ERROR").toDiagnostic()],
+    };
+  }
+
+  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  const metadata = options.metadata ?? {};
+  const analyzed = analyzeGrammar(grammar, {
+    name: options.name ?? "grammar",
+    rootRule: rootRuleName,
+    metadata,
+  });
+  const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
+  let kitPlan: KitPlan | { diagnostics: readonly Diagnostic[] } | undefined;
+  if (!hasErrors(diagnostics)) {
+    try {
+      kitPlan = planKitTarget(
+        analyzed,
+        options.kit,
+        metadata,
+        options.portability ?? "warn",
+      );
+      diagnostics.push(...kitPlan.diagnostics);
+    } catch (error) {
+      diagnostics.push({
+        ...toBabaError(error, "KIT_TARGET_INTERNAL_ERROR").toDiagnostic(),
+        backend: "kit",
+      });
+    }
+  }
+  if (hasErrors(diagnostics) || !isKitPlan(kitPlan)) return { diagnostics };
+  return { diagnostics, kit: kitPlan.kit };
 }
 
 /** Generates a deterministic bundle from EBNF source or a parsed grammar. */
@@ -291,7 +379,8 @@ function normalizeTargets(
   const result: GenerateTarget[] = [];
   for (const target of targets) {
     if (
-      target !== "tree-sitter" && target !== "typescript" && target !== "wasm"
+      target !== "tree-sitter" && target !== "typescript" &&
+      target !== "wasm" && target !== "kit"
     ) {
       throw new BabaError({
         code: "UNKNOWN_TARGET",
@@ -312,7 +401,8 @@ function normalizePortability(
   ) {
     return portability;
   }
-  return targets.includes("tree-sitter") && targets.includes("typescript")
+  return targets.includes("tree-sitter") &&
+      targets.some((target) => target !== "tree-sitter")
     ? "strict"
     : "warn";
 }
@@ -341,6 +431,16 @@ function isWasmPlan(
     | undefined,
 ): value is WasmPlan {
   return !!value && "wasm" in value;
+}
+
+function isKitPlan(
+  value:
+    | KitPlan
+    | { diagnostics: readonly Diagnostic[] }
+    | false
+    | undefined,
+): value is KitPlan {
+  return !!value && "kit" in value;
 }
 
 function collectBundlePathDiagnostics(

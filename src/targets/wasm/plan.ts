@@ -3,21 +3,18 @@ import type {
   Diagnostic,
   GeneratedFile,
   PortabilityMode,
-  TypeScriptTargetOptions,
   WasmTargetOptions,
 } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
-import type { RegexAst } from "../../compiler/regex/ast.ts";
-import { buildLexerDfa } from "../../compiler/regex/lexer.ts";
-import { parsePortableRegex } from "../../compiler/regex/parser.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
 import type { LrTable } from "../typescript/lr1.ts";
-import {
-  planTypeScriptTarget,
-  type TypeScriptPlan,
-} from "../typescript/plan.ts";
 import { emitSyntax } from "../typescript/syntax_emit.ts";
+import {
+  planRuntimeParserTarget,
+  type RuntimeParserPlan,
+  type RuntimeParserPlanningOptions,
+} from "../runtime/plan.ts";
 import { emitWasmLexer } from "./lexer_emit.ts";
 import { emitWasmModule, type WasmModuleImage } from "./module_emit.ts";
 import { emitWasmParser } from "./parser_emit.ts";
@@ -41,23 +38,27 @@ export function planWasmTarget(
   portability: PortabilityMode = "warn",
 ): WasmPlan | { diagnostics: readonly Diagnostic[] } {
   const diagnostics = [...wasmOptionsDiagnostics(options)];
-  const typeScriptPlan = planTypeScriptTarget(
+  const runtimePlan = planRuntimeParserTarget(
     analyzed,
-    typeScriptPlanningOptions(options),
+    runtimePlanningOptions(options),
     metadata,
     portability,
+    { backend: "wasm", codePrefix: "WASM", label: "Wasm" },
   );
-  diagnostics.push(...typeScriptPlan.diagnostics.map(wasmDiagnostic));
-  if (hasErrors(diagnostics) || !isTypeScriptPlan(typeScriptPlan)) {
+  diagnostics.push(...runtimePlan.diagnostics);
+  if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
     return { diagnostics };
   }
-  const dfa = buildLexerDfa(lexerSpecs(analyzed));
-  const wasm = emitWasmModule(dfa, typeScriptPlan.bnf, typeScriptPlan.lr);
+  const wasm = emitWasmModule(
+    runtimePlan.dfa,
+    runtimePlan.bnf,
+    runtimePlan.lr,
+  );
   return {
     analyzed,
-    bnf: typeScriptPlan.bnf,
-    lr: typeScriptPlan.lr,
-    dfa,
+    bnf: runtimePlan.bnf,
+    lr: runtimePlan.lr,
+    dfa: runtimePlan.dfa,
     wasm,
     directory: options.directory ?? "wasm",
     preserveTrivia: options.preserveTrivia ?? true,
@@ -108,46 +109,10 @@ export { wasmBytes } from "./wasm.ts";
 `;
 }
 
-function lexerSpecs(analyzed: AnalyzedGrammar) {
-  return [
-    ...analyzed.tokens
-      .filter((token) =>
-        token.kind === "skip" ||
-        (token.kind === "token" && analyzed.reachableTokens.has(token.id))
-      )
-      .map((token) => ({
-        ast: parsePortableRegex(token.pattern),
-        type: "named" as const,
-        priority: token.priority,
-        order: token.declarationOrder,
-      })),
-    ...analyzed.literals
-      .filter((literal) => analyzed.reachableLiterals.has(literal.id))
-      .map((literal) => ({
-        ast: literalAst(literal.value),
-        type: "literal" as const,
-        priority: 0,
-        order: literal.sourceOrder,
-      })),
-  ];
-}
-
-function literalAst(value: string): RegexAst {
-  const items: RegexAst[] = [];
-  for (let index = 0; index < value.length;) {
-    const codePoint = value.codePointAt(index)!;
-    items.push({ kind: "literal", codePoint });
-    index += codePoint > 0xffff ? 2 : 1;
-  }
-  if (items.length === 0) return { kind: "empty" };
-  return items.length === 1 ? items[0] : { kind: "sequence", items };
-}
-
-function typeScriptPlanningOptions(
+function runtimePlanningOptions(
   options: WasmTargetOptions,
-): TypeScriptTargetOptions {
+): RuntimeParserPlanningOptions {
   return {
-    preserveTrivia: options.preserveTrivia,
     lexerStateLimit: options.lexerStateLimit,
     parserStateLimit: options.parserStateLimit,
     parserItemLimit: options.parserItemLimit,
@@ -170,23 +135,6 @@ function wasmOptionsDiagnostics(options: WasmTargetOptions): Diagnostic[] {
   return diagnostics;
 }
 
-function wasmDiagnostic(diagnostic: Diagnostic): Diagnostic {
-  return {
-    ...diagnostic,
-    backend: "wasm",
-    code: diagnostic.code.startsWith("TS_")
-      ? `WASM_${diagnostic.code.slice("TS_".length)}`
-      : diagnostic.code,
-    message: diagnostic.message
-      .replaceAll("TypeScript target", "Wasm target")
-      .replaceAll("TypeScript parser", "Wasm parser")
-      .replaceAll("TypeScript lexer", "Wasm lexer")
-      .replaceAll("TypeScript output", "Wasm output")
-      .replaceAll("TypeScript LR", "Wasm LR")
-      .replaceAll("TypeScript ACTION/GOTO", "Wasm ACTION/GOTO"),
-  };
-}
-
 function isSafeRelativeDirectory(directory: string): boolean {
   if (
     directory.length === 0 ||
@@ -202,9 +150,9 @@ function isSafeRelativeDirectory(directory: string): boolean {
   );
 }
 
-function isTypeScriptPlan(
-  value: TypeScriptPlan | { diagnostics: readonly Diagnostic[] },
-): value is TypeScriptPlan {
+function isRuntimePlan(
+  value: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
+): value is RuntimeParserPlan {
   return "bnf" in value;
 }
 

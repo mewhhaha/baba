@@ -260,6 +260,18 @@ Deno.test("multi-target generation rejects Tree-sitter-only extras by default", 
   );
   assertEquals(warnSingleTarget.diagnostics[0].severity, "warning");
 
+  const warnRuntimeTargets = compile(source, {
+    targets: ["typescript", "wasm", "kit"],
+    metadata,
+  });
+  assert(warnRuntimeTargets.bundle);
+  assertEquals(warnRuntimeTargets.diagnostics.length, 3);
+  assert(
+    warnRuntimeTargets.diagnostics.every((diagnostic) =>
+      diagnostic.severity === "warning"
+    ),
+  );
+
   const explicitOff = compile(source, {
     targets: ["tree-sitter", "typescript"],
     metadata,

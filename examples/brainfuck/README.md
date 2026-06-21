@@ -30,7 +30,7 @@ Step 2: write the starting files:
 The generated files under `generated/` are committed in this example so you can
 inspect the result, but they should be treated as generated output.
 
-Step 3: generate both targets.
+Step 3: generate the parser artifacts.
 
 ```sh
 deno task generate
@@ -45,6 +45,14 @@ That command creates:
 - `generated/ts/*.ts`: generated TypeScript lexer/parser/syntax types.
 - `generated/wasm/*.ts`: generated Wasm-backed lexer/parser runtime.
 - `.helix/runtime/queries/brainfuck/*.scm`: local Helix query copies.
+
+The parser-kit target is not part of `--target all`. This example keeps kit
+usage artifact-free by compiling the grammar in memory and parsing a sample
+program with the public kit helpers:
+
+```sh
+deno task kit
+```
 
 The `.helix/languages.toml` file declares the generated Tree-sitter grammar for
 Helix. Run `deno task helix:sync` again whenever you regenerate the example and
@@ -104,6 +112,7 @@ Validate the generated runtime and interpreter:
 
 ```sh
 deno task check
+deno task kit
 ```
 
 Optionally validate the Tree-sitter grammar:

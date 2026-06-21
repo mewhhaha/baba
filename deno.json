@@ -1,10 +1,11 @@
 {
   "name": "@mewhhaha/baba",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "license": "MIT",
   "exports": {
     ".": "./src/mod.ts",
     "./advanced": "./src/advanced.ts",
+    "./kit": "./src/kit.ts",
     "./cli": "./src/cli.ts"
   },
   "publish": {
@@ -27,6 +28,13 @@
       "examples/thunkwasm/.helix/runtime/queries/thunkwasm/highlights.scm",
       "examples/thunkwasm/.helix/runtime/queries/thunkwasm/rainbows.scm",
       "examples/thunkwasm/generated/.baba-manifest.json"
+    ]
+  },
+  "fmt": {
+    "exclude": [
+      "examples/brainfuck/generated",
+      "examples/funcfuck/generated",
+      "examples/thunkwasm/generated"
     ]
   },
   "tasks": {

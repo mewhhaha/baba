@@ -1,7 +1,8 @@
 {
   "tasks": {
     "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name brainfuck --root module --metadata baba.json --target all --typescript-dir ts",
-    "check": "deno check interpreter.ts",
+    "check": "deno check interpreter.ts parser_kit_consumer.ts",
+    "kit": "deno run --allow-read parser_kit_consumer.ts",
     "hello": "deno run --allow-read interpreter.ts programs/hello.bf",
     "parallel": "deno run --allow-read interpreter.ts programs/parallel.bf",
     "counts": "deno run --allow-read interpreter.ts programs/counts_parallel.bf",

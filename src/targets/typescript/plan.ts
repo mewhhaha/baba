@@ -6,34 +6,26 @@ import type {
   TypeScriptTargetOptions,
 } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
-import type { RegexAst } from "../../compiler/regex/ast.ts";
-import {
-  buildLexerDfa,
-  type LexerRegexSpec,
-} from "../../compiler/regex/lexer.ts";
-import { isRegexNullable } from "../../compiler/regex/nullable.ts";
-import { regexOverlapWitness } from "../../compiler/regex/overlap.ts";
-import { parsePortableRegex } from "../../compiler/regex/parser.ts";
-import { type BnfGrammar, lowerToBnf } from "./bnf.ts";
-import { buildCanonicalLr1Table, type LrTable } from "./lr1.ts";
+import type { Dfa } from "../../compiler/regex/dfa.ts";
+import type { BnfGrammar } from "./bnf.ts";
+import type { LrTable } from "./lr1.ts";
 import { emitLexer } from "./lexer_emit.ts";
 import { emitParser } from "./parser_emit.ts";
 import { emitSyntax } from "./syntax_emit.ts";
+import {
+  planRuntimeParserTarget,
+  type RuntimeParserPlan,
+  type RuntimeParserPlanningOptions,
+} from "../runtime/plan.ts";
 
 export interface TypeScriptPlan {
   analyzed: AnalyzedGrammar;
   bnf: BnfGrammar;
   lr: LrTable;
+  dfa: Dfa;
   directory: string;
   generatedBytes: number;
   diagnostics: readonly Diagnostic[];
-}
-
-const DEFAULT_LEXER_STATE_LIMIT = 50_000;
-
-interface TypeScriptRegexAnalysis {
-  diagnostics: readonly Diagnostic[];
-  astByTokenId: ReadonlyMap<number, RegexAst>;
 }
 
 export function planTypeScriptTarget(
@@ -42,43 +34,25 @@ export function planTypeScriptTarget(
   metadata: BabaMetadata = {},
   portability: PortabilityMode = "warn",
 ): TypeScriptPlan | { diagnostics: readonly Diagnostic[] } {
-  const regexAnalysis = analyzeTypeScriptRegexes(analyzed);
-  const diagnostics: Diagnostic[] = [
-    ...typescriptCapabilityDiagnostics(analyzed, metadata, portability),
-    ...regexAnalysis.diagnostics,
-    ...typescriptLiteralDiagnostics(analyzed),
-    ...typescriptTokenOverlapDiagnostics(analyzed, regexAnalysis.astByTokenId),
-    ...typescriptLiteralOverlapDiagnostics(
-      analyzed,
-      regexAnalysis.astByTokenId,
-    ),
-    ...typescriptOptionsDiagnostics(options),
-  ];
-  if (!hasErrors(diagnostics)) {
-    diagnostics.push(
-      ...typescriptLexerStateDiagnostics(
-        analyzed,
-        regexAnalysis.astByTokenId,
-        options,
-      ),
-    );
+  const diagnostics = [...typescriptOptionsDiagnostics(options)];
+  const runtimePlan = planRuntimeParserTarget(
+    analyzed,
+    runtimePlanningOptions(options),
+    metadata,
+    portability,
+    { backend: "typescript", codePrefix: "TS", label: "TypeScript" },
+  );
+  diagnostics.push(...runtimePlan.diagnostics);
+  if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
+    return { diagnostics };
   }
-  if (hasErrors(diagnostics)) return { diagnostics };
-
-  const bnf = lowerToBnf(analyzed);
-  diagnostics.push(...bnf.diagnostics);
-  if (hasErrors(diagnostics)) return { diagnostics };
-
-  const lr = buildCanonicalLr1Table(bnf, {
-    stateLimit: options.parserStateLimit ?? 20_000,
-    itemLimit: options.parserItemLimit,
-    tableEntryLimit: options.parserTableEntryLimit,
-    conflictGroups: metadata.parser?.conflicts,
-    conflictResolutions: metadata.parser?.resolutions,
-  });
-  diagnostics.push(...lr.diagnostics);
-  if (hasErrors(diagnostics)) return { diagnostics };
-  const generatedSources = typeScriptSources(analyzed, bnf, lr, options);
+  const generatedSources = typeScriptSources(
+    analyzed,
+    runtimePlan.bnf,
+    runtimePlan.lr,
+    runtimePlan.dfa,
+    options,
+  );
   const generatedBytes = byteLength(
     generatedSources.map((source) => source.content).join(""),
   );
@@ -96,13 +70,21 @@ export function planTypeScriptTarget(
   }
   if (hasErrors(diagnostics)) return { diagnostics };
   if (options.reportParserStats) {
-    diagnostics.push(parserStatsDiagnostic(analyzed, bnf, lr, generatedBytes));
+    diagnostics.push(
+      parserStatsDiagnostic(
+        analyzed,
+        runtimePlan.bnf,
+        runtimePlan.lr,
+        generatedBytes,
+      ),
+    );
   }
 
   return {
     analyzed,
-    bnf,
-    lr,
+    bnf: runtimePlan.bnf,
+    lr: runtimePlan.lr,
+    dfa: runtimePlan.dfa,
     directory: options.directory ?? "typescript",
     generatedBytes,
     diagnostics,
@@ -114,9 +96,13 @@ export function emitTypeScriptTarget(
   options: TypeScriptTargetOptions = {},
 ): GeneratedFile[] {
   const dir = plan.directory;
-  return typeScriptSources(plan.analyzed, plan.bnf, plan.lr, options).map((
-    file,
-  ) => ({
+  return typeScriptSources(
+    plan.analyzed,
+    plan.bnf,
+    plan.lr,
+    plan.dfa,
+    options,
+  ).map((file) => ({
     path: `${dir}/${file.path}`,
     content: file.content,
     kind: "source",
@@ -127,6 +113,7 @@ function typeScriptSources(
   analyzed: AnalyzedGrammar,
   bnf: BnfGrammar,
   lr: LrTable,
+  dfa: Dfa,
   options: TypeScriptTargetOptions,
 ): Array<{ path: string; content: string }> {
   return [
@@ -136,7 +123,7 @@ function typeScriptSources(
     },
     {
       path: "lexer.ts",
-      content: emitLexer(analyzed, options),
+      content: emitLexer(analyzed, options, dfa),
     },
     {
       path: "parser.ts",
@@ -157,269 +144,6 @@ export { parse, parseTokens, parseTokensUnchecked } from "./parser.ts";
 `;
 }
 
-function typescriptCapabilityDiagnostics(
-  analyzed: AnalyzedGrammar,
-  metadata: BabaMetadata,
-  portability: PortabilityMode,
-): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  for (const external of analyzed.reachableExternals) {
-    diagnostics.push({
-      code: "TS_EXTERNAL_TOKENS_UNSUPPORTED",
-      severity: "error",
-      backend: "typescript",
-      message:
-        `The TypeScript target cannot generate scanner behavior for external token '${external}'. Generate only Tree-sitter output or replace the external token with an explicit portable token.`,
-    });
-  }
-
-  for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
-    if (ruleMeta.token?.kind === "token.immediate") {
-      diagnostics.push({
-        code: "TS_TOKEN_IMMEDIATE_UNSUPPORTED",
-        severity: "error",
-        backend: "typescript",
-        message:
-          `The TypeScript target does not support token.immediate metadata on rule '${ruleName}' because it may alter accepted whitespace.`,
-      });
-    }
-    if (
-      portability !== "off" &&
-      (ruleMeta.paths || ruleMeta.wrap || ruleMeta.fields)
-    ) {
-      diagnostics.push({
-        code: "PORTABILITY_TREE_SHAPE_DIFFERS",
-        severity: "warning",
-        backend: "typescript",
-        message:
-          `Tree-sitter shaping metadata on rule '${ruleName}' is ignored by the TypeScript CST target.`,
-      });
-    }
-  }
-
-  const skipNames = new Set(
-    analyzed.tokens.filter((token) => token.kind === "skip").map((token) =>
-      token.name
-    ),
-  );
-  for (const extra of metadata.extras ?? []) {
-    if (extra.kind !== "rule" || !skipNames.has(extra.name)) {
-      if (portability === "off") continue;
-      diagnostics.push({
-        code: "PORTABILITY_TREE_SITTER_EXTRA",
-        severity: portability === "strict" ? "error" : "warning",
-        backend: "typescript",
-        message:
-          "Tree-sitter extras that are not EBNF skip declarations are ignored by the TypeScript target.",
-      });
-    }
-  }
-
-  return diagnostics;
-}
-
-function analyzeTypeScriptRegexes(
-  analyzed: AnalyzedGrammar,
-): TypeScriptRegexAnalysis {
-  const diagnostics: Diagnostic[] = [];
-  const astByTokenId = new Map<number, RegexAst>();
-  for (const token of analyzed.tokens) {
-    if (token.kind === "token" && !analyzed.reachableTokens.has(token.id)) {
-      continue;
-    }
-    let ast: RegexAst;
-    try {
-      ast = parsePortableRegex(token.pattern);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      diagnostics.push({
-        code: "TS_LEXER_UNSUPPORTED_REGEX",
-        severity: "error",
-        backend: "typescript",
-        message:
-          `Token '${token.name}' is outside Baba's portable regex subset: ${message}`,
-        span: token.span,
-      });
-      continue;
-    }
-    astByTokenId.set(token.id, ast);
-    if (isRegexNullable(ast)) {
-      diagnostics.push({
-        code: "TS_LEXER_EMPTY_TOKEN",
-        severity: "error",
-        backend: "typescript",
-        message: `Token '${token.name}' must not match empty text.`,
-        span: token.span,
-      });
-    }
-  }
-  return { diagnostics, astByTokenId };
-}
-
-function typescriptTokenOverlapDiagnostics(
-  analyzed: AnalyzedGrammar,
-  astByTokenId: ReadonlyMap<number, RegexAst>,
-): Diagnostic[] {
-  const tokens = analyzed.tokens.filter((token) =>
-    token.kind === "skip" ||
-    (token.kind === "token" && analyzed.reachableTokens.has(token.id))
-  );
-  const diagnostics: Diagnostic[] = [];
-  for (let leftIndex = 0; leftIndex < tokens.length; leftIndex++) {
-    for (
-      let rightIndex = leftIndex + 1;
-      rightIndex < tokens.length;
-      rightIndex++
-    ) {
-      const left = tokens[leftIndex];
-      const right = tokens[rightIndex];
-      const leftAst = astByTokenId.get(left.id);
-      const rightAst = astByTokenId.get(right.id);
-      if (!leftAst || !rightAst) continue;
-      const witness = regexOverlapWitness(leftAst, rightAst);
-      if (!witness) continue;
-      if (left.priority !== right.priority) continue;
-      const selected = left.declarationOrder < right.declarationOrder
-        ? left
-        : right;
-      const shadowed = selected === left ? right : left;
-      const skipOnly = left.kind === "skip" && right.kind === "skip";
-      diagnostics.push({
-        code: "TS_LEXER_TOKEN_OVERLAP",
-        severity: skipOnly ? "warning" : "error",
-        backend: "typescript",
-        message: `${tokenLabel(left)} and ${tokenLabel(right)} can both match ${
-          JSON.stringify(witness)
-        }. The standalone lexer would select ${tokenLabel(selected)} before ${
-          tokenLabel(shadowed)
-        } for this input by declaration order.`,
-        span: right.span,
-      });
-    }
-  }
-  return diagnostics;
-}
-
-function typescriptLiteralDiagnostics(analyzed: AnalyzedGrammar): Diagnostic[] {
-  return analyzed.literals
-    .filter((literal) =>
-      analyzed.reachableLiterals.has(literal.id) && literal.value.length === 0
-    )
-    .map((literal): Diagnostic => ({
-      code: "TS_LEXER_GENERATION_ERROR",
-      severity: "error",
-      backend: "typescript",
-      message:
-        "The TypeScript target cannot generate a zero-length literal token.",
-      span: literal.span,
-    }));
-}
-
-function typescriptLiteralOverlapDiagnostics(
-  analyzed: AnalyzedGrammar,
-  astByTokenId: ReadonlyMap<number, RegexAst>,
-): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  const tokens = analyzed.tokens.filter((token) =>
-    token.kind === "skip" ||
-    (token.priority > 0 &&
-      (token.kind === "token" && analyzed.reachableTokens.has(token.id)))
-  );
-  const literals = analyzed.literals.filter((literal) =>
-    analyzed.reachableLiterals.has(literal.id)
-  );
-  for (const token of tokens) {
-    const tokenAst = astByTokenId.get(token.id);
-    if (!tokenAst) continue;
-    for (const literal of literals) {
-      const witness = regexOverlapWitness(tokenAst, literalAst(literal.value));
-      if (!witness) continue;
-      if (token.kind === "skip") {
-        diagnostics.push({
-          code: "TS_LEXER_TOKEN_OVERLAP",
-          severity: "error",
-          backend: "typescript",
-          message: `${tokenLabel(token)} and literal ${
-            JSON.stringify(literal.value)
-          } can both match ${
-            JSON.stringify(witness)
-          }. Trivia cannot overlap a reachable literal because that literal may be skipped before the parser can consume it.`,
-          span: token.span,
-        });
-        continue;
-      }
-      diagnostics.push({
-        code: "TS_LEXER_TOKEN_OVERLAP",
-        severity: "error",
-        backend: "typescript",
-        message: `${tokenLabel(token)} and literal ${
-          JSON.stringify(literal.value)
-        } can both match ${
-          JSON.stringify(witness)
-        }. Priority ${token.priority} would select ${
-          tokenLabel(token)
-        } before the literal, making the literal unavailable for this input.`,
-        span: token.span,
-      });
-    }
-  }
-  return diagnostics;
-}
-
-function typescriptLexerStateDiagnostics(
-  analyzed: AnalyzedGrammar,
-  astByTokenId: ReadonlyMap<number, RegexAst>,
-  options: TypeScriptTargetOptions,
-): Diagnostic[] {
-  const limit = options.lexerStateLimit ?? DEFAULT_LEXER_STATE_LIMIT;
-  const specs: LexerRegexSpec[] = [];
-  for (const token of analyzed.tokens) {
-    if (
-      token.kind !== "skip" &&
-      !(token.kind === "token" && analyzed.reachableTokens.has(token.id))
-    ) {
-      continue;
-    }
-    const ast = astByTokenId.get(token.id);
-    if (!ast) continue;
-    specs.push({
-      ast,
-      type: "named",
-      priority: token.priority,
-      order: token.declarationOrder,
-    });
-  }
-  for (const literal of analyzed.literals) {
-    if (!analyzed.reachableLiterals.has(literal.id)) continue;
-    specs.push({
-      ast: literalAst(literal.value),
-      type: "literal",
-      priority: 0,
-      order: literal.sourceOrder,
-    });
-  }
-  const dfa = buildLexerDfa(specs);
-  if (dfa.states.length <= limit) return [];
-  return [{
-    code: "TS_LEXER_STATE_LIMIT",
-    severity: "error",
-    backend: "typescript",
-    message:
-      `The TypeScript lexer generated ${dfa.states.length} DFA states, exceeding the configured limit (${limit}).`,
-  }];
-}
-
-function literalAst(value: string): RegexAst {
-  const items: RegexAst[] = [];
-  for (let index = 0; index < value.length;) {
-    const codePoint = value.codePointAt(index)!;
-    items.push({ kind: "literal", codePoint });
-    index += codePoint > 0xffff ? 2 : 1;
-  }
-  if (items.length === 0) return { kind: "empty" };
-  return items.length === 1 ? items[0] : { kind: "sequence", items };
-}
-
 function typescriptOptionsDiagnostics(
   options: TypeScriptTargetOptions,
 ): Diagnostic[] {
@@ -432,54 +156,6 @@ function typescriptOptionsDiagnostics(
       backend: "typescript",
       message:
         `Invalid TypeScript output directory '${directory}'. Use a relative directory without '.', '..', empty components, absolute paths, drive prefixes, or backslashes.`,
-    });
-  }
-  if (
-    options.lexerStateLimit !== undefined &&
-    (!Number.isInteger(options.lexerStateLimit) ||
-      options.lexerStateLimit < 1)
-  ) {
-    diagnostics.push({
-      code: "TS_LEXER_STATE_LIMIT",
-      severity: "error",
-      backend: "typescript",
-      message: "lexerStateLimit must be a positive integer.",
-    });
-  }
-  if (
-    options.parserStateLimit !== undefined &&
-    (!Number.isInteger(options.parserStateLimit) ||
-      options.parserStateLimit < 1)
-  ) {
-    diagnostics.push({
-      code: "TS_PARSER_STATE_LIMIT",
-      severity: "error",
-      backend: "typescript",
-      message: "parserStateLimit must be a positive integer.",
-    });
-  }
-  if (
-    options.parserItemLimit !== undefined &&
-    (!Number.isInteger(options.parserItemLimit) ||
-      options.parserItemLimit < 1)
-  ) {
-    diagnostics.push({
-      code: "TS_PARSER_ITEM_LIMIT",
-      severity: "error",
-      backend: "typescript",
-      message: "parserItemLimit must be a positive integer.",
-    });
-  }
-  if (
-    options.parserTableEntryLimit !== undefined &&
-    (!Number.isInteger(options.parserTableEntryLimit) ||
-      options.parserTableEntryLimit < 1)
-  ) {
-    diagnostics.push({
-      code: "TS_PARSER_TABLE_ENTRY_LIMIT",
-      severity: "error",
-      backend: "typescript",
-      message: "parserTableEntryLimit must be a positive integer.",
     });
   }
   if (
@@ -527,10 +203,6 @@ function byteLength(source: string): number {
   return new TextEncoder().encode(source).length;
 }
 
-function tokenLabel(token: AnalyzedGrammar["tokens"][number]): string {
-  return `${token.kind} ${token.name}`;
-}
-
 function isSafeRelativeDirectory(directory: string): boolean {
   if (
     directory.length === 0 ||
@@ -550,4 +222,21 @@ function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
   return diagnostics.some((diagnostic) =>
     (diagnostic.severity ?? "error") === "error"
   );
+}
+
+function runtimePlanningOptions(
+  options: TypeScriptTargetOptions,
+): RuntimeParserPlanningOptions {
+  return {
+    lexerStateLimit: options.lexerStateLimit,
+    parserStateLimit: options.parserStateLimit,
+    parserItemLimit: options.parserItemLimit,
+    parserTableEntryLimit: options.parserTableEntryLimit,
+  };
+}
+
+function isRuntimePlan(
+  value: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
+): value is RuntimeParserPlan {
+  return "bnf" in value;
 }
