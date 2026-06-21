@@ -20,12 +20,13 @@ Wasm adapter ABI version.
 source hash before it checks regenerated example artifacts. This catches
 compiler-source drift separately from the generated parser runtime identity.
 
-The first runtime-language-backed parser helper is `utf16CodePointWidth`, used
-by generated TypeScript lexers to advance over UTF-16 code points. The same
-runtime-language source is also compiled to Wasm in conformance tests. Because
-generated parser runtime code depends on runtime-language compiler output, the
-checked runtime implementation manifest includes both runtime language sources
-and the Stage-0 compiler.
+The first runtime-language-backed parser helpers are used by generated
+TypeScript lexers: `utf16CodePointWidth` advances over UTF-16 code points, and
+`dfaTransition` performs DFA transition lookup from generated read-only tables.
+The same runtime-language source shape is also compiled to Wasm in conformance
+tests. Because generated parser runtime code depends on runtime-language
+compiler output, the checked runtime implementation manifest includes both
+runtime language sources and the Stage-0 compiler.
 
 ## Current Executable Subset
 

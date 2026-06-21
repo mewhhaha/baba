@@ -28,6 +28,8 @@
   conformance coverage.
 - Added read-only `u32` runtime-language tables with checked TypeScript/Wasm
   table-load conformance coverage.
+- Moved generated TypeScript lexer DFA transition lookup onto a runtime-language
+  source program backed by read-only `u32` tables.
 
 ### Changed
 

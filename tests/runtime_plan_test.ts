@@ -77,10 +77,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "src/targets/runtime/typescript_lexer_runtime.ts",
   );
   assertIncludes(lexerRuntimeSource, "function bestCandidate");
-  assertIncludes(lexerRuntimeSource, "DFA_TRANSITIONS");
-  assertIncludes(lexerRuntimeSource, "UTF16_CODE_POINT_WIDTH_PROGRAM");
+  assertIncludes(lexerRuntimeSource, "createLexerRuntimeProgram");
   assertIncludes(lexerRuntimeSource, "emitRuntimeLanguageTypeScriptFunction");
   assertNotIncludes(lexerRuntimeSource, "function codePointLength");
+  assertNotIncludes(lexerRuntimeSource, "function transition");
 
   const parserRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_parser_runtime.ts",
