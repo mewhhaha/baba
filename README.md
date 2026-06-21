@@ -112,6 +112,10 @@ Both generated parser runtimes export the same main TypeScript API:
 - `parserPlanFormat`, `parserPlanVersion`, `parserPlanSemantics`, and
   `parserPlanHash`, identifying the portable parser-plan contract and exact plan
   data used by the generated tables;
+- `runtimeImplementationFormat`, `runtimeImplementationVersion`,
+  `runtimeImplementationSemantics`, and `runtimeImplementationHash`, identifying
+  the packaged standalone runtime source family used to emit the generated
+  runtime;
 - `lex(source)` for DFA tokenization;
 - `parse(source)` returning a discriminated `ParseResult`;
 - strict `parseTokens(source, tokens)` validation for external token streams:
@@ -159,6 +163,14 @@ package version, metadata schema version, parser-kit schema version, and Wasm
 adapter ABI version. Generated TypeScript, generated Wasm adapters, and
 parser-kit JSON all expose the same `parserPlanHash` or `portablePlan.hash` when
 they were built from the same portable parser plan.
+
+Generated TypeScript, generated Wasm adapters, and parser-kit JSON also expose a
+runtime implementation identity with format `"baba-runtime-implementation"`,
+version `1`, semantics `"baba-runtime-portable-v1"`, and an aggregate source
+hash. This verifies that outputs were packaged against the same checked-in
+runtime source family. It is not yet a claim that TypeScript and Wasm were
+compiled from one runtime-language source; that remains the next runtime
+compiler boundary.
 
 Use `--target kit` when another tool wants Baba's parser data without generated
 TypeScript source:
@@ -577,5 +589,6 @@ deno task bootstrap
 into a temporary directory and byte-compares them with `examples/*/generated`.
 `bootstrap` rewrites those generated files through Baba's manifest-aware
 `applyBundle()` path. These tasks cover the current Stage-0 generated runtime
-artifacts; a future runtime-language compiler should extend the same check with
-runtime source and artifact hashes.
+artifacts and verify the checked-in runtime implementation source manifest. A
+future runtime-language compiler should extend the same check with compiler
+source and artifact hashes.

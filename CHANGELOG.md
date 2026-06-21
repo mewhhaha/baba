@@ -14,6 +14,8 @@
 - Added bootstrap reproducibility tasks for checked-in generated examples.
 - Added TypeScript/Wasm/kit parity coverage for parser plans, conflict branches,
   token streams, spans, and CST token ranges.
+- Added runtime implementation identity metadata and a checked source manifest
+  for generated TypeScript, generated Wasm, and parser-kit outputs.
 
 ### Changed
 

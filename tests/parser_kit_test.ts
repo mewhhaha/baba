@@ -59,6 +59,17 @@ Deno.test("compileParserKit returns stable parser-kit data", () => {
   assertEquals(kit.portablePlan.semantics, "baba-portable-v1");
   assert(kit.portablePlan.hash.startsWith("fnv1a64:"));
   assertEquals(kit.portablePlan.hash.length, "fnv1a64:".length + 16);
+  assert(kit.runtimeImplementation);
+  assertEquals(
+    kit.runtimeImplementation.format,
+    "baba-runtime-implementation",
+  );
+  assertEquals(kit.runtimeImplementation.version, 1);
+  assertEquals(
+    kit.runtimeImplementation.semantics,
+    "baba-runtime-portable-v1",
+  );
+  assert(kit.runtimeImplementation.hash.startsWith("fnv1a64:"));
   const invalidPortablePlanKit = structuredClone(kit) as unknown as {
     portablePlan: { hash: unknown };
   };
@@ -352,6 +363,19 @@ Deno.test("parser-kit helpers match generated TypeScript runtime behavior", asyn
     assertEquals(kit.portablePlan.version, ts.parserPlanVersion);
     assertEquals(kit.portablePlan.semantics, ts.parserPlanSemantics);
     assertEquals(kit.portablePlan.hash, ts.parserPlanHash);
+    assertEquals(
+      kit.runtimeImplementation?.format,
+      ts.runtimeImplementationFormat,
+    );
+    assertEquals(
+      kit.runtimeImplementation?.version,
+      ts.runtimeImplementationVersion,
+    );
+    assertEquals(
+      kit.runtimeImplementation?.semantics,
+      ts.runtimeImplementationSemantics,
+    );
+    assertEquals(kit.runtimeImplementation?.hash, ts.runtimeImplementationHash);
     for (
       const source of [
         "let alpha = 42; if beta; emoji 😀;",
@@ -551,6 +575,10 @@ interface RuntimeModule {
   parserPlanVersion: number;
   parserPlanSemantics: "baba-portable-v1";
   parserPlanHash: string;
+  runtimeImplementationFormat: "baba-runtime-implementation";
+  runtimeImplementationVersion: number;
+  runtimeImplementationSemantics: "baba-runtime-portable-v1";
+  runtimeImplementationHash: string;
   lex(source: string, options?: { preserveTrivia?: boolean }): RuntimeLexResult;
   parse(
     source: string,

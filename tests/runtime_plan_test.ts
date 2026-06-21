@@ -1,4 +1,9 @@
 import { analyzeGrammar } from "../src/compiler/analyze.ts";
+import {
+  hashRuntimeImplementationManifest,
+  hashRuntimeImplementationSource,
+  RUNTIME_IMPLEMENTATION_METADATA,
+} from "../src/targets/runtime/implementation.ts";
 import { planRuntimeParserTarget } from "../src/targets/runtime/plan.ts";
 import {
   assert,
@@ -95,4 +100,28 @@ Deno.test("Wasm target packages shared core runtime source", async () => {
   assertIncludes(wasmRuntimeSource, "function lexOneFunction");
   assertIncludes(wasmRuntimeSource, "function parseTraceFunction");
   assertIncludes(wasmRuntimeSource, "function emitWasmModule");
+});
+
+Deno.test("runtime implementation manifest identifies source artifacts", async () => {
+  assertEquals(
+    RUNTIME_IMPLEMENTATION_METADATA.format,
+    "baba-runtime-implementation",
+  );
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.version, 1);
+  assertEquals(
+    RUNTIME_IMPLEMENTATION_METADATA.semantics,
+    "baba-runtime-portable-v1",
+  );
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 3);
+
+  const sources = [];
+  for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {
+    const content = await Deno.readTextFile(source.path);
+    assertEquals(hashRuntimeImplementationSource(content), source.hash);
+    sources.push(source);
+  }
+  assertEquals(
+    hashRuntimeImplementationManifest(sources),
+    RUNTIME_IMPLEMENTATION_METADATA.hash,
+  );
 });

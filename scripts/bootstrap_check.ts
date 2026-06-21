@@ -4,6 +4,11 @@ import {
   parseGrammar,
   parseMetadata,
 } from "../src/mod.ts";
+import {
+  hashRuntimeImplementationManifest,
+  hashRuntimeImplementationSource,
+  RUNTIME_IMPLEMENTATION_METADATA,
+} from "../src/targets/runtime/implementation.ts";
 
 interface ExampleConfig {
   dir: string;
@@ -45,6 +50,7 @@ if (import.meta.main) {
 export async function runBootstrapCheck(
   mode: "check" | "write" = "check",
 ): Promise<void> {
+  await verifyRuntimeImplementationMetadata();
   for (const example of EXAMPLES) {
     if (mode === "write") {
       await writeExample(example);
@@ -52,6 +58,35 @@ export async function runBootstrapCheck(
       await checkExample(example);
     }
   }
+}
+
+async function verifyRuntimeImplementationMetadata(): Promise<void> {
+  const actualSources = [];
+  for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {
+    const content = await Deno.readTextFile(source.path);
+    const hash = hashRuntimeImplementationSource(content);
+    if (hash !== source.hash) {
+      throw new Error(
+        [
+          `Runtime implementation source hash is stale for ${source.path}.`,
+          `expected in manifest: ${source.hash}`,
+          `actual: ${hash}`,
+        ].join("\n"),
+      );
+    }
+    actualSources.push({ ...source, hash });
+  }
+  const manifestHash = hashRuntimeImplementationManifest(actualSources);
+  if (manifestHash !== RUNTIME_IMPLEMENTATION_METADATA.hash) {
+    throw new Error(
+      [
+        "Runtime implementation manifest hash is stale.",
+        `expected in manifest: ${RUNTIME_IMPLEMENTATION_METADATA.hash}`,
+        `actual: ${manifestHash}`,
+      ].join("\n"),
+    );
+  }
+  console.log("verified runtime implementation manifest");
 }
 
 async function writeExample(example: ExampleConfig): Promise<void> {

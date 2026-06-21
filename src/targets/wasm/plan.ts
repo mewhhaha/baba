@@ -114,7 +114,7 @@ function wasmModSource(): string {
 export * from "./syntax.ts";
 export { lex } from "./lexer.ts";
 export { parse, parseTokens, parseTokensUnchecked } from "./parser.ts";
-export { memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, wasmAbiVersion, wasmBytes, wasmTargetKind } from "./wasm.ts";
+export { memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, runtimeImplementationFormat, runtimeImplementationHash, runtimeImplementationSemantics, runtimeImplementationVersion, wasmAbiVersion, wasmBytes, wasmTargetKind } from "./wasm.ts";
 `;
 }
 

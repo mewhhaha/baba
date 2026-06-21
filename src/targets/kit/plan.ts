@@ -13,6 +13,7 @@ import {
   type RuntimeParserPlan,
   type RuntimeParserPlanningOptions,
 } from "../runtime/plan.ts";
+import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
 import type {
   ParserKit,
   ParserKitActionEntry,
@@ -92,6 +93,12 @@ function createParserKit(
     generator: "@mewhhaha/baba",
     profile,
     portablePlan: { ...runtime.portableMetadata },
+    runtimeImplementation: {
+      format: RUNTIME_IMPLEMENTATION_METADATA.format,
+      version: RUNTIME_IMPLEMENTATION_METADATA.version,
+      semantics: RUNTIME_IMPLEMENTATION_METADATA.semantics,
+      hash: RUNTIME_IMPLEMENTATION_METADATA.hash,
+    },
     grammar: {
       name: analyzed.name,
       rootRule: analyzed.rules[analyzed.rootRule]?.name ?? "module",

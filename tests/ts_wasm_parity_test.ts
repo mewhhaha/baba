@@ -178,6 +178,32 @@ function assertPlanMetadataParity(runtimes: ParityRuntimes): void {
   );
   assertEquals(runtimes.ts.parserPlanHash, runtimes.wasm.parserPlanHash);
   assert(runtimes.ts.parserPlanHash.startsWith("fnv1a64:"));
+  assertEquals(
+    runtimes.ts.runtimeImplementationFormat,
+    "baba-runtime-implementation",
+  );
+  assertEquals(runtimes.ts.runtimeImplementationVersion, 1);
+  assertEquals(
+    runtimes.ts.runtimeImplementationSemantics,
+    "baba-runtime-portable-v1",
+  );
+  assertEquals(
+    runtimes.ts.runtimeImplementationFormat,
+    runtimes.wasm.runtimeImplementationFormat,
+  );
+  assertEquals(
+    runtimes.ts.runtimeImplementationVersion,
+    runtimes.wasm.runtimeImplementationVersion,
+  );
+  assertEquals(
+    runtimes.ts.runtimeImplementationSemantics,
+    runtimes.wasm.runtimeImplementationSemantics,
+  );
+  assertEquals(
+    runtimes.ts.runtimeImplementationHash,
+    runtimes.wasm.runtimeImplementationHash,
+  );
+  assert(runtimes.ts.runtimeImplementationHash.startsWith("fnv1a64:"));
 }
 
 function normalizeLexResult(result: RuntimeLexResult): unknown {
@@ -274,6 +300,10 @@ interface RuntimeModule {
   parserPlanVersion: number;
   parserPlanSemantics: "baba-portable-v1";
   parserPlanHash: string;
+  runtimeImplementationFormat: "baba-runtime-implementation";
+  runtimeImplementationVersion: number;
+  runtimeImplementationSemantics: "baba-runtime-portable-v1";
+  runtimeImplementationHash: string;
   lex(source: string, options?: { preserveTrivia?: boolean }): RuntimeLexResult;
   parse(
     source: string,

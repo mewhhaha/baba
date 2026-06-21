@@ -13,6 +13,7 @@ import type {
   PortableParserPlanMetadata,
   PortableParserPlanV1,
 } from "../runtime/portable_plan.ts";
+import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
 import { emitLexer } from "./lexer_emit.ts";
 import { emitParser } from "./parser_emit.ts";
 import { emitSyntax } from "./syntax_emit.ts";
@@ -159,6 +160,16 @@ export const parserPlanSemantics = ${
     JSON.stringify(portableMetadata.semantics)
   } as const;
 export const parserPlanHash = ${JSON.stringify(portableMetadata.hash)} as const;
+export const runtimeImplementationFormat = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.format)
+  } as const;
+export const runtimeImplementationVersion = ${RUNTIME_IMPLEMENTATION_METADATA.version};
+export const runtimeImplementationSemantics = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.semantics)
+  } as const;
+export const runtimeImplementationHash = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.hash)
+  } as const;
 export * from "./syntax.ts";
 export { lex } from "./lexer.ts";
 export { parse, parseTokens, parseTokensUnchecked } from "./parser.ts";

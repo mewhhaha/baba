@@ -5,6 +5,7 @@ export interface ParserKit {
   generator: "@mewhhaha/baba";
   profile?: ParserKitProfile;
   portablePlan: ParserKitPortablePlanMetadata;
+  runtimeImplementation?: ParserKitRuntimeImplementationMetadata;
   grammar: ParserKitGrammarInfo;
   tokens: ParserKitTokenMetadata;
   lexer: ParserKitLexer;
@@ -20,6 +21,13 @@ export interface ParserKitPortablePlanMetadata {
   format: "baba-parser-plan";
   version: 1;
   semantics: "baba-portable-v1";
+  hash: string;
+}
+
+export interface ParserKitRuntimeImplementationMetadata {
+  format: "baba-runtime-implementation";
+  version: 1;
+  semantics: "baba-runtime-portable-v1";
   hash: string;
 }
 
@@ -440,6 +448,40 @@ export function validateParserKit(
       issues,
     );
     requireString(kit.portablePlan.hash, "$.portablePlan.hash", issues);
+  }
+  if (kit.runtimeImplementation !== undefined) {
+    requireObject(
+      kit.runtimeImplementation,
+      "$.runtimeImplementation",
+      issues,
+    );
+    if (
+      kit.runtimeImplementation &&
+      typeof kit.runtimeImplementation === "object"
+    ) {
+      requireEnum(
+        kit.runtimeImplementation.format,
+        ["baba-runtime-implementation"],
+        "$.runtimeImplementation.format",
+        issues,
+      );
+      requireNumber(
+        kit.runtimeImplementation.version,
+        "$.runtimeImplementation.version",
+        issues,
+      );
+      requireEnum(
+        kit.runtimeImplementation.semantics,
+        ["baba-runtime-portable-v1"],
+        "$.runtimeImplementation.semantics",
+        issues,
+      );
+      requireString(
+        kit.runtimeImplementation.hash,
+        "$.runtimeImplementation.hash",
+        issues,
+      );
+    }
   }
   if (kit.grammar && typeof kit.grammar === "object") {
     requireString(kit.grammar.name, "$.grammar.name", issues);

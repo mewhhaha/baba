@@ -1,4 +1,5 @@
 import type { PortableParserPlanMetadata } from "../runtime/portable_plan.ts";
+import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
 import type { WasmModuleImage } from "./module_emit.ts";
 
 export function emitWasmRuntime(
@@ -50,6 +51,16 @@ export const parserPlanSemantics = ${
     JSON.stringify(portableMetadata.semantics)
   } as const;
 export const parserPlanHash = ${JSON.stringify(portableMetadata.hash)} as const;
+export const runtimeImplementationFormat = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.format)
+  } as const;
+export const runtimeImplementationVersion = ${RUNTIME_IMPLEMENTATION_METADATA.version};
+export const runtimeImplementationSemantics = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.semantics)
+  } as const;
+export const runtimeImplementationHash = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.hash)
+  } as const;
 
 export interface WasmSourceBuffer {
   sourcePtr: number;

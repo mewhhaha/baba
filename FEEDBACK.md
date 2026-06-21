@@ -48,6 +48,10 @@ runtime language:
 - Moved the Wasm core bytecode runtime emitter into `src/targets/runtime/`,
   leaving the Wasm target module emitter as a packaging reexport with regression
   coverage for the boundary.
+- Added versioned runtime implementation identity metadata
+  (`baba-runtime-implementation` v1) to generated TypeScript, generated Wasm,
+  and parser-kit outputs, backed by a checked source-hash manifest for the
+  current shared runtime source files.
 
 Still unresolved:
 

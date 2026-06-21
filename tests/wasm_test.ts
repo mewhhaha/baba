@@ -54,6 +54,16 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertEquals(mod.parserPlanVersion, 1);
     assertEquals(mod.parserPlanSemantics, "baba-portable-v1");
     assert(mod.parserPlanHash.startsWith("fnv1a64:"));
+    assertEquals(
+      mod.runtimeImplementationFormat,
+      "baba-runtime-implementation",
+    );
+    assertEquals(mod.runtimeImplementationVersion, 1);
+    assertEquals(
+      mod.runtimeImplementationSemantics,
+      "baba-runtime-portable-v1",
+    );
+    assert(mod.runtimeImplementationHash.startsWith("fnv1a64:"));
     assert(typeof mod.reset === "function");
 
     const lexed = mod.lex("let x = 42; // ok");
