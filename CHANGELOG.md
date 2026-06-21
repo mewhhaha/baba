@@ -54,6 +54,8 @@
   by `bootstrap:check`.
 - Added runtime-language parser expected-terminal range helpers and use them in
   generated TypeScript and Wasm-adapter parse diagnostics.
+- Added runtime-language parser production metadata helpers and use them for
+  generated TypeScript and Wasm-adapter reduce replay.
 
 ### Changed
 

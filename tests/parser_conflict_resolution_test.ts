@@ -145,6 +145,8 @@ Deno.test("generated deterministic parser omits branch-only helpers", () => {
   assertIncludes(parserSource, "function parserGoto(");
   assertIncludes(parserSource, "function parserExpectedStart(");
   assertIncludes(parserSource, "function parserExpectedEnd(");
+  assertIncludes(parserSource, "function parserProductionLhs(");
+  assertIncludes(parserSource, "function parserProductionRhsLength(");
   assertNotIncludes(parserSource, "const ACTIONS");
   assertNotIncludes(parserSource, "const GOTOS");
   assertNotIncludes(parserSource, "MAX_PARSE_BRANCHES");

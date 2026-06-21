@@ -15,6 +15,7 @@ export const RUNTIME_ACTION_ACCEPT = 0x03_00_00_00;
 export const RUNTIME_ACTION_KIND_MASK = 0xff_00_00_00;
 export const RUNTIME_ACTION_PAYLOAD_MASK = 0x00_ff_ff_ff;
 export const RUNTIME_NO_GOTO = 0xffff_ffff;
+export const RUNTIME_NO_PRODUCTION = 0xffff_ffff;
 
 const TRACE_STATUS = 0;
 const TRACE_ERROR_STATE = 1;
@@ -55,13 +56,15 @@ export interface ParserTableRuntimeProgramInput {
   readonly gotoRows: readonly (readonly ParserRuntimeLookupEntry[])[];
 }
 
-export interface ParserTraceRuntimeProgramInput
-  extends ParserTableRuntimeProgramInput {
+export interface ParserProductionRuntimeProgramInput {
   readonly productions: readonly ParserRuntimeProductionEntry[];
 }
 
-export type ParserConflictTableRuntimeProgramInput =
-  ParserTableRuntimeProgramInput;
+export interface ParserTraceRuntimeProgramInput
+  extends ParserTableRuntimeProgramInput, ParserProductionRuntimeProgramInput {}
+
+export interface ParserConflictTableRuntimeProgramInput
+  extends ParserTableRuntimeProgramInput, ParserProductionRuntimeProgramInput {}
 
 export interface ParserGotoRuntimeProgramInput {
   readonly gotoRows: readonly (readonly ParserRuntimeLookupEntry[])[];
@@ -197,14 +200,7 @@ export function createParserTraceRuntimeProgram(
     tables: [
       ...actionTable.tables,
       ...gotoTable.tables,
-      {
-        name: "parserProductions",
-        type: "u32",
-        values: input.productions.flatMap(([lhs, rhsLength]) => [
-          lhs,
-          rhsLength,
-        ]),
-      },
+      parserProductionsTable(input.productions),
     ],
     functions: [
       tableLookupFunction(
@@ -219,6 +215,7 @@ export function createParserTraceRuntimeProgram(
         gotoTable.entriesTable,
         RUNTIME_NO_GOTO,
       ),
+      ...parserProductionFunctions(input.productions.length),
       parserTraceSetTerminalFunction(),
       parserTraceFunction(input.productions.length),
       parserTraceErrorStateFunction(),
@@ -240,6 +237,7 @@ export function createParserConflictTableRuntimeProgram(
     tables: [
       ...actionTable.tables,
       ...gotoTable.tables,
+      parserProductionsTable(input.productions),
     ],
     functions: [
       tableLookupAtFunction(
@@ -254,7 +252,21 @@ export function createParserConflictTableRuntimeProgram(
         gotoTable.entriesTable,
         RUNTIME_NO_GOTO,
       ),
+      ...parserProductionFunctions(input.productions.length),
     ],
+  };
+}
+
+export function createParserProductionRuntimeProgram(
+  input: ParserProductionRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  return {
+    name: "parser_production_runtime",
+    entry: "parserProductionLhs",
+    tables: [
+      parserProductionsTable(input.productions),
+    ],
+    functions: parserProductionFunctions(input.productions.length),
   };
 }
 
@@ -473,6 +485,63 @@ function lexerScanBestEndFunction(): RuntimeLanguageFunction {
         kind: "return",
         expression: loadScratch(u32(LEXER_SCAN_BEST_END)),
       },
+    ],
+  };
+}
+
+function parserProductionsTable(
+  productions: readonly ParserRuntimeProductionEntry[],
+): RuntimeLanguageTable {
+  return {
+    name: "parserProductions",
+    type: "u32",
+    values: productions.flatMap(([lhs, rhsLength]) => [lhs, rhsLength]),
+  };
+}
+
+function parserProductionFunctions(
+  productionCount: number,
+): RuntimeLanguageFunction[] {
+  return [
+    parserProductionLoadFunction("parserProductionLhs", productionCount, 0),
+    parserProductionLoadFunction(
+      "parserProductionRhsLength",
+      productionCount,
+      1,
+    ),
+  ];
+}
+
+function parserProductionLoadFunction(
+  name: string,
+  productionCount: number,
+  fieldOffset: number,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "production", type: "u32" },
+    ],
+    locals: [
+      { name: "offset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("production"), u32(productionCount)),
+        consequent: [
+          setLocal(
+            "offset",
+            add(mul(local("production"), u32(2)), u32(fieldOffset)),
+          ),
+          {
+            kind: "return",
+            expression: load("parserProductions", local("offset")),
+          },
+        ],
+      },
+      { kind: "return", expression: u32(RUNTIME_NO_PRODUCTION) },
     ],
   };
 }
@@ -699,7 +768,6 @@ function parserTraceFunction(
       { name: "terminal", type: "u32" },
       { name: "action", type: "u32" },
       { name: "productionIndex", type: "u32" },
-      { name: "productionOffset", type: "u32" },
       { name: "lhs", type: "u32" },
       { name: "rhsLength", type: "u32" },
       { name: "gotoState", type: "u32" },
@@ -793,21 +861,18 @@ function parserTraceFunction(
                   sub(local("action"), u32(RUNTIME_ACTION_REDUCE)),
                 ),
                 setLocal(
-                  "productionOffset",
-                  mul(local("productionIndex"), u32(2)),
-                ),
-                setLocal(
                   "lhs",
-                  load("parserProductions", local("productionOffset")),
-                ),
-                setLocal(
-                  "productionOffset",
-                  add(local("productionOffset"), u32(1)),
+                  call("parserProductionLhs", [local("productionIndex")]),
                 ),
                 setLocal(
                   "rhsLength",
-                  load("parserProductions", local("productionOffset")),
+                  call("parserProductionRhsLength", [local("productionIndex")]),
                 ),
+                {
+                  kind: "if",
+                  condition: eq(local("rhsLength"), u32(RUNTIME_NO_PRODUCTION)),
+                  consequent: traceReturnStatements(TRACE_STATUS_INTERNAL),
+                },
                 {
                   kind: "if",
                   condition: lt(

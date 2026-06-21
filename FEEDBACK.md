@@ -116,6 +116,10 @@ runtime language:
   `parserExpectedStart`/`parserExpectedEnd` helpers, so TypeScript and
   Wasm-adapter parse diagnostics consume the same flattened expected-range
   runtime helper.
+- Moved generated parser production metadata lookup onto runtime-language
+  `parserProductionLhs`/`parserProductionRhsLength` helpers, so TypeScript
+  branch reduction, deterministic trace replay, and Wasm-adapter trace replay
+  consume the same production row helper.
 
 Still unresolved:
 
@@ -123,8 +127,9 @@ Still unresolved:
   execution now has a clearer shared runtime packaging boundary and generated
   lexer/parser table helpers plus deterministic TypeScript lexer candidate
   selection, expected-terminal diagnostic ranges, and parser trace control flow
-  from the runtime language, but conflict branch scheduling, Wasm parser control
-  flow, generated token object emission/diagnostics, and reduction/CST
+  from the runtime language. Production LHS/RHS-length metadata lookup is also
+  runtime-language-backed now, but conflict branch scheduling, Wasm parser
+  control flow, generated token object emission/diagnostics, and reducer/CST
   algorithms are still not mechanically emitted from one runtime-language
   implementation. The compiler now has a shared lowered control-flow/value IR
   and checked helper artifact hashes, but it still needs broader parser-runtime

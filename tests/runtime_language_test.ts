@@ -21,12 +21,14 @@ import {
   createParserConflictTableRuntimeProgram,
   createParserExpectedRuntimeProgram,
   createParserGotoRuntimeProgram,
+  createParserProductionRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
   RUNTIME_NO_GOTO,
+  RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_TRANSITION,
   UTF16_CODE_POINT_WIDTH_PROGRAM,
 } from "../src/targets/runtime/language_sources.ts";
@@ -174,6 +176,43 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserProductionBaseProgram = createParserProductionRuntimeProgram({
+    productions: [
+      [4, 0],
+      [7, 2],
+    ],
+  });
+  const parserProductionRuntimeProgram: RuntimeLanguageProgram = {
+    ...parserProductionBaseProgram,
+    name: "parser_production_conformance",
+    entry: "main",
+    functions: [
+      ...parserProductionBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserProductionLhs", [u32(0)]), u32(1000)),
+            add(
+              mul(call("parserProductionRhsLength", [u32(0)]), u32(100)),
+              add(
+                mul(call("parserProductionLhs", [u32(1)]), u32(10)),
+                add(
+                  call("parserProductionRhsLength", [u32(1)]),
+                  eq(
+                    call("parserProductionLhs", [u32(99)]),
+                    u32(RUNTIME_NO_PRODUCTION),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserConflictTableRuntimeProgram =
     createParserConflictTableRuntimeProgram({
       actionRows: [
@@ -189,6 +228,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           [8, 13],
         ],
         [],
+      ],
+      productions: [
+        [0, 1],
+        [2, 0],
+        [1, 3],
       ],
     });
   const parserTraceBaseProgram = createParserTraceRuntimeProgram({
@@ -775,6 +819,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "parser expected lookup returns flattened row ranges",
       program: parserExpectedRuntimeProgram,
       expected: { kind: "value", value: 225 },
+    },
+    {
+      name: "parser production lookup returns row fields",
+      program: parserProductionRuntimeProgram,
+      expected: { kind: "value", value: 4073 },
     },
     {
       name: "parser trace runtime emits deterministic action traces",

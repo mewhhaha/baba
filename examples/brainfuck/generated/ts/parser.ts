@@ -19,12 +19,6 @@ type RuntimeAction =
   | { kind: "reduce"; production: number }
   | { kind: "accept" };
 
-interface Production {
-  lhs: number;
-  rhsLength: number;
-  reducer: ReducerSpec;
-}
-
 type ReducerSpec =
   | { kind: "start" }
   | { kind: "rule"; ruleId: number }
@@ -76,7 +70,7 @@ interface RuntimeRuleFieldSchema {
 }
 
 const EOF_TERMINAL = 0;
-const PRODUCTIONS: readonly Production[] = [{"lhs":0,"rhsLength":1,"reducer":{"kind":"start"}},{"lhs":12,"rhsLength":1,"reducer":{"kind":"repeat1First"}},{"lhs":12,"rhsLength":2,"reducer":{"kind":"repeat1Append"}},{"lhs":1,"rhsLength":1,"reducer":{"kind":"rule","ruleId":0}},{"lhs":15,"rhsLength":0,"reducer":{"kind":"optionalEmpty"}},{"lhs":15,"rhsLength":1,"reducer":{"kind":"optionalSome"}},{"lhs":14,"rhsLength":1,"reducer":{"kind":"field","name":"count"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":16,"rhsLength":1,"reducer":{"kind":"ruleRef"}},{"lhs":13,"rhsLength":2,"reducer":{"kind":"sequence"}},{"lhs":2,"rhsLength":1,"reducer":{"kind":"rule","ruleId":1}},{"lhs":17,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":3,"rhsLength":1,"reducer":{"kind":"rule","ruleId":2}},{"lhs":18,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":4,"rhsLength":1,"reducer":{"kind":"rule","ruleId":3}},{"lhs":19,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":5,"rhsLength":1,"reducer":{"kind":"rule","ruleId":4}},{"lhs":20,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":6,"rhsLength":1,"reducer":{"kind":"rule","ruleId":5}},{"lhs":21,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":7,"rhsLength":1,"reducer":{"kind":"rule","ruleId":6}},{"lhs":22,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":8,"rhsLength":1,"reducer":{"kind":"rule","ruleId":7}},{"lhs":25,"rhsLength":0,"reducer":{"kind":"repeatEmpty"}},{"lhs":25,"rhsLength":2,"reducer":{"kind":"repeatAppend"}},{"lhs":24,"rhsLength":1,"reducer":{"kind":"field","name":"body"}},{"lhs":23,"rhsLength":3,"reducer":{"kind":"sequence"}},{"lhs":9,"rhsLength":1,"reducer":{"kind":"rule","ruleId":8}},{"lhs":28,"rhsLength":0,"reducer":{"kind":"repeatEmpty"}},{"lhs":28,"rhsLength":2,"reducer":{"kind":"repeatAppend"}},{"lhs":27,"rhsLength":1,"reducer":{"kind":"field","name":"body"}},{"lhs":26,"rhsLength":3,"reducer":{"kind":"sequence"}},{"lhs":10,"rhsLength":1,"reducer":{"kind":"rule","ruleId":9}},{"lhs":29,"rhsLength":1,"reducer":{"kind":"terminal"}},{"lhs":11,"rhsLength":1,"reducer":{"kind":"rule","ruleId":10}}];
+const PRODUCTION_REDUCERS: readonly ReducerSpec[] = [{"kind":"start"},{"kind":"repeat1First"},{"kind":"repeat1Append"},{"kind":"rule","ruleId":0},{"kind":"optionalEmpty"},{"kind":"optionalSome"},{"kind":"field","name":"count"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"sequence"},{"kind":"rule","ruleId":1},{"kind":"terminal"},{"kind":"rule","ruleId":2},{"kind":"terminal"},{"kind":"rule","ruleId":3},{"kind":"terminal"},{"kind":"rule","ruleId":4},{"kind":"terminal"},{"kind":"rule","ruleId":5},{"kind":"terminal"},{"kind":"rule","ruleId":6},{"kind":"terminal"},{"kind":"rule","ruleId":7},{"kind":"repeatEmpty"},{"kind":"repeatAppend"},{"kind":"field","name":"body"},{"kind":"sequence"},{"kind":"rule","ruleId":8},{"kind":"repeatEmpty"},{"kind":"repeatAppend"},{"kind":"field","name":"body"},{"kind":"sequence"},{"kind":"rule","ruleId":9},{"kind":"terminal"},{"kind":"rule","ruleId":10}];
 const EXPECTED_TERMINALS: readonly string[] = ["\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"]\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"}\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"]\"","\"}\"","\"]\"","\"}\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER"];
 const NAMED_TERMINALS = new Map<string, number>([["INTEGER",1]]);
 const LITERAL_TERMINALS = new Map<string, number>([["+",2],["-",3],["<",4],[">",5],[".",6],[",",7],["[",8],["]",9],["{",10],["}",11],["!",12]]);
@@ -110,6 +104,7 @@ const ACTION_ACCEPT = 50331648;
 const ACTION_KIND_MASK = 4278190080;
 const ACTION_PAYLOAD_MASK = 16777215;
 const NO_GOTO = 4294967295;
+const NO_PRODUCTION = 4294967295;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -268,6 +263,26 @@ function parserGoto(state: number, key: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserProductionLhs(production: number): number {
+  let offset = 0;
+  if (((((production) | 0) < ((42) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((production) >>> 0, (2) >>> 0) >>> 0) + (0)) >>> 0) >>> 0;
+    return (__baba_load_parserProductions(offset) >>> 0) >>> 0;
+  }
+  return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserProductionRhsLength(production: number): number {
+  let offset = 0;
+  if (((((production) | 0) < ((42) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((production) >>> 0, (2) >>> 0) >>> 0) + (1)) >>> 0) >>> 0;
+    return (__baba_load_parserProductions(offset) >>> 0) >>> 0;
+  }
+  return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTraceSetTerminal(index: number, terminal: number): number {
   let capacity = 0;
   index = (((8) + (index)) >>> 0) >>> 0;
@@ -290,7 +305,6 @@ function parserTrace(terminalCount: number): number {
   let terminal = 0;
   let action = 0;
   let productionIndex = 0;
-  let productionOffset = 0;
   let lhs = 0;
   let rhsLength = 0;
   let gotoState = 0;
@@ -347,10 +361,15 @@ function parserTrace(terminalCount: number): number {
     } else {
       if (((((action) | 0) < ((50331648) | 0) ? 1 : 0)) !== 0) {
         productionIndex = (((action) - (33554432)) >>> 0) >>> 0;
-        productionOffset = (Math.imul((productionIndex) >>> 0, (2) >>> 0) >>> 0) >>> 0;
-        lhs = (__baba_load_parserProductions(productionOffset) >>> 0) >>> 0;
-        productionOffset = (((productionOffset) + (1)) >>> 0) >>> 0;
-        rhsLength = (__baba_load_parserProductions(productionOffset) >>> 0) >>> 0;
+        lhs = (parserProductionLhs(productionIndex) >>> 0) >>> 0;
+        rhsLength = (parserProductionRhsLength(productionIndex) >>> 0) >>> 0;
+        if (((((rhsLength) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+          __baba_store_scratch(0, 2);
+          __baba_store_scratch(1, state);
+          __baba_store_scratch(2, streamIndex);
+          __baba_store_scratch(3, traceCount);
+          return (2) >>> 0;
+        }
         if (((((depth) | 0) < ((((rhsLength) + (1)) >>> 0) | 0) ? 1 : 0)) !== 0) {
           __baba_store_scratch(0, 2);
           __baba_store_scratch(1, state);
@@ -637,8 +656,9 @@ function replayTrace(
       };
     }
 
-    const production = PRODUCTIONS[payload];
-    if (!production) {
+    const rhsLength = parserProductionRhsLength(payload);
+    const reducer = PRODUCTION_REDUCERS[payload];
+    if (rhsLength === NO_PRODUCTION || !reducer) {
       return {
         ok: false,
         root: null,
@@ -651,7 +671,7 @@ function replayTrace(
         }],
       };
     }
-    if (production.rhsLength > values.length - 1) {
+    if (rhsLength > values.length - 1) {
       return {
         ok: false,
         root: null,
@@ -664,13 +684,13 @@ function replayTrace(
         }],
       };
     }
-    const rhsValues = production.rhsLength === 0
+    const rhsValues = rhsLength === 0
       ? []
-      : values.splice(values.length - production.rhsLength, production.rhsLength);
+      : values.splice(values.length - rhsLength, rhsLength);
     let reduced: unknown;
     try {
       reduced = reduceProduction(
-        production.reducer,
+        reducer,
         rhsValues,
         token.span.start,
         streamTokenIndices[index] ?? tokens.length,
