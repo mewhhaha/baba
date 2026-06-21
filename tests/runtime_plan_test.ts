@@ -78,6 +78,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(lexerRuntimeSource, "function bestCandidate");
   assertIncludes(lexerRuntimeSource, "DFA_TRANSITIONS");
+  assertIncludes(lexerRuntimeSource, "UTF16_CODE_POINT_WIDTH_PROGRAM");
+  assertIncludes(lexerRuntimeSource, "emitRuntimeLanguageTypeScriptFunction");
+  assertNotIncludes(lexerRuntimeSource, "function codePointLength");
 
   const parserRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_parser_runtime.ts",
@@ -112,7 +115,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 3);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 4);
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {

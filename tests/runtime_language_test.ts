@@ -1,6 +1,7 @@
 import {
   compileRuntimeLanguageWasm,
   emitRuntimeLanguageTypeScript,
+  emitRuntimeLanguageTypeScriptFunction,
   type RuntimeExpression,
   RuntimeLanguageProgram,
 } from "../src/targets/runtime/language.ts";
@@ -9,6 +10,7 @@ import {
   hashRuntimeLanguageCompilerSource,
   RUNTIME_LANGUAGE_COMPILER_METADATA,
 } from "../src/targets/runtime/language_manifest.ts";
+import { UTF16_CODE_POINT_WIDTH_PROGRAM } from "../src/targets/runtime/language_sources.ts";
 import { assertEquals } from "./helpers.ts";
 
 Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
@@ -148,6 +150,18 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 10 },
     },
     {
+      name: "UTF-16 helper returns one code unit below the astral plane",
+      program: UTF16_CODE_POINT_WIDTH_PROGRAM,
+      args: [0xffff],
+      expected: { kind: "value", value: 1 },
+    },
+    {
+      name: "UTF-16 helper returns two code units for astral code points",
+      program: UTF16_CODE_POINT_WIDTH_PROGRAM,
+      args: [0x1f600],
+      expected: { kind: "value", value: 2 },
+    },
+    {
       name: "early return skips later traps",
       program: {
         name: "early_return",
@@ -190,6 +204,14 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       `${testCase.name} Wasm result`,
     );
   }
+});
+
+Deno.test("runtime language can emit standalone TypeScript helper functions", () => {
+  const source = emitRuntimeLanguageTypeScriptFunction(
+    UTF16_CODE_POINT_WIDTH_PROGRAM,
+  );
+  assertEquals(source.includes("function utf16CodePointWidth"), true);
+  assertEquals(source.includes("runtimeLanguageVersion"), false);
 });
 
 Deno.test("runtime language compiler manifest is current", async () => {
@@ -255,9 +277,13 @@ async function runTypeScript(
     const path = `${directory}/runtime_language.ts`;
     await Deno.writeTextFile(path, emitRuntimeLanguageTypeScript(program));
     const module = await import(`file://${path}?${crypto.randomUUID()}`) as {
-      main: (...args: readonly number[]) => number;
+      [key: string]: ((...args: readonly number[]) => number) | unknown;
     };
-    return { kind: "value", value: module.main(...args) >>> 0 };
+    const entry = module[program.entry] as
+      | ((...args: readonly number[]) => number)
+      | undefined;
+    if (!entry) throw new Error(`Missing entry ${program.entry}.`);
+    return { kind: "value", value: entry(...args) >>> 0 };
   } catch {
     return { kind: "trap" };
   } finally {
@@ -276,9 +302,12 @@ async function runWasm(
   const instance = "instance" in instantiated
     ? instantiated.instance
     : instantiated;
-  const main = instance.exports.main as (...args: readonly number[]) => number;
+  const entry = instance.exports[program.entry] as
+    | ((...args: readonly number[]) => number)
+    | undefined;
   try {
-    return { kind: "value", value: main(...args) >>> 0 };
+    if (!entry) throw new Error(`Missing entry ${program.entry}.`);
+    return { kind: "value", value: entry(...args) >>> 0 };
   } catch {
     return { kind: "trap" };
   }

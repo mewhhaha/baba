@@ -114,6 +114,22 @@ interface Candidate {
   end: number;
 }
 
+class RuntimeLanguageTrap extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeLanguageTrap";
+  }
+}
+
+function utf16CodePointWidth(codePoint: number): number {
+  if (((((codePoint) | 0) < ((65536) | 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  } else {
+    return (2) >>> 0;
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 export function lex(source: string, options: LexOptions = {}): LexResult {
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
   const tokens: Token[] = [];
@@ -197,7 +213,7 @@ function bestCandidate(source: string, offset: number): Candidate | null {
     if (codePoint === undefined) break;
     const target = transition(state, codePoint);
     if (target < 0) break;
-    index += codePointLength(codePoint);
+    index += utf16CodePointWidth(codePoint);
     state = target;
     const specIndex = DFA_ACCEPTS[state] ?? -1;
     if (specIndex >= 0) best = { specIndex, end: index };
@@ -224,8 +240,4 @@ function transition(state: number, codePoint: number): number {
     }
   }
   return -1;
-}
-
-function codePointLength(codePoint: number): 1 | 2 {
-  return codePoint > 0xffff ? 2 : 1;
 }

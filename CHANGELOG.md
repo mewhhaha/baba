@@ -22,6 +22,8 @@
   `bootstrap:check`.
 - Expanded the private runtime-language conformance subset with `u32`
   parameters, locals, assignments, branches, and loops.
+- Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
+  runtime-language source with TypeScript/Wasm conformance coverage.
 
 ### Changed
 

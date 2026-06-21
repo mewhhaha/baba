@@ -62,15 +62,19 @@ runtime language:
 - Expanded the private runtime-language conformance subset with `u32`
   parameters, locals, assignments, structured branches, and loops across both
   TypeScript and Wasm backends.
+- Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
+  runtime-language source program, with the same source compiled through both
+  TypeScript and Wasm conformance tests.
 
 Still unresolved:
 
 - The P0 source-of-truth milestone remains open: TypeScript and Wasm runtime
-  execution now has a clearer shared runtime packaging boundary, but the
-  TypeScript runtime artifact and Wasm runtime are still not mechanically
-  emitted from one runtime-language implementation. That requires a larger
-  runtime compiler/artifact boundary before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  execution now has a clearer shared runtime packaging boundary and one
+  generated lexer helper from the runtime language, but the main lexer/parser
+  algorithms are still not mechanically emitted from one runtime-language
+  implementation. That requires a larger runtime compiler/artifact boundary
+  before the release can fully satisfy "one runtime implementation, two
+  execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

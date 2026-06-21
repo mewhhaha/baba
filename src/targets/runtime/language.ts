@@ -77,6 +77,10 @@ export class RuntimeLanguageTrap extends Error {
   }
 }
 
+export interface RuntimeLanguageTypeScriptFunctionOptions {
+  readonly exported?: boolean;
+}
+
 export function emitRuntimeLanguageTypeScript(
   program: RuntimeLanguageProgram,
 ): string {
@@ -108,6 +112,43 @@ function divU32(left: number, right: number): number {
 }
 
 export function ${identifier(entry.name)}(${
+    parameters.map((parameter) => `${identifier(parameter.name)}: number`).join(
+      ", ",
+    )
+  }): number {
+${locals.map((local) => `  let ${identifier(local.name)} = 0;`).join("\n")}${
+    locals.length > 0 ? "\n" : ""
+  }${
+    entry.body.map((statement) =>
+      emitTypeScriptStatement(statement, localNames, "  ")
+    ).join("\n")
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+`;
+}
+
+export function emitRuntimeLanguageTypeScriptFunction(
+  program: RuntimeLanguageProgram,
+  options: RuntimeLanguageTypeScriptFunctionOptions = {},
+): string {
+  const entry = runtimeLanguageEntryFunction(program);
+  const parameters = functionParameters(entry);
+  const locals = functionLocals(entry);
+  const localNames = new Set([
+    ...parameters.map((parameter) => parameter.name),
+    ...locals.map((local) => local.name),
+  ]);
+  validateVariableSet(entry, parameters, locals);
+  const prefix = options.exported ? "export " : "";
+  return `class RuntimeLanguageTrap extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeLanguageTrap";
+  }
+}
+
+${prefix}function ${identifier(entry.name)}(${
     parameters.map((parameter) => `${identifier(parameter.name)}: number`).join(
       ", ",
     )

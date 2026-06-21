@@ -15,11 +15,11 @@
       "ownership": "generated"
     },
     "ts/lexer.ts": {
-      "hash": "efd92ec5f1080281c3c9d14d44201c5bffa60c81191e1479c69bfd78686f81e7",
+      "hash": "cf0bb7ad7031f55a55fa493cf402efdbcbd7d5d3824077018f71812da1d12799",
       "ownership": "generated"
     },
     "ts/mod.ts": {
-      "hash": "57c93113a33939cad456452aa1bed54136c113ed3b57569497cf6e91616265ac",
+      "hash": "815caf02405878c146264b284e32adadb5597d1bb3c6b13ea788accad6c9705a",
       "ownership": "generated"
     },
     "ts/parser.ts": {
@@ -47,7 +47,7 @@
       "ownership": "generated"
     },
     "wasm/wasm.ts": {
-      "hash": "c13d16b27e306b5f434559854326008f0d7f97335b7bacc7251f2ee119892173",
+      "hash": "f62ef4511a24d96658dc2a3074f4d0665bf5b1e599ba1d81afa6e6d735d4545b",
       "ownership": "generated"
     }
   }

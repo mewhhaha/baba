@@ -1,3 +1,6 @@
+import { emitRuntimeLanguageTypeScriptFunction } from "./language.ts";
+import { UTF16_CODE_POINT_WIDTH_PROGRAM } from "./language_sources.ts";
+
 export interface TypeScriptLexerNamedSpec {
   readonly kind: string;
   readonly pattern: string;
@@ -83,6 +86,11 @@ interface Candidate {
   end: number;
 }
 
+${
+    emitRuntimeLanguageTypeScriptFunction(UTF16_CODE_POINT_WIDTH_PROGRAM)
+      .trimEnd()
+  }
+
 export function lex(source: string, options: LexOptions = {}): LexResult {
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
   const tokens: Token[] = [];
@@ -166,7 +174,7 @@ function bestCandidate(source: string, offset: number): Candidate | null {
     if (codePoint === undefined) break;
     const target = transition(state, codePoint);
     if (target < 0) break;
-    index += codePointLength(codePoint);
+    index += utf16CodePointWidth(codePoint);
     state = target;
     const specIndex = DFA_ACCEPTS[state] ?? -1;
     if (specIndex >= 0) best = { specIndex, end: index };
@@ -193,10 +201,6 @@ function transition(state: number, codePoint: number): number {
     }
   }
   return -1;
-}
-
-function codePointLength(codePoint: number): 1 | 2 {
-  return codePoint > 0xffff ? 2 : 1;
 }
 `;
 }
