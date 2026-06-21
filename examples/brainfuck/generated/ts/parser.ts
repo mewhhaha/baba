@@ -128,6 +128,7 @@ const __baba_table_parserActionRows: readonly number[] = [0,10,19,20,31,42,53,62
 const __baba_table_parserActionEntries: readonly number[] = [1,16777217,2,33554436,3,33554436,4,33554436,5,33554436,6,33554436,7,33554436,8,33554436,10,33554436,12,33554436,2,33554437,3,33554437,4,33554437,5,33554437,6,33554437,7,33554437,8,33554437,10,33554437,12,33554437,0,50331648,0,33554433,1,33554433,2,33554433,3,33554433,4,33554433,5,33554433,6,33554433,7,33554433,8,33554433,10,33554433,12,33554433,0,33554435,1,16777217,2,33554436,3,33554436,4,33554436,5,33554436,6,33554436,7,33554436,8,33554436,10,33554436,12,33554436,0,33554449,1,33554449,2,33554449,3,33554449,4,33554449,5,33554449,6,33554449,7,33554449,8,33554449,10,33554449,12,33554449,2,16777225,3,16777226,4,16777227,5,16777228,6,16777229,7,16777230,8,16777231,10,16777232,12,16777233,2,33554438,3,33554438,4,33554438,5,33554438,6,33554438,7,33554438,8,33554438,10,33554438,12,33554438,0,33554434,1,33554434,2,33554434,3,33554434,4,33554434,5,33554434,6,33554434,7,33554434,8,33554434,10,33554434,12,33554434,0,33554450,1,33554450,2,33554450,3,33554450,4,33554450,5,33554450,6,33554450,7,33554450,8,33554450,10,33554450,12,33554450,0,33554452,1,33554452,2,33554452,3,33554452,4,33554452,5,33554452,6,33554452,7,33554452,8,33554452,10,33554452,12,33554452,0,33554454,1,33554454,2,33554454,3,33554454,4,33554454,5,33554454,6,33554454,7,33554454,8,33554454,10,33554454,12,33554454,0,33554456,1,33554456,2,33554456,3,33554456,4,33554456,5,33554456,6,33554456,7,33554456,8,33554456,10,33554456,12,33554456,0,33554458,1,33554458,2,33554458,3,33554458,4,33554458,5,33554458,6,33554458,7,33554458,8,33554458,10,33554458,12,33554458,0,33554460,1,33554460,2,33554460,3,33554460,4,33554460,5,33554460,6,33554460,7,33554460,8,33554460,10,33554460,12,33554460,1,33554462,2,33554462,3,33554462,4,33554462,5,33554462,6,33554462,7,33554462,8,33554462,9,33554462,10,33554462,12,33554462,1,33554467,2,33554467,3,33554467,4,33554467,5,33554467,6,33554467,7,33554467,8,33554467,10,33554467,11,33554467,12,33554467,0,33554472,1,33554472,2,33554472,3,33554472,4,33554472,5,33554472,6,33554472,7,33554472,8,33554472,10,33554472,12,33554472,0,33554439,1,33554439,2,33554439,3,33554439,4,33554439,5,33554439,6,33554439,7,33554439,8,33554439,10,33554439,12,33554439,0,33554440,1,33554440,2,33554440,3,33554440,4,33554440,5,33554440,6,33554440,7,33554440,8,33554440,10,33554440,12,33554440,0,33554441,1,33554441,2,33554441,3,33554441,4,33554441,5,33554441,6,33554441,7,33554441,8,33554441,10,33554441,12,33554441,0,33554442,1,33554442,2,33554442,3,33554442,4,33554442,5,33554442,6,33554442,7,33554442,8,33554442,10,33554442,12,33554442,0,33554443,1,33554443,2,33554443,3,33554443,4,33554443,5,33554443,6,33554443,7,33554443,8,33554443,10,33554443,12,33554443,0,33554444,1,33554444,2,33554444,3,33554444,4,33554444,5,33554444,6,33554444,7,33554444,8,33554444,10,33554444,12,33554444,0,33554445,1,33554445,2,33554445,3,33554445,4,33554445,5,33554445,6,33554445,7,33554445,8,33554445,10,33554445,12,33554445,0,33554446,1,33554446,2,33554446,3,33554446,4,33554446,5,33554446,6,33554446,7,33554446,8,33554446,10,33554446,12,33554446,0,33554447,1,33554447,2,33554447,3,33554447,4,33554447,5,33554447,6,33554447,7,33554447,8,33554447,10,33554447,12,33554447,0,33554448,1,33554448,2,33554448,3,33554448,4,33554448,5,33554448,6,33554448,7,33554448,8,33554448,10,33554448,12,33554448,0,33554451,1,33554451,2,33554451,3,33554451,4,33554451,5,33554451,6,33554451,7,33554451,8,33554451,10,33554451,12,33554451,0,33554453,1,33554453,2,33554453,3,33554453,4,33554453,5,33554453,6,33554453,7,33554453,8,33554453,10,33554453,12,33554453,0,33554455,1,33554455,2,33554455,3,33554455,4,33554455,5,33554455,6,33554455,7,33554455,8,33554455,10,33554455,12,33554455,0,33554457,1,33554457,2,33554457,3,33554457,4,33554457,5,33554457,6,33554457,7,33554457,8,33554457,10,33554457,12,33554457,0,33554459,1,33554459,2,33554459,3,33554459,4,33554459,5,33554459,6,33554459,7,33554459,8,33554459,10,33554459,12,33554459,0,33554461,1,33554461,2,33554461,3,33554461,4,33554461,5,33554461,6,33554461,7,33554461,8,33554461,10,33554461,12,33554461,0,33554466,1,33554466,2,33554466,3,33554466,4,33554466,5,33554466,6,33554466,7,33554466,8,33554466,10,33554466,12,33554466,0,33554471,1,33554471,2,33554471,3,33554471,4,33554471,5,33554471,6,33554471,7,33554471,8,33554471,10,33554471,12,33554471,0,33554473,1,33554473,2,33554473,3,33554473,4,33554473,5,33554473,6,33554473,7,33554473,8,33554473,10,33554473,12,33554473,9,16777257,1,16777217,2,33554436,3,33554436,4,33554436,5,33554436,6,33554436,7,33554436,8,33554436,9,33554464,10,33554436,12,33554436,11,16777261,1,16777217,2,33554436,3,33554436,4,33554436,5,33554436,6,33554436,7,33554436,8,33554436,10,33554436,11,33554469,12,33554436,0,33554465,1,33554465,2,33554465,3,33554465,4,33554465,5,33554465,6,33554465,7,33554465,8,33554465,10,33554465,12,33554465,1,33554463,2,33554463,3,33554463,4,33554463,5,33554463,6,33554463,7,33554463,8,33554463,9,33554463,10,33554463,12,33554463,1,33554449,2,33554449,3,33554449,4,33554449,5,33554449,6,33554449,7,33554449,8,33554449,9,33554449,10,33554449,12,33554449,2,16777265,3,16777266,4,16777267,5,16777268,6,16777269,7,16777270,8,16777271,10,16777272,12,16777273,0,33554470,1,33554470,2,33554470,3,33554470,4,33554470,5,33554470,6,33554470,7,33554470,8,33554470,10,33554470,12,33554470,1,33554468,2,33554468,3,33554468,4,33554468,5,33554468,6,33554468,7,33554468,8,33554468,10,33554468,11,33554468,12,33554468,1,33554449,2,33554449,3,33554449,4,33554449,5,33554449,6,33554449,7,33554449,8,33554449,10,33554449,11,33554449,12,33554449,2,16777293,3,16777294,4,16777295,5,16777296,6,16777297,7,16777298,8,16777299,10,16777300,12,16777301,1,33554450,2,33554450,3,33554450,4,33554450,5,33554450,6,33554450,7,33554450,8,33554450,9,33554450,10,33554450,12,33554450,1,33554452,2,33554452,3,33554452,4,33554452,5,33554452,6,33554452,7,33554452,8,33554452,9,33554452,10,33554452,12,33554452,1,33554454,2,33554454,3,33554454,4,33554454,5,33554454,6,33554454,7,33554454,8,33554454,9,33554454,10,33554454,12,33554454,1,33554456,2,33554456,3,33554456,4,33554456,5,33554456,6,33554456,7,33554456,8,33554456,9,33554456,10,33554456,12,33554456,1,33554458,2,33554458,3,33554458,4,33554458,5,33554458,6,33554458,7,33554458,8,33554458,9,33554458,10,33554458,12,33554458,1,33554460,2,33554460,3,33554460,4,33554460,5,33554460,6,33554460,7,33554460,8,33554460,9,33554460,10,33554460,12,33554460,1,33554462,2,33554462,3,33554462,4,33554462,5,33554462,6,33554462,7,33554462,8,33554462,9,33554462,10,33554462,12,33554462,1,33554467,2,33554467,3,33554467,4,33554467,5,33554467,6,33554467,7,33554467,8,33554467,10,33554467,11,33554467,12,33554467,1,33554472,2,33554472,3,33554472,4,33554472,5,33554472,6,33554472,7,33554472,8,33554472,9,33554472,10,33554472,12,33554472,1,33554439,2,33554439,3,33554439,4,33554439,5,33554439,6,33554439,7,33554439,8,33554439,9,33554439,10,33554439,12,33554439,1,33554440,2,33554440,3,33554440,4,33554440,5,33554440,6,33554440,7,33554440,8,33554440,9,33554440,10,33554440,12,33554440,1,33554441,2,33554441,3,33554441,4,33554441,5,33554441,6,33554441,7,33554441,8,33554441,9,33554441,10,33554441,12,33554441,1,33554442,2,33554442,3,33554442,4,33554442,5,33554442,6,33554442,7,33554442,8,33554442,9,33554442,10,33554442,12,33554442,1,33554443,2,33554443,3,33554443,4,33554443,5,33554443,6,33554443,7,33554443,8,33554443,9,33554443,10,33554443,12,33554443,1,33554444,2,33554444,3,33554444,4,33554444,5,33554444,6,33554444,7,33554444,8,33554444,9,33554444,10,33554444,12,33554444,1,33554445,2,33554445,3,33554445,4,33554445,5,33554445,6,33554445,7,33554445,8,33554445,9,33554445,10,33554445,12,33554445,1,33554446,2,33554446,3,33554446,4,33554446,5,33554446,6,33554446,7,33554446,8,33554446,9,33554446,10,33554446,12,33554446,1,33554447,2,33554447,3,33554447,4,33554447,5,33554447,6,33554447,7,33554447,8,33554447,9,33554447,10,33554447,12,33554447,1,33554448,2,33554448,3,33554448,4,33554448,5,33554448,6,33554448,7,33554448,8,33554448,9,33554448,10,33554448,12,33554448,1,33554451,2,33554451,3,33554451,4,33554451,5,33554451,6,33554451,7,33554451,8,33554451,9,33554451,10,33554451,12,33554451,1,33554453,2,33554453,3,33554453,4,33554453,5,33554453,6,33554453,7,33554453,8,33554453,9,33554453,10,33554453,12,33554453,1,33554455,2,33554455,3,33554455,4,33554455,5,33554455,6,33554455,7,33554455,8,33554455,9,33554455,10,33554455,12,33554455,1,33554457,2,33554457,3,33554457,4,33554457,5,33554457,6,33554457,7,33554457,8,33554457,9,33554457,10,33554457,12,33554457,1,33554459,2,33554459,3,33554459,4,33554459,5,33554459,6,33554459,7,33554459,8,33554459,9,33554459,10,33554459,12,33554459,1,33554461,2,33554461,3,33554461,4,33554461,5,33554461,6,33554461,7,33554461,8,33554461,9,33554461,10,33554461,12,33554461,1,33554466,2,33554466,3,33554466,4,33554466,5,33554466,6,33554466,7,33554466,8,33554466,9,33554466,10,33554466,12,33554466,1,33554471,2,33554471,3,33554471,4,33554471,5,33554471,6,33554471,7,33554471,8,33554471,9,33554471,10,33554471,12,33554471,1,33554473,2,33554473,3,33554473,4,33554473,5,33554473,6,33554473,7,33554473,8,33554473,9,33554473,10,33554473,12,33554473,1,33554450,2,33554450,3,33554450,4,33554450,5,33554450,6,33554450,7,33554450,8,33554450,10,33554450,11,33554450,12,33554450,1,33554452,2,33554452,3,33554452,4,33554452,5,33554452,6,33554452,7,33554452,8,33554452,10,33554452,11,33554452,12,33554452,1,33554454,2,33554454,3,33554454,4,33554454,5,33554454,6,33554454,7,33554454,8,33554454,10,33554454,11,33554454,12,33554454,1,33554456,2,33554456,3,33554456,4,33554456,5,33554456,6,33554456,7,33554456,8,33554456,10,33554456,11,33554456,12,33554456,1,33554458,2,33554458,3,33554458,4,33554458,5,33554458,6,33554458,7,33554458,8,33554458,10,33554458,11,33554458,12,33554458,1,33554460,2,33554460,3,33554460,4,33554460,5,33554460,6,33554460,7,33554460,8,33554460,10,33554460,11,33554460,12,33554460,1,33554462,2,33554462,3,33554462,4,33554462,5,33554462,6,33554462,7,33554462,8,33554462,9,33554462,10,33554462,12,33554462,1,33554467,2,33554467,3,33554467,4,33554467,5,33554467,6,33554467,7,33554467,8,33554467,10,33554467,11,33554467,12,33554467,1,33554472,2,33554472,3,33554472,4,33554472,5,33554472,6,33554472,7,33554472,8,33554472,10,33554472,11,33554472,12,33554472,1,33554439,2,33554439,3,33554439,4,33554439,5,33554439,6,33554439,7,33554439,8,33554439,10,33554439,11,33554439,12,33554439,1,33554440,2,33554440,3,33554440,4,33554440,5,33554440,6,33554440,7,33554440,8,33554440,10,33554440,11,33554440,12,33554440,1,33554441,2,33554441,3,33554441,4,33554441,5,33554441,6,33554441,7,33554441,8,33554441,10,33554441,11,33554441,12,33554441,1,33554442,2,33554442,3,33554442,4,33554442,5,33554442,6,33554442,7,33554442,8,33554442,10,33554442,11,33554442,12,33554442,1,33554443,2,33554443,3,33554443,4,33554443,5,33554443,6,33554443,7,33554443,8,33554443,10,33554443,11,33554443,12,33554443,1,33554444,2,33554444,3,33554444,4,33554444,5,33554444,6,33554444,7,33554444,8,33554444,10,33554444,11,33554444,12,33554444,1,33554445,2,33554445,3,33554445,4,33554445,5,33554445,6,33554445,7,33554445,8,33554445,10,33554445,11,33554445,12,33554445,1,33554446,2,33554446,3,33554446,4,33554446,5,33554446,6,33554446,7,33554446,8,33554446,10,33554446,11,33554446,12,33554446,1,33554447,2,33554447,3,33554447,4,33554447,5,33554447,6,33554447,7,33554447,8,33554447,10,33554447,11,33554447,12,33554447,1,33554448,2,33554448,3,33554448,4,33554448,5,33554448,6,33554448,7,33554448,8,33554448,10,33554448,11,33554448,12,33554448,1,33554451,2,33554451,3,33554451,4,33554451,5,33554451,6,33554451,7,33554451,8,33554451,10,33554451,11,33554451,12,33554451,1,33554453,2,33554453,3,33554453,4,33554453,5,33554453,6,33554453,7,33554453,8,33554453,10,33554453,11,33554453,12,33554453,1,33554455,2,33554455,3,33554455,4,33554455,5,33554455,6,33554455,7,33554455,8,33554455,10,33554455,11,33554455,12,33554455,1,33554457,2,33554457,3,33554457,4,33554457,5,33554457,6,33554457,7,33554457,8,33554457,10,33554457,11,33554457,12,33554457,1,33554459,2,33554459,3,33554459,4,33554459,5,33554459,6,33554459,7,33554459,8,33554459,10,33554459,11,33554459,12,33554459,1,33554461,2,33554461,3,33554461,4,33554461,5,33554461,6,33554461,7,33554461,8,33554461,10,33554461,11,33554461,12,33554461,1,33554466,2,33554466,3,33554466,4,33554466,5,33554466,6,33554466,7,33554466,8,33554466,10,33554466,11,33554466,12,33554466,1,33554471,2,33554471,3,33554471,4,33554471,5,33554471,6,33554471,7,33554471,8,33554471,10,33554471,11,33554471,12,33554471,1,33554473,2,33554473,3,33554473,4,33554473,5,33554473,6,33554473,7,33554473,8,33554473,10,33554473,11,33554473,12,33554473,9,16777325,11,16777326,9,16777327,11,16777328,1,33554465,2,33554465,3,33554465,4,33554465,5,33554465,6,33554465,7,33554465,8,33554465,9,33554465,10,33554465,12,33554465,1,33554470,2,33554470,3,33554470,4,33554470,5,33554470,6,33554470,7,33554470,8,33554470,9,33554470,10,33554470,12,33554470,1,33554465,2,33554465,3,33554465,4,33554465,5,33554465,6,33554465,7,33554465,8,33554465,10,33554465,11,33554465,12,33554465,1,33554470,2,33554470,3,33554470,4,33554470,5,33554470,6,33554470,7,33554470,8,33554470,10,33554470,11,33554470,12,33554470];
 const __baba_table_parserGotoRows: readonly number[] = [0,6,6,6,6,10,10,29,29,29,29,29,29,29,29,29,31,33,33,33,33,33,33,33,33,33,33,33,33,33,33,33,33,33,33,33,33,33,33,37,37,41,41,41,41,60,60,60,60,79,79,79,79,79,79,79,81,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,83,85,87];
 const __baba_table_parserGotoEntries: readonly number[] = [1,2,2,3,12,4,13,5,14,6,15,7,2,8,13,5,14,6,15,7,3,18,4,19,5,20,6,21,7,22,8,23,9,24,10,25,11,26,16,27,17,28,18,29,19,30,20,31,21,32,22,33,23,34,26,35,29,36,24,37,25,38,27,39,28,40,2,42,13,43,14,44,15,7,2,46,13,47,14,48,15,7,3,58,4,59,5,60,6,61,7,62,8,63,9,64,10,65,11,66,16,67,17,68,18,69,19,70,20,71,21,72,22,73,23,74,26,75,29,76,3,86,4,87,5,88,6,89,7,90,8,91,9,92,10,93,11,94,16,95,17,96,18,97,19,98,20,99,21,100,22,101,23,102,26,103,29,104,24,105,25,38,27,106,28,40,24,107,25,38,27,108,28,40];
+const __baba_table_parserProductions: readonly number[] = [0,1,12,1,12,2,1,1,15,0,15,1,14,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,13,2,2,1,17,1,3,1,18,1,4,1,19,1,5,1,20,1,6,1,21,1,7,1,22,1,8,1,25,0,25,2,24,1,23,3,9,1,28,0,28,2,27,1,26,3,10,1,29,1,11,1];
 function __baba_load_parserActionRows(index: number): number {
   const normalized = index >>> 0;
   if (normalized >= __baba_table_parserActionRows.length) {
@@ -160,6 +161,44 @@ function __baba_load_parserGotoEntries(index: number): number {
   return __baba_table_parserGotoEntries[normalized] >>> 0;
 }
 
+function __baba_load_parserProductions(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_table_parserProductions.length) {
+    throw new RuntimeLanguageTrap("table index out of bounds");
+  }
+  return __baba_table_parserProductions[normalized] >>> 0;
+}
+
+
+let __baba_scratch = new Uint32Array(0);
+
+function __baba_ensure_scratch(words: number): number {
+  const normalized = words >>> 0;
+  if (normalized > 1073725440) {
+    throw new RuntimeLanguageTrap("scratch memory size out of bounds");
+  }
+  if (normalized <= __baba_scratch.length) return __baba_scratch.length >>> 0;
+  const next = new Uint32Array(normalized);
+  next.set(__baba_scratch);
+  __baba_scratch = next;
+  return __baba_scratch.length >>> 0;
+}
+
+function __baba_load_scratch(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_scratch.length) {
+    throw new RuntimeLanguageTrap("scratch memory index out of bounds");
+  }
+  return __baba_scratch[normalized] >>> 0;
+}
+
+function __baba_store_scratch(index: number, value: number): void {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_scratch.length) {
+    throw new RuntimeLanguageTrap("scratch memory index out of bounds");
+  }
+  __baba_scratch[normalized] = value >>> 0;
+}
 
 
 function parserAction(state: number, key: number): number {
@@ -220,6 +259,171 @@ function parserGoto(state: number, key: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTraceSetTerminal(index: number, terminal: number): number {
+  let capacity = 0;
+  index = (((8) + (index)) >>> 0) >>> 0;
+  capacity = (__baba_ensure_scratch(((index) + (1)) >>> 0) >>> 0) >>> 0;
+  __baba_store_scratch(index, terminal);
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTrace(terminalCount: number): number {
+  let capacity = 0;
+  let stackBase = 0;
+  let stackCapacity = 0;
+  let traceBase = 0;
+  let depth = 0;
+  let streamIndex = 0;
+  let traceCount = 0;
+  let loop = 0;
+  let state = 0;
+  let terminal = 0;
+  let action = 0;
+  let productionIndex = 0;
+  let productionOffset = 0;
+  let lhs = 0;
+  let rhsLength = 0;
+  let gotoState = 0;
+  capacity = (__baba_ensure_scratch(((8) + (terminalCount)) >>> 0) >>> 0) >>> 0;
+  stackBase = (((8) + (terminalCount)) >>> 0) >>> 0;
+  stackCapacity = (((((terminalCount) + (42)) >>> 0) + (16)) >>> 0) >>> 0;
+  traceBase = (((stackBase) + (stackCapacity)) >>> 0) >>> 0;
+  capacity = (__baba_ensure_scratch(((traceBase) + (1)) >>> 0) >>> 0) >>> 0;
+  __baba_store_scratch(0, 0);
+  __baba_store_scratch(1, 0);
+  __baba_store_scratch(2, 0);
+  __baba_store_scratch(3, 0);
+  __baba_store_scratch(4, traceBase);
+  __baba_store_scratch(stackBase, 0);
+  depth = (1) >>> 0;
+  streamIndex = (0) >>> 0;
+  loop = (1) >>> 0;
+  while ((loop) !== 0) {
+    if (((((streamIndex) | 0) < ((terminalCount) | 0) ? 1 : 0)) !== 0) {
+    } else {
+      __baba_store_scratch(0, 2);
+      __baba_store_scratch(1, state);
+      __baba_store_scratch(2, streamIndex);
+      __baba_store_scratch(3, traceCount);
+      return (2) >>> 0;
+    }
+    state = (__baba_load_scratch(((stackBase) + (((depth) - (1)) >>> 0)) >>> 0) >>> 0) >>> 0;
+    terminal = (__baba_load_scratch(((8) + (streamIndex)) >>> 0) >>> 0) >>> 0;
+    action = (parserAction(state, terminal) >>> 0) >>> 0;
+    if (((((action) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      __baba_store_scratch(0, 1);
+      __baba_store_scratch(1, state);
+      __baba_store_scratch(2, streamIndex);
+      __baba_store_scratch(3, traceCount);
+      return (1) >>> 0;
+    }
+    if (((((action) | 0) < ((33554432) | 0) ? 1 : 0)) !== 0) {
+      capacity = (__baba_ensure_scratch(((((traceBase) + (traceCount)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
+      __baba_store_scratch(((traceBase) + (traceCount)) >>> 0, action);
+      traceCount = (((traceCount) + (1)) >>> 0) >>> 0;
+      gotoState = (((action) - (16777216)) >>> 0) >>> 0;
+      if (((((depth) | 0) < ((stackCapacity) | 0) ? 1 : 0)) !== 0) {
+      } else {
+        __baba_store_scratch(0, 2);
+        __baba_store_scratch(1, state);
+        __baba_store_scratch(2, streamIndex);
+        __baba_store_scratch(3, traceCount);
+        return (2) >>> 0;
+      }
+      capacity = (__baba_ensure_scratch(((((stackBase) + (depth)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
+      __baba_store_scratch(((stackBase) + (depth)) >>> 0, gotoState);
+      depth = (((depth) + (1)) >>> 0) >>> 0;
+      streamIndex = (((streamIndex) + (1)) >>> 0) >>> 0;
+    } else {
+      if (((((action) | 0) < ((50331648) | 0) ? 1 : 0)) !== 0) {
+        productionIndex = (((action) - (33554432)) >>> 0) >>> 0;
+        productionOffset = (Math.imul((productionIndex) >>> 0, (2) >>> 0) >>> 0) >>> 0;
+        lhs = (__baba_load_parserProductions(productionOffset) >>> 0) >>> 0;
+        productionOffset = (((productionOffset) + (1)) >>> 0) >>> 0;
+        rhsLength = (__baba_load_parserProductions(productionOffset) >>> 0) >>> 0;
+        if (((((depth) | 0) < ((((rhsLength) + (1)) >>> 0) | 0) ? 1 : 0)) !== 0) {
+          __baba_store_scratch(0, 2);
+          __baba_store_scratch(1, state);
+          __baba_store_scratch(2, streamIndex);
+          __baba_store_scratch(3, traceCount);
+          return (2) >>> 0;
+        }
+        depth = (((depth) - (rhsLength)) >>> 0) >>> 0;
+        state = (__baba_load_scratch(((stackBase) + (((depth) - (1)) >>> 0)) >>> 0) >>> 0) >>> 0;
+        gotoState = (parserGoto(state, lhs) >>> 0) >>> 0;
+        if (((((gotoState) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+          __baba_store_scratch(0, 2);
+          __baba_store_scratch(1, state);
+          __baba_store_scratch(2, streamIndex);
+          __baba_store_scratch(3, traceCount);
+          return (2) >>> 0;
+        } else {
+          capacity = (__baba_ensure_scratch(((((traceBase) + (traceCount)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
+          __baba_store_scratch(((traceBase) + (traceCount)) >>> 0, action);
+          traceCount = (((traceCount) + (1)) >>> 0) >>> 0;
+          if (((((depth) | 0) < ((stackCapacity) | 0) ? 1 : 0)) !== 0) {
+          } else {
+            __baba_store_scratch(0, 2);
+            __baba_store_scratch(1, state);
+            __baba_store_scratch(2, streamIndex);
+            __baba_store_scratch(3, traceCount);
+            return (2) >>> 0;
+          }
+          capacity = (__baba_ensure_scratch(((((stackBase) + (depth)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
+          __baba_store_scratch(((stackBase) + (depth)) >>> 0, gotoState);
+          depth = (((depth) + (1)) >>> 0) >>> 0;
+        }
+      } else {
+        if (((((action) >>> 0) === ((50331648) >>> 0) ? 1 : 0)) !== 0) {
+          capacity = (__baba_ensure_scratch(((((traceBase) + (traceCount)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
+          __baba_store_scratch(((traceBase) + (traceCount)) >>> 0, action);
+          traceCount = (((traceCount) + (1)) >>> 0) >>> 0;
+          __baba_store_scratch(0, 0);
+          __baba_store_scratch(1, state);
+          __baba_store_scratch(2, streamIndex);
+          __baba_store_scratch(3, traceCount);
+          return (0) >>> 0;
+        } else {
+          __baba_store_scratch(0, 2);
+          __baba_store_scratch(1, state);
+          __baba_store_scratch(2, streamIndex);
+          __baba_store_scratch(3, traceCount);
+          return (2) >>> 0;
+        }
+      }
+    }
+  }
+  __baba_store_scratch(0, 2);
+  __baba_store_scratch(1, state);
+  __baba_store_scratch(2, streamIndex);
+  __baba_store_scratch(3, traceCount);
+  return (2) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTraceErrorState(): number {
+  return (__baba_load_scratch(1) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTraceErrorIndex(): number {
+  return (__baba_load_scratch(2) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTraceCount(): number {
+  return (__baba_load_scratch(3) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTraceAction(index: number): number {
+  let traceBase = 0;
+  traceBase = (__baba_load_scratch(4) >>> 0) >>> 0;
+  return (__baba_load_scratch(((traceBase) + (index)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 export function parse(
   source: string,
   options: ParseOptions = {},
@@ -267,50 +471,182 @@ function parseTokenList(
     };
   }
 
-  const states: number[] = [0];
-  const values: unknown[] = [null];
-  let index = 0;
+  const stream = compactTraceTokenStream(source, tokens);
+  let status = 0;
+  try {
+    for (let index = 0; index < stream.terminalCount; index++) {
+      parserTraceSetTerminal(index, stream.terminals[index]);
+    }
+    status = parserTrace(stream.terminalCount);
+  } catch (error) {
+    return {
+      ok: false,
+      root: null,
+      source,
+      tokens,
+      diagnostics: [internalParserDiagnostic(error, {
+        start: source.length,
+        end: source.length,
+      })],
+    };
+  }
 
-  while (true) {
-    index = skipTrivia(tokens, index);
-    const token = tokens[index] ?? eofToken(source.length);
-    const terminal = tokenToTerminal(token);
-    const state = states[states.length - 1];
-    const action = findAction(state, terminal);
-
-    if (!action) {
+  if (status !== 0) {
+    const errorIndex = parserTraceErrorIndex();
+    const token = stream.tokens[errorIndex] ?? eofToken(source.length);
+    if (status === 1) {
       return {
         ok: false,
         root: null,
         source,
         tokens,
-        diagnostics: [unexpectedTokenDiagnostic(token, state)],
+        diagnostics: [unexpectedTokenDiagnostic(
+          token,
+          parserTraceErrorState(),
+        )],
       };
     }
+    return {
+      ok: false,
+      root: null,
+      source,
+      tokens,
+      diagnostics: [{
+        code: "PARSER_INTERNAL_ERROR",
+        message: "Runtime-language parser trace failed.",
+        span: currentSpan(token),
+      }],
+    };
+  }
 
-    if (action.kind === "shift") {
-      states.push(action.state);
-      values.push(shiftedToken(token, index));
+  const traceCount = parserTraceCount();
+  const trace = new Int32Array(traceCount);
+  for (let index = 0; index < traceCount; index++) {
+    trace[index] = parserTraceAction(index) | 0;
+  }
+
+  return replayTrace(
+    source,
+    tokens,
+    stream.tokens,
+    stream.tokenIndices,
+    trace,
+  );
+}
+
+interface CompactTraceTokenStream {
+  tokens: readonly Token[];
+  tokenIndices: readonly number[];
+  terminals: Int32Array;
+  terminalCount: number;
+}
+
+function compactTraceTokenStream(
+  source: string,
+  tokens: readonly Token[],
+): CompactTraceTokenStream {
+  const streamTokens: Token[] = new Array(tokens.length + 1);
+  const streamTokenIndices: number[] = new Array(tokens.length + 1);
+  const terminals = new Int32Array(tokens.length + 1);
+  let streamTokenCount = 0;
+  let terminalCount = 0;
+  let index = 0;
+  while (true) {
+    index = skipTrivia(tokens, index);
+    const token = tokens[index] ?? eofToken(source.length);
+    streamTokens[streamTokenCount] = token;
+    streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
+    streamTokenCount++;
+    terminals[terminalCount] = tokenToTerminal(token);
+    terminalCount++;
+    if (token.type === "eof" || index >= tokens.length) break;
+    index++;
+  }
+  streamTokens.length = streamTokenCount;
+  streamTokenIndices.length = streamTokenCount;
+  return { tokens: streamTokens, tokenIndices: streamTokenIndices, terminals, terminalCount };
+}
+
+function replayTrace(
+  source: string,
+  tokens: readonly Token[],
+  streamTokens: readonly Token[],
+  streamTokenIndices: readonly number[],
+  trace: Int32Array,
+): ParseResult<RootNode> {
+  const values: unknown[] = [null];
+  let index = 0;
+
+  for (let traceIndex = 0; traceIndex < trace.length; traceIndex++) {
+    const encoded = trace[traceIndex];
+    const kind = encoded >>> 24;
+    const payload = encoded & 0x00ffffff;
+
+    if (kind === 1) {
+      values.push(shiftedToken(
+        streamTokens[index] ?? eofToken(source.length),
+        streamTokenIndices[index] ?? tokens.length,
+      ));
       index++;
       continue;
     }
 
-    if (action.kind === "accept") {
+    if (kind === 3) {
       return acceptedParseResult(source, tokens, values[values.length - 1]);
     }
 
-    const production = PRODUCTIONS[action.production];
+    const token = streamTokens[index] ?? eofToken(source.length);
+    if (kind !== 2) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [{
+          code: "PARSER_INTERNAL_ERROR",
+          message: "Runtime-language parser trace contained an unknown action kind.",
+          span: currentSpan(token),
+        }],
+      };
+    }
+
+    const production = PRODUCTIONS[payload];
+    if (!production) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [{
+          code: "PARSER_INTERNAL_ERROR",
+          message: "Runtime-language parser trace referenced an unknown production.",
+          span: currentSpan(token),
+        }],
+      };
+    }
+    if (production.rhsLength > values.length - 1) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [{
+          code: "PARSER_INTERNAL_ERROR",
+          message: "Runtime-language parser trace underflowed the replay stack.",
+          span: currentSpan(token),
+        }],
+      };
+    }
     const rhsValues = production.rhsLength === 0
       ? []
       : values.splice(values.length - production.rhsLength, production.rhsLength);
-    states.splice(states.length - production.rhsLength, production.rhsLength);
     let reduced: unknown;
     try {
       reduced = reduceProduction(
         production.reducer,
         rhsValues,
         token.span.start,
-        index,
+        streamTokenIndices[index] ?? tokens.length,
       );
     } catch (error) {
       return {
@@ -321,39 +657,20 @@ function parseTokenList(
         diagnostics: [internalParserDiagnostic(error, token.span)],
       };
     }
-    const gotoState = findGoto(states[states.length - 1], production.lhs);
-    if (gotoState === undefined) {
-      return {
-        ok: false,
-        root: null,
-        source,
-        tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Parser table is missing a goto entry.",
-          span: currentSpan(token),
-        }],
-      };
-    }
-    states.push(gotoState);
     values.push(reduced);
   }
-}
 
-function findAction(state: number, terminal: number): RuntimeAction | undefined {
-  const encoded = parserAction(state, terminal);
-  if (encoded === ACTION_NONE) return undefined;
-  const kind = encoded & ACTION_KIND_MASK;
-  const payload = encoded & ACTION_PAYLOAD_MASK;
-  if (kind === ACTION_SHIFT) return { kind: "shift", state: payload };
-  if (kind === ACTION_REDUCE) return { kind: "reduce", production: payload };
-  if (kind === ACTION_ACCEPT) return { kind: "accept" };
-  return undefined;
-}
-
-function findGoto(state: number, nonterminal: number): number | undefined {
-  const next = parserGoto(state, nonterminal);
-  return next === NO_GOTO ? undefined : next;
+  return {
+    ok: false,
+    root: null,
+    source,
+    tokens,
+    diagnostics: [{
+      code: "PARSER_INTERNAL_ERROR",
+      message: "Runtime-language parser trace ended without accepting.",
+      span: { start: source.length, end: source.length },
+    }],
+  };
 }
 
 function reduceProduction(

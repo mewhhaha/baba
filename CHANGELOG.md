@@ -41,6 +41,9 @@
 - Added growable checked `u32` scratch memory to the private runtime-language
   subset, with matching TypeScript/Wasm conformance coverage for stack-like
   load/store behavior and explicit growth.
+- Added a runtime-language parser trace helper for deterministic LR parser
+  control flow, with TypeScript/Wasm conformance coverage for emitted action
+  traces.
 
 ### Changed
 
@@ -53,6 +56,9 @@
 - TypeScript target emitters now package shared runtime source from
   `src/targets/runtime/` instead of carrying lexer/parser execution templates
   directly under `src/targets/typescript/`.
+- Deterministic generated TypeScript parsers now drive LR shift/reduce/accept
+  control flow through a runtime-language `parserTrace` helper and replay the
+  resulting action trace to construct the CST.
 - The Wasm target now packages its core bytecode runtime emitter from
   `src/targets/runtime/` instead of carrying it directly under
   `src/targets/wasm/`.

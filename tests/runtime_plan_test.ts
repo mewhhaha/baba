@@ -91,7 +91,8 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "createParserConflictTableRuntimeProgram",
   );
-  assertIncludes(parserRuntimeSource, "createParserTableRuntimeProgram");
+  assertIncludes(parserRuntimeSource, "createParserTraceRuntimeProgram");
+  assertIncludes(parserRuntimeSource, "function replayTrace");
 });
 
 Deno.test("Wasm target packages shared core runtime source", async () => {

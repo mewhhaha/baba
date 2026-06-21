@@ -168,14 +168,15 @@ Generated TypeScript, generated Wasm adapters, and parser-kit JSON also expose a
 runtime implementation identity with format `"baba-runtime-implementation"`,
 version `1`, semantics `"baba-runtime-portable-v1"`, and an aggregate source
 hash. This verifies that outputs were packaged against the same checked-in
-runtime source family. It is not yet a claim that TypeScript and Wasm were
-compiled from one runtime-language source; that remains the next runtime
-compiler boundary.
+runtime source family. Deterministic TypeScript parser control flow now uses a
+runtime-language `parserTrace` helper, but this identity is not yet a claim that
+the full TypeScript and Wasm parser runtimes were compiled from one
+runtime-language source; that remains the next runtime compiler boundary.
 
 The initial private runtime-language semantics are documented in
 `docs/runtime-language.md`. Its Stage-0 executable subset currently covers
-32-bit scalar control and arithmetic conformance; the parser runtime has not yet
-been lowered through it.
+32-bit scalar control, table helpers, growable scratch memory, and deterministic
+parser trace conformance.
 
 Use `--target kit` when another tool wants Baba's parser data without generated
 TypeScript source:

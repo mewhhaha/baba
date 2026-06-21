@@ -15,6 +15,7 @@ import {
   createParserConflictTableRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserTableRuntimeProgram,
+  createParserTraceRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
@@ -87,6 +88,113 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         [],
       ],
     });
+  const parserTraceBaseProgram = createParserTraceRuntimeProgram({
+    actionRows: [
+      [[1, RUNTIME_ACTION_SHIFT + 1]],
+      [[0, RUNTIME_ACTION_REDUCE + 1]],
+      [[0, RUNTIME_ACTION_ACCEPT]],
+      [[0, RUNTIME_ACTION_REDUCE + 2]],
+    ],
+    gotoRows: [
+      [
+        [1, 2],
+        [2, 3],
+      ],
+      [],
+      [],
+      [],
+    ],
+    productions: [
+      [0, 1],
+      [2, 1],
+      [1, 1],
+    ],
+  });
+  const parserTraceRuntimeProgram: RuntimeLanguageProgram = {
+    ...parserTraceBaseProgram,
+    name: "parser_trace_conformance",
+    entry: "main",
+    functions: [
+      ...parserTraceBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "result", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          {
+            kind: "setLocal",
+            name: "result",
+            expression: call("parserTraceSetTerminal", [u32(0), u32(1)]),
+          },
+          {
+            kind: "setLocal",
+            name: "result",
+            expression: call("parserTraceSetTerminal", [u32(1), u32(0)]),
+          },
+          {
+            kind: "setLocal",
+            name: "result",
+            expression: call("parserTrace", [u32(2)]),
+          },
+          {
+            kind: "if",
+            condition: local("result"),
+            consequent: [
+              { kind: "return", expression: local("result") },
+            ],
+          },
+          {
+            kind: "setLocal",
+            name: "result",
+            expression: call("parserTraceCount", []),
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(0)]),
+              u32(RUNTIME_ACTION_SHIFT + 1),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(10))),
+            ],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(1)]),
+              u32(RUNTIME_ACTION_REDUCE + 1),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(100))),
+            ],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(2)]),
+              u32(RUNTIME_ACTION_REDUCE + 2),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(1000))),
+            ],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(3)]),
+              u32(RUNTIME_ACTION_ACCEPT),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(10000))),
+            ],
+          },
+          { kind: "return", expression: local("result") },
+        ],
+      },
+    ],
+  };
   const scratchStackProgram: RuntimeLanguageProgram = {
     name: "scratch_stack",
     entry: "main",
@@ -556,6 +664,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: RUNTIME_NO_GOTO },
     },
     {
+      name: "parser trace runtime emits deterministic action traces",
+      program: parserTraceRuntimeProgram,
+      expected: { kind: "value", value: 11114 },
+    },
+    {
       name: "early return skips later traps",
       program: {
         name: "early_return",
@@ -662,6 +775,14 @@ function local(name: string) {
   return { kind: "local" as const, name };
 }
 
+function setLocal(name: string, expression: RuntimeExpression) {
+  return { kind: "setLocal" as const, name, expression };
+}
+
+function call(functionName: string, args: readonly RuntimeExpression[]) {
+  return { kind: "call" as const, function: functionName, args };
+}
+
 function loadScratch(index: RuntimeExpression) {
   return { kind: "loadScratchU32" as const, index };
 }
@@ -680,6 +801,10 @@ function add(left: RuntimeExpression, right: RuntimeExpression) {
 
 function sub(left: RuntimeExpression, right: RuntimeExpression) {
   return { kind: "subU32" as const, left, right };
+}
+
+function eq(left: RuntimeExpression, right: RuntimeExpression) {
+  return { kind: "eqU32" as const, left, right };
 }
 
 function asciiRow(

@@ -93,17 +93,23 @@ runtime language:
   behavior and explicit growth. This is the first mutable-memory substrate
   needed before parser stacks and trace buffers can be lowered through the
   runtime language.
+- Moved deterministic generated TypeScript parser LR shift/reduce/accept control
+  flow onto a runtime-language `parserTrace` source program backed by generated
+  action/goto/production tables and growable scratch memory. Generated
+  TypeScript now feeds terminal IDs into that helper and replays the resulting
+  action trace to build the CST, with TypeScript/Wasm conformance coverage for
+  the trace helper.
 
 Still unresolved:
 
 - The P0 source-of-truth milestone remains open: TypeScript and Wasm runtime
   execution now has a clearer shared runtime packaging boundary and generated
-  lexer/parser table helpers plus a checked mutable scratch-memory substrate
-  from the runtime language, but conflict branch scheduling, the main
-  lexer/parser control flow, and reduction algorithms are still not mechanically
-  emitted from one runtime-language implementation. That requires a larger
-  runtime compiler/artifact boundary before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  lexer/parser table helpers plus deterministic TypeScript parser trace control
+  flow from the runtime language, but conflict branch scheduling, lexical token
+  selection, Wasm parser control flow, and reduction/CST algorithms are still
+  not mechanically emitted from one runtime-language implementation. That
+  requires a larger runtime compiler/artifact boundary before the release can
+  fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

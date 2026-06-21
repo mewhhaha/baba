@@ -15,6 +15,16 @@ export const RUNTIME_ACTION_KIND_MASK = 0xff_00_00_00;
 export const RUNTIME_ACTION_PAYLOAD_MASK = 0x00_ff_ff_ff;
 export const RUNTIME_NO_GOTO = 0xffff_ffff;
 
+const TRACE_STATUS = 0;
+const TRACE_ERROR_STATE = 1;
+const TRACE_ERROR_INDEX = 2;
+const TRACE_COUNT = 3;
+const TRACE_BASE = 4;
+const TRACE_TERMINALS_BASE = 8;
+const TRACE_STATUS_OK = 0;
+const TRACE_STATUS_UNEXPECTED = 1;
+const TRACE_STATUS_INTERNAL = 2;
+
 export type LexerRuntimeTransition = readonly [
   start: number,
   end: number,
@@ -27,10 +37,19 @@ export interface LexerRuntimeProgramInput {
 }
 
 export type ParserRuntimeLookupEntry = readonly [key: number, value: number];
+export type ParserRuntimeProductionEntry = readonly [
+  lhs: number,
+  rhsLength: number,
+];
 
 export interface ParserTableRuntimeProgramInput {
   readonly actionRows: readonly (readonly ParserRuntimeLookupEntry[])[];
   readonly gotoRows: readonly (readonly ParserRuntimeLookupEntry[])[];
+}
+
+export interface ParserTraceRuntimeProgramInput
+  extends ParserTableRuntimeProgramInput {
+  readonly productions: readonly ParserRuntimeProductionEntry[];
 }
 
 export type ParserConflictTableRuntimeProgramInput =
@@ -131,6 +150,50 @@ export function createParserTableRuntimeProgram(
         gotoTable.entriesTable,
         RUNTIME_NO_GOTO,
       ),
+    ],
+  };
+}
+
+export function createParserTraceRuntimeProgram(
+  input: ParserTraceRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  const actionTable = flattenLookupTable("parserAction", input.actionRows);
+  const gotoTable = flattenLookupTable("parserGoto", input.gotoRows);
+  return {
+    name: "parser_trace_runtime",
+    entry: "parserTrace",
+    scratchMemoryWords: 0,
+    tables: [
+      ...actionTable.tables,
+      ...gotoTable.tables,
+      {
+        name: "parserProductions",
+        type: "u32",
+        values: input.productions.flatMap(([lhs, rhsLength]) => [
+          lhs,
+          rhsLength,
+        ]),
+      },
+    ],
+    functions: [
+      tableLookupFunction(
+        "parserAction",
+        actionTable.rowsTable,
+        actionTable.entriesTable,
+        RUNTIME_ACTION_NONE,
+      ),
+      tableLookupFunction(
+        "parserGoto",
+        gotoTable.rowsTable,
+        gotoTable.entriesTable,
+        RUNTIME_NO_GOTO,
+      ),
+      parserTraceSetTerminalFunction(),
+      parserTraceFunction(input.productions.length),
+      parserTraceErrorStateFunction(),
+      parserTraceErrorIndexFunction(),
+      parserTraceCountFunction(),
+      parserTraceActionFunction(),
     ],
   };
 }
@@ -441,6 +504,288 @@ function tableLookupAtFunction(
   };
 }
 
+function parserTraceSetTerminalFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceSetTerminal",
+    parameters: [
+      { name: "index", type: "u32" },
+      { name: "terminal", type: "u32" },
+    ],
+    locals: [
+      { name: "capacity", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("index", add(u32(TRACE_TERMINALS_BASE), local("index"))),
+      setLocal("capacity", ensureScratch(add(local("index"), u32(1)))),
+      storeScratch(local("index"), local("terminal")),
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserTraceFunction(
+  productionCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserTrace",
+    parameters: [
+      { name: "terminalCount", type: "u32" },
+    ],
+    locals: [
+      { name: "capacity", type: "u32" },
+      { name: "stackBase", type: "u32" },
+      { name: "stackCapacity", type: "u32" },
+      { name: "traceBase", type: "u32" },
+      { name: "depth", type: "u32" },
+      { name: "streamIndex", type: "u32" },
+      { name: "traceCount", type: "u32" },
+      { name: "loop", type: "u32" },
+      { name: "state", type: "u32" },
+      { name: "terminal", type: "u32" },
+      { name: "action", type: "u32" },
+      { name: "productionIndex", type: "u32" },
+      { name: "productionOffset", type: "u32" },
+      { name: "lhs", type: "u32" },
+      { name: "rhsLength", type: "u32" },
+      { name: "gotoState", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "capacity",
+        ensureScratch(add(u32(TRACE_TERMINALS_BASE), local("terminalCount"))),
+      ),
+      setLocal(
+        "stackBase",
+        add(u32(TRACE_TERMINALS_BASE), local("terminalCount")),
+      ),
+      setLocal(
+        "stackCapacity",
+        add(add(local("terminalCount"), u32(productionCount)), u32(16)),
+      ),
+      setLocal("traceBase", add(local("stackBase"), local("stackCapacity"))),
+      setLocal("capacity", ensureScratch(add(local("traceBase"), u32(1)))),
+      storeScratch(u32(TRACE_STATUS), u32(TRACE_STATUS_OK)),
+      storeScratch(u32(TRACE_ERROR_STATE), u32(0)),
+      storeScratch(u32(TRACE_ERROR_INDEX), u32(0)),
+      storeScratch(u32(TRACE_COUNT), u32(0)),
+      storeScratch(u32(TRACE_BASE), local("traceBase")),
+      storeScratch(local("stackBase"), u32(0)),
+      setLocal("depth", u32(1)),
+      setLocal("streamIndex", u32(0)),
+      setLocal("loop", u32(1)),
+      {
+        kind: "while",
+        condition: local("loop"),
+        body: [
+          {
+            kind: "if",
+            condition: lt(local("streamIndex"), local("terminalCount")),
+            consequent: [],
+            alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+          },
+          setLocal(
+            "state",
+            loadScratch(add(local("stackBase"), sub(local("depth"), u32(1)))),
+          ),
+          setLocal(
+            "terminal",
+            loadScratch(add(u32(TRACE_TERMINALS_BASE), local("streamIndex"))),
+          ),
+          setLocal(
+            "action",
+            call("parserAction", [local("state"), local("terminal")]),
+          ),
+          {
+            kind: "if",
+            condition: eq(local("action"), u32(RUNTIME_ACTION_NONE)),
+            consequent: traceReturnStatements(TRACE_STATUS_UNEXPECTED),
+          },
+          {
+            kind: "if",
+            condition: lt(local("action"), u32(RUNTIME_ACTION_REDUCE)),
+            consequent: [
+              ...traceStoreActionStatements(),
+              setLocal(
+                "gotoState",
+                sub(local("action"), u32(RUNTIME_ACTION_SHIFT)),
+              ),
+              {
+                kind: "if",
+                condition: lt(local("depth"), local("stackCapacity")),
+                consequent: [],
+                alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+              },
+              setLocal(
+                "capacity",
+                ensureScratch(
+                  add(add(local("stackBase"), local("depth")), u32(1)),
+                ),
+              ),
+              storeScratch(
+                add(local("stackBase"), local("depth")),
+                local("gotoState"),
+              ),
+              setLocal("depth", add(local("depth"), u32(1))),
+              setLocal("streamIndex", add(local("streamIndex"), u32(1))),
+            ],
+            alternate: [{
+              kind: "if",
+              condition: lt(local("action"), u32(RUNTIME_ACTION_ACCEPT)),
+              consequent: [
+                setLocal(
+                  "productionIndex",
+                  sub(local("action"), u32(RUNTIME_ACTION_REDUCE)),
+                ),
+                setLocal(
+                  "productionOffset",
+                  mul(local("productionIndex"), u32(2)),
+                ),
+                setLocal(
+                  "lhs",
+                  load("parserProductions", local("productionOffset")),
+                ),
+                setLocal(
+                  "productionOffset",
+                  add(local("productionOffset"), u32(1)),
+                ),
+                setLocal(
+                  "rhsLength",
+                  load("parserProductions", local("productionOffset")),
+                ),
+                {
+                  kind: "if",
+                  condition: lt(
+                    local("depth"),
+                    add(local("rhsLength"), u32(1)),
+                  ),
+                  consequent: traceReturnStatements(TRACE_STATUS_INTERNAL),
+                },
+                setLocal("depth", sub(local("depth"), local("rhsLength"))),
+                setLocal(
+                  "state",
+                  loadScratch(
+                    add(local("stackBase"), sub(local("depth"), u32(1))),
+                  ),
+                ),
+                setLocal(
+                  "gotoState",
+                  call("parserGoto", [local("state"), local("lhs")]),
+                ),
+                {
+                  kind: "if",
+                  condition: eq(local("gotoState"), u32(RUNTIME_NO_GOTO)),
+                  consequent: traceReturnStatements(TRACE_STATUS_INTERNAL),
+                  alternate: [
+                    ...traceStoreActionStatements(),
+                    {
+                      kind: "if",
+                      condition: lt(local("depth"), local("stackCapacity")),
+                      consequent: [],
+                      alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+                    },
+                    setLocal(
+                      "capacity",
+                      ensureScratch(
+                        add(add(local("stackBase"), local("depth")), u32(1)),
+                      ),
+                    ),
+                    storeScratch(
+                      add(local("stackBase"), local("depth")),
+                      local("gotoState"),
+                    ),
+                    setLocal("depth", add(local("depth"), u32(1))),
+                  ],
+                },
+              ],
+              alternate: [{
+                kind: "if",
+                condition: eq(local("action"), u32(RUNTIME_ACTION_ACCEPT)),
+                consequent: [
+                  ...traceStoreActionStatements(),
+                  ...traceReturnStatements(TRACE_STATUS_OK),
+                ],
+                alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+              }],
+            }],
+          },
+        ],
+      },
+      ...traceReturnStatements(TRACE_STATUS_INTERNAL),
+    ],
+  };
+}
+
+function parserTraceErrorStateFunction(): RuntimeLanguageFunction {
+  return traceHeaderLoadFunction("parserTraceErrorState", TRACE_ERROR_STATE);
+}
+
+function parserTraceErrorIndexFunction(): RuntimeLanguageFunction {
+  return traceHeaderLoadFunction("parserTraceErrorIndex", TRACE_ERROR_INDEX);
+}
+
+function parserTraceCountFunction(): RuntimeLanguageFunction {
+  return traceHeaderLoadFunction("parserTraceCount", TRACE_COUNT);
+}
+
+function parserTraceActionFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceAction",
+    parameters: [
+      { name: "index", type: "u32" },
+    ],
+    locals: [
+      { name: "traceBase", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("traceBase", loadScratch(u32(TRACE_BASE))),
+      {
+        kind: "return",
+        expression: loadScratch(add(local("traceBase"), local("index"))),
+      },
+    ],
+  };
+}
+
+function traceHeaderLoadFunction(
+  name: string,
+  index: number,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    result: "u32",
+    body: [
+      { kind: "return", expression: loadScratch(u32(index)) },
+    ],
+  };
+}
+
+function traceStoreActionStatements(): RuntimeStatement[] {
+  return [
+    setLocal(
+      "capacity",
+      ensureScratch(add(add(local("traceBase"), local("traceCount")), u32(1))),
+    ),
+    storeScratch(
+      add(local("traceBase"), local("traceCount")),
+      local("action"),
+    ),
+    setLocal("traceCount", add(local("traceCount"), u32(1))),
+  ];
+}
+
+function traceReturnStatements(status: number): RuntimeStatement[] {
+  return [
+    storeScratch(u32(TRACE_STATUS), u32(status)),
+    storeScratch(u32(TRACE_ERROR_STATE), local("state")),
+    storeScratch(u32(TRACE_ERROR_INDEX), local("streamIndex")),
+    storeScratch(u32(TRACE_COUNT), local("traceCount")),
+    { kind: "return", expression: u32(status) },
+  ];
+}
+
 function setLocal(
   name: string,
   expression: RuntimeExpression,
@@ -460,11 +805,40 @@ function load(table: string, index: RuntimeExpression): RuntimeExpression {
   return { kind: "loadTableU32", table, index };
 }
 
+function loadScratch(index: RuntimeExpression): RuntimeExpression {
+  return { kind: "loadScratchU32", index };
+}
+
+function storeScratch(
+  index: RuntimeExpression,
+  value: RuntimeExpression,
+): RuntimeStatement {
+  return { kind: "storeScratchU32", index, value };
+}
+
+function ensureScratch(words: RuntimeExpression): RuntimeExpression {
+  return { kind: "ensureScratchWords", words };
+}
+
+function call(
+  functionName: string,
+  args: readonly RuntimeExpression[],
+): RuntimeExpression {
+  return { kind: "call", function: functionName, args };
+}
+
 function add(
   left: RuntimeExpression,
   right: RuntimeExpression,
 ): RuntimeExpression {
   return { kind: "addU32", left, right };
+}
+
+function sub(
+  left: RuntimeExpression,
+  right: RuntimeExpression,
+): RuntimeExpression {
+  return { kind: "subU32", left, right };
 }
 
 function mul(
@@ -486,4 +860,11 @@ function lt(
   right: RuntimeExpression,
 ): RuntimeExpression {
   return { kind: "ltS32", left, right };
+}
+
+function eq(
+  left: RuntimeExpression,
+  right: RuntimeExpression,
+): RuntimeExpression {
+  return { kind: "eqU32", left, right };
 }

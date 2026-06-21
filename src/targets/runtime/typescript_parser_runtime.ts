@@ -8,7 +8,7 @@ import {
 } from "./language.ts";
 import {
   createParserConflictTableRuntimeProgram,
-  createParserTableRuntimeProgram,
+  createParserTraceRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_KIND_MASK,
   RUNTIME_ACTION_NONE,
@@ -46,15 +46,19 @@ export function emitParser(
     nonterminal,
     target,
   ]);
+  const runtimeProductions = bnf.productions.map((production) =>
+    [production.lhs, production.rhs.length] as const
+  );
   const tableRuntimeProgram = emitTypeScriptTables
     ? emitBranchRuntime
       ? createParserConflictTableRuntimeProgram({
         actionRows: parserRuntimeActionRows(actionRows),
         gotoRows,
       })
-      : createParserTableRuntimeProgram({
+      : createParserTraceRuntimeProgram({
         actionRows: parserRuntimeActionRows(actionRows),
         gotoRows,
+        productions: runtimeProductions,
       })
     : null;
   const productions = bnf.productions.map((production) => ({
@@ -371,94 +375,103 @@ function deterministicParseRuntime(): string {
     };
   }
 
-  const states: number[] = [0];
-  const values: unknown[] = [null];
-  let index = 0;
+  const stream = compactTraceTokenStream(source, tokens);
+  let status = 0;
+  try {
+    for (let index = 0; index < stream.terminalCount; index++) {
+      parserTraceSetTerminal(index, stream.terminals[index]);
+    }
+    status = parserTrace(stream.terminalCount);
+  } catch (error) {
+    return {
+      ok: false,
+      root: null,
+      source,
+      tokens,
+      diagnostics: [internalParserDiagnostic(error, {
+        start: source.length,
+        end: source.length,
+      })],
+    };
+  }
 
+  if (status !== 0) {
+    const errorIndex = parserTraceErrorIndex();
+    const token = stream.tokens[errorIndex] ?? eofToken(source.length);
+    if (status === 1) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [unexpectedTokenDiagnostic(
+          token,
+          parserTraceErrorState(),
+        )],
+      };
+    }
+    return {
+      ok: false,
+      root: null,
+      source,
+      tokens,
+      diagnostics: [{
+        code: "PARSER_INTERNAL_ERROR",
+        message: "Runtime-language parser trace failed.",
+        span: currentSpan(token),
+      }],
+    };
+  }
+
+  const traceCount = parserTraceCount();
+  const trace = new Int32Array(traceCount);
+  for (let index = 0; index < traceCount; index++) {
+    trace[index] = parserTraceAction(index) | 0;
+  }
+
+  return replayTrace(
+    source,
+    tokens,
+    stream.tokens,
+    stream.tokenIndices,
+    trace,
+  );
+}
+
+interface CompactTraceTokenStream {
+  tokens: readonly Token[];
+  tokenIndices: readonly number[];
+  terminals: Int32Array;
+  terminalCount: number;
+}
+
+function compactTraceTokenStream(
+  source: string,
+  tokens: readonly Token[],
+): CompactTraceTokenStream {
+  const streamTokens: Token[] = new Array(tokens.length + 1);
+  const streamTokenIndices: number[] = new Array(tokens.length + 1);
+  const terminals = new Int32Array(tokens.length + 1);
+  let streamTokenCount = 0;
+  let terminalCount = 0;
+  let index = 0;
   while (true) {
     index = skipTrivia(tokens, index);
     const token = tokens[index] ?? eofToken(source.length);
-    const terminal = tokenToTerminal(token);
-    const state = states[states.length - 1];
-    const action = findAction(state, terminal);
-
-    if (!action) {
-      return {
-        ok: false,
-        root: null,
-        source,
-        tokens,
-        diagnostics: [unexpectedTokenDiagnostic(token, state)],
-      };
-    }
-
-    if (action.kind === "shift") {
-      states.push(action.state);
-      values.push(shiftedToken(token, index));
-      index++;
-      continue;
-    }
-
-    if (action.kind === "accept") {
-      return acceptedParseResult(source, tokens, values[values.length - 1]);
-    }
-
-    const production = PRODUCTIONS[action.production];
-    const rhsValues = production.rhsLength === 0
-      ? []
-      : values.splice(values.length - production.rhsLength, production.rhsLength);
-    states.splice(states.length - production.rhsLength, production.rhsLength);
-    let reduced: unknown;
-    try {
-      reduced = reduceProduction(
-        production.reducer,
-        rhsValues,
-        token.span.start,
-        index,
-      );
-    } catch (error) {
-      return {
-        ok: false,
-        root: null,
-        source,
-        tokens,
-        diagnostics: [internalParserDiagnostic(error, token.span)],
-      };
-    }
-    const gotoState = findGoto(states[states.length - 1], production.lhs);
-    if (gotoState === undefined) {
-      return {
-        ok: false,
-        root: null,
-        source,
-        tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Parser table is missing a goto entry.",
-          span: currentSpan(token),
-        }],
-      };
-    }
-    states.push(gotoState);
-    values.push(reduced);
+    streamTokens[streamTokenCount] = token;
+    streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
+    streamTokenCount++;
+    terminals[terminalCount] = tokenToTerminal(token);
+    terminalCount++;
+    if (token.type === "eof" || index >= tokens.length) break;
+    index++;
   }
+  streamTokens.length = streamTokenCount;
+  streamTokenIndices.length = streamTokenCount;
+  return { tokens: streamTokens, tokenIndices: streamTokenIndices, terminals, terminalCount };
 }
 
-function findAction(state: number, terminal: number): RuntimeAction | undefined {
-  const encoded = parserAction(state, terminal);
-  if (encoded === ACTION_NONE) return undefined;
-  const kind = encoded & ACTION_KIND_MASK;
-  const payload = encoded & ACTION_PAYLOAD_MASK;
-  if (kind === ACTION_SHIFT) return { kind: "shift", state: payload };
-  if (kind === ACTION_REDUCE) return { kind: "reduce", production: payload };
-  if (kind === ACTION_ACCEPT) return { kind: "accept" };
-  return undefined;
-}
-
-function findGoto(state: number, nonterminal: number): number | undefined {
-  const next = parserGoto(state, nonterminal);
-  return next === NO_GOTO ? undefined : next;
-}`;
+${replayTraceRuntime("Runtime-language")}`;
 }
 
 function branchParseRuntime(): string {
@@ -767,7 +780,11 @@ function compactTokenStream(
   return { tokens: streamTokens, tokenIndices: streamTokenIndices, input, terminalCount };
 }
 
-function replayTrace(
+${replayTraceRuntime("Wasm")}`;
+}
+
+function replayTraceRuntime(label: string): string {
+  return `function replayTrace(
   source: string,
   tokens: readonly Token[],
   streamTokens: readonly Token[],
@@ -804,7 +821,7 @@ function replayTrace(
         tokens,
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
-          message: "Wasm parser trace contained an unknown action kind.",
+          message: "${label} parser trace contained an unknown action kind.",
           span: currentSpan(token),
         }],
       };
@@ -819,7 +836,7 @@ function replayTrace(
         tokens,
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
-          message: "Wasm parser trace referenced an unknown production.",
+          message: "${label} parser trace referenced an unknown production.",
           span: currentSpan(token),
         }],
       };
@@ -832,7 +849,7 @@ function replayTrace(
         tokens,
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
-          message: "Wasm parser trace underflowed the replay stack.",
+          message: "${label} parser trace underflowed the replay stack.",
           span: currentSpan(token),
         }],
       };
@@ -867,7 +884,7 @@ function replayTrace(
     tokens,
     diagnostics: [{
       code: "PARSER_INTERNAL_ERROR",
-      message: "Wasm parser trace ended without accepting.",
+      message: "${label} parser trace ended without accepting.",
       span: { start: source.length, end: source.length },
     }],
   };

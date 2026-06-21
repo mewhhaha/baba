@@ -2,8 +2,8 @@
 
 Baba's runtime language is private compiler infrastructure for standalone parser
 runtimes. Its current executable subset is intentionally small: it exists to
-make runtime semantics testable before the parser runtime is lowered through the
-language.
+make runtime semantics testable while the parser runtime is being lowered
+through the language.
 
 ## Version
 
@@ -25,10 +25,13 @@ TypeScript lexers and parsers: `utf16CodePointWidth` advances over UTF-16 code
 points, `dfaTransition` performs DFA transition lookup from generated read-only
 tables, deterministic parsers use `parserAction`/`parserGoto` for parser table
 lookup, and conflict parsers use generated `parserActionAt`/`parserGoto` helpers
-for multi-action and goto lookup. The same runtime-language source shape is also
-compiled to Wasm in conformance tests. Because generated parser runtime code
-depends on runtime-language compiler output, the checked runtime implementation
-manifest includes both runtime language sources and the Stage-0 compiler.
+for multi-action and goto lookup. Deterministic TypeScript parsers also use a
+runtime-language `parserTrace` helper backed by growable scratch memory for LR
+shift/reduce/accept control flow; TypeScript code still replays that trace to
+build the CST. The same runtime-language source shape is also compiled to Wasm
+in conformance tests. Because generated parser runtime code depends on
+runtime-language compiler output, the checked runtime implementation manifest
+includes both runtime language sources and the Stage-0 compiler.
 
 ## Current Executable Subset
 
@@ -94,5 +97,5 @@ These rules must be specified before the parser runtime can be fully lowered:
 - host-visible memory layout.
 
 Until the parser runtime is lowered through this language, Baba does not claim
-that TypeScript and Wasm are mechanically emitted from one runtime-language
-implementation.
+that the full TypeScript and Wasm parser runtimes are mechanically emitted from
+one runtime-language implementation.
