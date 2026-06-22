@@ -487,23 +487,24 @@ function generateTreeSitterHighlightsQueryFromPlan(
   plan: TreeSitterPlan,
   metadata: TreeSitterMetadata,
 ): string {
+  const highlightMetadata = metadata.queries?.highlights;
   const explicit = resolveHighlightCaptureSelectors(
-    metadata.queries?.highlights?.entries ?? [],
+    highlightMetadata?.entries ?? [],
     plan,
   );
   const explicitSelectors = new Set(
     explicit.filter(isCaptureMetadata).map(captureSelectorKey),
   );
-  for (
-    const suppress of metadata.queries?.highlights?.defaults?.suppress ?? []
-  ) {
-    explicitSelectors.add(captureSelectorKey(suppress));
-  }
+  const suppress = highlightMetadata?.defaults?.suppress ?? [];
+  const mode = highlightMetadata?.defaults?.mode ?? "rich";
   const lines = [
     ...renderCaptureQueryEntries(explicit),
-    ...defaultHighlightQueryEntries(
-      plan,
-      explicitSelectors,
+    ...renderCaptureQueryEntries(
+      defaultHighlightQueryEntries(plan, {
+        explicitSelectors,
+        suppress,
+        mode,
+      }),
     ),
   ];
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
@@ -772,15 +773,51 @@ function renderCaptureQueryEntries(
 ): string[] {
   return captures.map((capture) => {
     if (isRawQueryEntry(capture)) return capture.pattern;
-    if (capture.node) return `(${capture.node}) @${capture.capture}`;
-    return `${JSON.stringify(capture.literal)} @${capture.capture}`;
+    return renderCaptureMetadata(capture);
   });
+}
+
+function renderCaptureMetadata(capture: TreeSitterCaptureMetadata): string {
+  const child = capture.node
+    ? `(${capture.node}) @${capture.capture}`
+    : `${JSON.stringify(capture.literal)} @${capture.capture}`;
+  if (capture.parent === undefined) return child;
+  const field = capture.field !== undefined ? `${capture.field}: ` : "";
+  return `(${capture.parent} ${field}${child})`;
 }
 
 function captureSelectorKey(
   capture: TreeSitterCaptureSelectorMetadata,
 ): string {
+  return [
+    capture.parent !== undefined ? `parent:${capture.parent}` : "parent:*",
+    capture.field !== undefined ? `field:${capture.field}` : "field:*",
+    capture.node ? `node:${capture.node}` : `literal:${capture.literal}`,
+  ].join("/");
+}
+
+function captureChildSelectorKey(
+  capture: TreeSitterCaptureSelectorMetadata,
+): string {
   return capture.node ? `node:${capture.node}` : `literal:${capture.literal}`;
+}
+
+function matchesCaptureSelector(
+  selector: TreeSitterCaptureSelectorMetadata,
+  candidate: TreeSitterCaptureSelectorMetadata,
+): boolean {
+  if (
+    captureChildSelectorKey(selector) !== captureChildSelectorKey(candidate)
+  ) {
+    return false;
+  }
+  if (selector.parent !== undefined && selector.parent !== candidate.parent) {
+    return false;
+  }
+  if (selector.field !== undefined && selector.field !== candidate.field) {
+    return false;
+  }
+  return true;
 }
 
 function resolveHighlightCaptureSelectors(
@@ -798,7 +835,12 @@ function resolveHighlightCaptureSelectors(
     }
     const wrapper = singleLiteralRules.get(capture.literal);
     if (!wrapper) return capture;
-    return { node: wrapper, capture: capture.capture };
+    return {
+      parent: capture.parent,
+      field: capture.field,
+      node: wrapper,
+      capture: capture.capture,
+    };
   });
 }
 
@@ -816,14 +858,48 @@ function isCaptureMetadata(
 
 function defaultHighlightQueryEntries(
   plan: TreeSitterPlan,
-  explicitSelectors: Set<string>,
-): string[] {
-  const lines: string[] = [];
+  options: {
+    explicitSelectors: Set<string>;
+    suppress: TreeSitterCaptureSelectorMetadata[];
+    mode: "rich" | "minimal";
+  },
+): TreeSitterCaptureMetadata[] {
+  const entries: TreeSitterCaptureMetadata[] = [];
+  const seen = new Set<string>();
+  const pushEntry = (entry: TreeSitterCaptureMetadata) => {
+    if (shouldSkipDefaultHighlightEntry(entry, options)) return;
+    const key = captureSelectorKey(entry);
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push(entry);
+  };
+
+  pushMinimalDefaultHighlightEntries(plan, pushEntry);
+  if (options.mode === "rich") pushRichDefaultHighlightEntries(plan, pushEntry);
+  return entries;
+}
+
+function shouldSkipDefaultHighlightEntry(
+  entry: TreeSitterCaptureMetadata,
+  options: {
+    explicitSelectors: Set<string>;
+    suppress: TreeSitterCaptureSelectorMetadata[];
+  },
+): boolean {
+  if (options.explicitSelectors.has(captureSelectorKey(entry))) return true;
+  return options.suppress.some((selector) =>
+    matchesCaptureSelector(selector, entry)
+  );
+}
+
+function pushMinimalDefaultHighlightEntries(
+  plan: TreeSitterPlan,
+  push: (entry: TreeSitterCaptureMetadata) => void,
+): void {
   const terminals = [...plan.reachableLiterals].sort();
   const namedLiteralTerminals = collectNamedLiteralRuleTerminals(plan);
   const pushLiteral = (literal: string, capture: string) => {
-    if (explicitSelectors.has(`literal:${literal}`)) return;
-    lines.push(`${JSON.stringify(literal)} @${capture}`);
+    push({ literal, capture });
   };
 
   for (const terminal of terminals) {
@@ -846,8 +922,267 @@ function defaultHighlightQueryEntries(
       pushLiteral(terminal, "operator");
     }
   }
+}
 
-  return lines;
+function pushRichDefaultHighlightEntries(
+  plan: TreeSitterPlan,
+  push: (entry: TreeSitterCaptureMetadata) => void,
+): void {
+  for (const entry of inferNamedHighlightEntries(plan)) push(entry);
+  for (const entry of inferContextualIdentifierHighlightEntries(plan)) {
+    push(entry);
+  }
+}
+
+function inferNamedHighlightEntries(
+  plan: TreeSitterPlan,
+): TreeSitterCaptureMetadata[] {
+  const entries: TreeSitterCaptureMetadata[] = [];
+  const pushNode = (node: string, capture: string) => {
+    entries.push({ node, capture });
+  };
+
+  for (const rule of plan.rules) {
+    if (!plan.reachableRules.has(rule.name)) continue;
+    const capture = inferNamedNodeHighlightCapture(rule.name, "rule");
+    if (capture) pushNode(rule.name, capture);
+  }
+
+  for (const token of plan.tokens) {
+    const reachable = token.kind === "skip" ||
+      plan.reachableTokens.has(token.name);
+    if (!reachable) continue;
+    const capture = inferNamedNodeHighlightCapture(token.name, token.kind);
+    if (capture) pushNode(token.name, capture);
+  }
+
+  for (const external of plan.externals) {
+    const capture = inferNamedNodeHighlightCapture(external, "token");
+    if (capture) pushNode(external, capture);
+  }
+
+  return entries;
+}
+
+function inferNamedNodeHighlightCapture(
+  name: string,
+  kind: "rule" | "token" | "skip",
+): string | undefined {
+  const parts = nameParts(name);
+  if (parts.includes("comment")) return "comment";
+  if (kind === "skip") return undefined;
+  if (
+    hasAnyPart(parts, [
+      "string",
+      "str",
+      "char",
+      "character",
+      "text",
+    ])
+  ) {
+    return "string";
+  }
+  if (
+    hasAnyPart(parts, [
+      "number",
+      "numeric",
+      "integer",
+      "int",
+      "float",
+      "double",
+      "decimal",
+      "hex",
+      "octal",
+      "binary",
+    ])
+  ) {
+    return "number";
+  }
+  if (
+    hasAnyPart(parts, [
+      "boolean",
+      "bool",
+      "true",
+      "false",
+      "null",
+      "nil",
+      "none",
+      "undefined",
+      "constant",
+      "const",
+    ])
+  ) {
+    return "constant.builtin";
+  }
+  if (hasAnyPart(parts, ["intrinsic", "builtin", "builtins"])) {
+    return "function.builtin";
+  }
+  if (parts.includes("label")) return "label";
+  if (hasAnyPart(parts, ["field", "member", "property"])) {
+    return "variable.other.member";
+  }
+  if (isTypeLikeName(parts)) return "type";
+  return undefined;
+}
+
+function inferContextualIdentifierHighlightEntries(
+  plan: TreeSitterPlan,
+): TreeSitterCaptureMetadata[] {
+  const entries: TreeSitterCaptureMetadata[] = [];
+  const seen = new Set<string>();
+  const push = (
+    parent: string,
+    field: string | undefined,
+    selector: TreeSitterCaptureSelectorMetadata,
+    capture: string,
+  ) => {
+    const entry: TreeSitterCaptureMetadata = selector.node
+      ? { parent, field, node: selector.node, capture }
+      : { parent, field, literal: selector.literal, capture };
+    const key = captureSelectorKey(entry);
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push(entry);
+  };
+
+  for (const rule of plan.rules) {
+    if (!plan.reachableRules.has(rule.name)) continue;
+    collectContextualIdentifierHighlightEntries(
+      rule.expression,
+      rule.name,
+      undefined,
+      push,
+    );
+  }
+  return entries.sort((left, right) =>
+    captureSelectorKey(left).localeCompare(captureSelectorKey(right))
+  );
+}
+
+function collectContextualIdentifierHighlightEntries(
+  expression: TreeSitterExpression,
+  parent: string,
+  field: string | undefined,
+  push: (
+    parent: string,
+    field: string | undefined,
+    selector: TreeSitterCaptureSelectorMetadata,
+    capture: string,
+  ) => void,
+): void {
+  if (expression.kind === "field") {
+    collectContextualIdentifierHighlightEntries(
+      expression.expression,
+      parent,
+      expression.name,
+      push,
+    );
+    return;
+  }
+  if (expression.kind === "ref") {
+    if (field && isIdentifierLikeName(expression.name)) {
+      const capture = inferContextualIdentifierCapture(parent, field);
+      if (capture) push(parent, field, { node: expression.name }, capture);
+    }
+    return;
+  }
+  if (expression.kind === "literal") return;
+  for (const child of expressionChildren(expression)) {
+    collectContextualIdentifierHighlightEntries(child, parent, field, push);
+  }
+}
+
+function inferContextualIdentifierCapture(
+  parent: string,
+  field: string,
+): string | undefined {
+  const parentParts = nameParts(parent);
+  const fieldParts = nameParts(field);
+  if (hasAnyPart(fieldParts, ["callee", "function", "func", "method"])) {
+    return "function.call";
+  }
+  if (hasAnyPart(fieldParts, ["field", "member", "property"])) {
+    return "variable.other.member";
+  }
+  if (fieldParts.includes("label")) return "label";
+  if (isTypeLikeName(fieldParts)) return "type";
+  if (
+    hasAnyPart(fieldParts, [
+      "variable",
+      "var",
+      "binding",
+      "bind",
+      "target",
+      "parameter",
+      "param",
+    ])
+  ) {
+    return "variable";
+  }
+  if (!hasAnyPart(fieldParts, ["name", "identifier", "ident"])) {
+    return undefined;
+  }
+  if (
+    hasAnyPart(parentParts, [
+      "function",
+      "fn",
+      "func",
+      "method",
+      "procedure",
+      "proc",
+    ])
+  ) {
+    return "function";
+  }
+  if (isTypeLikeName(parentParts)) return "type";
+  if (hasAnyPart(parentParts, ["field", "member", "property"])) {
+    return "variable.other.member";
+  }
+  if (parentParts.includes("label")) return "label";
+  if (
+    hasAnyPart(parentParts, [
+      "variable",
+      "var",
+      "binding",
+      "bind",
+      "let",
+      "parameter",
+      "param",
+    ])
+  ) {
+    return "variable";
+  }
+  return undefined;
+}
+
+function isIdentifierLikeName(name: string): boolean {
+  const parts = nameParts(name);
+  return hasAnyPart(parts, ["ident", "identifier", "name", "symbol"]);
+}
+
+function isTypeLikeName(parts: string[]): boolean {
+  return hasAnyPart(parts, [
+    "type",
+    "typename",
+    "class",
+    "struct",
+    "enum",
+    "interface",
+    "trait",
+    "record",
+  ]);
+}
+
+function hasAnyPart(parts: string[], candidates: string[]): boolean {
+  return candidates.some((candidate) => parts.includes(candidate));
+}
+
+function nameParts(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
 }
 
 function collectExpressionRefs(expression: TreeSitterExpression): string[] {
@@ -1339,6 +1674,16 @@ function validateCaptureMetadata(
       collectReachableRuleNames(grammar, rootRuleName),
     ),
   );
+  const fieldsByParent =
+    metadata.some((capture) =>
+        !isRawQueryEntry(capture) && capture.field !== undefined
+      )
+      ? collectGeneratedTreeSitterFieldNames(
+        grammar,
+        fullMetadata,
+        rootRuleName,
+      )
+      : new Map<string, Set<string>>();
   for (const [index, capture] of metadata.entries()) {
     const entryPath = `${path}[${index}]`;
     if (isRawQueryEntry(capture)) continue;
@@ -1356,6 +1701,13 @@ function validateCaptureMetadata(
         { path: `${entryPath}.literal` },
       );
     }
+    validateCaptureSelectorContext(
+      capture,
+      knownNodes,
+      fieldsByParent,
+      context,
+      entryPath,
+    );
   }
 }
 
@@ -1380,6 +1732,14 @@ function validateCaptureSelectorsMetadata(
       collectReachableRuleNames(grammar, rootRuleName),
     ),
   );
+  const fieldsByParent =
+    metadata.some((selector) => selector.field !== undefined)
+      ? collectGeneratedTreeSitterFieldNames(
+        grammar,
+        fullMetadata,
+        rootRuleName,
+      )
+      : new Map<string, Set<string>>();
   for (const [index, selector] of metadata.entries()) {
     const entryPath = `${path}[${index}]`;
     if (selector.node && !knownNodes.has(selector.node)) {
@@ -1396,6 +1756,44 @@ function validateCaptureSelectorsMetadata(
         { path: `${entryPath}.literal` },
       );
     }
+    validateCaptureSelectorContext(
+      selector,
+      knownNodes,
+      fieldsByParent,
+      context,
+      entryPath,
+    );
+  }
+}
+
+function validateCaptureSelectorContext(
+  selector: TreeSitterCaptureSelectorMetadata,
+  knownNodes: Set<string>,
+  fieldsByParent: Map<string, Set<string>>,
+  context: string,
+  path: string,
+): void {
+  if (selector.field !== undefined && selector.parent === undefined) {
+    treeSitterDiagnosticError(
+      "METADATA_UNKNOWN_QUERY_FIELD",
+      `Fielded ${context} selector requires parent`,
+      { path: `${path}.field` },
+    );
+  }
+  if (selector.parent !== undefined && !knownNodes.has(selector.parent)) {
+    treeSitterDiagnosticError(
+      "METADATA_UNKNOWN_QUERY_NODE",
+      `Unknown ${context} parent '${selector.parent}'`,
+      { path: `${path}.parent` },
+    );
+  }
+  if (selector.parent === undefined || selector.field === undefined) return;
+  if (!fieldsByParent.get(selector.parent)?.has(selector.field)) {
+    treeSitterDiagnosticError(
+      "METADATA_UNKNOWN_QUERY_FIELD",
+      `Unknown ${context} field '${selector.field}' on parent '${selector.parent}'`,
+      { path: `${path}.field` },
+    );
   }
 }
 
@@ -1416,7 +1814,7 @@ function uncoveredSuppressedHighlightDiagnostics(
 
   const ignoredContexts = new Set(
     (metadata.queries?.highlights?.defaults?.ignore ?? []).map((ignore) =>
-      `${ignore.parent}:${captureSelectorKey(ignore)}`
+      highlightContextKey(ignore.parent, ignore.field, ignore)
     ),
   );
 
@@ -1426,17 +1824,17 @@ function uncoveredSuppressedHighlightDiagnostics(
     suppress,
   );
   for (const context of contexts) {
-    const selectorKey = captureSelectorKey(context.selector);
-    if (globalCaptures.has(selectorKey)) continue;
-    if (ignoredContexts.has(`${context.parent}:${selectorKey}`)) continue;
+    if (hasMatchingHighlightCapture(globalCaptures, context)) continue;
+    if (isIgnoredHighlightContext(ignoredContexts, context)) continue;
     const child = context.selector.node ??
       JSON.stringify(context.selector.literal);
+    const field = context.field ? ` field ${context.field}` : "";
     diagnostics.push({
       code: "QUERY_UNCAPTURED_CONTEXT",
       severity: "warning",
       backend: "tree-sitter",
       message:
-        `highlight metadata suppresses ${child}, but ${child} appears under ${context.parent} with no explicit highlight capture.`,
+        `highlight metadata suppresses ${child}, but ${child} appears under ${context.parent}${field} with no explicit highlight capture.`,
     });
   }
   return diagnostics;
@@ -1445,21 +1843,19 @@ function uncoveredSuppressedHighlightDiagnostics(
 function collectSuppressedHighlightContexts(
   plan: TreeSitterPlan,
   suppress: TreeSitterCaptureSelectorMetadata[],
-): Array<{ parent: string; selector: TreeSitterCaptureSelectorMetadata }> {
-  const suppressedNodes = new Map(
-    suppress.filter((selector) => selector.node).map((selector) => [
-      selector.node,
-      selector,
-    ]),
-  );
-  const suppressedLiterals = new Map(
-    suppress.filter((selector) => selector.literal).map((selector) => [
-      selector.literal,
-      selector,
-    ]),
-  );
+): Array<
+  {
+    parent: string;
+    field?: string;
+    selector: TreeSitterCaptureSelectorMetadata;
+  }
+> {
   const contexts: Array<
-    { parent: string; selector: TreeSitterCaptureSelectorMetadata }
+    {
+      parent: string;
+      field?: string;
+      selector: TreeSitterCaptureSelectorMetadata;
+    }
   > = [];
   const seen = new Set<string>();
   for (const rule of plan.rules) {
@@ -1467,14 +1863,15 @@ function collectSuppressedHighlightContexts(
     collectSuppressedHighlightContextsInto(
       rule.expression,
       rule.name,
-      suppressedNodes,
-      suppressedLiterals,
+      undefined,
+      suppress,
       contexts,
       seen,
     );
   }
   return contexts.sort((left, right) =>
     left.parent.localeCompare(right.parent) ||
+    (left.field ?? "").localeCompare(right.field ?? "") ||
     captureSelectorKey(left.selector).localeCompare(
       captureSelectorKey(right.selector),
     )
@@ -1484,27 +1881,53 @@ function collectSuppressedHighlightContexts(
 function collectSuppressedHighlightContextsInto(
   expression: TreeSitterExpression,
   parent: string,
-  suppressedNodes: Map<string | undefined, TreeSitterCaptureSelectorMetadata>,
-  suppressedLiterals: Map<
-    string | undefined,
-    TreeSitterCaptureSelectorMetadata
-  >,
+  field: string | undefined,
+  suppress: TreeSitterCaptureSelectorMetadata[],
   contexts: Array<
-    { parent: string; selector: TreeSitterCaptureSelectorMetadata }
+    {
+      parent: string;
+      field?: string;
+      selector: TreeSitterCaptureSelectorMetadata;
+    }
   >,
   seen: Set<string>,
 ): void {
+  if (expression.kind === "field") {
+    collectSuppressedHighlightContextsInto(
+      expression.expression,
+      parent,
+      expression.name,
+      suppress,
+      contexts,
+      seen,
+    );
+    return;
+  }
   if (expression.kind === "ref") {
-    const selector = suppressedNodes.get(expression.name);
-    if (selector) {
-      pushSuppressedHighlightContext(parent, selector, contexts, seen);
+    for (const selector of suppress) {
+      if (!selector.node) continue;
+      if (selector.node !== expression.name) continue;
+      pushSuppressedHighlightContext(
+        parent,
+        field,
+        selector,
+        contexts,
+        seen,
+      );
     }
     return;
   }
   if (expression.kind === "literal") {
-    const selector = suppressedLiterals.get(expression.value);
-    if (selector) {
-      pushSuppressedHighlightContext(parent, selector, contexts, seen);
+    for (const selector of suppress) {
+      if (!selector.literal) continue;
+      if (selector.literal !== expression.value) continue;
+      pushSuppressedHighlightContext(
+        parent,
+        field,
+        selector,
+        contexts,
+        seen,
+      );
     }
     return;
   }
@@ -1512,8 +1935,8 @@ function collectSuppressedHighlightContextsInto(
     collectSuppressedHighlightContextsInto(
       child,
       parent,
-      suppressedNodes,
-      suppressedLiterals,
+      field,
+      suppress,
       contexts,
       seen,
     );
@@ -1522,16 +1945,70 @@ function collectSuppressedHighlightContextsInto(
 
 function pushSuppressedHighlightContext(
   parent: string,
+  field: string | undefined,
   selector: TreeSitterCaptureSelectorMetadata,
   contexts: Array<
-    { parent: string; selector: TreeSitterCaptureSelectorMetadata }
+    {
+      parent: string;
+      field?: string;
+      selector: TreeSitterCaptureSelectorMetadata;
+    }
   >,
   seen: Set<string>,
 ): void {
-  const key = `${parent}:${captureSelectorKey(selector)}`;
+  if (selector.parent !== undefined && selector.parent !== parent) return;
+  if (selector.field !== undefined && selector.field !== field) return;
+  const key = highlightContextKey(parent, field, selector);
   if (seen.has(key)) return;
   seen.add(key);
-  contexts.push({ parent, selector });
+  contexts.push({ parent, field, selector });
+}
+
+function hasMatchingHighlightCapture(
+  captureKeys: Set<string>,
+  context: {
+    parent: string;
+    field?: string;
+    selector: TreeSitterCaptureSelectorMetadata;
+  },
+): boolean {
+  const selector = context.selector.node
+    ? { node: context.selector.node }
+    : { literal: context.selector.literal };
+  return [
+    selector,
+    { ...selector, parent: context.parent },
+    { ...selector, parent: context.parent, field: context.field },
+  ].some((candidate) => captureKeys.has(captureSelectorKey(candidate)));
+}
+
+function isIgnoredHighlightContext(
+  ignoredContexts: Set<string>,
+  context: {
+    parent: string;
+    field?: string;
+    selector: TreeSitterCaptureSelectorMetadata;
+  },
+): boolean {
+  const selector = context.selector.node
+    ? { node: context.selector.node }
+    : { literal: context.selector.literal };
+  return [
+    highlightContextKey(context.parent, undefined, selector),
+    highlightContextKey(context.parent, context.field, selector),
+  ].some((key) => ignoredContexts.has(key));
+}
+
+function highlightContextKey(
+  parent: string,
+  field: string | undefined,
+  selector: TreeSitterCaptureSelectorMetadata,
+): string {
+  return [
+    `parent:${parent}`,
+    field !== undefined ? `field:${field}` : "field:*",
+    captureChildSelectorKey(selector),
+  ].join("/");
 }
 
 function expressionChildren(
@@ -1659,6 +2136,66 @@ function collectGeneratedTreeSitterNodeNames(
     }
   }
   return names;
+}
+
+function collectGeneratedTreeSitterFieldNames(
+  grammar: EbnfGrammar,
+  metadata: TreeSitterMetadata,
+  rootRuleName: string,
+): Map<string, Set<string>> {
+  const plan = createGrammarTreeSitterPlan(grammar, rootRuleName, metadata);
+  const fieldsByParent = new Map<string, Set<string>>();
+  const addField = (parent: string, field: string | undefined) => {
+    if (!field) return;
+    let fields = fieldsByParent.get(parent);
+    if (!fields) {
+      fields = new Set();
+      fieldsByParent.set(parent, fields);
+    }
+    fields.add(field);
+  };
+
+  for (const rule of plan.rules) {
+    if (!plan.reachableRules.has(rule.name)) continue;
+    collectExpressionFieldNames(rule.expression, rule.name, addField);
+  }
+
+  for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
+    if (ruleName !== "source_file" && !plan.reachableRules.has(ruleName)) {
+      continue;
+    }
+    const expression = ruleName === "source_file"
+      ? sourceFileExpression(plan)
+      : plan.rules.find((rule) => rule.name === ruleName)?.expression;
+    if (!expression) continue;
+    const normalized = normalizeRuleMetadata(
+      ruleMeta,
+      expression,
+      ruleName,
+      metadata.version,
+      `metadata.rules.${ruleName}`,
+    );
+    for (const pathMeta of normalized.paths.values()) {
+      addField(ruleName, pathMeta.field);
+    }
+  }
+
+  return fieldsByParent;
+}
+
+function collectExpressionFieldNames(
+  expression: TreeSitterExpression,
+  parent: string,
+  addField: (parent: string, field: string | undefined) => void,
+): void {
+  if (expression.kind === "field") {
+    addField(parent, expression.name);
+    collectExpressionFieldNames(expression.expression, parent, addField);
+    return;
+  }
+  for (const child of expressionChildren(expression)) {
+    collectExpressionFieldNames(child, parent, addField);
+  }
 }
 
 function collectGeneratedSymbolSets(

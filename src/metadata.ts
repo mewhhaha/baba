@@ -266,8 +266,21 @@ function parseHighlightCaptureQuery(
   }
   if (hasKey(object, "defaults")) {
     const defaults = expectObject(object.defaults, `${path}.defaults`);
-    assertKnownKeys(defaults, `${path}.defaults`, ["suppress", "ignore"]);
+    assertKnownKeys(defaults, `${path}.defaults`, [
+      "mode",
+      "suppress",
+      "ignore",
+    ]);
     metadata.defaults = {};
+    if (hasKey(defaults, "mode")) {
+      const mode = expectString(defaults.mode, `${path}.defaults.mode`);
+      if (mode !== "rich" && mode !== "minimal") {
+        throwMetadataShape(
+          `Expected ${path}.defaults.mode to be "rich" or "minimal"`,
+        );
+      }
+      metadata.defaults.mode = mode;
+    }
     if (hasKey(defaults, "suppress")) {
       metadata.defaults.suppress = expectArray(
         defaults.suppress,
@@ -292,19 +305,27 @@ function parseHighlightCaptureQuery(
           "node",
           "literal",
           "parent",
+          "field",
         ]);
         const selector = parseCaptureSelectorMetadata(
-          hasKey(ignoreObject, "node")
-            ? { node: ignoreObject.node }
-            : { literal: ignoreObject.literal },
+          {
+            ...(hasKey(ignoreObject, "node")
+              ? { node: ignoreObject.node }
+              : { literal: ignoreObject.literal }),
+            parent: ignoreObject.parent,
+            ...(hasKey(ignoreObject, "field")
+              ? { field: ignoreObject.field }
+              : {}),
+          },
           `${path}.defaults.ignore[${index}]`,
         );
         return {
           ...selector,
-          parent: expectString(
-            ignoreObject.parent,
-            `${path}.defaults.ignore[${index}].parent`,
-          ),
+          parent: selector.parent ??
+            expectString(
+              ignoreObject.parent,
+              `${path}.defaults.ignore[${index}].parent`,
+            ),
         };
       });
     }
@@ -349,15 +370,23 @@ function parseCaptureMetadata(
   path: string,
 ): TreeSitterCaptureQueryEntry {
   const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["node", "literal", "capture", "pattern"]);
+  assertKnownKeys(object, path, [
+    "node",
+    "literal",
+    "capture",
+    "pattern",
+    "parent",
+    "field",
+  ]);
 
   if (hasKey(object, "pattern")) {
     if (
       hasKey(object, "node") || hasKey(object, "literal") ||
-      hasKey(object, "capture")
+      hasKey(object, "capture") || hasKey(object, "parent") ||
+      hasKey(object, "field")
     ) {
       throwMetadataShape(
-        `Expected ${path} raw pattern to omit node, literal, and capture`,
+        `Expected ${path} raw pattern to omit node, literal, capture, parent, and field`,
       );
     }
     return { pattern: expectString(object.pattern, `${path}.pattern`) };
@@ -375,9 +404,18 @@ function parseCaptureMetadata(
     expectString(object.capture, `${path}.capture`),
     `${path}.capture`,
   );
+  const context = parseSelectorContext(object, path);
   return hasNode
-    ? { node: expectString(object.node, `${path}.node`), capture }
-    : { literal: expectString(object.literal, `${path}.literal`), capture };
+    ? {
+      ...context,
+      node: expectString(object.node, `${path}.node`),
+      capture,
+    }
+    : {
+      ...context,
+      literal: expectString(object.literal, `${path}.literal`),
+      capture,
+    };
 }
 
 function parseCaptureSelectorMetadata(
@@ -385,7 +423,7 @@ function parseCaptureSelectorMetadata(
   path: string,
 ): TreeSitterCaptureSelectorMetadata {
   const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["node", "literal"]);
+  assertKnownKeys(object, path, ["node", "literal", "parent", "field"]);
   const hasNode = hasKey(object, "node");
   const hasLiteral = hasKey(object, "literal");
   if (hasNode === hasLiteral) {
@@ -393,9 +431,29 @@ function parseCaptureSelectorMetadata(
       `Expected ${path} to specify exactly one of node or literal`,
     );
   }
+  const context = parseSelectorContext(object, path);
   return hasNode
-    ? { node: expectString(object.node, `${path}.node`) }
-    : { literal: expectString(object.literal, `${path}.literal`) };
+    ? { ...context, node: expectString(object.node, `${path}.node`) }
+    : { ...context, literal: expectString(object.literal, `${path}.literal`) };
+}
+
+function parseSelectorContext(
+  object: Record<string, unknown>,
+  path: string,
+): Pick<TreeSitterCaptureSelectorMetadata, "parent" | "field"> {
+  const parent = hasKey(object, "parent")
+    ? expectString(object.parent, `${path}.parent`)
+    : undefined;
+  const field = hasKey(object, "field")
+    ? expectString(object.field, `${path}.field`)
+    : undefined;
+  if (field !== undefined && parent === undefined) {
+    throwMetadataShape(`Expected ${path}.field to also specify parent`);
+  }
+  return {
+    ...(parent !== undefined ? { parent } : {}),
+    ...(field !== undefined ? { field } : {}),
+  };
 }
 
 function parseRainbowsMetadata(

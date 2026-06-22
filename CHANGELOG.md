@@ -26,6 +26,12 @@
   array, fixed-record, and growable-vector helper substrates with reset,
   allocation overflow checks, wrong-kind traps, stale-handle traps, and
   bounds-checked load/store/append conformance across TypeScript and Wasm.
+- Moved deterministic runtime-language parser trace stack and accepted-action
+  storage onto arena-backed growable vectors, with vector truncation used for LR
+  reductions.
+- Added rich generated Tree-sitter highlight defaults with contextual
+  `parent`/`field` selectors, comment/string/number/constant/builtin/type/member
+  inference, contextual identifier captures, and a `minimal` compatibility mode.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source with TypeScript/Wasm conformance coverage.
 - Added runtime-language function calls and multi-function TypeScript/Wasm
@@ -128,6 +134,9 @@
   generated JavaScript spec-discriminant table.
 - Generated TypeScript lexers and parser token-stream validation now use
   runtime-language `lexerSpecTokenClass` for literal/main/trivia classification.
+- Generated Tree-sitter highlights now default to rich inference; use
+  `queries.highlights.defaults.mode: "minimal"` for the previous literal-only
+  keyword/punctuation/operator defaults.
 - Generated parser token-stream validation now delegates public token
   literal/main/trivia compatibility decisions to runtime-language
   `lexerSpecPublicTokenStatus`.

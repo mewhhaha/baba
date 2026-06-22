@@ -481,8 +481,18 @@ block = "{" embedded_source "}" ;
   },
   "queries": {
     "highlights": {
-      "entries": [{ "node": "ident", "capture": "function" }],
-      "defaults": { "suppress": [{ "node": "ident" }] }
+      "entries": [
+        {
+          "parent": "module",
+          "field": "name",
+          "node": "ident",
+          "capture": "function"
+        }
+      ],
+      "defaults": {
+        "mode": "rich",
+        "suppress": [{ "parent": "module", "field": "name", "node": "ident" }]
+      }
     },
     "locals": [{ "node": "ident", "capture": "local.definition" }],
     "injections": [{ "node": "embedded_source", "language": "<language>" }]
@@ -510,6 +520,39 @@ Supported top-level keys:
 
 Metadata does not contain formatter, LSP, editor, package, license, author, or
 binding configuration.
+
+Highlight queries accept raw `patterns` plus structured `entries`. A structured
+entry may target a node or literal globally, or add `parent` and optional
+`field` context:
+
+```json
+{
+  "queries": {
+    "highlights": {
+      "entries": [
+        {
+          "parent": "fn_sig",
+          "field": "name",
+          "node": "IDENT",
+          "capture": "function"
+        },
+        { "literal": "fn", "capture": "keyword" }
+      ],
+      "patterns": ["(call_expression function: (_) @function.call)"]
+    }
+  }
+}
+```
+
+Generated highlight defaults use `"rich"` mode unless configured otherwise. Rich
+mode keeps literal keyword, punctuation, bracket, delimiter, and operator
+captures, then infers common IDE captures for comments, strings, numbers,
+constants, builtins, type-like nodes, members, labels, and contextual identifier
+fields such as function names or call callees. It does not add a global
+`(ident) @variable` capture. Use `"defaults": { "mode": "minimal" }` to keep the
+older literal-only defaults. Default suppressions accept the same
+`parent`/`field` context, so one inferred capture can be disabled without
+removing the same node everywhere.
 
 ### Parser Runtime Conflict Policy
 

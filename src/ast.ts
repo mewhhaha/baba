@@ -351,6 +351,8 @@ export interface TreeSitterCaptureQueryMetadata {
 }
 
 export interface TreeSitterHighlightDefaultsMetadata {
+  /** Default highlight inference mode. Defaults to rich. */
+  mode?: "rich" | "minimal";
   suppress?: TreeSitterCaptureSelectorMetadata[];
   ignore?: TreeSitterHighlightCoverageIgnoreMetadata[];
 }
@@ -361,6 +363,10 @@ export interface TreeSitterRawQueryMetadata {
 }
 
 export interface TreeSitterCaptureSelectorMetadata {
+  /** Parent syntax node that must contain the selected child. */
+  parent?: string;
+  /** Parent field name that must contain the selected child. Requires `parent`. */
+  field?: string;
   /** Node name to select. Mutually exclusive with `literal`. */
   node?: string;
   /** Literal terminal to select. Mutually exclusive with `node`. */

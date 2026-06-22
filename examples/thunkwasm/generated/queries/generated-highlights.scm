@@ -27,3 +27,7 @@
 "->" @operator
 ";" @punctuation.delimiter
 "=" @operator
+(integer) @number
+(fun_expr param: (IDENT) @variable)
+(let_expr name: (IDENT) @variable)
+(variable name: (IDENT) @variable)

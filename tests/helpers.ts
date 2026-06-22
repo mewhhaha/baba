@@ -12,6 +12,7 @@ export {
 } from "../src/mod.ts";
 export {
   collectReachabilityDiagnostics,
+  collectTreeSitterHighlightDiagnostics,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,
   generateTreeSitterQueries,

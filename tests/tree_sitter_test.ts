@@ -382,6 +382,104 @@ Deno.test("metadata drives Tree-sitter shaping and queries", () => {
   assertIncludes(queries["injections.scm"], "(#set! injection.language");
 });
 
+Deno.test("highlight metadata renders and validates contextual captures", () => {
+  const source = `
+    token IDENT = /[a-z]+/ ;
+    module = fn_sig ;
+    fn_sig = "fn" name:IDENT ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: {
+        entries: [
+          {
+            parent: "fn_sig",
+            field: "name",
+            node: "IDENT",
+            capture: "function",
+          },
+        ],
+      },
+    },
+  }));
+
+  const highlights = generateTreeSitterHighlightsQuery(source, { metadata });
+  assertIncludes(highlights, "(fn_sig name: (IDENT) @function)");
+
+  assertThrowsIncludes(
+    () =>
+      generateTreeSitterHighlightsQuery(source, {
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          queries: {
+            highlights: {
+              entries: [{
+                parent: "missing",
+                field: "name",
+                node: "IDENT",
+                capture: "function",
+              }],
+            },
+          },
+        })),
+      }),
+    "Unknown highlight parent 'missing'",
+  );
+  assertThrowsIncludes(
+    () =>
+      generateTreeSitterHighlightsQuery(source, {
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          queries: {
+            highlights: {
+              entries: [{
+                parent: "fn_sig",
+                field: "missing",
+                node: "IDENT",
+                capture: "function",
+              }],
+            },
+          },
+        })),
+      }),
+    "Unknown highlight field 'missing' on parent 'fn_sig'",
+  );
+  assertThrowsIncludes(
+    () =>
+      generateTreeSitterHighlightsQuery(source, {
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          queries: {
+            highlights: {
+              entries: [{
+                parent: "fn_sig",
+                field: "name",
+                node: "missing",
+                capture: "function",
+              }],
+            },
+          },
+        })),
+      }),
+    "Unknown highlight capture node 'missing'",
+  );
+  assertThrowsIncludes(
+    () =>
+      generateTreeSitterHighlightsQuery(source, {
+        metadata: parseTreeSitterMetadata(JSON.stringify({
+          queries: {
+            highlights: {
+              entries: [{
+                parent: "fn_sig",
+                field: "name",
+                literal: "missing",
+                capture: "keyword",
+              }],
+            },
+          },
+        })),
+      }),
+    "Unknown highlight capture literal 'missing'",
+  );
+});
+
 Deno.test("versioned metadata rejects legacy numeric paths", () => {
   assertThrowsIncludes(
     () =>
@@ -573,6 +671,11 @@ Deno.test("generated Tree-sitter artifacts compile, parse, and query", async () 
   const dir = await Deno.makeTempDir();
   try {
     const bundle = generate(source, { name: "tiny", metadata });
+    const highlights = bundle.files.find((file) =>
+      file.path === "queries/generated-highlights.scm"
+    )?.content ?? "";
+    assertIncludes(highlights, "(function name: (ident) @function)");
+    assertIncludes(highlights, "(block binding: (ident) @variable)");
     await applyBundle(bundle, { root: dir });
     await Deno.writeTextFile(
       `${dir}/sample.tiny`,
@@ -606,7 +709,11 @@ Deno.test("generated Tree-sitter artifacts compile, parse, and query", async () 
     assertIncludes(parse.stdout, "(module");
     assertNotIncludes(parse.stdout, "ERROR");
 
-    for (const file of bundle.files.filter((file) => file.kind === "query")) {
+    for (
+      const file of bundle.files.filter((file) =>
+        file.kind === "query"
+      )
+    ) {
       await runCommand(
         "tree-sitter",
         [

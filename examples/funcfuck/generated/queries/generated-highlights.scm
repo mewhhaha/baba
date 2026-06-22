@@ -29,3 +29,6 @@
 ">>" @operator
 "[" @punctuation.bracket
 "]" @punctuation.bracket
+(builtin) @function.builtin
+(integer_values) @number
+(integer_tail) @number

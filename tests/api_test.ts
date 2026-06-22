@@ -11,6 +11,7 @@ import {
   captureConsoleError,
   captureConsoleLog,
   collectReachabilityDiagnostics,
+  collectTreeSitterHighlightDiagnostics,
   compile,
   denoCheck,
   explicitGrammar,
@@ -134,21 +135,135 @@ Deno.test("TypeScript-only compilation reports target-neutral unreachable rules"
   assertEquals(result.diagnostics[0].backend, undefined);
 });
 
-Deno.test("highlight defaults are rooted and do not infer token semantics", () => {
+Deno.test("highlight defaults are rooted and infer contextual identifier semantics", () => {
   const source = `
     token ident = /[a-z]+/ ;
     token Ghost = /ghost/ ;
-    dead = "unused" Ghost ;
-    module = "fn" ident ;
+    dead = "unused" name:Ghost ;
+    module = function ;
+    function = "fn" name:ident ;
   `;
   const highlights = generateTreeSitterHighlightsQuery(source, {
     rootRule: "module",
   });
 
   assertIncludes(highlights, '"fn" @keyword');
+  assertIncludes(highlights, "(function name: (ident) @function)");
   assertNotIncludes(highlights, "(ident) @variable");
   assertNotIncludes(highlights, '"unused" @keyword');
   assertNotIncludes(highlights, "(Ghost) @constant");
+});
+
+Deno.test("rich highlight defaults infer IDE-grade named and contextual captures", () => {
+  const source = `
+    token ident = /[a-z]+/ ;
+    token integer = /[0-9]+/ ;
+    token string_literal = /"[^"\\r\\n]*"/ ;
+    token boolean_literal = /TRUE|FALSE/ ;
+    token intrinsic = /@[a-z]+/ ;
+    skip line_comment = /#[^\\r\\n]*/ ;
+    skip whitespace = /[ \\t\\r\\n]+/ ;
+
+    module = function_decl type_decl call member variable literal_value ;
+    function_decl = "fn" name:ident ;
+    type_decl = "type" name:ident ;
+    call = callee:ident "(" ")" ;
+    member = object:ident "." field:ident ;
+    variable = "let" name:ident ;
+    literal_value = integer string_literal boolean_literal intrinsic ;
+  `;
+
+  const highlights = generateTreeSitterHighlightsQuery(source);
+
+  assertIncludes(highlights, '"fn" @keyword');
+  assertIncludes(highlights, '"(" @punctuation.bracket');
+  assertIncludes(highlights, '"." @punctuation.delimiter');
+  assertIncludes(highlights, "(line_comment) @comment");
+  assertIncludes(highlights, "(string_literal) @string");
+  assertIncludes(highlights, "(integer) @number");
+  assertIncludes(highlights, "(boolean_literal) @constant.builtin");
+  assertIncludes(highlights, "(intrinsic) @function.builtin");
+  assertIncludes(highlights, "(type_decl) @type");
+  assertIncludes(highlights, "(function_decl name: (ident) @function)");
+  assertIncludes(highlights, "(type_decl name: (ident) @type)");
+  assertIncludes(highlights, "(call callee: (ident) @function.call)");
+  assertIncludes(highlights, "(member field: (ident) @variable.other.member)");
+  assertIncludes(highlights, "(variable name: (ident) @variable)");
+  assert(!highlights.split("\n").includes("(ident) @variable"));
+});
+
+Deno.test("minimal highlight defaults preserve literal-only inference", () => {
+  const source = `
+    token ident = /[a-z]+/ ;
+    token integer = /[0-9]+/ ;
+    skip line_comment = /#[^\\r\\n]*/ ;
+
+    module = function_decl integer ;
+    function_decl = "fn" name:ident ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: {
+        defaults: { mode: "minimal" },
+      },
+    },
+  }));
+
+  const highlights = generateTreeSitterHighlightsQuery(source, { metadata });
+
+  assertIncludes(highlights, '"fn" @keyword');
+  assertNotIncludes(highlights, "(function_decl name: (ident) @function)");
+  assertNotIncludes(highlights, "(integer) @number");
+  assertNotIncludes(highlights, "(line_comment) @comment");
+});
+
+Deno.test("contextual highlight suppression only removes matching defaults", () => {
+  const source = `
+    token ident = /[a-z]+/ ;
+    module = call variable ;
+    call = callee:ident ;
+    variable = name:ident ;
+  `;
+  const metadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: {
+        defaults: {
+          suppress: [
+            { parent: "call", field: "callee", node: "ident" },
+          ],
+          ignore: [
+            { parent: "call", field: "callee", node: "ident" },
+          ],
+        },
+      },
+    },
+  }));
+
+  const highlights = generateTreeSitterHighlightsQuery(source, { metadata });
+
+  assertNotIncludes(highlights, "(call callee: (ident) @function.call)");
+  assertIncludes(highlights, "(variable name: (ident) @variable)");
+  assertEquals(
+    collectTreeSitterHighlightDiagnostics(source, { metadata }).length,
+    0,
+  );
+
+  const warningMetadata = parseTreeSitterMetadata(JSON.stringify({
+    queries: {
+      highlights: {
+        defaults: {
+          suppress: [
+            { parent: "call", field: "callee", node: "ident" },
+          ],
+        },
+      },
+    },
+  }));
+  const diagnostics = collectTreeSitterHighlightDiagnostics(source, {
+    metadata: warningMetadata,
+  });
+  assertEquals(diagnostics[0]?.code, "QUERY_UNCAPTURED_CONTEXT");
+  assertIncludes(diagnostics[0]?.message ?? "", "call field callee");
 });
 
 Deno.test("public entrypoints type-check", async () => {
