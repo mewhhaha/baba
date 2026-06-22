@@ -114,11 +114,11 @@ export const RUNTIME_FIELD_FINAL_OK = 0;
 export const RUNTIME_FIELD_FINAL_REQUIRED_MISSING = 1;
 export const RUNTIME_FIELD_FINAL_TOO_MANY = 2;
 
-const TRACE_STATUS = 0;
-const TRACE_ERROR_STATE = 1;
-const TRACE_ERROR_INDEX = 2;
-const TRACE_COUNT = 3;
-const TRACE_BASE = 4;
+const TRACE_STATUS = 1;
+const TRACE_ERROR_STATE = 2;
+const TRACE_ERROR_INDEX = 3;
+const TRACE_COUNT = 4;
+const TRACE_BASE = 5;
 const TRACE_TERMINALS_BASE = 8;
 const TRACE_STATUS_OK = RUNTIME_TRACE_STATUS_OK;
 const TRACE_STATUS_UNEXPECTED = RUNTIME_TRACE_STATUS_UNEXPECTED;
@@ -393,12 +393,13 @@ export function createParserTraceRuntimeProgram(
       ),
       ...parserActionFunctions(),
       ...parserProductionFunctions(input.productions.length),
+      ...runtimeArenaFunctions(),
       parserTraceSetTerminalFunction(),
       parserTraceFunction(input.productions.length),
       parserTraceErrorStateFunction(),
       parserTraceErrorIndexFunction(),
       parserTraceCountFunction(),
-      parserTraceActionFunction(),
+      parserTraceActionFunction("vector"),
       parserTraceStatusKindFunction(),
     ],
   };
@@ -472,7 +473,7 @@ export function createParserConflictTraceRuntimeProgram(
       parserTraceErrorStateFunction(),
       parserTraceErrorIndexFunction(),
       parserTraceCountFunction(),
-      parserTraceActionFunction(),
+      parserTraceActionFunction("scratch"),
       parserTraceStatusKindFunction(),
     ],
   };
@@ -601,6 +602,7 @@ export function createParserRangeRuntimeProgram(): RuntimeLanguageProgram {
 function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
   return [
     runtimeArenaResetFunction(),
+    runtimeArenaResetToFunction(),
     runtimeArenaUsedFunction(),
     runtimeArenaAllocFunction(),
     runtimeObjectKindFunction(),
@@ -621,6 +623,7 @@ function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
     runtimeVectorDataFunction(),
     runtimeVectorLoadFunction(),
     runtimeVectorStoreFunction(),
+    runtimeVectorTruncateFunction(),
     runtimeVectorAppendFunction(),
   ];
 }
@@ -628,17 +631,40 @@ function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
 function runtimeArenaResetFunction(): RuntimeLanguageFunction {
   return {
     name: "runtimeArenaReset",
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: call("runtimeArenaResetTo", [
+          u32(RUNTIME_ARENA_FIRST_WORD),
+        ]),
+      },
+    ],
+  };
+}
+
+function runtimeArenaResetToFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArenaResetTo",
+    parameters: [
+      { name: "firstWord", type: "u32" },
+    ],
     locals: [
       { name: "capacity", type: "u32" },
     ],
     result: "u32",
     body: [
-      setLocal("capacity", ensureScratch(u32(RUNTIME_ARENA_FIRST_WORD))),
+      {
+        kind: "if",
+        condition: eq(local("firstWord"), u32(0)),
+        consequent: [{ kind: "trap" }],
+      },
+      setLocal("capacity", ensureScratch(local("firstWord"))),
       storeScratch(
         u32(RUNTIME_ARENA_NEXT_WORD),
-        u32(RUNTIME_ARENA_FIRST_WORD),
+        local("firstWord"),
       ),
-      { kind: "return", expression: u32(RUNTIME_ARENA_FIRST_WORD) },
+      { kind: "return", expression: local("firstWord") },
     ],
   };
 }
@@ -1277,6 +1303,33 @@ function runtimeVectorStoreFunction(): RuntimeLanguageFunction {
           local("value"),
         ]),
       },
+    ],
+  };
+}
+
+function runtimeVectorTruncateFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorTruncate",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "length", type: "u32" },
+    ],
+    locals: [
+      { name: "oldLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("oldLength", call("runtimeVectorLength", [local("handle")])),
+      {
+        kind: "if",
+        condition: ltu(local("oldLength"), local("length")),
+        consequent: [{ kind: "trap" }],
+      },
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_VECTOR_LENGTH_WORD_OFFSET)),
+        local("length"),
+      ),
+      { kind: "return", expression: local("length") },
     ],
   };
 }
@@ -3052,9 +3105,9 @@ function parserTraceFunction(
     ],
     locals: [
       { name: "capacity", type: "u32" },
-      { name: "stackBase", type: "u32" },
+      { name: "stackHandle", type: "u32" },
       { name: "stackCapacity", type: "u32" },
-      { name: "traceBase", type: "u32" },
+      { name: "traceHandle", type: "u32" },
       { name: "depth", type: "u32" },
       { name: "streamIndex", type: "u32" },
       { name: "traceCount", type: "u32" },
@@ -3076,21 +3129,39 @@ function parserTraceFunction(
         ensureScratch(add(u32(TRACE_TERMINALS_BASE), local("terminalCount"))),
       ),
       setLocal(
-        "stackBase",
-        add(u32(TRACE_TERMINALS_BASE), local("terminalCount")),
+        "capacity",
+        call("runtimeArenaResetTo", [
+          add(u32(TRACE_TERMINALS_BASE), local("terminalCount")),
+        ]),
       ),
       setLocal(
         "stackCapacity",
         add(add(local("terminalCount"), u32(productionCount)), u32(16)),
       ),
-      setLocal("traceBase", add(local("stackBase"), local("stackCapacity"))),
-      setLocal("capacity", ensureScratch(add(local("traceBase"), u32(1)))),
+      setLocal(
+        "stackHandle",
+        call("runtimeVectorNew", [
+          local("stackCapacity"),
+        ]),
+      ),
+      setLocal(
+        "traceHandle",
+        call("runtimeVectorNew", [
+          local("stackCapacity"),
+        ]),
+      ),
+      setLocal(
+        "capacity",
+        call("runtimeVectorAppend", [
+          local("stackHandle"),
+          u32(0),
+        ]),
+      ),
       storeScratch(u32(TRACE_STATUS), u32(TRACE_STATUS_OK)),
       storeScratch(u32(TRACE_ERROR_STATE), u32(0)),
       storeScratch(u32(TRACE_ERROR_INDEX), u32(0)),
       storeScratch(u32(TRACE_COUNT), u32(0)),
-      storeScratch(u32(TRACE_BASE), local("traceBase")),
-      storeScratch(local("stackBase"), u32(0)),
+      storeScratch(u32(TRACE_BASE), local("traceHandle")),
       setLocal("depth", u32(1)),
       setLocal("streamIndex", u32(0)),
       setLocal("loop", u32(1)),
@@ -3106,7 +3177,10 @@ function parserTraceFunction(
           },
           setLocal(
             "state",
-            loadScratch(add(local("stackBase"), sub(local("depth"), u32(1)))),
+            call("runtimeVectorLoad", [
+              local("stackHandle"),
+              sub(local("depth"), u32(1)),
+            ]),
           ),
           setLocal(
             "terminal",
@@ -3134,7 +3208,6 @@ function parserTraceFunction(
             condition: eq(local("actionKind"), u32(RUNTIME_ACTION_SHIFT)),
             consequent: [
               ...traceStoreActionStatements(),
-              setLocal("gotoState", local("actionPayload")),
               {
                 kind: "if",
                 condition: lt(local("depth"), local("stackCapacity")),
@@ -3143,13 +3216,10 @@ function parserTraceFunction(
               },
               setLocal(
                 "capacity",
-                ensureScratch(
-                  add(add(local("stackBase"), local("depth")), u32(1)),
-                ),
-              ),
-              storeScratch(
-                add(local("stackBase"), local("depth")),
-                local("gotoState"),
+                call("runtimeVectorAppend", [
+                  local("stackHandle"),
+                  local("actionPayload"),
+                ]),
               ),
               setLocal("depth", add(local("depth"), u32(1))),
               setLocal("streamIndex", add(local("streamIndex"), u32(1))),
@@ -3182,10 +3252,18 @@ function parserTraceFunction(
                 },
                 setLocal("depth", sub(local("depth"), local("rhsLength"))),
                 setLocal(
+                  "capacity",
+                  call("runtimeVectorTruncate", [
+                    local("stackHandle"),
+                    local("depth"),
+                  ]),
+                ),
+                setLocal(
                   "state",
-                  loadScratch(
-                    add(local("stackBase"), sub(local("depth"), u32(1))),
-                  ),
+                  call("runtimeVectorLoad", [
+                    local("stackHandle"),
+                    sub(local("depth"), u32(1)),
+                  ]),
                 ),
                 setLocal(
                   "gotoState",
@@ -3205,13 +3283,10 @@ function parserTraceFunction(
                     },
                     setLocal(
                       "capacity",
-                      ensureScratch(
-                        add(add(local("stackBase"), local("depth")), u32(1)),
-                      ),
-                    ),
-                    storeScratch(
-                      add(local("stackBase"), local("depth")),
-                      local("gotoState"),
+                      call("runtimeVectorAppend", [
+                        local("stackHandle"),
+                        local("gotoState"),
+                      ]),
                     ),
                     setLocal("depth", add(local("depth"), u32(1))),
                   ],
@@ -3572,21 +3647,26 @@ function parserTraceCountFunction(): RuntimeLanguageFunction {
   return traceHeaderLoadFunction("parserTraceCount", TRACE_COUNT);
 }
 
-function parserTraceActionFunction(): RuntimeLanguageFunction {
+function parserTraceActionFunction(
+  storage: "scratch" | "vector",
+): RuntimeLanguageFunction {
+  const traceLocal = storage === "vector" ? "traceHandle" : "traceBase";
   return {
     name: "parserTraceAction",
     parameters: [
       { name: "index", type: "u32" },
     ],
     locals: [
-      { name: "traceBase", type: "u32" },
+      { name: traceLocal, type: "u32" },
     ],
     result: "u32",
     body: [
-      setLocal("traceBase", loadScratch(u32(TRACE_BASE))),
+      setLocal(traceLocal, loadScratch(u32(TRACE_BASE))),
       {
         kind: "return",
-        expression: loadScratch(add(local("traceBase"), local("index"))),
+        expression: storage === "vector"
+          ? call("runtimeVectorLoad", [local(traceLocal), local("index")])
+          : loadScratch(add(local(traceLocal), local("index"))),
       },
     ],
   };
@@ -3758,11 +3838,10 @@ function traceStoreActionStatements(): RuntimeStatement[] {
   return [
     setLocal(
       "capacity",
-      ensureScratch(add(add(local("traceBase"), local("traceCount")), u32(1))),
-    ),
-    storeScratch(
-      add(local("traceBase"), local("traceCount")),
-      local("action"),
+      call("runtimeVectorAppend", [
+        local("traceHandle"),
+        local("action"),
+      ]),
     ),
     setLocal("traceCount", add(local("traceCount"), u32(1))),
   ];

@@ -358,6 +358,326 @@ function parserProductionRhsLength(production: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function runtimeArenaReset(): number {
+  return (runtimeArenaResetTo(1) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArenaResetTo(firstWord: number): number {
+  let capacity = 0;
+  if (((((firstWord) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  capacity = (__baba_ensure_scratch(firstWord) >>> 0) >>> 0;
+  __baba_store_scratch(0, firstWord);
+  return (firstWord) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArenaUsed(): number {
+  return (__baba_load_scratch(0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArenaAlloc(words: number): number {
+  let base = 0;
+  let next = 0;
+  let capacity = 0;
+  base = (__baba_load_scratch(0) >>> 0) >>> 0;
+  if (((((base) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    base = (1) >>> 0;
+    __baba_store_scratch(0, base);
+  }
+  next = (((base) + (words)) >>> 0) >>> 0;
+  if (((((next) >>> 0) < ((base) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  capacity = (__baba_ensure_scratch(next) >>> 0) >>> 0;
+  __baba_store_scratch(0, next);
+  return (base) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeObjectKind(handle: number): number {
+  let used = 0;
+  if (((((handle) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  used = (__baba_load_scratch(0) >>> 0) >>> 0;
+  if (((((handle) >>> 0) < ((used) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(handle) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArrayNew(length: number): number {
+  let handle = 0;
+  let total = 0;
+  let index = 0;
+  let offset = 0;
+  total = (((length) + (2)) >>> 0) >>> 0;
+  if (((((total) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  handle = (runtimeArenaAlloc(total) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 1);
+  __baba_store_scratch(((handle) + (1)) >>> 0, length);
+  index = (0) >>> 0;
+  while (((((index) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+    offset = (((((handle) + (2)) >>> 0) + (index)) >>> 0) >>> 0;
+    __baba_store_scratch(offset, 0);
+    index = (((index) + (1)) >>> 0) >>> 0;
+  }
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArrayLength(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArrayElementOffset(handle: number, index: number): number {
+  let length = 0;
+  let offset = 0;
+  let next = 0;
+  length = (runtimeArrayLength(handle) >>> 0) >>> 0;
+  if (((((index) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  offset = (((((handle) + (2)) >>> 0) + (index)) >>> 0) >>> 0;
+  if (((((offset) >>> 0) < ((handle) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  next = (((offset) + (1)) >>> 0) >>> 0;
+  if (((((next) >>> 0) < ((offset) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  if (((((__baba_load_scratch(0) >>> 0) >>> 0) < ((next) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (offset) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArrayLoad(handle: number, index: number): number {
+  return (__baba_load_scratch(runtimeArrayElementOffset(handle, index) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArrayStore(handle: number, index: number, value: number): number {
+  let offset = 0;
+  offset = (runtimeArrayElementOffset(handle, index) >>> 0) >>> 0;
+  __baba_store_scratch(offset, value);
+  return (value) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeRecordNew(tag: number, fieldCount: number): number {
+  let handle = 0;
+  let total = 0;
+  let index = 0;
+  let offset = 0;
+  total = (((fieldCount) + (3)) >>> 0) >>> 0;
+  if (((((total) >>> 0) < ((fieldCount) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  handle = (runtimeArenaAlloc(total) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 2);
+  __baba_store_scratch(((handle) + (1)) >>> 0, tag);
+  __baba_store_scratch(((handle) + (2)) >>> 0, fieldCount);
+  index = (0) >>> 0;
+  while (((((index) >>> 0) < ((fieldCount) >>> 0) ? 1 : 0)) !== 0) {
+    offset = (((((handle) + (3)) >>> 0) + (index)) >>> 0) >>> 0;
+    __baba_store_scratch(offset, 0);
+    index = (((index) + (1)) >>> 0) >>> 0;
+  }
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeRecordTag(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeRecordFieldCount(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeRecordFieldOffset(handle: number, field: number): number {
+  let fieldCount = 0;
+  let offset = 0;
+  let next = 0;
+  fieldCount = (runtimeRecordFieldCount(handle) >>> 0) >>> 0;
+  if (((((field) >>> 0) < ((fieldCount) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  offset = (((((handle) + (3)) >>> 0) + (field)) >>> 0) >>> 0;
+  if (((((offset) >>> 0) < ((handle) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  next = (((offset) + (1)) >>> 0) >>> 0;
+  if (((((next) >>> 0) < ((offset) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  if (((((__baba_load_scratch(0) >>> 0) >>> 0) < ((next) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (offset) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeRecordLoad(handle: number, field: number): number {
+  return (__baba_load_scratch(runtimeRecordFieldOffset(handle, field) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeRecordStore(handle: number, field: number, value: number): number {
+  let offset = 0;
+  offset = (runtimeRecordFieldOffset(handle, field) >>> 0) >>> 0;
+  __baba_store_scratch(offset, value);
+  return (value) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeVectorNew(capacity: number): number {
+  let handle = 0;
+  let data = 0;
+  data = (runtimeArrayNew(capacity) >>> 0) >>> 0;
+  handle = (runtimeArenaAlloc(4) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 3);
+  __baba_store_scratch(((handle) + (1)) >>> 0, 0);
+  __baba_store_scratch(((handle) + (2)) >>> 0, capacity);
+  __baba_store_scratch(((handle) + (3)) >>> 0, data);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeVectorLength(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeVectorCapacity(handle: number): number {
+  let length = 0;
+  length = (runtimeVectorLength(handle) >>> 0) >>> 0;
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeVectorData(handle: number): number {
+  let length = 0;
+  length = (runtimeVectorLength(handle) >>> 0) >>> 0;
+  return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeVectorLoad(handle: number, index: number): number {
+  let length = 0;
+  let data = 0;
+  length = (runtimeVectorLength(handle) >>> 0) >>> 0;
+  if (((((index) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  data = (runtimeVectorData(handle) >>> 0) >>> 0;
+  return (runtimeArrayLoad(data, index) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeVectorStore(handle: number, index: number, value: number): number {
+  let length = 0;
+  let data = 0;
+  length = (runtimeVectorLength(handle) >>> 0) >>> 0;
+  if (((((index) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  data = (runtimeVectorData(handle) >>> 0) >>> 0;
+  return (runtimeArrayStore(data, index, value) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeVectorTruncate(handle: number, length: number): number {
+  let oldLength = 0;
+  oldLength = (runtimeVectorLength(handle) >>> 0) >>> 0;
+  if (((((oldLength) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  __baba_store_scratch(((handle) + (1)) >>> 0, length);
+  return (length) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeVectorAppend(handle: number, value: number): number {
+  let length = 0;
+  let capacity = 0;
+  let newCapacity = 0;
+  let oldData = 0;
+  let newData = 0;
+  let index = 0;
+  let copied = 0;
+  length = (runtimeVectorLength(handle) >>> 0) >>> 0;
+  capacity = (runtimeVectorCapacity(handle) >>> 0) >>> 0;
+  oldData = (runtimeVectorData(handle) >>> 0) >>> 0;
+  if (((((length) >>> 0) < ((capacity) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    if (((((capacity) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      newCapacity = (1) >>> 0;
+    } else {
+      newCapacity = (((capacity) + (capacity)) >>> 0) >>> 0;
+      if (((((newCapacity) >>> 0) < ((capacity) >>> 0) ? 1 : 0)) !== 0) {
+        throw new RuntimeLanguageTrap("explicit trap");
+      }
+    }
+    newData = (runtimeArrayNew(newCapacity) >>> 0) >>> 0;
+    index = (0) >>> 0;
+    while (((((index) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+      copied = (runtimeArrayLoad(oldData, index) >>> 0) >>> 0;
+      copied = (runtimeArrayStore(newData, index, copied) >>> 0) >>> 0;
+      index = (((index) + (1)) >>> 0) >>> 0;
+    }
+    __baba_store_scratch(((handle) + (2)) >>> 0, newCapacity);
+    __baba_store_scratch(((handle) + (3)) >>> 0, newData);
+    capacity = (newCapacity) >>> 0;
+    oldData = (newData) >>> 0;
+  }
+  copied = (runtimeArrayStore(oldData, length, value) >>> 0) >>> 0;
+  __baba_store_scratch(((handle) + (1)) >>> 0, ((length) + (1)) >>> 0);
+  return (value) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTraceSetTerminal(index: number, terminal: number): number {
   let capacity = 0;
   index = (((8) + (index)) >>> 0) >>> 0;
@@ -369,9 +689,9 @@ function parserTraceSetTerminal(index: number, terminal: number): number {
 
 function parserTrace(terminalCount: number): number {
   let capacity = 0;
-  let stackBase = 0;
+  let stackHandle = 0;
   let stackCapacity = 0;
-  let traceBase = 0;
+  let traceHandle = 0;
   let depth = 0;
   let streamIndex = 0;
   let traceCount = 0;
@@ -386,55 +706,52 @@ function parserTrace(terminalCount: number): number {
   let rhsLength = 0;
   let gotoState = 0;
   capacity = (__baba_ensure_scratch(((8) + (terminalCount)) >>> 0) >>> 0) >>> 0;
-  stackBase = (((8) + (terminalCount)) >>> 0) >>> 0;
+  capacity = (runtimeArenaResetTo(((8) + (terminalCount)) >>> 0) >>> 0) >>> 0;
   stackCapacity = (((((terminalCount) + (195)) >>> 0) + (16)) >>> 0) >>> 0;
-  traceBase = (((stackBase) + (stackCapacity)) >>> 0) >>> 0;
-  capacity = (__baba_ensure_scratch(((traceBase) + (1)) >>> 0) >>> 0) >>> 0;
-  __baba_store_scratch(0, 0);
+  stackHandle = (runtimeVectorNew(stackCapacity) >>> 0) >>> 0;
+  traceHandle = (runtimeVectorNew(stackCapacity) >>> 0) >>> 0;
+  capacity = (runtimeVectorAppend(stackHandle, 0) >>> 0) >>> 0;
   __baba_store_scratch(1, 0);
   __baba_store_scratch(2, 0);
   __baba_store_scratch(3, 0);
-  __baba_store_scratch(4, traceBase);
-  __baba_store_scratch(stackBase, 0);
+  __baba_store_scratch(4, 0);
+  __baba_store_scratch(5, traceHandle);
   depth = (1) >>> 0;
   streamIndex = (0) >>> 0;
   loop = (1) >>> 0;
   while ((loop) !== 0) {
     if (((((streamIndex) | 0) < ((terminalCount) | 0) ? 1 : 0)) !== 0) {
     } else {
-      __baba_store_scratch(0, 2);
-      __baba_store_scratch(1, state);
-      __baba_store_scratch(2, streamIndex);
-      __baba_store_scratch(3, traceCount);
+      __baba_store_scratch(1, 2);
+      __baba_store_scratch(2, state);
+      __baba_store_scratch(3, streamIndex);
+      __baba_store_scratch(4, traceCount);
       return (2) >>> 0;
     }
-    state = (__baba_load_scratch(((stackBase) + (((depth) - (1)) >>> 0)) >>> 0) >>> 0) >>> 0;
+    state = (runtimeVectorLoad(stackHandle, ((depth) - (1)) >>> 0) >>> 0) >>> 0;
     terminal = (__baba_load_scratch(((8) + (streamIndex)) >>> 0) >>> 0) >>> 0;
     action = (parserAction(state, terminal) >>> 0) >>> 0;
     actionKind = (parserActionKind(action) >>> 0) >>> 0;
     actionPayload = (parserActionPayload(action) >>> 0) >>> 0;
     if (((((actionKind) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
-      __baba_store_scratch(0, 1);
-      __baba_store_scratch(1, state);
-      __baba_store_scratch(2, streamIndex);
-      __baba_store_scratch(3, traceCount);
+      __baba_store_scratch(1, 1);
+      __baba_store_scratch(2, state);
+      __baba_store_scratch(3, streamIndex);
+      __baba_store_scratch(4, traceCount);
       return (1) >>> 0;
     }
     if (((((actionKind) >>> 0) === ((16777216) >>> 0) ? 1 : 0)) !== 0) {
-      capacity = (__baba_ensure_scratch(((((traceBase) + (traceCount)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
-      __baba_store_scratch(((traceBase) + (traceCount)) >>> 0, action);
+      capacity = (runtimeVectorAppend(traceHandle, action) >>> 0) >>> 0;
       traceCount = (((traceCount) + (1)) >>> 0) >>> 0;
-      gotoState = (actionPayload) >>> 0;
       if (((((depth) | 0) < ((stackCapacity) | 0) ? 1 : 0)) !== 0) {
       } else {
-        __baba_store_scratch(0, 2);
-        __baba_store_scratch(1, state);
-        __baba_store_scratch(2, streamIndex);
-        __baba_store_scratch(3, traceCount);
+        __baba_store_scratch(1, 2);
+        __baba_store_scratch(2, state);
+        __baba_store_scratch(3, streamIndex);
+        __baba_store_scratch(4, traceCount);
         return (2) >>> 0;
       }
-      capacity = (__baba_ensure_scratch(((((stackBase) + (depth)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
-      __baba_store_scratch(((stackBase) + (depth)) >>> 0, gotoState);
+      capacity = (runtimeVectorAppend(stackHandle, actionPayload) >>> 0) >>> 0;
       depth = (((depth) + (1)) >>> 0) >>> 0;
       streamIndex = (((streamIndex) + (1)) >>> 0) >>> 0;
     } else {
@@ -443,91 +760,89 @@ function parserTrace(terminalCount: number): number {
         lhs = (parserProductionLhs(productionIndex) >>> 0) >>> 0;
         rhsLength = (parserProductionRhsLength(productionIndex) >>> 0) >>> 0;
         if (((((rhsLength) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
-          __baba_store_scratch(0, 2);
-          __baba_store_scratch(1, state);
-          __baba_store_scratch(2, streamIndex);
-          __baba_store_scratch(3, traceCount);
+          __baba_store_scratch(1, 2);
+          __baba_store_scratch(2, state);
+          __baba_store_scratch(3, streamIndex);
+          __baba_store_scratch(4, traceCount);
           return (2) >>> 0;
         }
         if (((((depth) | 0) < ((((rhsLength) + (1)) >>> 0) | 0) ? 1 : 0)) !== 0) {
-          __baba_store_scratch(0, 2);
-          __baba_store_scratch(1, state);
-          __baba_store_scratch(2, streamIndex);
-          __baba_store_scratch(3, traceCount);
+          __baba_store_scratch(1, 2);
+          __baba_store_scratch(2, state);
+          __baba_store_scratch(3, streamIndex);
+          __baba_store_scratch(4, traceCount);
           return (2) >>> 0;
         }
         depth = (((depth) - (rhsLength)) >>> 0) >>> 0;
-        state = (__baba_load_scratch(((stackBase) + (((depth) - (1)) >>> 0)) >>> 0) >>> 0) >>> 0;
+        capacity = (runtimeVectorTruncate(stackHandle, depth) >>> 0) >>> 0;
+        state = (runtimeVectorLoad(stackHandle, ((depth) - (1)) >>> 0) >>> 0) >>> 0;
         gotoState = (parserGoto(state, lhs) >>> 0) >>> 0;
         if (((((gotoState) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
-          __baba_store_scratch(0, 2);
-          __baba_store_scratch(1, state);
-          __baba_store_scratch(2, streamIndex);
-          __baba_store_scratch(3, traceCount);
+          __baba_store_scratch(1, 2);
+          __baba_store_scratch(2, state);
+          __baba_store_scratch(3, streamIndex);
+          __baba_store_scratch(4, traceCount);
           return (2) >>> 0;
         } else {
-          capacity = (__baba_ensure_scratch(((((traceBase) + (traceCount)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
-          __baba_store_scratch(((traceBase) + (traceCount)) >>> 0, action);
+          capacity = (runtimeVectorAppend(traceHandle, action) >>> 0) >>> 0;
           traceCount = (((traceCount) + (1)) >>> 0) >>> 0;
           if (((((depth) | 0) < ((stackCapacity) | 0) ? 1 : 0)) !== 0) {
           } else {
-            __baba_store_scratch(0, 2);
-            __baba_store_scratch(1, state);
-            __baba_store_scratch(2, streamIndex);
-            __baba_store_scratch(3, traceCount);
+            __baba_store_scratch(1, 2);
+            __baba_store_scratch(2, state);
+            __baba_store_scratch(3, streamIndex);
+            __baba_store_scratch(4, traceCount);
             return (2) >>> 0;
           }
-          capacity = (__baba_ensure_scratch(((((stackBase) + (depth)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
-          __baba_store_scratch(((stackBase) + (depth)) >>> 0, gotoState);
+          capacity = (runtimeVectorAppend(stackHandle, gotoState) >>> 0) >>> 0;
           depth = (((depth) + (1)) >>> 0) >>> 0;
         }
       } else {
         if (((((actionKind) >>> 0) === ((50331648) >>> 0) ? 1 : 0)) !== 0) {
-          capacity = (__baba_ensure_scratch(((((traceBase) + (traceCount)) >>> 0) + (1)) >>> 0) >>> 0) >>> 0;
-          __baba_store_scratch(((traceBase) + (traceCount)) >>> 0, action);
+          capacity = (runtimeVectorAppend(traceHandle, action) >>> 0) >>> 0;
           traceCount = (((traceCount) + (1)) >>> 0) >>> 0;
-          __baba_store_scratch(0, 0);
-          __baba_store_scratch(1, state);
-          __baba_store_scratch(2, streamIndex);
-          __baba_store_scratch(3, traceCount);
+          __baba_store_scratch(1, 0);
+          __baba_store_scratch(2, state);
+          __baba_store_scratch(3, streamIndex);
+          __baba_store_scratch(4, traceCount);
           return (0) >>> 0;
         } else {
-          __baba_store_scratch(0, 2);
-          __baba_store_scratch(1, state);
-          __baba_store_scratch(2, streamIndex);
-          __baba_store_scratch(3, traceCount);
+          __baba_store_scratch(1, 2);
+          __baba_store_scratch(2, state);
+          __baba_store_scratch(3, streamIndex);
+          __baba_store_scratch(4, traceCount);
           return (2) >>> 0;
         }
       }
     }
   }
-  __baba_store_scratch(0, 2);
-  __baba_store_scratch(1, state);
-  __baba_store_scratch(2, streamIndex);
-  __baba_store_scratch(3, traceCount);
+  __baba_store_scratch(1, 2);
+  __baba_store_scratch(2, state);
+  __baba_store_scratch(3, streamIndex);
+  __baba_store_scratch(4, traceCount);
   return (2) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
 function parserTraceErrorState(): number {
-  return (__baba_load_scratch(1) >>> 0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserTraceErrorIndex(): number {
   return (__baba_load_scratch(2) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
-function parserTraceCount(): number {
+function parserTraceErrorIndex(): number {
   return (__baba_load_scratch(3) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTraceCount(): number {
+  return (__baba_load_scratch(4) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTraceAction(index: number): number {
-  let traceBase = 0;
-  traceBase = (__baba_load_scratch(4) >>> 0) >>> 0;
-  return (__baba_load_scratch(((traceBase) + (index)) >>> 0) >>> 0) >>> 0;
+  let traceHandle = 0;
+  traceHandle = (__baba_load_scratch(5) >>> 0) >>> 0;
+  return (runtimeVectorLoad(traceHandle, index) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 

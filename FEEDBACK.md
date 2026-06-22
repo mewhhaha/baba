@@ -105,6 +105,9 @@ runtime language:
   behavior and explicit growth. This is the first mutable-memory substrate
   needed before parser stacks and trace buffers can be lowered through the
   runtime language.
+- Moved deterministic parser trace state-stack and accepted-action storage onto
+  arena-backed growable vectors, including vector truncation for LR reductions.
+  Declared-conflict trace branch snapshotting still uses scratch-memory buffers.
 - Moved deterministic generated TypeScript parser LR shift/reduce/accept control
   flow onto a runtime-language `parserTrace` source program backed by generated
   action/goto/production tables and growable scratch memory. Generated

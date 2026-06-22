@@ -81,7 +81,8 @@ shift/reduce/accept/unknown action kinds before generated TypeScript replay
 dispatches the accepted trace. `parserTraceStatusKind` classifies parser trace
 status values for generated TypeScript parsers and Wasm adapters before those
 hosts allocate public diagnostics. Deterministic TypeScript parsers use a
-runtime-language `parserTrace` helper backed by growable scratch memory for LR
+runtime-language `parserTrace` helper whose parser state stack and
+accepted-action trace are stored in arena-backed growable vectors for LR
 shift/reduce/accept control flow. Declared-conflict TypeScript parsers use a
 runtime-language conflict `parserTrace` helper that stores and restores branch
 frames as scratch-memory `u32` data before TypeScript replays the accepted
@@ -165,6 +166,8 @@ execute both outputs and compare returned values or traps.
 - Vector append grows capacity from `0` to `1`, then doubles capacity, copying
   existing elements into a new arena-backed array before storing the appended
   value and advancing length.
+- Vector truncation can shorten length without clearing the discarded backing
+  elements; attempting to truncate to a longer length traps.
 - Arena-backed array, record, and vector helpers trap for handle `0`, stale or
   out-of-range handles, wrong object kind, out-of-bounds indexes, and offset
   overflow. Handles are currently raw arena offsets with checked object-kind

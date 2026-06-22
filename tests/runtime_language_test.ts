@@ -1407,6 +1407,14 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
             "discard",
             call("runtimeVectorStore", [local("handle"), u32(1), u32(9)]),
           ),
+          setLocal(
+            "discard",
+            call("runtimeVectorTruncate", [local("handle"), u32(2)]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [local("handle"), u32(13)]),
+          ),
           {
             kind: "return",
             expression: add(
@@ -1542,6 +1550,33 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           {
             kind: "return",
             expression: call("runtimeVectorLoad", [local("handle"), u32(0)]),
+          },
+        ],
+      },
+    ],
+  };
+  const arenaVectorTruncateGrowProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_vector_truncate_grow",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeVectorNew", [u32(2)])),
+          {
+            kind: "return",
+            expression: call("runtimeVectorTruncate", [
+              local("handle"),
+              u32(1),
+            ]),
           },
         ],
       },
@@ -1840,7 +1875,7 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "runtime arena vectors append, grow, and preserve values",
       program: arenaVectorProgram,
-      expected: { kind: "value", value: 18_340_601 },
+      expected: { kind: "value", value: 18_340_603 },
     },
     {
       name: "runtime arena reset reuses allocation lifetime",
@@ -1860,6 +1895,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "runtime vector access traps out of bounds",
       program: arenaVectorBoundsProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime vector truncate traps when asked to grow",
+      program: arenaVectorTruncateGrowProgram,
       expected: { kind: "trap" },
     },
     {
