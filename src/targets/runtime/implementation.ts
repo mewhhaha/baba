@@ -48,7 +48,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/public_diagnostic_materializer.ts",
       role: "public-diagnostic-materializer",
-      hash: "fnv1a64:9ee78c87b0ccb328",
+      hash: "fnv1a64:d34992df466d557f",
     },
     {
       path: "src/targets/runtime/public_parse_result_materializer.ts",
@@ -73,7 +73,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_sources.ts",
       role: "runtime-language-source",
-      hash: "fnv1a64:d41bed634acb320f",
+      hash: "fnv1a64:c6dfd08d130d6ad8",
     },
     {
       path: "src/targets/runtime/language.ts",
@@ -83,7 +83,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_artifacts.ts",
       role: "runtime-language-artifact-manifest",
-      hash: "fnv1a64:2800e4dea9320fa9",
+      hash: "fnv1a64:edde6afd021aeaf8",
     },
     {
       path: "src/targets/runtime/typescript_parser_runtime.ts",
@@ -102,7 +102,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:5d23f68470609e09" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:611d64a202677c7c" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

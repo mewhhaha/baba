@@ -5,6 +5,12 @@ import type {
   RuntimeLanguageTable,
   RuntimeStatement,
 } from "./language.ts";
+import {
+  PARSER_DIAGNOSTIC_CODE_PARSE_TRAILING_INPUT,
+  PARSER_DIAGNOSTIC_CODE_PARSE_UNEXPECTED_TOKEN,
+  PARSER_DIAGNOSTIC_DETAIL_NONE,
+  PARSER_DIAGNOSTIC_DETAIL_PARSER_STATE,
+} from "./diagnostic_codes.ts";
 
 export const RUNTIME_NO_TRANSITION = 0xffff_ffff;
 export const RUNTIME_NO_ACCEPT = RUNTIME_NO_TRANSITION;
@@ -1636,6 +1642,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserDiagnosticSpanStartFunction(),
     parserDiagnosticSpanEndFunction(),
     parserDiagnosticDetailFunction(),
+    parserDiagnosticDetailKindIdFunction(),
     parserRuleNodeFromFragmentFunction(),
     parserRuleNodeRuleIdFunction(),
     parserRuleNodeSpanStartFunction(),
@@ -2532,6 +2539,42 @@ function parserDiagnosticDetailFunction(): RuntimeLanguageFunction {
     RUNTIME_OBJECT_PARSER_DIAGNOSTIC,
     RUNTIME_PARSER_DIAGNOSTIC_DETAIL_WORD_OFFSET,
   );
+}
+
+function parserDiagnosticDetailKindIdFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserDiagnosticDetailKindId",
+    parameters: [{ name: "code", type: "u32" }],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("code"),
+          u32(PARSER_DIAGNOSTIC_CODE_PARSE_UNEXPECTED_TOKEN),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(PARSER_DIAGNOSTIC_DETAIL_PARSER_STATE),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("code"),
+          u32(PARSER_DIAGNOSTIC_CODE_PARSE_TRAILING_INPUT),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(PARSER_DIAGNOSTIC_DETAIL_PARSER_STATE),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(PARSER_DIAGNOSTIC_DETAIL_NONE),
+      },
+    ],
+  };
 }
 
 function parserRuleNodeRuleIdFunction(): RuntimeLanguageFunction {

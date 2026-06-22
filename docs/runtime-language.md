@@ -315,8 +315,9 @@ execute both outputs and compare returned values or traps.
   CST node object.
 - Generated public parse diagnostics are emitted from one shared runtime-target
   diagnostic materializer helper. The helper allocates runtime diagnostic
-  records and reads span data back from those records before materializing
-  public JavaScript diagnostic objects.
+  records, reads span data back from those records, asks the runtime-language
+  `parserDiagnosticDetailKindId` helper for the numeric detail payload kind, and
+  then materializes public JavaScript diagnostic objects.
 - Boundary failures visible to Baba users are structured diagnostics: grammar
   validation and target planning return compiler diagnostics, lexing returns
   `LexDiagnostic`, parsing returns `ParseDiagnostic`, invalid external token
@@ -340,10 +341,11 @@ execute both outputs and compare returned values or traps.
   trailing-input diagnostics use `runtimeDetail` for the parser state that
   produced the expected-terminal set and set `runtimeDetailKind` to
   `"parser-state"` with `runtimeDetailKindId` equal to
-  `parserDiagnosticDetailKindParserState`. Generated `wasm/abi.json` descriptors
-  include `parserDiagnostics.schemas`, which maps each runtime code to its
-  public string code, `runtimeDetail` kind, numeric detail-kind id, and public
-  payload fields.
+  `parserDiagnosticDetailKindParserState`; the numeric detail-kind decision
+  comes from the runtime-language `parserDiagnosticDetailKindId` helper.
+  Generated `wasm/abi.json` descriptors include `parserDiagnostics.schemas`,
+  which maps each runtime code to its public string code, `runtimeDetail` kind,
+  numeric detail-kind id, and public payload fields.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset

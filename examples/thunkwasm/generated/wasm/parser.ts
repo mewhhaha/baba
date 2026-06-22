@@ -1436,6 +1436,17 @@ function parserDiagnosticDetail(handle: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserDiagnosticDetailKindId(code: number): number {
+  if (((((code) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((code) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserRuleNodeFromFragment(ruleId: number, fragment: number): number {
   let handle = 0;
   handle = (runtimeArenaAlloc(8) >>> 0) >>> 0;
@@ -1587,14 +1598,15 @@ function parseDiagnostic(
   if (parserDiagnosticCode(handle) !== expectedCode) {
     throw new Error("Runtime diagnostic code mismatch.");
   }
+  const detailKindId = parserDiagnosticDetailKindId(expectedCode);
   return {
     code,
     message,
     span: diagnosticSpan(handle),
     runtimeCode: parserDiagnosticCode(handle),
     runtimeDetail: parserDiagnosticDetail(handle),
-    runtimeDetailKind: diagnosticDetailKind(expectedCode),
-    runtimeDetailKindId: diagnosticDetailKindId(expectedCode),
+    runtimeDetailKind: diagnosticDetailKindName(detailKindId),
+    runtimeDetailKindId: detailKindId,
   };
 }
 
@@ -1615,25 +1627,14 @@ function diagnosticCodeId(code: ParseDiagnostic["code"]): number {
   }
 }
 
-function diagnosticDetailKind(
-  runtimeCode: number,
+function diagnosticDetailKindName(
+  detailKindId: number,
 ): ParseDiagnostic["runtimeDetailKind"] {
-  switch (runtimeCode) {
-    case DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN:
-    case DIAGNOSTIC_PARSE_TRAILING_INPUT:
+  switch (detailKindId) {
+    case DIAGNOSTIC_DETAIL_PARSER_STATE:
       return "parser-state";
     default:
       return "none";
-  }
-}
-
-function diagnosticDetailKindId(runtimeCode: number): number {
-  switch (runtimeCode) {
-    case DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN:
-    case DIAGNOSTIC_PARSE_TRAILING_INPUT:
-      return DIAGNOSTIC_DETAIL_PARSER_STATE;
-    default:
-      return DIAGNOSTIC_DETAIL_NONE;
   }
 }
 

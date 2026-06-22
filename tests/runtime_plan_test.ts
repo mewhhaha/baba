@@ -76,6 +76,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const lexerRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_lexer_runtime.ts",
   );
+  const runtimeLanguageSourcesSource = await Deno.readTextFile(
+    "src/targets/runtime/language_sources.ts",
+  );
   const syntaxRuntimeSource = await Deno.readTextFile(
     "src/targets/typescript/syntax_emit.ts",
   );
@@ -226,6 +229,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "PARSER_DIAGNOSTIC_DETAIL_PARSER_STATE",
   );
+  assertIncludes(runtimeLanguageSourcesSource, "parserDiagnosticDetailKindId");
   assertIncludes(parserRuntimeSource, "parserDiagnosticDetailKindNone");
   assertIncludes(
     parserRuntimeSource,
@@ -263,11 +267,19 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(publicDiagnosticMaterializerSource, "parserDiagnosticNew");
   assertIncludes(
     publicDiagnosticMaterializerSource,
-    "runtimeDetailKindId: diagnosticDetailKindId(expectedCode)",
+    "const detailKindId = parserDiagnosticDetailKindId(expectedCode)",
   );
   assertIncludes(
     publicDiagnosticMaterializerSource,
-    "function diagnosticDetailKindId",
+    "runtimeDetailKind: diagnosticDetailKindName(detailKindId)",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "runtimeDetailKindId: detailKindId",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "function diagnosticDetailKindName",
   );
   assertIncludes(
     publicDiagnosticMaterializerSource,

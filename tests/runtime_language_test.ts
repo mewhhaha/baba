@@ -1843,6 +1843,33 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
             consequent: [],
             alternate: [{ kind: "return", expression: u32(0) }],
           },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserDiagnosticDetailKindId", [u32(2)]),
+              u32(1),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserDiagnosticDetailKindId", [u32(3)]),
+              u32(1),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserDiagnosticDetailKindId", [u32(1)]),
+              u32(0),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
           setLocal(
             "rule",
             call("parserRuleNodeFromFragment", [u32(4), local("fragment")]),
