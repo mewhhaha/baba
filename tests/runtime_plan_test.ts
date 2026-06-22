@@ -132,7 +132,16 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     publicSourceTextBoundarySource,
     "function sourceTextCodePointAt",
   );
+  assertIncludes(
+    publicSourceTextBoundarySource,
+    "utf16CodePointFromUnits",
+  );
+  assertIncludes(
+    publicSourceTextBoundarySource,
+    "function sourceTextCodeUnitAt",
+  );
   assertIncludes(publicSourceTextBoundarySource, "source.slice");
+  assertIncludes(publicSourceTextBoundarySource, "source.charCodeAt");
   assertIncludes(publicTokenMaterializerSource, "function materializeToken");
   assertIncludes(publicTokenMaterializerSource, "function materializeEofToken");
   assertIncludes(

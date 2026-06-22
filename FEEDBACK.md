@@ -200,11 +200,16 @@ runtime language:
   input at the host boundary, with half-open UTF-16 spans and explicit
   `utf16CodePointWidth` behavior for NUL, Unicode line separators, isolated
   surrogates, and astral code points.
+- Moved generated TypeScript lexer UTF-16 surrogate decoding onto
+  runtime-language `utf16CodePointFromUnits`. The JavaScript host boundary still
+  reads code units from the source string, but `codePointAt()` is no longer the
+  semantic decoder for portable TypeScript lexing.
 - Moved generated TypeScript lexer longest-match accept/candidate selection onto
   runtime-language `lexerScan*` helpers backed by generated DFA accept tables
-  and scratch memory. Generated TypeScript still decodes JavaScript strings and
-  wraps public API token objects at the boundary, but it no longer carries a
-  standalone `DFA_ACCEPTS` table or accept-tracking loop.
+  and scratch memory. Generated TypeScript still reads JavaScript string code
+  units and wraps public API token objects at the boundary, but it no longer
+  carries a standalone `DFA_ACCEPTS` table, accept-tracking loop, or host-native
+  code-point decoder.
 - Moved generated TypeScript lexer public non-EOF token materialization through
   runtime-language parser token records. The lexer now allocates a runtime token
   handle for matched literals, named tokens, preserved trivia, and lexical error
@@ -416,18 +421,19 @@ Still unresolved:
   current JavaScript-hosted Wasm adapter, and core Wasm metadata for host-owned
   linear-memory buffers plus caller-owned result-buffer lifetimes and a
   generated host-neutral ABI descriptor. Host source text access now routes
-  through one shared generated `SourceTextBoundary` handle helper, but it still
-  lacks executable non-JS host helpers and opaque host-neutral handle
-  capabilities beyond that descriptor, host source-text handles plus source
-  decoding fully lowered into the runtime language, complete generated
-  parser-runtime lowering for remaining host public object materialization
-  outside the shared wrapper helpers, and richer executable host-neutral error
-  payload variants beyond the current trace status metadata plus descriptor
-  schemas and runtime-language-backed public detail-kind ID fields for parser
-  diagnostic code/detail records. The compiler now has a shared lowered
-  control-flow/value IR and checked helper artifact hashes, but it still needs
-  broader parser-runtime lowering before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  through one shared generated `SourceTextBoundary` handle helper, and
+  TypeScript lexer UTF-16 surrogate decoding now goes through runtime-language
+  `utf16CodePointFromUnits`, but it still lacks executable non-JS host helpers
+  and opaque host-neutral handle capabilities beyond that descriptor, host
+  source-text handles fully lowered into the runtime language, complete
+  generated parser-runtime lowering for remaining host public object
+  materialization outside the shared wrapper helpers, and richer executable
+  host-neutral error payload variants beyond the current trace status metadata
+  plus descriptor schemas and runtime-language-backed public detail-kind ID
+  fields for parser diagnostic code/detail records. The compiler now has a
+  shared lowered control-flow/value IR and checked helper artifact hashes, but
+  it still needs broader parser-runtime lowering before the release can fully
+  satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

@@ -272,10 +272,60 @@ const UTF16_CODE_POINT_WIDTH_FUNCTION: RuntimeLanguageFunction = {
   }],
 };
 
+const UTF16_CODE_POINT_FROM_UNITS_FUNCTION: RuntimeLanguageFunction = {
+  name: "utf16CodePointFromUnits",
+  parameters: [
+    { name: "leadUnit", type: "u32" },
+    { name: "trailUnit", type: "u32" },
+    { name: "hasTrail", type: "u32" },
+  ],
+  result: "u32",
+  body: [
+    {
+      kind: "if",
+      condition: eq(local("hasTrail"), u32(0)),
+      consequent: [{ kind: "return", expression: local("leadUnit") }],
+    },
+    {
+      kind: "if",
+      condition: lt(local("leadUnit"), u32(0xd800)),
+      consequent: [{ kind: "return", expression: local("leadUnit") }],
+    },
+    {
+      kind: "if",
+      condition: lt(u32(0xdbff), local("leadUnit")),
+      consequent: [{ kind: "return", expression: local("leadUnit") }],
+    },
+    {
+      kind: "if",
+      condition: lt(local("trailUnit"), u32(0xdc00)),
+      consequent: [{ kind: "return", expression: local("leadUnit") }],
+    },
+    {
+      kind: "if",
+      condition: lt(u32(0xdfff), local("trailUnit")),
+      consequent: [{ kind: "return", expression: local("leadUnit") }],
+    },
+    {
+      kind: "return",
+      expression: add(
+        u32(0x1_00_00),
+        add(
+          mul(sub(local("leadUnit"), u32(0xd800)), u32(0x400)),
+          sub(local("trailUnit"), u32(0xdc00)),
+        ),
+      ),
+    },
+  ],
+};
+
 export const UTF16_CODE_POINT_WIDTH_PROGRAM: RuntimeLanguageProgram = {
   name: "utf16_code_point_width",
   entry: "utf16CodePointWidth",
-  functions: [UTF16_CODE_POINT_WIDTH_FUNCTION],
+  functions: [
+    UTF16_CODE_POINT_WIDTH_FUNCTION,
+    UTF16_CODE_POINT_FROM_UNITS_FUNCTION,
+  ],
 };
 
 export const RUNTIME_ARENA_PROGRAM: RuntimeLanguageProgram = {
@@ -373,6 +423,7 @@ export function createLexerRuntimeProgram(
     tables,
     functions: [
       UTF16_CODE_POINT_WIDTH_FUNCTION,
+      UTF16_CODE_POINT_FROM_UNITS_FUNCTION,
       dfaTransitionFunction(input.asciiTransitions !== null),
       ...(input.accepts
         ? [

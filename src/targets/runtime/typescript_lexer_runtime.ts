@@ -121,7 +121,7 @@ ${
     emitRuntimeLanguageTypeScriptFunction(runtimeProgram)
       .trimEnd()
   }
-${emitPublicSourceTextBoundary()}
+${emitPublicSourceTextBoundary({ includeCodePoint: true })}
 ${emitPublicTokenMaterializer({ label: "Lexer" })}
 ${emitPublicLexDiagnosticMaterializer()}
 ${emitPublicLexResultMaterializer()}
@@ -158,7 +158,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
 
     const start = offset;
     const codePoint = sourceTextCodePointAt(sourceText, offset);
-    offset += codePoint === undefined ? 1 : utf16CodePointWidth(codePoint);
+    offset += utf16CodePointWidth(codePoint);
     const handle = parserTokenNew(
       PUBLIC_TOKEN_ERROR,
       0,
@@ -210,7 +210,6 @@ function bestCandidate(
 
   while (index < sourceText.length) {
     const codePoint = sourceTextCodePointAt(sourceText, index);
-    if (codePoint === undefined) break;
     if (lexerScanAdvance(codePoint) === 0) break;
     index += utf16CodePointWidth(codePoint);
   }

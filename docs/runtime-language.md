@@ -33,10 +33,11 @@ remain a future step before Baba can claim the full parser runtime is emitted
 from one runtime-language implementation.
 
 The first runtime-language-backed parser helpers are used by generated
-TypeScript lexers and parsers: `utf16CodePointWidth` advances over UTF-16 code
-points, `dfaTransition` performs DFA transition lookup from generated read-only
-tables, and `lexerScan*` helpers track longest-match accepting candidates from
-generated DFA accept tables. `lexerSpecTokenClass`/`lexerSpecPayload`/
+TypeScript lexers and parsers: `utf16CodePointFromUnits` decodes UTF-16 code
+units into code points, `utf16CodePointWidth` advances over UTF-16 code points,
+`dfaTransition` performs DFA transition lookup from generated read-only tables,
+and `lexerScan*` helpers track longest-match accepting candidates from generated
+DFA accept tables. `lexerSpecTokenClass`, `lexerSpecPayload`, and
 `lexerSpecTerminal` map accepted lexer spec indexes to token object
 classification data and parser terminal ids for generated TypeScript
 `parse(source)`, while `lexerSpecFlags` remains the lower-level table helper.
@@ -193,16 +194,19 @@ execute both outputs and compare returned values or traps.
   constants. `textLength(text)` returns the number of UTF-16 code units.
   `textCodeUnitAt(text, index)` returns the code unit at a checked zero-based
   offset and traps when the text handle or index is out of bounds. Generated
-  standalone parser runtimes still treat host source text as an immutable UTF-16
-  code-unit sequence at the host boundary; turning host source buffers into
-  runtime-language text handles remains a future lowering step.
+  TypeScript lexer source decoding now calls `utf16CodePointFromUnits` after the
+  host boundary reads adjacent UTF-16 code units. Standalone parser runtimes
+  still treat host source text as an immutable UTF-16 code-unit sequence at the
+  host boundary; turning host source buffers into runtime-language text handles
+  remains a future lowering step.
 - Generated token materialization, lexer wrapper code, and token-stream
   validation route host source access through one shared `SourceTextBoundary`
   helper. The boundary carries the immutable source string and UTF-16 length and
-  owns generated slice, text-match, and code-point reads. It is still a
-  JavaScript host wrapper, but it is the single generated handle contract to
-  replace when dynamic host source buffers are lowered into runtime-language
-  handles.
+  owns generated slice, text-match, and code-unit reads. TypeScript lexer
+  code-point decoding is delegated from that boundary to runtime-language
+  `utf16CodePointFromUnits`. It is still a JavaScript host wrapper, but it is
+  the single generated handle contract to replace when dynamic host source
+  buffers are lowered into runtime-language handles.
 - Generated JavaScript-hosted Wasm adapters treat `WasmSourceBuffer` values
   returned by `writeSource()` as adapter-owned source capabilities. The adapter
   tracks those buffers by object provenance and input epoch, rejects forged
@@ -239,6 +243,9 @@ execute both outputs and compare returned values or traps.
   `0x10000` and `2` otherwise. Isolated surrogate code units are treated as BMP
   values and advance by one code unit, matching JavaScript `codePointAt()`
   behavior on ill-formed UTF-16 strings.
+- `utf16CodePointFromUnits(leadUnit, trailUnit, hasTrail)` combines a valid
+  high-surrogate/low-surrogate pair into one scalar value and otherwise returns
+  the lead code unit unchanged.
 - Scratch-memory growth traps if the requested capacity exceeds the Wasm-backed
   implementation limit.
 - Scratch-memory loads and stores trap on indexes outside the current capacity.
@@ -357,8 +364,8 @@ These rules must be specified before the parser runtime can be fully lowered:
   lifetimes for future non-JS Wasm hosts beyond the current ABI descriptor,
   linear-memory ownership metadata, and JavaScript-hosted
   `WasmSourceBuffer`/`ParseTraceInput` provenance gates;
-- host source-text handles and source decoding fully lowered into the runtime
-  language;
+- host source-text handles fully lowered into the runtime language, including a
+  future non-JavaScript dynamic source-buffer ABI;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
 - complete generated-parser lowering for remaining host public object
   materialization that still sits outside the shared token, lex diagnostic,

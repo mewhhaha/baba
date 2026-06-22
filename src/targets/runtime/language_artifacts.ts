@@ -267,9 +267,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "utf16_code_point_width",
       entry: "utf16CodePointWidth",
-      sourceHash: "fnv1a64:007be33aff20f70b",
-      typescriptHash: "fnv1a64:92995f2385b0ec83",
-      wasmHash: "fnv1a64:7bcc39b7fe691598",
+      sourceHash: "fnv1a64:548fa4450115643e",
+      typescriptHash: "fnv1a64:0b4948b0d6309f2d",
+      wasmHash: "fnv1a64:edd2bbbaaa8c1909",
     },
     {
       name: "runtime_arena",
@@ -288,9 +288,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "lexer_runtime",
       entry: "dfaTransition",
-      sourceHash: "fnv1a64:aa747159a847349f",
-      typescriptHash: "fnv1a64:0de4cc783cf52967",
-      wasmHash: "fnv1a64:1e6c42f862c5faf9",
+      sourceHash: "fnv1a64:2a3a958e670e7eac",
+      typescriptHash: "fnv1a64:c93894a473cfeb7d",
+      wasmHash: "fnv1a64:9099efd234030f23",
     },
     {
       name: "parser_table_runtime",
@@ -372,7 +372,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:587f6d9e098c4519" as const;
+  "fnv1a64:cfaa9ec3d1ffa028" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

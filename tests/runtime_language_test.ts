@@ -2903,6 +2903,44 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 2 },
     },
     {
+      name: "UTF-16 helper decodes surrogate pairs from code units",
+      program: {
+        ...UTF16_CODE_POINT_WIDTH_PROGRAM,
+        name: "utf16_code_point_decode",
+        entry: "main",
+        functions: [
+          ...UTF16_CODE_POINT_WIDTH_PROGRAM.functions,
+          {
+            name: "main",
+            result: "u32",
+            body: [{
+              kind: "return",
+              expression: add(
+                call("utf16CodePointFromUnits", [
+                  u32(0xd83d),
+                  u32(0xde00),
+                  u32(1),
+                ]),
+                add(
+                  call("utf16CodePointFromUnits", [
+                    u32(0xd83d),
+                    u32(0),
+                    u32(0),
+                  ]),
+                  call("utf16CodePointFromUnits", [
+                    u32(0x41),
+                    u32(0xde00),
+                    u32(1),
+                  ]),
+                ),
+              ),
+            }],
+          },
+        ],
+      },
+      expected: { kind: "value", value: 183_934 },
+    },
+    {
       name: "DFA transition uses ASCII fast table hits",
       program: lexerRuntimeProgram,
       args: [0, 0x41],

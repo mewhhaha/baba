@@ -225,6 +225,26 @@ function utf16CodePointWidth(codePoint: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function utf16CodePointFromUnits(leadUnit: number, trailUnit: number, hasTrail: number): number {
+  if (((((hasTrail) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  if (((((leadUnit) | 0) < ((55296) | 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  if (((((56319) | 0) < ((leadUnit) | 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  if (((((trailUnit) | 0) < ((56320) | 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  if (((((57343) | 0) < ((trailUnit) | 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  return (((65536) + (((Math.imul((((leadUnit) - (55296)) >>> 0) >>> 0, (1024) >>> 0) >>> 0) + (((trailUnit) - (56320)) >>> 0)) >>> 0)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function dfaTransition(state: number, codePoint: number): number {
   let index = 0;
   let low = 0;
@@ -491,8 +511,25 @@ function sourceTextMatches(
 function sourceTextCodePointAt(
   sourceText: SourceTextBoundary,
   offset: number,
-): number | undefined {
-  return sourceText.source.codePointAt(offset);
+): number {
+  const leadUnit = sourceTextCodeUnitAt(sourceText, offset);
+  const trailOffset = offset + 1;
+  const hasTrail = trailOffset < sourceText.length ? 1 : 0;
+  const trailUnit = hasTrail === 1
+    ? sourceTextCodeUnitAt(sourceText, trailOffset)
+    : 0;
+  return utf16CodePointFromUnits(leadUnit, trailUnit, hasTrail);
+}
+
+function sourceTextCodeUnitAt(
+  sourceText: SourceTextBoundary,
+  offset: number,
+): number {
+  const normalized = offset >>> 0;
+  if (normalized >= sourceText.length) {
+    throw new Error("Source text offset out of bounds.");
+  }
+  return sourceText.source.charCodeAt(normalized) >>> 0;
 }
 interface RuntimeTerminalToken {
   __babaTerminal?: number;
@@ -612,7 +649,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
 
     const start = offset;
     const codePoint = sourceTextCodePointAt(sourceText, offset);
-    offset += codePoint === undefined ? 1 : utf16CodePointWidth(codePoint);
+    offset += utf16CodePointWidth(codePoint);
     const handle = parserTokenNew(
       PUBLIC_TOKEN_ERROR,
       0,
@@ -664,7 +701,6 @@ function bestCandidate(
 
   while (index < sourceText.length) {
     const codePoint = sourceTextCodePointAt(sourceText, index);
-    if (codePoint === undefined) break;
     if (lexerScanAdvance(codePoint) === 0) break;
     index += utf16CodePointWidth(codePoint);
   }

@@ -266,11 +266,15 @@ function sourceTextMatches(
   return text === sourceTextSlice(sourceText, span);
 }
 
-function sourceTextCodePointAt(
+function sourceTextCodeUnitAt(
   sourceText: SourceTextBoundary,
   offset: number,
-): number | undefined {
-  return sourceText.source.codePointAt(offset);
+): number {
+  const normalized = offset >>> 0;
+  if (normalized >= sourceText.length) {
+    throw new Error("Source text offset out of bounds.");
+  }
+  return sourceText.source.charCodeAt(normalized) >>> 0;
 }
 interface RuntimeTerminalToken {
   __babaTerminal?: number;
