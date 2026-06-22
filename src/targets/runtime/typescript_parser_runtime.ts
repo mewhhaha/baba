@@ -109,6 +109,11 @@ import {
   RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
   RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
   RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION,
+  RUNTIME_TOKEN_STREAM_STATUS_GAP,
+  RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
+  RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
+  RUNTIME_TOKEN_STREAM_STATUS_OVERLAP,
+  RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_OK,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
@@ -428,6 +433,11 @@ const SPEC_STATUS_NOT_LITERAL = ${RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL};
 const SPEC_STATUS_NOT_MAIN = ${RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN};
 const SPEC_STATUS_NOT_TRIVIA = ${RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA};
 const LEXICAL_TOKEN_OK = ${RUNTIME_LEXICAL_TOKEN_STATUS_OK};
+const TOKEN_STREAM_INVALID_SPAN = ${RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN};
+const TOKEN_STREAM_GAP = ${RUNTIME_TOKEN_STREAM_STATUS_GAP};
+const TOKEN_STREAM_OVERLAP = ${RUNTIME_TOKEN_STREAM_STATUS_OVERLAP};
+const TOKEN_STREAM_ZERO_WIDTH = ${RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH};
+const TOKEN_STREAM_INVALID_EOF = ${RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF};
 const DIAGNOSTIC_PARSE_LEXICAL_ERROR = ${PARSER_DIAGNOSTIC_CODE_PARSE_LEXICAL_ERROR};
 const DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN = ${PARSER_DIAGNOSTIC_CODE_PARSE_UNEXPECTED_TOKEN};
 const DIAGNOSTIC_PARSE_TRAILING_INPUT = ${PARSER_DIAGNOSTIC_CODE_PARSE_TRAILING_INPUT};
@@ -1338,8 +1348,7 @@ function validateTokenStream(
       !Number.isInteger(span.start) ||
       !Number.isInteger(span.end) ||
       span.start < 0 ||
-      span.end < span.start ||
-      span.end > sourceText.length
+      span.end < 0
     ) {
       diagnostics.push(invalidTokenStream(
         \`Token at index \${index} has an invalid span.\`,
@@ -1348,7 +1357,24 @@ function validateTokenStream(
       continue;
     }
 
-    if (span.start > previousEnd) {
+    const boundsStatus = parserTokenStreamSpanBoundsStatus(
+      span.start,
+      span.end,
+      sourceText.length,
+    );
+    if (boundsStatus === TOKEN_STREAM_INVALID_SPAN) {
+      diagnostics.push(invalidTokenStream(
+        \`Token at index \${index} has an invalid span.\`,
+        clampSpan(span, sourceText.length),
+      ));
+      continue;
+    }
+
+    const positionStatus = parserTokenStreamSpanPositionStatus(
+      span.start,
+      previousEnd,
+    );
+    if (positionStatus === TOKEN_STREAM_GAP) {
       const gapDiagnostic = validateSourceGap(
         canonicalTokens,
         previousEnd,
@@ -1357,7 +1383,7 @@ function validateTokenStream(
       if (gapDiagnostic) diagnostics.push(gapDiagnostic);
     }
 
-    if (span.start < previousEnd) {
+    if (positionStatus === TOKEN_STREAM_OVERLAP) {
       diagnostics.push(invalidTokenStream(
         \`Token at index \${index} overlaps a previous token.\`,
         span,
@@ -1386,12 +1412,14 @@ function validateTokenStream(
         ));
       }
       eofIndex = index;
-      if (
-        token.text !== "" ||
-        token.channel !== "main" ||
-        span.start !== span.end ||
-        span.start !== sourceText.length
-      ) {
+      const eofStatus = parserTokenStreamEofStatus(
+        typeof token.text === "string" ? token.text.length : 0xffffffff,
+        token.channel === "main" ? 1 : 0,
+        span.start,
+        span.end,
+        sourceText.length,
+      );
+      if (eofStatus === TOKEN_STREAM_INVALID_EOF) {
         diagnostics.push(invalidTokenStream(
           "EOF token must have empty text, main channel, and an empty span at the end of the source.",
           span,
@@ -1407,7 +1435,10 @@ function validateTokenStream(
       ));
     }
 
-    if (span.start === span.end) {
+    if (
+      parserTokenStreamWidthStatus(span.start, span.end) ===
+        TOKEN_STREAM_ZERO_WIDTH
+    ) {
       diagnostics.push(invalidTokenStream(
         \`Token at index \${index} has zero width.\`,
         span,

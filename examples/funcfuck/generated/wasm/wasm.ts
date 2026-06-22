@@ -5402,7 +5402,7 @@ export const parserPlanHash = "fnv1a64:9ee9cdb16cfded8d" as const;
 export const runtimeImplementationFormat = "baba-runtime-implementation" as const;
 export const runtimeImplementationVersion = 1;
 export const runtimeImplementationSemantics = "baba-runtime-portable-v1" as const;
-export const runtimeImplementationHash = "fnv1a64:56bae1345005a59c" as const;
+export const runtimeImplementationHash = "fnv1a64:02b4e7558ffc9cfa" as const;
 
 validateWasmAbi();
 

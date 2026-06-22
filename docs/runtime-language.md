@@ -59,15 +59,18 @@ boundary, but generated parsers map those spellings to lexer spec indexes and
 use the same runtime-language helpers for channel and terminal classification.
 `lexerSpecPublicTokenStatus` decides whether a mapped public literal/main/trivia
 token is compatible with the spec row; TypeScript still validates object
-shape/text/spans and emits public diagnostics. `lexerTokenDiagnosticStatus`
-classifies external tokens as diagnostically accepted, lexical error tokens, or
-not in the parser terminal set before TypeScript allocates the public diagnostic
-object. Deterministic parsers use `parserAction`/`parserGoto` for parser table
-lookup, and conflict parsers use generated
-`parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
-fan-out and goto lookup. Generated parsers also use the `parserExpectedStart`
-and `parserExpectedEnd` helpers to map parser states to flattened
-expected-terminal display ranges for diagnostics, and
+shape/text and emits public diagnostics. `parserTokenStreamSpanBoundsStatus`,
+`parserTokenStreamSpanPositionStatus`, `parserTokenStreamWidthStatus`, and
+`parserTokenStreamEofStatus` classify external token-stream span ordering and
+EOF-shape errors before TypeScript allocates public diagnostics.
+`lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
+accepted, lexical error tokens, or not in the parser terminal set before
+TypeScript allocates the public diagnostic object. Deterministic parsers use
+`parserAction`/`parserGoto` for parser table lookup, and conflict parsers use
+generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
+multi-action fan-out and goto lookup. Generated parsers also use the
+`parserExpectedStart` and `parserExpectedEnd` helpers to map parser states to
+flattened expected-terminal display ranges for diagnostics, and
 `parserUnexpectedDiagnosticCode` uses runtime EOF flags to choose
 unexpected-token versus trailing-input runtime diagnostic codes without scanning
 display strings. Reduction replay uses

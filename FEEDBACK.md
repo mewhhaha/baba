@@ -337,6 +337,12 @@ runtime language:
 - Moved generated external token-stream literal/main/trivia compatibility checks
   onto runtime-language `lexerSpecPublicTokenStatus`. Generated TypeScript still
   validates public object shape/text/spans and emits public diagnostics.
+- Moved generated external token-stream span bounds, span position, token width,
+  and EOF-shape classification onto runtime-language
+  `parserTokenStreamSpanBoundsStatus`/`parserTokenStreamSpanPositionStatus`/
+  `parserTokenStreamWidthStatus`/`parserTokenStreamEofStatus`. Generated
+  TypeScript still owns public object shape/text checks and diagnostic message
+  allocation.
 - Moved generated token-level lexical diagnostic classification onto
   runtime-language `lexerTokenDiagnosticStatus`, so external `parseTokens()`
   lexical diagnostics no longer decide directly in TypeScript whether error,
@@ -381,9 +387,9 @@ Still unresolved:
   creation now read token class, payload, terminal, and span metadata through
   runtime-language token records before wrapping public token objects. External
   `parseTokens()` mapping still accepts public strings/literals at the API
-  boundary, but terminal/channel classification and public token class
-  compatibility plus token-level lexical diagnostic classification now go
-  through runtime-language lexer spec helpers. Parser replay span and
+  boundary, but terminal/channel classification, public token class
+  compatibility, span/EOF-shape status, plus token-level lexical diagnostic
+  classification now go through runtime-language helpers. Parser replay span and
   token-range merge arithmetic is runtime-language-backed, trailing-input
   diagnostic code selection uses runtime-language
   `parserUnexpectedDiagnosticCode`, reducer result-shape classification is

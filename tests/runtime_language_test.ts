@@ -104,6 +104,11 @@ import {
   RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
   RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
   RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION,
+  RUNTIME_TOKEN_STREAM_STATUS_GAP,
+  RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
+  RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
+  RUNTIME_TOKEN_STREAM_STATUS_OVERLAP,
+  RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_INTERNAL,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
@@ -1950,6 +1955,72 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserTokenStreamValidationProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_token_stream_validation",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserTokenStreamSpanBoundsStatus", [
+                u32(3),
+                u32(2),
+                u32(5),
+              ]),
+              u32(1_000_000),
+            ),
+            add(
+              mul(
+                call("parserTokenStreamSpanBoundsStatus", [
+                  u32(1),
+                  u32(6),
+                  u32(5),
+                ]),
+                u32(100_000),
+              ),
+              add(
+                mul(
+                  call("parserTokenStreamSpanPositionStatus", [
+                    u32(3),
+                    u32(0),
+                  ]),
+                  u32(10_000),
+                ),
+                add(
+                  mul(
+                    call("parserTokenStreamSpanPositionStatus", [
+                      u32(1),
+                      u32(3),
+                    ]),
+                    u32(1_000),
+                  ),
+                  add(
+                    mul(
+                      call("parserTokenStreamWidthStatus", [u32(4), u32(4)]),
+                      u32(100),
+                    ),
+                    call("parserTokenStreamEofStatus", [
+                      u32(1),
+                      u32(1),
+                      u32(5),
+                      u32(5),
+                      u32(5),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserObjectWrongKindProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_object_wrong_kind",
@@ -2665,6 +2736,19 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "runtime parser object layout stores fragments fields and rules",
       program: parserObjectProgram,
       expected: { kind: "value", value: 411_425_139 },
+    },
+    {
+      name: "runtime token-stream validation helpers classify spans and EOF",
+      program: parserTokenStreamValidationProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN * 1_000_000 +
+          RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN * 100_000 +
+          RUNTIME_TOKEN_STREAM_STATUS_GAP * 10_000 +
+          RUNTIME_TOKEN_STREAM_STATUS_OVERLAP * 1_000 +
+          RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH * 100 +
+          RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
+      },
     },
     {
       name: "runtime parser object access traps on wrong handle kind",

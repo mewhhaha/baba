@@ -36,6 +36,12 @@ export const RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA = 4;
 export const RUNTIME_LEXICAL_TOKEN_STATUS_OK = 0;
 export const RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN = 1;
 export const RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL = 2;
+export const RUNTIME_TOKEN_STREAM_STATUS_OK = 0;
+export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN = 1;
+export const RUNTIME_TOKEN_STREAM_STATUS_GAP = 2;
+export const RUNTIME_TOKEN_STREAM_STATUS_OVERLAP = 3;
+export const RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH = 4;
+export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF = 5;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -1695,6 +1701,10 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserDiagnosticSpanEndFunction(),
     parserDiagnosticDetailFunction(),
     parserDiagnosticDetailKindIdFunction(),
+    parserTokenStreamSpanBoundsStatusFunction(),
+    parserTokenStreamSpanPositionStatusFunction(),
+    parserTokenStreamWidthStatusFunction(),
+    parserTokenStreamEofStatusFunction(),
     parserRuleNodeFromFragmentFunction(),
     parserRuleNodeRuleIdFunction(),
     parserRuleNodeSpanStartFunction(),
@@ -2624,6 +2634,154 @@ function parserDiagnosticDetailKindIdFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(PARSER_DIAGNOSTIC_DETAIL_NONE),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamSpanBoundsStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamSpanBoundsStatus",
+    parameters: [
+      { name: "start", type: "u32" },
+      { name: "end", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: ltu(local("sourceLength"), local("end")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("end"), local("start")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamSpanPositionStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamSpanPositionStatus",
+    parameters: [
+      { name: "start", type: "u32" },
+      { name: "previousEnd", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: ltu(local("previousEnd"), local("start")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_GAP),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("start"), local("previousEnd")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OVERLAP),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamWidthStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamWidthStatus",
+    parameters: [
+      { name: "start", type: "u32" },
+      { name: "end", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("start"), local("end")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamEofStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamEofStatus",
+    parameters: [
+      { name: "textLength", type: "u32" },
+      { name: "isMainChannel", type: "u32" },
+      { name: "start", type: "u32" },
+      { name: "end", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("textLength"), u32(0)),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("isMainChannel"), u32(1)),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("start"), local("end")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("start"), local("sourceLength")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
       },
     ],
   };

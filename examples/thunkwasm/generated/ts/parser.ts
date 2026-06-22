@@ -105,6 +105,11 @@ const SPEC_STATUS_NOT_LITERAL = 2;
 const SPEC_STATUS_NOT_MAIN = 3;
 const SPEC_STATUS_NOT_TRIVIA = 4;
 const LEXICAL_TOKEN_OK = 0;
+const TOKEN_STREAM_INVALID_SPAN = 1;
+const TOKEN_STREAM_GAP = 2;
+const TOKEN_STREAM_OVERLAP = 3;
+const TOKEN_STREAM_ZERO_WIDTH = 4;
+const TOKEN_STREAM_INVALID_EOF = 5;
 const DIAGNOSTIC_PARSE_LEXICAL_ERROR = 1;
 const DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN = 2;
 const DIAGNOSTIC_PARSE_TRAILING_INPUT = 3;
@@ -1733,6 +1738,57 @@ function parserDiagnosticDetailKindId(code: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTokenStreamSpanBoundsStatus(start: number, end: number, sourceLength: number): number {
+  if (((((sourceLength) >>> 0) < ((end) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((end) >>> 0) < ((start) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenStreamSpanPositionStatus(start: number, previousEnd: number): number {
+  if (((((previousEnd) >>> 0) < ((start) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((start) >>> 0) < ((previousEnd) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenStreamWidthStatus(start: number, end: number): number {
+  if (((((start) >>> 0) === ((end) >>> 0) ? 1 : 0)) !== 0) {
+    return (4) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenStreamEofStatus(textLength: number, isMainChannel: number, start: number, end: number, sourceLength: number): number {
+  if (((((textLength) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (5) >>> 0;
+  }
+  if (((((isMainChannel) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (5) >>> 0;
+  }
+  if (((((start) >>> 0) === ((end) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (5) >>> 0;
+  }
+  if (((((start) >>> 0) === ((sourceLength) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (5) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserRuleNodeFromFragment(ruleId: number, fragment: number): number {
   let handle = 0;
   handle = (runtimeArenaAlloc(8) >>> 0) >>> 0;
@@ -2942,8 +2998,7 @@ function validateTokenStream(
       !Number.isInteger(span.start) ||
       !Number.isInteger(span.end) ||
       span.start < 0 ||
-      span.end < span.start ||
-      span.end > sourceText.length
+      span.end < 0
     ) {
       diagnostics.push(invalidTokenStream(
         `Token at index ${index} has an invalid span.`,
@@ -2952,7 +3007,24 @@ function validateTokenStream(
       continue;
     }
 
-    if (span.start > previousEnd) {
+    const boundsStatus = parserTokenStreamSpanBoundsStatus(
+      span.start,
+      span.end,
+      sourceText.length,
+    );
+    if (boundsStatus === TOKEN_STREAM_INVALID_SPAN) {
+      diagnostics.push(invalidTokenStream(
+        `Token at index ${index} has an invalid span.`,
+        clampSpan(span, sourceText.length),
+      ));
+      continue;
+    }
+
+    const positionStatus = parserTokenStreamSpanPositionStatus(
+      span.start,
+      previousEnd,
+    );
+    if (positionStatus === TOKEN_STREAM_GAP) {
       const gapDiagnostic = validateSourceGap(
         canonicalTokens,
         previousEnd,
@@ -2961,7 +3033,7 @@ function validateTokenStream(
       if (gapDiagnostic) diagnostics.push(gapDiagnostic);
     }
 
-    if (span.start < previousEnd) {
+    if (positionStatus === TOKEN_STREAM_OVERLAP) {
       diagnostics.push(invalidTokenStream(
         `Token at index ${index} overlaps a previous token.`,
         span,
@@ -2990,12 +3062,14 @@ function validateTokenStream(
         ));
       }
       eofIndex = index;
-      if (
-        token.text !== "" ||
-        token.channel !== "main" ||
-        span.start !== span.end ||
-        span.start !== sourceText.length
-      ) {
+      const eofStatus = parserTokenStreamEofStatus(
+        typeof token.text === "string" ? token.text.length : 0xffffffff,
+        token.channel === "main" ? 1 : 0,
+        span.start,
+        span.end,
+        sourceText.length,
+      );
+      if (eofStatus === TOKEN_STREAM_INVALID_EOF) {
         diagnostics.push(invalidTokenStream(
           "EOF token must have empty text, main channel, and an empty span at the end of the source.",
           span,
@@ -3011,7 +3085,10 @@ function validateTokenStream(
       ));
     }
 
-    if (span.start === span.end) {
+    if (
+      parserTokenStreamWidthStatus(span.start, span.end) ===
+        TOKEN_STREAM_ZERO_WIDTH
+    ) {
       diagnostics.push(invalidTokenStream(
         `Token at index ${index} has zero width.`,
         span,

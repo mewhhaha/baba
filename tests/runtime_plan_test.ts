@@ -255,6 +255,18 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "validateTokenStream(sourceText, tokens)",
   );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTokenStreamSpanBoundsStatus",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTokenStreamSpanPositionStatus",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTokenStreamEofStatus",
+  );
   assertIncludes(parserRuntimeSource, "sourceTextMatches");
   assertNotIncludes(parserRuntimeSource, "source.slice");
   assertIncludes(
