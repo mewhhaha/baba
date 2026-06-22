@@ -125,6 +125,8 @@ runtime language:
   `parserActionKind`/`parserActionPayload` helpers.
 - Switched the core Wasm parser trace decoder to the same shared runtime action
   kind/payload masks used by the runtime-language helpers.
+- Added a runtime-language `parserActionCount` helper so generated conflict
+  parsers get action fan-out from shared table logic before scheduling branches.
 
 Still unresolved:
 
@@ -135,13 +137,14 @@ Still unresolved:
   from the runtime language. Production LHS/RHS-length metadata lookup is also
   runtime-language-backed now, and action kind/payload decoding uses
   runtime-language helpers in generated parser replay and `parserTrace`, while
-  core Wasm trace decoding uses the same shared masks. Conflict branch
-  scheduling, the rest of Wasm parser control flow, generated token object
-  emission/diagnostics, and reducer/CST algorithms are still not mechanically
-  emitted from one runtime-language implementation. The compiler now has a
-  shared lowered control-flow/value IR and checked helper artifact hashes, but
-  it still needs broader parser-runtime lowering before the release can fully
-  satisfy "one runtime implementation, two execution targets."
+  core Wasm trace decoding uses the same shared masks. Conflict branch fan-out
+  counting is now runtime-language-backed, but branch queue scheduling, the rest
+  of Wasm parser control flow, generated token object emission/diagnostics, and
+  reducer/CST algorithms are still not mechanically emitted from one
+  runtime-language implementation. The compiler now has a shared lowered
+  control-flow/value IR and checked helper artifact hashes, but it still needs
+  broader parser-runtime lowering before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

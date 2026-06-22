@@ -717,9 +717,9 @@ function betterFailure(
 
 function findActions(state: number, terminal: number): RuntimeAction[] {
   const actions: RuntimeAction[] = [];
-  for (let ordinal = 0; ; ordinal++) {
+  const actionCount = parserActionCount(state, terminal);
+  for (let ordinal = 0; ordinal < actionCount; ordinal++) {
     const encoded = parserActionAt(state, terminal, ordinal);
-    if (encoded === ACTION_NONE) break;
     const kind = parserActionKind(encoded);
     const payload = parserActionPayload(encoded);
     if (kind === ACTION_SHIFT) {

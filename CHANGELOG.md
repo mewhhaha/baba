@@ -61,6 +61,8 @@
   decoding.
 - Switched the core Wasm parser trace decoder to the shared runtime action
   kind/payload masks.
+- Added a runtime-language `parserActionCount` helper for conflict parser action
+  fan-out.
 
 ### Changed
 

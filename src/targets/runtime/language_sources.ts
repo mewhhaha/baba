@@ -255,6 +255,7 @@ export function createParserConflictTableRuntimeProgram(
         actionTable.entriesTable,
         RUNTIME_ACTION_NONE,
       ),
+      parserActionCountFunction(),
       tableLookupFunction(
         "parserGoto",
         gotoTable.rowsTable,
@@ -591,6 +592,49 @@ function parserActionPayloadFunction(): RuntimeLanguageFunction {
         kind: "return",
         expression: and(local("action"), u32(RUNTIME_ACTION_PAYLOAD_MASK)),
       },
+    ],
+  };
+}
+
+function parserActionCountFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserActionCount",
+    parameters: [
+      { name: "state", type: "u32" },
+      { name: "terminal", type: "u32" },
+    ],
+    locals: [
+      { name: "count", type: "u32" },
+      { name: "action", type: "u32" },
+      { name: "loop", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("count", u32(0)),
+      setLocal("loop", u32(1)),
+      {
+        kind: "while",
+        condition: local("loop"),
+        body: [
+          setLocal(
+            "action",
+            call("parserActionAt", [
+              local("state"),
+              local("terminal"),
+              local("count"),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(local("action"), u32(RUNTIME_ACTION_NONE)),
+            consequent: [
+              { kind: "return", expression: local("count") },
+            ],
+          },
+          setLocal("count", add(local("count"), u32(1))),
+        ],
+      },
+      { kind: "return", expression: local("count") },
     ],
   };
 }

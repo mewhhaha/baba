@@ -256,6 +256,28 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         [1, 3],
       ],
     });
+  const parserConflictActionCountRuntimeProgram: RuntimeLanguageProgram = {
+    ...parserConflictTableRuntimeProgram,
+    name: "parser_conflict_action_count_conformance",
+    entry: "main",
+    functions: [
+      ...parserConflictTableRuntimeProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserActionCount", [u32(0), u32(1)]), u32(100)),
+            add(
+              mul(call("parserActionCount", [u32(0), u32(5)]), u32(10)),
+              call("parserActionCount", [u32(0), u32(3)]),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserTraceBaseProgram = createParserTraceRuntimeProgram({
     actionRows: [
       [[1, RUNTIME_ACTION_SHIFT + 1]],
@@ -837,6 +859,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       program: parserConflictTableRuntimeProgram,
       args: [0, 3, 0],
       expected: { kind: "value", value: 0 },
+    },
+    {
+      name: "parser conflict action count reports fan-out",
+      program: parserConflictActionCountRuntimeProgram,
+      expected: { kind: "value", value: 210 },
     },
     {
       name: "parser goto lookup finds target states",

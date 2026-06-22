@@ -149,6 +149,7 @@ Deno.test("generated deterministic parser omits branch-only helpers", () => {
   assertIncludes(parserSource, "function parserProductionRhsLength(");
   assertIncludes(parserSource, "function parserActionKind(");
   assertIncludes(parserSource, "function parserActionPayload(");
+  assertNotIncludes(parserSource, "function parserActionCount(");
   assertNotIncludes(parserSource, "const ACTIONS");
   assertNotIncludes(parserSource, "const GOTOS");
   assertNotIncludes(parserSource, "MAX_PARSE_BRANCHES");
@@ -201,6 +202,7 @@ Deno.test("TypeScript parser branches through declared local grammar conflicts",
     assertIncludes(parserSource, "interface ParseBranch");
     assertIncludes(parserSource, "function findActions(");
     assertIncludes(parserSource, "function parserActionAt(");
+    assertIncludes(parserSource, "function parserActionCount(");
     assertIncludes(parserSource, "function parserGoto(");
     assertNotIncludes(parserSource, "const ACTIONS");
     assertNotIncludes(parserSource, "const GOTOS");
