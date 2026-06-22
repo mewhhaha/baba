@@ -47,7 +47,8 @@ function hostSyntaxValue(handle: number): SyntaxElement {
 
 function buildChildren(ruleNodeHandle: number): SyntaxElement[] {
   const count = parserRuleNodeChildCount(ruleNodeHandle);
-  if (count === 0) return [];
+  const status = parserRuleNodeChildListStatus(count);
+  if (status === RULE_NODE_CHILD_LIST_EMPTY) return [];
   const children = parserRuleNodeChildren(ruleNodeHandle);
   const values: SyntaxElement[] = [];
   for (let index = 0; index < count; index++) {

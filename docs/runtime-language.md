@@ -103,7 +103,8 @@ runtime-language rule-node field vector, reads runtime field-capture records,
 and resolves captured host values through the runtime fragment handle map.
 Public child assembly similarly iterates the runtime-language rule-node child
 vector and resolves runtime token/rule-node handles through the per-replay
-syntax handle map. Field value-class/count validation now uses
+syntax handle map; empty/non-empty child-list classification comes from
+`parserRuleNodeChildListStatus`. Field value-class/count validation now uses
 `parserFieldValueClass`/`parserFieldSchemaStatus`/
 `parserFieldArrayValueStatus`/`parserFieldScalarValueStatus`/
 `parserFieldCaptureStatus`/`parserFieldFinalStatus` helpers, replay reduction

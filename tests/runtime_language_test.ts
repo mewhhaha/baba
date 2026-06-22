@@ -111,6 +111,8 @@ import {
   RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
   RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
   RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION,
+  RUNTIME_RULE_NODE_CHILD_LIST_EMPTY,
+  RUNTIME_RULE_NODE_CHILD_LIST_PRESENT,
   RUNTIME_SHIFTED_TOKEN_STATUS_INVALID,
   RUNTIME_SHIFTED_TOKEN_STATUS_OK,
   RUNTIME_TOKEN_STREAM_STATUS_GAP,
@@ -2053,6 +2055,25 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserRuleNodeChildListStatusProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_rule_node_child_list_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserRuleNodeChildListStatus", [u32(0)]), u32(10)),
+            call("parserRuleNodeChildListStatus", [u32(2)]),
+          ),
+        }],
+      },
+    ],
+  };
   const parserTokenStreamValidationProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_token_stream_validation",
@@ -3027,6 +3048,15 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "runtime parser object layout stores fragments fields and rules",
       program: parserObjectProgram,
       expected: { kind: "value", value: 411_425_139 },
+    },
+    {
+      name: "runtime parser rule-node child list status classifies empty lists",
+      program: parserRuleNodeChildListStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_RULE_NODE_CHILD_LIST_EMPTY * 10 +
+          RUNTIME_RULE_NODE_CHILD_LIST_PRESENT,
+      },
     },
     {
       name: "runtime token-stream validation helpers classify spans and EOF",

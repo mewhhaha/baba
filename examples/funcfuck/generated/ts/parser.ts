@@ -87,6 +87,7 @@ const REPLAY_REDUCTION_UNKNOWN_PRODUCTION = 1;
 const REPLAY_REDUCTION_RULE_PAYLOAD_MISSING = 2;
 const REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING = 3;
 const REPLAY_REDUCTION_STACK_UNDERFLOW = 4;
+const RULE_NODE_CHILD_LIST_EMPTY = 0;
 const SHIFTED_TOKEN_OK = 0;
 const NO_FIELD = 4294967295;
 const FIELD_ARRAY_VALUE_MISSING = 1;
@@ -1945,6 +1946,14 @@ function parserRuleNodeChildCount(handle: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserRuleNodeChildListStatus(count: number): number {
+  if (((((count) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserRuleNodeFieldCount(handle: number): number {
   return (runtimeVectorLength(parserRuleNodeFields(handle) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -2275,7 +2284,8 @@ function hostSyntaxValue(handle: number): SyntaxElement {
 
 function buildChildren(ruleNodeHandle: number): SyntaxElement[] {
   const count = parserRuleNodeChildCount(ruleNodeHandle);
-  if (count === 0) return [];
+  const status = parserRuleNodeChildListStatus(count);
+  if (status === RULE_NODE_CHILD_LIST_EMPTY) return [];
   const children = parserRuleNodeChildren(ruleNodeHandle);
   const values: SyntaxElement[] = [];
   for (let index = 0; index < count; index++) {
