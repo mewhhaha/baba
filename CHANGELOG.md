@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.1
+
+### Changed
+
+- Moved additional generated parser/runtime classification decisions into the
+  shared runtime-language helper layer, including field schema validation,
+  scalar and array field value status, and rule-node child-list status.
+- Refreshed generated examples and runtime manifests so bootstrap checks prove
+  the checked-in artifacts match the current runtime sources.
+
 ## 1.5.0
 
 ### Added
