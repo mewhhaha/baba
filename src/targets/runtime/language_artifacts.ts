@@ -14,6 +14,7 @@ import {
   createParserExpectedRuntimeProgram,
   createParserFieldRuntimeProgram,
   createParserGotoRuntimeProgram,
+  createParserObjectRuntimeProgram,
   createParserProductionRuntimeProgram,
   createParserRangeRuntimeProgram,
   createParserReducerRuntimeProgram,
@@ -70,6 +71,10 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
     {
       name: "runtime_arena",
       program: RUNTIME_ARENA_PROGRAM,
+    },
+    {
+      name: "parser_object_runtime",
+      program: createParserObjectRuntimeProgram(),
     },
     {
       name: "lexer_runtime",
@@ -274,6 +279,13 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
       wasmHash: "fnv1a64:ef251ecaa7876d56",
     },
     {
+      name: "parser_object_runtime",
+      entry: "parserFragmentNew",
+      sourceHash: "fnv1a64:6ae9c22f5b0b18cc",
+      typescriptHash: "fnv1a64:581d282503a03ff7",
+      wasmHash: "fnv1a64:86de992e2cfc92eb",
+    },
+    {
       name: "lexer_runtime",
       entry: "dfaTransition",
       sourceHash: "fnv1a64:aa747159a847349f",
@@ -360,7 +372,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:86cde2d12cd8f3c4" as const;
+  "fnv1a64:64f449fafdf2fe67" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

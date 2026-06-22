@@ -136,6 +136,9 @@ const RUNTIME_ARENA_FIRST_WORD = 1;
 const RUNTIME_OBJECT_ARRAY = 1;
 const RUNTIME_OBJECT_RECORD = 2;
 const RUNTIME_OBJECT_VECTOR = 3;
+const RUNTIME_OBJECT_PARSER_FRAGMENT = 4;
+const RUNTIME_OBJECT_PARSER_FIELD_CAPTURE = 5;
+const RUNTIME_OBJECT_PARSER_RULE_NODE = 6;
 const RUNTIME_ARRAY_LENGTH_WORD_OFFSET = 1;
 const RUNTIME_ARRAY_DATA_WORD_OFFSET = 2;
 const RUNTIME_RECORD_TAG_WORD_OFFSET = 1;
@@ -145,6 +148,25 @@ const RUNTIME_VECTOR_LENGTH_WORD_OFFSET = 1;
 const RUNTIME_VECTOR_CAPACITY_WORD_OFFSET = 2;
 const RUNTIME_VECTOR_DATA_WORD_OFFSET = 3;
 const RUNTIME_VECTOR_HEADER_WORDS = 4;
+const RUNTIME_PARSER_FRAGMENT_VALUE_WORD_OFFSET = 1;
+const RUNTIME_PARSER_FRAGMENT_SPAN_START_WORD_OFFSET = 2;
+const RUNTIME_PARSER_FRAGMENT_SPAN_END_WORD_OFFSET = 3;
+const RUNTIME_PARSER_FRAGMENT_TOKEN_START_WORD_OFFSET = 4;
+const RUNTIME_PARSER_FRAGMENT_TOKEN_END_WORD_OFFSET = 5;
+const RUNTIME_PARSER_FRAGMENT_CHILDREN_WORD_OFFSET = 6;
+const RUNTIME_PARSER_FRAGMENT_FIELDS_WORD_OFFSET = 7;
+const RUNTIME_PARSER_FRAGMENT_HEADER_WORDS = 8;
+const RUNTIME_PARSER_FIELD_CAPTURE_FIELD_ID_WORD_OFFSET = 1;
+const RUNTIME_PARSER_FIELD_CAPTURE_VALUE_WORD_OFFSET = 2;
+const RUNTIME_PARSER_FIELD_CAPTURE_HEADER_WORDS = 3;
+const RUNTIME_PARSER_RULE_NODE_RULE_ID_WORD_OFFSET = 1;
+const RUNTIME_PARSER_RULE_NODE_SPAN_START_WORD_OFFSET = 2;
+const RUNTIME_PARSER_RULE_NODE_SPAN_END_WORD_OFFSET = 3;
+const RUNTIME_PARSER_RULE_NODE_TOKEN_START_WORD_OFFSET = 4;
+const RUNTIME_PARSER_RULE_NODE_TOKEN_END_WORD_OFFSET = 5;
+const RUNTIME_PARSER_RULE_NODE_CHILDREN_WORD_OFFSET = 6;
+const RUNTIME_PARSER_RULE_NODE_FIELDS_WORD_OFFSET = 7;
+const RUNTIME_PARSER_RULE_NODE_HEADER_WORDS = 8;
 
 export type LexerRuntimeTransition = readonly [
   start: number,
@@ -241,6 +263,18 @@ export const RUNTIME_ARENA_PROGRAM: RuntimeLanguageProgram = {
   scratchMemoryWords: RUNTIME_ARENA_FIRST_WORD,
   functions: runtimeArenaFunctions(),
 };
+
+export function createParserObjectRuntimeProgram(): RuntimeLanguageProgram {
+  return {
+    name: "parser_object_runtime",
+    entry: "parserFragmentNew",
+    scratchMemoryWords: RUNTIME_ARENA_FIRST_WORD,
+    functions: [
+      ...runtimeArenaFunctions(),
+      ...parserObjectFunctions(),
+    ],
+  };
+}
 
 export function createLexerRuntimeProgram(
   input: LexerRuntimeProgramInput,
@@ -1461,6 +1495,515 @@ function runtimeVectorAppendFunction(): RuntimeLanguageFunction {
       storeScratch(
         add(local("handle"), u32(RUNTIME_VECTOR_LENGTH_WORD_OFFSET)),
         add(local("length"), u32(1)),
+      ),
+      { kind: "return", expression: local("value") },
+    ],
+  };
+}
+
+function parserObjectFunctions(): RuntimeLanguageFunction[] {
+  return [
+    parserFragmentNewFunction(),
+    parserFragmentValueFunction(),
+    parserFragmentSpanStartFunction(),
+    parserFragmentSpanEndFunction(),
+    parserFragmentTokenStartFunction(),
+    parserFragmentTokenEndFunction(),
+    parserFragmentChildrenFunction(),
+    parserFragmentFieldsFunction(),
+    parserFragmentChildCountFunction(),
+    parserFragmentChildAtFunction(),
+    parserFragmentAppendChildFunction(),
+    parserFragmentFieldCountFunction(),
+    parserFragmentFieldAtFunction(),
+    parserFragmentAppendFieldFunction(),
+    parserFieldCaptureNewFunction(),
+    parserFieldCaptureFieldIdFunction(),
+    parserFieldCaptureValueFunction(),
+    parserRuleNodeFromFragmentFunction(),
+    parserRuleNodeRuleIdFunction(),
+    parserRuleNodeSpanStartFunction(),
+    parserRuleNodeSpanEndFunction(),
+    parserRuleNodeTokenStartFunction(),
+    parserRuleNodeTokenEndFunction(),
+    parserRuleNodeChildrenFunction(),
+    parserRuleNodeFieldsFunction(),
+    parserRuleNodeChildCountFunction(),
+    parserRuleNodeFieldCountFunction(),
+  ];
+}
+
+function parserFragmentNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentNew",
+    parameters: [
+      { name: "value", type: "u32" },
+      { name: "spanStart", type: "u32" },
+      { name: "spanEnd", type: "u32" },
+      { name: "tokenStart", type: "u32" },
+      { name: "tokenEnd", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+      { name: "children", type: "u32" },
+      { name: "fields", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("children", call("runtimeVectorNew", [u32(0)])),
+      setLocal("fields", call("runtimeVectorNew", [u32(0)])),
+      setLocal(
+        "handle",
+        call("runtimeArenaAlloc", [u32(RUNTIME_PARSER_FRAGMENT_HEADER_WORDS)]),
+      ),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_PARSER_FRAGMENT)),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_FRAGMENT_VALUE_WORD_OFFSET)),
+        local("value"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_FRAGMENT_SPAN_START_WORD_OFFSET),
+        ),
+        local("spanStart"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_FRAGMENT_SPAN_END_WORD_OFFSET)),
+        local("spanEnd"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_FRAGMENT_TOKEN_START_WORD_OFFSET),
+        ),
+        local("tokenStart"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_FRAGMENT_TOKEN_END_WORD_OFFSET),
+        ),
+        local("tokenEnd"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_FRAGMENT_CHILDREN_WORD_OFFSET)),
+        local("children"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_FRAGMENT_FIELDS_WORD_OFFSET)),
+        local("fields"),
+      ),
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function parserFieldCaptureNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldCaptureNew",
+    parameters: [
+      { name: "fieldId", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "handle",
+        call("runtimeArenaAlloc", [
+          u32(RUNTIME_PARSER_FIELD_CAPTURE_HEADER_WORDS),
+        ]),
+      ),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_PARSER_FIELD_CAPTURE)),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_FIELD_CAPTURE_FIELD_ID_WORD_OFFSET),
+        ),
+        local("fieldId"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_FIELD_CAPTURE_VALUE_WORD_OFFSET),
+        ),
+        local("value"),
+      ),
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function parserRuleNodeFromFragmentFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserRuleNodeFromFragment",
+    parameters: [
+      { name: "ruleId", type: "u32" },
+      { name: "fragment", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "handle",
+        call("runtimeArenaAlloc", [u32(RUNTIME_PARSER_RULE_NODE_HEADER_WORDS)]),
+      ),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_PARSER_RULE_NODE)),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_RULE_NODE_RULE_ID_WORD_OFFSET)),
+        local("ruleId"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_RULE_NODE_SPAN_START_WORD_OFFSET),
+        ),
+        call("parserFragmentSpanStart", [local("fragment")]),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_RULE_NODE_SPAN_END_WORD_OFFSET),
+        ),
+        call("parserFragmentSpanEnd", [local("fragment")]),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_RULE_NODE_TOKEN_START_WORD_OFFSET),
+        ),
+        call("parserFragmentTokenStart", [local("fragment")]),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_RULE_NODE_TOKEN_END_WORD_OFFSET),
+        ),
+        call("parserFragmentTokenEnd", [local("fragment")]),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_RULE_NODE_CHILDREN_WORD_OFFSET),
+        ),
+        call("parserFragmentChildren", [local("fragment")]),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_RULE_NODE_FIELDS_WORD_OFFSET)),
+        call("parserFragmentFields", [local("fragment")]),
+      ),
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function parserFragmentValueFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFragmentValue",
+    RUNTIME_OBJECT_PARSER_FRAGMENT,
+    RUNTIME_PARSER_FRAGMENT_VALUE_WORD_OFFSET,
+  );
+}
+
+function parserFragmentSpanStartFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFragmentSpanStart",
+    RUNTIME_OBJECT_PARSER_FRAGMENT,
+    RUNTIME_PARSER_FRAGMENT_SPAN_START_WORD_OFFSET,
+  );
+}
+
+function parserFragmentSpanEndFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFragmentSpanEnd",
+    RUNTIME_OBJECT_PARSER_FRAGMENT,
+    RUNTIME_PARSER_FRAGMENT_SPAN_END_WORD_OFFSET,
+  );
+}
+
+function parserFragmentTokenStartFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFragmentTokenStart",
+    RUNTIME_OBJECT_PARSER_FRAGMENT,
+    RUNTIME_PARSER_FRAGMENT_TOKEN_START_WORD_OFFSET,
+  );
+}
+
+function parserFragmentTokenEndFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFragmentTokenEnd",
+    RUNTIME_OBJECT_PARSER_FRAGMENT,
+    RUNTIME_PARSER_FRAGMENT_TOKEN_END_WORD_OFFSET,
+  );
+}
+
+function parserFragmentChildrenFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFragmentChildren",
+    RUNTIME_OBJECT_PARSER_FRAGMENT,
+    RUNTIME_PARSER_FRAGMENT_CHILDREN_WORD_OFFSET,
+  );
+}
+
+function parserFragmentFieldsFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFragmentFields",
+    RUNTIME_OBJECT_PARSER_FRAGMENT,
+    RUNTIME_PARSER_FRAGMENT_FIELDS_WORD_OFFSET,
+  );
+}
+
+function parserFragmentChildCountFunction(): RuntimeLanguageFunction {
+  return parserVectorCountFunction(
+    "parserFragmentChildCount",
+    "parserFragmentChildren",
+  );
+}
+
+function parserFragmentFieldCountFunction(): RuntimeLanguageFunction {
+  return parserVectorCountFunction(
+    "parserFragmentFieldCount",
+    "parserFragmentFields",
+  );
+}
+
+function parserFragmentChildAtFunction(): RuntimeLanguageFunction {
+  return parserVectorLoadFunction(
+    "parserFragmentChildAt",
+    "parserFragmentChildren",
+  );
+}
+
+function parserFragmentFieldAtFunction(): RuntimeLanguageFunction {
+  return parserVectorLoadFunction(
+    "parserFragmentFieldAt",
+    "parserFragmentFields",
+  );
+}
+
+function parserFragmentAppendChildFunction(): RuntimeLanguageFunction {
+  return parserVectorAppendHandleFunction(
+    "parserFragmentAppendChild",
+    "parserFragmentChildren",
+  );
+}
+
+function parserFragmentAppendFieldFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentAppendField",
+    parameters: [
+      { name: "fragment", type: "u32" },
+      { name: "capture", type: "u32" },
+    ],
+    locals: [
+      { name: "kind", type: "u32" },
+      { name: "fields", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("kind", call("runtimeObjectKind", [local("capture")])),
+      {
+        kind: "if",
+        condition: eq(local("kind"), u32(RUNTIME_OBJECT_PARSER_FIELD_CAPTURE)),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      setLocal("fields", call("parserFragmentFields", [local("fragment")])),
+      setLocal(
+        "discard",
+        call("runtimeVectorAppend", [local("fields"), local("capture")]),
+      ),
+      { kind: "return", expression: local("capture") },
+    ],
+  };
+}
+
+function parserFieldCaptureFieldIdFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFieldCaptureFieldId",
+    RUNTIME_OBJECT_PARSER_FIELD_CAPTURE,
+    RUNTIME_PARSER_FIELD_CAPTURE_FIELD_ID_WORD_OFFSET,
+  );
+}
+
+function parserFieldCaptureValueFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserFieldCaptureValue",
+    RUNTIME_OBJECT_PARSER_FIELD_CAPTURE,
+    RUNTIME_PARSER_FIELD_CAPTURE_VALUE_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeRuleIdFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserRuleNodeRuleId",
+    RUNTIME_OBJECT_PARSER_RULE_NODE,
+    RUNTIME_PARSER_RULE_NODE_RULE_ID_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeSpanStartFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserRuleNodeSpanStart",
+    RUNTIME_OBJECT_PARSER_RULE_NODE,
+    RUNTIME_PARSER_RULE_NODE_SPAN_START_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeSpanEndFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserRuleNodeSpanEnd",
+    RUNTIME_OBJECT_PARSER_RULE_NODE,
+    RUNTIME_PARSER_RULE_NODE_SPAN_END_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeTokenStartFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserRuleNodeTokenStart",
+    RUNTIME_OBJECT_PARSER_RULE_NODE,
+    RUNTIME_PARSER_RULE_NODE_TOKEN_START_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeTokenEndFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserRuleNodeTokenEnd",
+    RUNTIME_OBJECT_PARSER_RULE_NODE,
+    RUNTIME_PARSER_RULE_NODE_TOKEN_END_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeChildrenFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserRuleNodeChildren",
+    RUNTIME_OBJECT_PARSER_RULE_NODE,
+    RUNTIME_PARSER_RULE_NODE_CHILDREN_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeFieldsFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserRuleNodeFields",
+    RUNTIME_OBJECT_PARSER_RULE_NODE,
+    RUNTIME_PARSER_RULE_NODE_FIELDS_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeChildCountFunction(): RuntimeLanguageFunction {
+  return parserVectorCountFunction(
+    "parserRuleNodeChildCount",
+    "parserRuleNodeChildren",
+  );
+}
+
+function parserRuleNodeFieldCountFunction(): RuntimeLanguageFunction {
+  return parserVectorCountFunction(
+    "parserRuleNodeFieldCount",
+    "parserRuleNodeFields",
+  );
+}
+
+function parserObjectLoadFunction(
+  name: string,
+  expectedKind: number,
+  wordOffset: number,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "kind", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
+      {
+        kind: "if",
+        condition: eq(local("kind"), u32(expectedKind)),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      {
+        kind: "return",
+        expression: loadScratch(add(local("handle"), u32(wordOffset))),
+      },
+    ],
+  };
+}
+
+function parserVectorCountFunction(
+  name: string,
+  vectorAccessor: string,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: call("runtimeVectorLength", [
+          call(vectorAccessor, [local("handle")]),
+        ]),
+      },
+    ],
+  };
+}
+
+function parserVectorLoadFunction(
+  name: string,
+  vectorAccessor: string,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "index", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: call("runtimeVectorLoad", [
+          call(vectorAccessor, [local("handle")]),
+          local("index"),
+        ]),
+      },
+    ],
+  };
+}
+
+function parserVectorAppendHandleFunction(
+  name: string,
+  vectorAccessor: string,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    locals: [
+      { name: "vector", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("vector", call(vectorAccessor, [local("handle")])),
+      setLocal(
+        "discard",
+        call("runtimeVectorAppend", [local("vector"), local("value")]),
       ),
       { kind: "return", expression: local("value") },
     ],

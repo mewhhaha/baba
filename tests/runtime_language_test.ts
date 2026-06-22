@@ -25,6 +25,7 @@ import {
   createParserExpectedRuntimeProgram,
   createParserFieldRuntimeProgram,
   createParserGotoRuntimeProgram,
+  createParserObjectRuntimeProgram,
   createParserProductionRuntimeProgram,
   createParserReducerRuntimeProgram,
   createParserTableRuntimeProgram,
@@ -1642,6 +1643,204 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserObjectBaseProgram = createParserObjectRuntimeProgram();
+  const parserObjectProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_object_conformance",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "fragment", type: "u32" },
+          { name: "child", type: "u32" },
+          { name: "capture", type: "u32" },
+          { name: "rule", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal(
+            "fragment",
+            call("parserFragmentNew", [
+              u32(77),
+              u32(2),
+              u32(5),
+              u32(1),
+              u32(3),
+            ]),
+          ),
+          setLocal(
+            "child",
+            call("parserFragmentNew", [
+              u32(88),
+              u32(3),
+              u32(4),
+              u32(2),
+              u32(3),
+            ]),
+          ),
+          setLocal(
+            "capture",
+            call("parserFieldCaptureNew", [u32(9), local("child")]),
+          ),
+          setLocal(
+            "discard",
+            call("parserFragmentAppendChild", [
+              local("fragment"),
+              local("child"),
+            ]),
+          ),
+          setLocal(
+            "discard",
+            call("parserFragmentAppendField", [
+              local("fragment"),
+              local("capture"),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentChildAt", [local("fragment"), u32(0)]),
+              local("child"),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFieldCaptureValue", [
+                call("parserFragmentFieldAt", [local("fragment"), u32(0)]),
+              ]),
+              local("child"),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          setLocal(
+            "rule",
+            call("parserRuleNodeFromFragment", [u32(4), local("fragment")]),
+          ),
+          {
+            kind: "return",
+            expression: add(
+              mul(
+                call("runtimeObjectKind", [local("fragment")]),
+                u32(100_000_000),
+              ),
+              add(
+                mul(
+                  call("parserRuleNodeChildCount", [local("rule")]),
+                  u32(10_000_000),
+                ),
+                add(
+                  mul(
+                    call("parserRuleNodeFieldCount", [local("rule")]),
+                    u32(1_000_000),
+                  ),
+                  add(
+                    mul(
+                      call("parserRuleNodeRuleId", [local("rule")]),
+                      u32(100_000),
+                    ),
+                    add(
+                      mul(
+                        call("parserRuleNodeSpanStart", [local("rule")]),
+                        u32(10_000),
+                      ),
+                      add(
+                        mul(
+                          call("parserRuleNodeSpanEnd", [local("rule")]),
+                          u32(1_000),
+                        ),
+                        add(
+                          mul(
+                            call("parserRuleNodeTokenStart", [local("rule")]),
+                            u32(100),
+                          ),
+                          add(
+                            mul(
+                              call("parserRuleNodeTokenEnd", [local("rule")]),
+                              u32(10),
+                            ),
+                            call("parserFieldCaptureFieldId", [
+                              local("capture"),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          },
+        ],
+      },
+    ],
+  };
+  const parserObjectWrongKindProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_object_wrong_kind",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeArrayNew", [u32(1)])),
+          {
+            kind: "return",
+            expression: call("parserFragmentValue", [local("handle")]),
+          },
+        ],
+      },
+    ],
+  };
+  const parserObjectWrongFieldProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_object_wrong_field",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "fragment", type: "u32" },
+          { name: "child", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal(
+            "fragment",
+            call("parserFragmentNew", [u32(1), u32(0), u32(0), u32(0), u32(0)]),
+          ),
+          setLocal(
+            "child",
+            call("parserFragmentNew", [u32(2), u32(0), u32(0), u32(0), u32(0)]),
+          ),
+          {
+            kind: "return",
+            expression: call("parserFragmentAppendField", [
+              local("fragment"),
+              local("child"),
+            ]),
+          },
+        ],
+      },
+    ],
+  };
   const arenaStaleHandleProgram: RuntimeLanguageProgram = {
     ...RUNTIME_ARENA_PROGRAM,
     name: "arena_stale_handle",
@@ -1922,6 +2121,21 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "runtime vector helpers trap on wrong handle kind",
       program: arenaVectorWrongKindProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime parser object layout stores fragments fields and rules",
+      program: parserObjectProgram,
+      expected: { kind: "value", value: 411_425_139 },
+    },
+    {
+      name: "runtime parser object access traps on wrong handle kind",
+      program: parserObjectWrongKindProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime parser field append traps on wrong capture kind",
+      program: parserObjectWrongFieldProgram,
       expected: { kind: "trap" },
     },
     {
