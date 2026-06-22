@@ -42,6 +42,7 @@ export const RUNTIME_TOKEN_STREAM_STATUS_GAP = 2;
 export const RUNTIME_TOKEN_STREAM_STATUS_OVERLAP = 3;
 export const RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH = 4;
 export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF = 5;
+export const RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP = 6;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -1705,6 +1706,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamSpanPositionStatusFunction(),
     parserTokenStreamWidthStatusFunction(),
     parserTokenStreamEofStatusFunction(),
+    parserTokenStreamGapTokenStatusFunction(),
     parserRuleNodeFromFragmentFunction(),
     parserRuleNodeRuleIdFunction(),
     parserRuleNodeSpanStartFunction(),
@@ -2777,6 +2779,51 @@ function parserTokenStreamEofStatusFunction(): RuntimeLanguageFunction {
         alternate: [{
           kind: "return",
           expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamGapTokenStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamGapTokenStatus",
+    parameters: [
+      { name: "tokenClass", type: "u32" },
+      { name: "tokenStart", type: "u32" },
+      { name: "tokenEnd", type: "u32" },
+      { name: "gapStart", type: "u32" },
+      { name: "gapEnd", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("tokenClass"), u32(RUNTIME_PUBLIC_TOKEN_TRIVIA)),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("tokenStart"), local("gapStart")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("gapEnd"), local("tokenEnd")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
         }],
       },
       {

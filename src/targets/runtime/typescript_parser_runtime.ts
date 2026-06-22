@@ -112,6 +112,7 @@ import {
   RUNTIME_TOKEN_STREAM_STATUS_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
+  RUNTIME_TOKEN_STREAM_STATUS_OK,
   RUNTIME_TOKEN_STREAM_STATUS_OVERLAP,
   RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
@@ -434,6 +435,7 @@ const SPEC_STATUS_NOT_MAIN = ${RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN};
 const SPEC_STATUS_NOT_TRIVIA = ${RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA};
 const LEXICAL_TOKEN_OK = ${RUNTIME_LEXICAL_TOKEN_STATUS_OK};
 const TOKEN_STREAM_INVALID_SPAN = ${RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN};
+const TOKEN_STREAM_OK = ${RUNTIME_TOKEN_STREAM_STATUS_OK};
 const TOKEN_STREAM_GAP = ${RUNTIME_TOKEN_STREAM_STATUS_GAP};
 const TOKEN_STREAM_OVERLAP = ${RUNTIME_TOKEN_STREAM_STATUS_OVERLAP};
 const TOKEN_STREAM_ZERO_WIDTH = ${RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH};
@@ -1574,12 +1576,14 @@ function validateSourceGap(
     if (token.type === "eof") continue;
     if (token.span.end <= start) continue;
     if (token.span.start >= end) break;
-    if (
-      token.type !== "named" ||
-      token.channel !== "trivia" ||
-      token.span.start < start ||
-      token.span.end > end
-    ) {
+    const status = parserTokenStreamGapTokenStatus(
+      publicTokenClass(token),
+      token.span.start,
+      token.span.end,
+      start,
+      end,
+    );
+    if (status !== TOKEN_STREAM_OK) {
       return invalidTokenStream(
         "Token stream omits nontrivia source text.",
         { start, end },

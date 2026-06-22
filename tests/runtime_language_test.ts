@@ -107,6 +107,8 @@ import {
   RUNTIME_TOKEN_STREAM_STATUS_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
+  RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP,
+  RUNTIME_TOKEN_STREAM_STATUS_OK,
   RUNTIME_TOKEN_STREAM_STATUS_OVERLAP,
   RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
@@ -1968,53 +1970,80 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           kind: "return",
           expression: add(
             mul(
-              call("parserTokenStreamSpanBoundsStatus", [
-                u32(3),
-                u32(2),
-                u32(5),
-              ]),
-              u32(1_000_000),
-            ),
-            add(
-              mul(
-                call("parserTokenStreamSpanBoundsStatus", [
-                  u32(1),
-                  u32(6),
-                  u32(5),
-                ]),
-                u32(100_000),
-              ),
               add(
                 mul(
-                  call("parserTokenStreamSpanPositionStatus", [
+                  call("parserTokenStreamSpanBoundsStatus", [
                     u32(3),
-                    u32(0),
+                    u32(2),
+                    u32(5),
                   ]),
-                  u32(10_000),
+                  u32(1_000_000),
                 ),
                 add(
                   mul(
-                    call("parserTokenStreamSpanPositionStatus", [
+                    call("parserTokenStreamSpanBoundsStatus", [
                       u32(1),
-                      u32(3),
+                      u32(6),
+                      u32(5),
                     ]),
-                    u32(1_000),
+                    u32(100_000),
                   ),
                   add(
                     mul(
-                      call("parserTokenStreamWidthStatus", [u32(4), u32(4)]),
-                      u32(100),
+                      call("parserTokenStreamSpanPositionStatus", [
+                        u32(3),
+                        u32(0),
+                      ]),
+                      u32(10_000),
                     ),
-                    call("parserTokenStreamEofStatus", [
-                      u32(1),
-                      u32(1),
-                      u32(5),
-                      u32(5),
-                      u32(5),
-                    ]),
+                    add(
+                      mul(
+                        call("parserTokenStreamSpanPositionStatus", [
+                          u32(1),
+                          u32(3),
+                        ]),
+                        u32(1_000),
+                      ),
+                      add(
+                        mul(
+                          call("parserTokenStreamWidthStatus", [
+                            u32(4),
+                            u32(4),
+                          ]),
+                          u32(100),
+                        ),
+                        call("parserTokenStreamEofStatus", [
+                          u32(1),
+                          u32(1),
+                          u32(5),
+                          u32(5),
+                          u32(5),
+                        ]),
+                      ),
+                    ),
                   ),
                 ),
               ),
+              u32(100),
+            ),
+            add(
+              mul(
+                call("parserTokenStreamGapTokenStatus", [
+                  u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                  u32(2),
+                  u32(3),
+                  u32(1),
+                  u32(4),
+                ]),
+                u32(10),
+              ),
+              call("parserTokenStreamGapTokenStatus", [
+                u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                u32(2),
+                u32(3),
+                u32(1),
+                u32(4),
+              ]),
             ),
           ),
         }],
@@ -2742,12 +2771,14 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       program: parserTokenStreamValidationProgram,
       expected: {
         kind: "value",
-        value: RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN * 1_000_000 +
-          RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN * 100_000 +
-          RUNTIME_TOKEN_STREAM_STATUS_GAP * 10_000 +
-          RUNTIME_TOKEN_STREAM_STATUS_OVERLAP * 1_000 +
-          RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH * 100 +
-          RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
+        value: (RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN * 1_000_000 +
+              RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN * 100_000 +
+              RUNTIME_TOKEN_STREAM_STATUS_GAP * 10_000 +
+              RUNTIME_TOKEN_STREAM_STATUS_OVERLAP * 1_000 +
+              RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH * 100 +
+              RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF) * 100 +
+          RUNTIME_TOKEN_STREAM_STATUS_OK * 10 +
+          RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP,
       },
     },
     {

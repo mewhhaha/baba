@@ -63,6 +63,8 @@ shape/text and emits public diagnostics. `parserTokenStreamSpanBoundsStatus`,
 `parserTokenStreamSpanPositionStatus`, `parserTokenStreamWidthStatus`, and
 `parserTokenStreamEofStatus` classify external token-stream span ordering and
 EOF-shape errors before TypeScript allocates public diagnostics.
+`parserTokenStreamGapTokenStatus` classifies canonical lexer tokens inside
+omitted source gaps as safely omitted trivia or invalid nontrivia source.
 `lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
 accepted, lexical error tokens, or not in the parser terminal set before
 TypeScript allocates the public diagnostic object. Deterministic parsers use

@@ -106,6 +106,7 @@ const SPEC_STATUS_NOT_MAIN = 3;
 const SPEC_STATUS_NOT_TRIVIA = 4;
 const LEXICAL_TOKEN_OK = 0;
 const TOKEN_STREAM_INVALID_SPAN = 1;
+const TOKEN_STREAM_OK = 0;
 const TOKEN_STREAM_GAP = 2;
 const TOKEN_STREAM_OVERLAP = 3;
 const TOKEN_STREAM_ZERO_WIDTH = 4;
@@ -1789,6 +1790,21 @@ function parserTokenStreamEofStatus(textLength: number, isMainChannel: number, s
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTokenStreamGapTokenStatus(tokenClass: number, tokenStart: number, tokenEnd: number, gapStart: number, gapEnd: number): number {
+  if (((((tokenClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (6) >>> 0;
+  }
+  if (((((tokenStart) >>> 0) < ((gapStart) >>> 0) ? 1 : 0)) !== 0) {
+    return (6) >>> 0;
+  }
+  if (((((gapEnd) >>> 0) < ((tokenEnd) >>> 0) ? 1 : 0)) !== 0) {
+    return (6) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserRuleNodeFromFragment(ruleId: number, fragment: number): number {
   let handle = 0;
   handle = (runtimeArenaAlloc(8) >>> 0) >>> 0;
@@ -3224,12 +3240,14 @@ function validateSourceGap(
     if (token.type === "eof") continue;
     if (token.span.end <= start) continue;
     if (token.span.start >= end) break;
-    if (
-      token.type !== "named" ||
-      token.channel !== "trivia" ||
-      token.span.start < start ||
-      token.span.end > end
-    ) {
+    const status = parserTokenStreamGapTokenStatus(
+      publicTokenClass(token),
+      token.span.start,
+      token.span.end,
+      start,
+      end,
+    );
+    if (status !== TOKEN_STREAM_OK) {
       return invalidTokenStream(
         "Token stream omits nontrivia source text.",
         { start, end },
