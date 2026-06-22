@@ -139,11 +139,14 @@ generated JavaScript adapter copies source text into Wasm memory as UTF-16 code
 units, so all public spans are UTF-16 offsets matching the TypeScript target.
 Parse and lex results remain ordinary JavaScript objects. Low-level typed-array
 views returned by `wasm.ts` helpers are tied to the current `WebAssembly.Memory`
-buffer; call `reset()` to clear cached input ownership before reusing the
-adapter across independent runs. Repeated parses reuse memory up to the previous
-high-water mark, and adapter-side offset arithmetic is checked against the
-32-bit Wasm address space. The core module declares a maximum of 65,535 Wasm
-pages; the adapter checks the same page limit before calling `memory.grow()`.
+buffer. `WasmSourceBuffer` values returned by `writeSource()` are adapter-owned
+capabilities: they are not forgeable or serializable, and they become stale
+after `reset()` or after `writeSource()` installs a different source. Call
+`writeSource()` again to obtain a current buffer before using `lexOne()` or
+`lexAll()`. Repeated parses reuse memory up to the previous high-water mark, and
+adapter-side offset arithmetic is checked against the 32-bit Wasm address space.
+The core module declares a maximum of 65,535 Wasm pages; the adapter checks the
+same page limit before calling `memory.grow()`.
 
 Internally, standalone parser targets lower the analyzed grammar once into a
 versioned portable parser plan:

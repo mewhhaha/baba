@@ -21,6 +21,10 @@ runtime language:
 - Documented and exported Wasm ABI/plan versions, `reset()`, UTF-16 span units,
   repeated-parse memory reuse behavior, a core module maximum page count, and
   adapter-side page/overflow checks before memory growth.
+- Added JavaScript-hosted Wasm adapter source-buffer provenance checks:
+  `WasmSourceBuffer` values are now adapter-owned capabilities, forged buffers
+  are rejected, and previous buffers become stale after `reset()` or after
+  `writeSource()` installs a different source.
 - Documented the current structured-error boundary: public compiler/lexer/parser
   APIs return diagnostics, invalid external token streams return
   `TS_PARSER_INVALID_TOKEN_STREAM`, caught generated runtime/replay traps become
@@ -345,17 +349,19 @@ Still unresolved:
   records, growable vectors, and initial parser
   fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
   fragment assembly helpers that generated replay is beginning to use. It now
-  has a shared in-runtime object-kind provenance gate for arena handles and a
-  non-enumerable plan-local terminal hint for public tokens, but it still lacks
-  a complete host-boundary ownership and handle capability contract for future
-  non-JS Wasm hosts, first-class runtime-language text values if source decoding
-  moves fully into the runtime language, plus complete generated parser-runtime
-  lowering for remaining host public object materialization outside the shared
-  wrapper helpers and a richer structured-error taxonomy for a future
-  host-neutral Wasm ABI. The compiler now has a shared lowered
-  control-flow/value IR and checked helper artifact hashes, but it still needs
-  broader parser-runtime lowering before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  has a shared in-runtime object-kind provenance gate for arena handles, a
+  non-enumerable plan-local terminal hint for public tokens, and an
+  adapter-owned `WasmSourceBuffer` provenance/epoch gate for the current
+  JavaScript-hosted Wasm adapter, but it still lacks a complete host-boundary
+  ownership and handle capability contract for future non-JS Wasm hosts,
+  first-class runtime-language text values if source decoding moves fully into
+  the runtime language, plus complete generated parser-runtime lowering for
+  remaining host public object materialization outside the shared wrapper
+  helpers and a richer structured-error taxonomy for a future host-neutral Wasm
+  ABI. The compiler now has a shared lowered control-flow/value IR and checked
+  helper artifact hashes, but it still needs broader parser-runtime lowering
+  before the release can fully satisfy "one runtime implementation, two
+  execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

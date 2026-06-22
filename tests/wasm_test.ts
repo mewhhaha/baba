@@ -209,6 +209,53 @@ Deno.test("Wasm runtime validates parse trace input bounds", async () => {
   }
 });
 
+Deno.test("Wasm source buffers are adapter-owned capabilities", async () => {
+  const result = compile(`module = "a" ;`, { targets: ["wasm"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    const runtime = await import(`file://${dir}/wasm/wasm.ts`);
+
+    const buffer = runtime.writeSource("a");
+    assertEquals(runtime.lexOne(buffer, 0)?.end, 1);
+    assertEquals(runtime.lexAll(buffer).length, 3);
+    assertThrowsIncludes(
+      () => runtime.lexOne({ ...buffer }, 0),
+      "WasmSourceBuffer is not owned by this adapter",
+    );
+    assertThrowsIncludes(
+      () => runtime.lexAll({ ...buffer }),
+      "WasmSourceBuffer is not owned by this adapter",
+    );
+
+    runtime.writeSource("aa");
+    assertThrowsIncludes(
+      () => runtime.lexOne(buffer, 0),
+      "WasmSourceBuffer is stale; call writeSource() again",
+    );
+
+    const resetBuffer = runtime.writeSource("a");
+    assertEquals(runtime.lexOne(resetBuffer, 0)?.end, 1);
+    assertThrowsIncludes(
+      () => runtime.lexOne(resetBuffer, 2),
+      "offset exceeds source buffer length",
+    );
+    runtime.reset();
+    assertThrowsIncludes(
+      () => runtime.lexAll(resetBuffer),
+      "WasmSourceBuffer is stale; call writeSource() again",
+    );
+
+    const nextBuffer = runtime.writeSource("a");
+    assertEquals(runtime.lexOne(nextBuffer, 0)?.end, 1);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("Wasm target generates deterministic runtime bytes", () => {
   const source = `
     token ID = /[A-Za-z_][A-Za-z0-9_]*/ ;

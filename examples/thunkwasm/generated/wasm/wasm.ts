@@ -13931,16 +13931,20 @@ export interface WasmSourceBuffer {
 
 let cachedSource: string | null = null;
 let cachedBuffer: WasmSourceBuffer | null = null;
+let sourceBufferEpoch = 0;
+const sourceBufferOwners = new WeakMap<WasmSourceBuffer, number>();
 
 export function reset(): void {
   wasm.reset();
   parserTraceRuntime = instantiateParserTraceRuntime();
+  sourceBufferEpoch++;
   cachedSource = null;
   cachedBuffer = null;
 }
 
 export function writeSource(source: string): WasmSourceBuffer {
   if (cachedSource === source && cachedBuffer) return cachedBuffer;
+  sourceBufferEpoch++;
   const sourcePtr = INPUT_BASE;
   const sourceBytes = checkedMul(
     source.length,
@@ -13964,14 +13968,16 @@ export function writeSource(source: string): WasmSourceBuffer {
   for (let index = 0; index < source.length; index++) {
     units[index] = source.charCodeAt(index);
   }
-  cachedSource = source;
-  cachedBuffer = {
+  const buffer = {
     sourcePtr,
     sourceLength: source.length,
     resultPtr,
     tokenPtr,
     tokenCapacity,
   };
+  sourceBufferOwners.set(buffer, sourceBufferEpoch);
+  cachedSource = source;
+  cachedBuffer = buffer;
   return cachedBuffer;
 }
 
@@ -13979,6 +13985,11 @@ export function lexOne(buffer: WasmSourceBuffer, offset: number): {
   specIndex: number;
   end: number;
 } | null {
+  assertOwnedSourceBuffer(buffer);
+  assertNonNegativeInteger("offset", offset);
+  if (offset > buffer.sourceLength) {
+    throw new RangeError("offset exceeds source buffer length.");
+  }
   const matched = wasm.lex_one(
     buffer.sourcePtr,
     buffer.sourceLength,
@@ -13994,6 +14005,7 @@ export function lexOne(buffer: WasmSourceBuffer, offset: number): {
 }
 
 export function lexAll(buffer: WasmSourceBuffer): Int32Array {
+  assertOwnedSourceBuffer(buffer);
   const count = wasm.lex_all(
     buffer.sourcePtr,
     buffer.sourceLength,
@@ -14096,6 +14108,16 @@ function assertParseTraceInput(input: ParseTraceInput): void {
     throw new RangeError(
       "terminals length must cover parse input terminalCapacity.",
     );
+  }
+}
+
+function assertOwnedSourceBuffer(buffer: WasmSourceBuffer): void {
+  const epoch = sourceBufferOwners.get(buffer);
+  if (epoch === undefined) {
+    throw new TypeError("WasmSourceBuffer is not owned by this adapter.");
+  }
+  if (epoch !== sourceBufferEpoch) {
+    throw new TypeError("WasmSourceBuffer is stale; call writeSource() again.");
   }
 }
 
