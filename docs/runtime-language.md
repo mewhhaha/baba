@@ -303,6 +303,14 @@ execute both outputs and compare returned values or traps.
   `PARSER_INTERNAL_ERROR` diagnostics. Direct execution of private
   runtime-language helpers still traps; those traps are conformance-test
   behavior, not public parser API results.
+- Generated parser modules export numeric parser diagnostic code constants
+  matching runtime diagnostic records: `parserDiagnosticCodeParseLexicalError`
+  (`1`), `parserDiagnosticCodeParseUnexpectedToken` (`2`),
+  `parserDiagnosticCodeParseTrailingInput` (`3`),
+  `parserDiagnosticCodeParseInvalidTokenStream` (`4`),
+  `parserDiagnosticCodeInternalError` (`5`), and
+  `parserDiagnosticCodeBranchLimit` (`6`). Public diagnostics still expose
+  string `code` values for JavaScript consumers.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset

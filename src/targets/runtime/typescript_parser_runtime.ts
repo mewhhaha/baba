@@ -422,6 +422,12 @@ const DIAGNOSTIC_PARSE_TRAILING_INPUT = 3;
 const DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM = 4;
 const DIAGNOSTIC_PARSER_INTERNAL_ERROR = 5;
 const DIAGNOSTIC_PARSER_BRANCH_LIMIT = 6;
+export const parserDiagnosticCodeParseLexicalError = DIAGNOSTIC_PARSE_LEXICAL_ERROR;
+export const parserDiagnosticCodeParseUnexpectedToken = DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN;
+export const parserDiagnosticCodeParseTrailingInput = DIAGNOSTIC_PARSE_TRAILING_INPUT;
+export const parserDiagnosticCodeParseInvalidTokenStream = DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM;
+export const parserDiagnosticCodeInternalError = DIAGNOSTIC_PARSER_INTERNAL_ERROR;
+export const parserDiagnosticCodeBranchLimit = DIAGNOSTIC_PARSER_BRANCH_LIMIT;
 
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
 }

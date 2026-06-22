@@ -94,6 +94,12 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertEquals(mod.wasmTraceStatusUnexpected, 1);
     assertEquals(mod.wasmTraceStatusInternal, 2);
     assertEquals(mod.wasmTraceStatusBranchLimit, 3);
+    assertEquals(mod.parserDiagnosticCodeParseLexicalError, 1);
+    assertEquals(mod.parserDiagnosticCodeParseUnexpectedToken, 2);
+    assertEquals(mod.parserDiagnosticCodeParseTrailingInput, 3);
+    assertEquals(mod.parserDiagnosticCodeParseInvalidTokenStream, 4);
+    assertEquals(mod.parserDiagnosticCodeInternalError, 5);
+    assertEquals(mod.parserDiagnosticCodeBranchLimit, 6);
     assertEquals(mod.parserPlanFormat, "baba-parser-plan");
     assertEquals(mod.parserPlanVersion, 1);
     assertEquals(mod.parserPlanSemantics, "baba-portable-v1");

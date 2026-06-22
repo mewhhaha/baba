@@ -123,6 +123,10 @@ Both generated parser runtimes export the same main TypeScript API:
   canonical tokenization, and permits omitted trivia only;
 - low-level `parseTokensUnchecked(source, tokens)` when validation is not
   wanted;
+- parser diagnostic numeric ID constants such as
+  `parserDiagnosticCodeParseLexicalError` and
+  `parserDiagnosticCodeInternalError`, matching the runtime diagnostic record
+  taxonomy while public diagnostics continue to use string `code` values;
 - `positionAt(source, offset)` and `createSourceMap(source)` for UTF-16
   offset-to-line/column diagnostics;
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia

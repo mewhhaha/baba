@@ -43,6 +43,9 @@ runtime language:
   `TS_PARSER_INVALID_TOKEN_STREAM`, caught generated runtime/replay traps become
   `PARSER_INTERNAL_ERROR`, and direct private runtime-language helper execution
   remains trap-based conformance behavior.
+- Exported generated parser diagnostic numeric ID constants from TypeScript and
+  Wasm parser modules, matching the runtime diagnostic record taxonomy while
+  public parser diagnostics keep their string `code` values.
 - Added deterministic generated Wasm output coverage. Local independent-engine
   validation remains unavailable because `wasm-tools`, `wasm-validate`, and
   `wasmtime` are not installed in this environment.
@@ -384,8 +387,8 @@ Still unresolved:
   runtime-language text values if source decoding moves fully into the runtime
   language, plus complete generated parser-runtime lowering for remaining host
   public object materialization outside the shared wrapper helpers and a richer
-  structured error taxonomy beyond the current trace status metadata for a
-  future host-neutral Wasm ABI. The compiler now has a shared lowered
+  host-neutral error payload taxonomy beyond the current trace status metadata
+  and parser diagnostic IDs. The compiler now has a shared lowered
   control-flow/value IR and checked helper artifact hashes, but it still needs
   broader parser-runtime lowering before the release can fully satisfy "one
   runtime implementation, two execution targets."

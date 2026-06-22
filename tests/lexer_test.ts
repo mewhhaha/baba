@@ -54,6 +54,12 @@ Deno.test("generates standalone TypeScript lexer and parser", async () => {
     await denoCheck(`${dir}/typescript/mod.ts`);
     const mod = await import(`file://${dir}/typescript/mod.ts`);
     assertEquals(mod.parserPlanVersion, 1);
+    assertEquals(mod.parserDiagnosticCodeParseLexicalError, 1);
+    assertEquals(mod.parserDiagnosticCodeParseUnexpectedToken, 2);
+    assertEquals(mod.parserDiagnosticCodeParseTrailingInput, 3);
+    assertEquals(mod.parserDiagnosticCodeParseInvalidTokenStream, 4);
+    assertEquals(mod.parserDiagnosticCodeInternalError, 5);
+    assertEquals(mod.parserDiagnosticCodeBranchLimit, 6);
     const lexed = mod.lex("let x = 42; // ok");
     const firstToken = lexed.tokens[0] as Record<string, unknown>;
     assertEquals("__babaTerminal" in firstToken, true);
