@@ -471,6 +471,83 @@ Deno.test("TypeScript parseTokens rejects EOF before source end and nontrivia ga
   }
 });
 
+Deno.test("TypeScript parser accepts multiple omitted trivia gaps in parseTokens", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = "if" name:IDENT "," value:IDENT ";" ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const gapySource = "if   alpha   ,   beta ;";
+    const lexed = mod.lex(gapySource);
+    const mainOnly = lexed.tokens.filter((token: {
+      channel: "main" | "trivia" | "error";
+    }) => token.channel !== "trivia");
+    const parsed = mod.parseTokens(gapySource, mainOnly);
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.fields.name.text, "alpha");
+    assertEquals(parsed.root.fields.value.text, "beta");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parseTokensUnchecked bypasses strict token stream span validation", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = "if" name:IDENT "," value:IDENT ";" ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const gapySource = "if alpha , beta ;";
+    const lexed = mod.lex(gapySource);
+    const mainOnly = lexed.tokens.filter((token: {
+      channel: "main" | "trivia" | "error";
+    }) => token.channel !== "trivia");
+    const malformed = mainOnly.map((token: {
+      type: string;
+      kind?: string;
+      text: string;
+      span: { start: number; end: number };
+      channel: "main" | "trivia" | "error";
+      literal?: string;
+    }) =>
+      token.type === "named" && token.kind === "IDENT" && token.text === "alpha"
+        ? { ...token, span: { ...token.span, end: token.span.start } }
+        : token
+    );
+    const strict = mod.parseTokens(gapySource, malformed);
+    assertEquals(strict.ok, false);
+    assertEquals(strict.diagnostics[0].code, "PARSE_INVALID_TOKEN_STREAM");
+    const unchecked = mod.parseTokensUnchecked(gapySource, malformed);
+    assert(
+      !unchecked.diagnostics.some((diagnostic: { code: string }) =>
+        diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
+      ),
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("TypeScript parser assigns current offsets to empty rule spans", async () => {
   const source = `
     skip WS = /[ \\t\\r\\n]+/ ;

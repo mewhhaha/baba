@@ -23,12 +23,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/typescript_lexer_runtime.ts",
       role: "typescript-lexer-runtime",
-      hash: "fnv1a64:48d380f97852b264",
+      hash: "fnv1a64:6131a376d3948eda",
     },
     {
       path: "src/targets/runtime/public_source_text.ts",
       role: "public-source-text-boundary",
-      hash: "fnv1a64:c83bb21894ce29cd",
+      hash: "fnv1a64:e520abd85b8a829d",
     },
     {
       path: "src/targets/runtime/public_lex_diagnostic_materializer.ts",
@@ -48,7 +48,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/public_diagnostic_materializer.ts",
       role: "public-diagnostic-materializer",
-      hash: "fnv1a64:8305ad0a3e834e89",
+      hash: "fnv1a64:6c3f9b7fd779c829",
     },
     {
       path: "src/targets/runtime/public_parse_result_materializer.ts",
@@ -73,22 +73,22 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_sources.ts",
       role: "runtime-language-source",
-      hash: "fnv1a64:b72cf84b49327f95",
+      hash: "fnv1a64:a827640764439ca7",
     },
     {
       path: "src/targets/runtime/language.ts",
       role: "runtime-language-compiler",
-      hash: "fnv1a64:c17b70b9cda1864c",
+      hash: "fnv1a64:6f5893ae4b55f8aa",
     },
     {
       path: "src/targets/runtime/language_artifacts.ts",
       role: "runtime-language-artifact-manifest",
-      hash: "fnv1a64:b93a3d91486b90d8",
+      hash: "fnv1a64:e12e1c04bf0d162f",
     },
     {
       path: "src/targets/runtime/typescript_parser_runtime.ts",
       role: "typescript-parser-runtime",
-      hash: "fnv1a64:3cc5e963cfe3d655",
+      hash: "fnv1a64:1813f4893d70a69e",
     },
     {
       path: "src/targets/runtime/wasm_abi.ts",
@@ -102,7 +102,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:0e916eb84c43d7bd" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:3dc7772fc468b910" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

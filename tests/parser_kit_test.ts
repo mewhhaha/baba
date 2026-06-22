@@ -433,6 +433,118 @@ Deno.test("parser-kit helpers match generated TypeScript runtime behavior", asyn
       ),
       normalizeParseResult(ts.parseTokensUnchecked(lexed.source, lexed.tokens)),
     );
+
+    const withoutTrivia = lexed.tokens.filter((token) =>
+      token.channel !== "trivia"
+    );
+    const omittedTrivia = parseTokensWithKit(
+      kit,
+      lexed.source,
+      withoutTrivia,
+    );
+    assertEquals(omittedTrivia.ok, true);
+    assertJsonEquals(
+      normalizeParseResult(omittedTrivia),
+      normalizeParseResult(ts.parseTokens(lexed.source, withoutTrivia)),
+    );
+
+    const omittedMain = parseTokensWithKit(
+      kit,
+      lexed.source,
+      withoutTrivia.slice(1),
+    );
+    assertEquals(omittedMain.ok, false);
+    assertEquals(omittedMain.diagnostics[0].code, "PARSE_INVALID_TOKEN_STREAM");
+
+    const malformed = withoutTrivia.map((token) =>
+      token.type === "named" && token.kind === "IDENT" && token.text === "beta"
+        ? { ...token, span: { ...token.span, end: token.span.start } }
+        : token
+    );
+    const strictMalformed = parseTokensWithKit(kit, lexed.source, malformed);
+    assertEquals(strictMalformed.ok, false);
+    assertEquals(
+      strictMalformed.diagnostics[0].code,
+      "PARSE_INVALID_TOKEN_STREAM",
+    );
+    const uncheckedMalformed = parseTokensUncheckedWithKit(
+      kit,
+      lexed.source,
+      malformed,
+    );
+    assertEquals(uncheckedMalformed.ok, true);
+    assert(
+      !uncheckedMalformed.diagnostics.some((diagnostic) =>
+        diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
+      ),
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("parser-kit metadata matches TypeScript and Wasm plan metadata", async () => {
+  const { kit, ts, wasm, cleanup } = await buildKitParityRuntime(
+    deterministicGrammar,
+  );
+  try {
+    assertEquals(kit.portablePlan.format, "baba-parser-plan");
+    assertEquals(kit.portablePlan.version, 1);
+    assertEquals(kit.portablePlan.semantics, "baba-portable-v1");
+    assertEquals(kit.portablePlan.format, ts.parserPlanFormat);
+    assertEquals(kit.portablePlan.version, ts.parserPlanVersion);
+    assertEquals(kit.portablePlan.semantics, ts.parserPlanSemantics);
+    assertEquals(kit.portablePlan.format, wasm.parserPlanFormat);
+    assertEquals(kit.portablePlan.version, wasm.parserPlanVersion);
+    assertEquals(kit.portablePlan.semantics, wasm.parserPlanSemantics);
+    assertEquals(ts.parserPlanHash, wasm.parserPlanHash);
+    assertEquals(kit.portablePlan.hash, ts.parserPlanHash);
+    assertEquals(kit.portablePlan.hash, wasm.parserPlanHash);
+    assertEquals(ts.runtimeImplementationFormat, "baba-runtime-implementation");
+    assertEquals(ts.runtimeImplementationVersion, 1);
+    assertEquals(ts.runtimeImplementationSemantics, "baba-runtime-portable-v1");
+    assertEquals(
+      kit.runtimeImplementation?.format,
+      ts.runtimeImplementationFormat,
+    );
+    assertEquals(
+      kit.runtimeImplementation?.version,
+      ts.runtimeImplementationVersion,
+    );
+    assertEquals(
+      kit.runtimeImplementation?.semantics,
+      ts.runtimeImplementationSemantics,
+    );
+    assertEquals(
+      kit.runtimeImplementation?.format,
+      wasm.runtimeImplementationFormat,
+    );
+    assertEquals(
+      kit.runtimeImplementation?.version,
+      wasm.runtimeImplementationVersion,
+    );
+    assertEquals(
+      kit.runtimeImplementation?.semantics,
+      wasm.runtimeImplementationSemantics,
+    );
+    assertEquals(
+      ts.runtimeImplementationFormat,
+      wasm.runtimeImplementationFormat,
+    );
+    assertEquals(
+      ts.runtimeImplementationVersion,
+      wasm.runtimeImplementationVersion,
+    );
+    assertEquals(
+      ts.runtimeImplementationSemantics,
+      wasm.runtimeImplementationSemantics,
+    );
+    assertEquals(ts.runtimeImplementationHash, wasm.runtimeImplementationHash);
+    assertEquals(kit.runtimeImplementation?.hash, ts.runtimeImplementationHash);
+    assertEquals(
+      kit.runtimeImplementation?.hash,
+      wasm.runtimeImplementationHash,
+    );
   } finally {
     await cleanup();
   }
@@ -477,17 +589,22 @@ async function buildKitParityRuntime(
 
   const runtimeResult = compile(source, {
     ...options,
-    targets: ["typescript"],
+    targets: ["typescript", "wasm"],
     typescript: { directory: "ts" },
+    wasm: { directory: "wasm" },
   });
   assertEquals(runtimeResult.diagnostics.length, 0);
   assert(runtimeResult.bundle);
   const dir = await Deno.makeTempDir();
   await applyBundle(runtimeResult.bundle, { root: dir });
-  await denoCheck(`${dir}/ts/mod.ts`);
+  await Promise.all([
+    denoCheck(`${dir}/ts/mod.ts`),
+    denoCheck(`${dir}/wasm/mod.ts`),
+  ]);
   return {
     kit: kitResult.kit,
     ts: await import(`file://${dir}/ts/mod.ts`),
+    wasm: await import(`file://${dir}/wasm/mod.ts`),
     cleanup: () => Deno.remove(dir, { recursive: true }),
   };
 }
@@ -596,6 +713,7 @@ function assertJsonEquals(actual: unknown, expected: unknown): void {
 interface KitParityRuntime {
   kit: ParserKit;
   ts: RuntimeModule;
+  wasm: RuntimeModule;
   cleanup: () => Promise<void>;
 }
 

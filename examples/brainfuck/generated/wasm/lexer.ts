@@ -15,12 +15,14 @@ import {
 } from "./wasm.ts";
 
 const DEFAULT_PRESERVE_TRIVIA = true;
+const NO_LEXER_SPEC = 4294967295;
 const NO_TERMINAL = 4294967295;
 const PUBLIC_TOKEN_LITERAL = 1;
 const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
 const PUBLIC_TOKEN_ERROR = 4;
 const PUBLIC_TOKEN_EOF = 5;
+const LEXER_TOKEN_EMIT_TOKEN = 1;
 
 const NAMED_SPECS: readonly {
   kind: NamedTokenKind;
@@ -102,6 +104,14 @@ function divU32(left: number, right: number): number {
   return Math.trunc((left >>> 0) / divisor) >>> 0;
 }
 
+const __baba_table_lexerSpecs: readonly number[] = [0,0,1,2,1,4294967295,1,0,2,1,1,3,1,2,4,1,3,5,1,4,6,1,5,7,1,6,8,1,7,9,1,8,10,1,9,11,1,10,12];
+function __baba_load_lexerSpecs(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_table_lexerSpecs.length) {
+    throw new RuntimeLanguageTrap("table index out of bounds");
+  }
+  return __baba_table_lexerSpecs[normalized] >>> 0;
+}
 
 
 let __baba_scratch = new Uint32Array(1);
@@ -240,6 +250,138 @@ function parserTokenSpanEnd(handle: number): number {
   let discard = 0;
   discard = (runtimeExpectObjectKind(handle, 7) >>> 0) >>> 0;
   return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerSpecFlags(specIndex: number): number {
+  let offset = 0;
+  if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((specIndex) >>> 0, (3) >>> 0) >>> 0) + (0)) >>> 0) >>> 0;
+    return (__baba_load_lexerSpecs(offset) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerSpecTokenClass(specIndex: number): number {
+  let flags = 0;
+  if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
+    flags = (lexerSpecFlags(specIndex) >>> 0) >>> 0;
+    if (((((((flags) & (1)) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      if (((((((flags) & (2)) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+        return (3) >>> 0;
+      } else {
+        return (2) >>> 0;
+      }
+    } else {
+      return (1) >>> 0;
+    }
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerSpecPayload(specIndex: number): number {
+  let offset = 0;
+  if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((specIndex) >>> 0, (3) >>> 0) >>> 0) + (1)) >>> 0) >>> 0;
+    return (__baba_load_lexerSpecs(offset) >>> 0) >>> 0;
+  }
+  return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerSpecTerminal(specIndex: number): number {
+  let offset = 0;
+  if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((specIndex) >>> 0, (3) >>> 0) >>> 0) + (2)) >>> 0) >>> 0;
+    return (__baba_load_lexerSpecs(offset) >>> 0) >>> 0;
+  }
+  return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerPublicTokenClass(tokenClass: number): number {
+  if (((((tokenClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((tokenClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  return (2) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerTokenEmitStatus(tokenClass: number, preserveTrivia: number): number {
+  if (((((tokenClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((preserveTrivia) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerSpecPublicTokenStatus(specIndex: number, publicClass: number): number {
+  let specClass = 0;
+  if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (1) >>> 0;
+  }
+  specClass = (lexerSpecTokenClass(specIndex) >>> 0) >>> 0;
+  if (((((specClass) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((specClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (2) >>> 0;
+    }
+  }
+  if (((((publicClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((specClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (3) >>> 0;
+    }
+  }
+  if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((specClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (4) >>> 0;
+    }
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerTokenDiagnosticStatus(publicClass: number, terminal: number): number {
+  if (((((publicClass) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((terminal) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    } else {
+      return (0) >>> 0;
+    }
+  }
+  if (((((publicClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((terminal) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    } else {
+      return (0) >>> 0;
+    }
+  }
+  return (2) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 interface SourceTextBoundary {
@@ -415,32 +557,15 @@ function lexInternal(
     const start = records[index + 1];
     const end = records[index + 2];
     if (specIndex >= 0) {
-      let tokenClass = PUBLIC_TOKEN_ERROR;
-      let payload = 0;
-      let terminal = NO_TERMINAL;
-      let foundSpec = false;
-      if (specIndex < NAMED_SPECS.length) {
-        const spec = NAMED_SPECS[specIndex];
-        if (spec) {
-          tokenClass = spec.channel === "trivia"
-            ? PUBLIC_TOKEN_TRIVIA
-            : PUBLIC_TOKEN_MAIN;
-          payload = specIndex;
-          terminal = spec.terminal;
-          foundSpec = true;
-        }
-      } else {
-        const literalIndex = specIndex - NAMED_SPECS.length;
-        const spec = LITERAL_SPECS[literalIndex];
-        if (spec) {
-          tokenClass = PUBLIC_TOKEN_LITERAL;
-          payload = literalIndex;
-          terminal = spec.terminal;
-          foundSpec = true;
-        }
-      }
-      if (foundSpec) {
-        if (tokenClass !== PUBLIC_TOKEN_TRIVIA || preserveTrivia) {
+      const runtimeTokenClass = lexerSpecTokenClass(specIndex);
+      const tokenClass = lexerPublicTokenClass(runtimeTokenClass);
+      const payload = lexerSpecPayload(specIndex);
+      const terminal = lexerSpecTerminal(specIndex);
+      if (payload !== NO_LEXER_SPEC) {
+        if (
+          lexerTokenEmitStatus(runtimeTokenClass, preserveTrivia ? 1 : 0) ===
+            LEXER_TOKEN_EMIT_TOKEN
+        ) {
           const handle = parserTokenNew(
             tokenClass,
             payload,

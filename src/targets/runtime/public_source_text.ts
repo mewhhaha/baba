@@ -37,7 +37,7 @@ ${
 ): number {
   const leadUnit = sourceTextCodeUnitAt(sourceText, offset);
   const trailOffset = offset + 1;
-  const hasTrail = trailOffset < sourceText.length ? 1 : 0;
+  const hasTrail = utf16HasCodeUnit(trailOffset, sourceText.length);
   const trailUnit = hasTrail === 1
     ? sourceTextCodeUnitAt(sourceText, trailOffset)
     : 0;

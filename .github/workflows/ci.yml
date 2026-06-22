@@ -28,6 +28,15 @@ jobs:
       - name: Install Tree-sitter CLI
         run: deno install -g -A npm:tree-sitter-cli@0.25.8
 
+      - uses: bytecodealliance/actions/wasm-tools/setup@v1
+
+      - uses: bytecodealliance/actions/wasmtime/setup@v1
+
+      - name: Check independent Wasm tools
+        run: |
+          wasm-tools --version
+          wasmtime --version
+
       - name: Check formatting
         run: deno fmt --check
 

@@ -30,10 +30,19 @@ import {
   createParserReducerRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
+  RUNTIME_ACCEPTED_ROOT_STATUS_DIRECT,
+  RUNTIME_ACCEPTED_ROOT_STATUS_FRAGMENT_VALUE,
+  RUNTIME_ACCEPTED_ROOT_STATUS_MISSING,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
   RUNTIME_ARENA_PROGRAM,
+  RUNTIME_DIAGNOSTIC_CODE_STATUS_MISMATCH,
+  RUNTIME_DIAGNOSTIC_CODE_STATUS_OK,
+  RUNTIME_DIAGNOSTIC_MERGE_BOTH,
+  RUNTIME_DIAGNOSTIC_MERGE_EMPTY,
+  RUNTIME_DIAGNOSTIC_MERGE_LEFT,
+  RUNTIME_DIAGNOSTIC_MERGE_RIGHT,
   RUNTIME_FIELD_ARRAY,
   RUNTIME_FIELD_ARRAY_VALUE_MISSING,
   RUNTIME_FIELD_ARRAY_VALUE_OK,
@@ -69,6 +78,8 @@ import {
   RUNTIME_LEXER_SPEC_STATUS_OK,
   RUNTIME_LEXER_SPEC_STATUS_UNKNOWN,
   RUNTIME_LEXER_SPEC_TRIVIA,
+  RUNTIME_LEXER_TOKEN_EMIT_SKIP,
+  RUNTIME_LEXER_TOKEN_EMIT_TOKEN,
   RUNTIME_LEXER_TOKEN_LITERAL,
   RUNTIME_LEXER_TOKEN_MAIN,
   RUNTIME_LEXER_TOKEN_TRIVIA,
@@ -342,6 +353,67 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const lexerPublicTokenRuntimeProgram: RuntimeLanguageProgram = {
+    ...lexerSpecBaseProgram,
+    name: "lexer_public_token_status_conformance",
+    entry: "main",
+    functions: [
+      ...lexerSpecBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("lexerPublicTokenClass", [
+                u32(RUNTIME_LEXER_TOKEN_LITERAL),
+              ]),
+              u32(100_000),
+            ),
+            add(
+              mul(
+                call("lexerPublicTokenClass", [
+                  u32(RUNTIME_LEXER_TOKEN_TRIVIA),
+                ]),
+                u32(10_000),
+              ),
+              add(
+                mul(
+                  call("lexerPublicTokenClass", [
+                    u32(RUNTIME_LEXER_TOKEN_MAIN),
+                  ]),
+                  u32(1_000),
+                ),
+                add(
+                  mul(
+                    call("lexerTokenEmitStatus", [
+                      u32(RUNTIME_LEXER_TOKEN_TRIVIA),
+                      u32(0),
+                    ]),
+                    u32(100),
+                  ),
+                  add(
+                    mul(
+                      call("lexerTokenEmitStatus", [
+                        u32(RUNTIME_LEXER_TOKEN_TRIVIA),
+                        u32(1),
+                      ]),
+                      u32(10),
+                    ),
+                    call("lexerTokenEmitStatus", [
+                      u32(RUNTIME_LEXER_TOKEN_MAIN),
+                      u32(0),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const lexerScanRuntimeProgram: RuntimeLanguageProgram = {
     ...lexerScanBaseProgram,
     name: "lexer_scan_conformance",
@@ -388,6 +460,33 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                 mul(call("lexerScanBestSpec", []), u32(10)),
                 call("lexerScanBestEnd", []),
               ),
+            ),
+          },
+        ],
+      },
+    ],
+  };
+  const lexerScanBoundaryRuntimeProgram: RuntimeLanguageProgram = {
+    ...lexerScanBaseProgram,
+    name: "lexer_scan_boundary_conformance",
+    entry: "main",
+    functions: [
+      ...lexerScanBaseProgram.functions,
+      {
+        name: "main",
+        locals: [{ name: "discard", type: "u32" }],
+        result: "u32",
+        body: [
+          setLocal("discard", call("lexerScanReset", [])),
+          setLocal("discard", call("lexerScanAdvance", [u32(0x41)])),
+          {
+            kind: "return",
+            expression: add(
+              mul(
+                call("lexerScanNextOffset", [u32(7), u32(0x1f600)]),
+                u32(100),
+              ),
+              call("lexerScanCandidateEnd", [u32(7)]),
             ),
           },
         ],
@@ -2248,6 +2347,112 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserDiagnosticMergeStatusProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_diagnostic_merge_status",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserDiagnosticMergeStatus", [u32(0), u32(0)]),
+              u32(1_000),
+            ),
+            add(
+              mul(
+                call("parserDiagnosticMergeStatus", [u32(2), u32(0)]),
+                u32(100),
+              ),
+              add(
+                mul(
+                  call("parserDiagnosticMergeStatus", [u32(0), u32(3)]),
+                  u32(10),
+                ),
+                call("parserDiagnosticMergeStatus", [u32(2), u32(3)]),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserDiagnosticCodeStatusProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_diagnostic_code_status",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserDiagnosticCodeStatus", [u32(7), u32(7)]),
+              u32(10),
+            ),
+            call("parserDiagnosticCodeStatus", [u32(7), u32(8)]),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserTraceTokenStreamPublicIndexProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_trace_token_stream_public_index",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserTraceTokenStreamPublicIndex", [u32(2), u32(5)]),
+              u32(10),
+            ),
+            call("parserTraceTokenStreamPublicIndex", [u32(5), u32(5)]),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserAcceptedRootStatusProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_accepted_root_status",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserAcceptedRootStatus", [u32(1), u32(0), u32(0)]),
+              u32(100),
+            ),
+            add(
+              mul(
+                call("parserAcceptedRootStatus", [u32(0), u32(1), u32(1)]),
+                u32(10),
+              ),
+              call("parserAcceptedRootStatus", [u32(0), u32(1), u32(0)]),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserRuleNodeChildListStatusProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_rule_node_child_list_status_conformance",
@@ -3598,6 +3803,31 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     },
     {
+      name: "runtime diagnostic merge helper classifies empty sides",
+      program: parserDiagnosticMergeStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_DIAGNOSTIC_MERGE_EMPTY * 1_000 +
+          RUNTIME_DIAGNOSTIC_MERGE_LEFT * 100 +
+          RUNTIME_DIAGNOSTIC_MERGE_RIGHT * 10 +
+          RUNTIME_DIAGNOSTIC_MERGE_BOTH,
+      },
+    },
+    {
+      name: "runtime diagnostic code helper validates record payloads",
+      program: parserDiagnosticCodeStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_DIAGNOSTIC_CODE_STATUS_OK * 10 +
+          RUNTIME_DIAGNOSTIC_CODE_STATUS_MISMATCH,
+      },
+    },
+    {
+      name: "runtime trace token-stream helper clamps public token indexes",
+      program: parserTraceTokenStreamPublicIndexProgram,
+      expected: { kind: "value", value: 25 },
+    },
+    {
       name: "runtime trace token-stream helper classifies parser input tokens",
       program: parserTraceTokenStreamStatusProgram,
       expected: {
@@ -3607,6 +3837,16 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_TRACE_TOKEN_STREAM_EMIT * 100 +
           RUNTIME_TRACE_TOKEN_STREAM_SKIP * 10 +
           RUNTIME_TRACE_TOKEN_STREAM_STOP,
+      },
+    },
+    {
+      name: "runtime accepted-root helper classifies replay values",
+      program: parserAcceptedRootStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_ACCEPTED_ROOT_STATUS_DIRECT * 100 +
+          RUNTIME_ACCEPTED_ROOT_STATUS_FRAGMENT_VALUE * 10 +
+          RUNTIME_ACCEPTED_ROOT_STATUS_MISSING,
       },
     },
     {
@@ -3887,18 +4127,27 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                     u32(0),
                     u32(0),
                   ]),
-                  call("utf16CodePointFromUnits", [
-                    u32(0x41),
-                    u32(0xde00),
-                    u32(1),
-                  ]),
+                  add(
+                    call("utf16CodePointFromUnits", [
+                      u32(0x41),
+                      u32(0xde00),
+                      u32(1),
+                    ]),
+                    add(
+                      mul(
+                        call("utf16HasCodeUnit", [u32(0), u32(1)]),
+                        u32(10),
+                      ),
+                      call("utf16HasCodeUnit", [u32(1), u32(1)]),
+                    ),
+                  ),
                 ),
               ),
             }],
           },
         ],
       },
-      expected: { kind: "value", value: 183_934 },
+      expected: { kind: "value", value: 183_944 },
     },
     {
       name: "DFA transition uses ASCII fast table hits",
@@ -3967,6 +4216,24 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL * 10 +
           RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL,
       },
+    },
+    {
+      name: "lexer public token helpers classify emitted token records",
+      program: lexerPublicTokenRuntimeProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_PUBLIC_TOKEN_LITERAL * 100_000 +
+          RUNTIME_PUBLIC_TOKEN_TRIVIA * 10_000 +
+          RUNTIME_PUBLIC_TOKEN_MAIN * 1_000 +
+          RUNTIME_LEXER_TOKEN_EMIT_SKIP * 100 +
+          RUNTIME_LEXER_TOKEN_EMIT_TOKEN * 10 +
+          RUNTIME_LEXER_TOKEN_EMIT_TOKEN,
+      },
+    },
+    {
+      name: "lexer scan boundary helpers compute source offsets",
+      program: lexerScanBoundaryRuntimeProgram,
+      expected: { kind: "value", value: 908 },
     },
     {
       name: "parser table lookup finds shift actions",

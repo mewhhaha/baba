@@ -94,18 +94,87 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
       ),
     );
 
-    const withoutTrivia = tsLexed.tokens.filter((token: RuntimeToken) =>
+    const tsWithoutTrivia = tsLexed.tokens.filter((token: RuntimeToken) =>
+      token.channel !== "trivia"
+    );
+    const wasmWithoutTrivia = wasmLexed.tokens.filter((token: RuntimeToken) =>
       token.channel !== "trivia"
     );
     assertJsonEquals(
-      normalizeParseResult(runtimes.ts.parseTokens(source, withoutTrivia)),
-      normalizeParseResult(runtimes.wasm.parseTokens(source, withoutTrivia)),
+      normalizeParseResult(runtimes.ts.parseTokens(source, tsWithoutTrivia)),
+      normalizeParseResult(
+        runtimes.wasm.parseTokens(source, wasmWithoutTrivia),
+      ),
+    );
+    assertJsonEquals(
+      normalizeParseResult(
+        runtimes.ts.parseTokensUnchecked(source, tsWithoutTrivia),
+      ),
+      normalizeParseResult(
+        runtimes.wasm.parseTokensUnchecked(source, wasmWithoutTrivia),
+      ),
     );
 
-    const omittedMain = withoutTrivia.slice(1);
+    const omittedMain = tsWithoutTrivia.slice(1);
+    const omittedMainWasm = wasmWithoutTrivia.slice(1);
     assertJsonEquals(
       normalizeParseResult(runtimes.ts.parseTokens(source, omittedMain)),
-      normalizeParseResult(runtimes.wasm.parseTokens(source, omittedMain)),
+      normalizeParseResult(runtimes.wasm.parseTokens(source, omittedMainWasm)),
+    );
+
+    const malformedTs = tsWithoutTrivia.map((token: RuntimeToken) =>
+      token.type === "named" && token.kind === "IDENT" && token.text === "beta"
+        ? { ...token, span: { ...token.span, end: token.span.start } }
+        : token
+    );
+    const malformedWasm = wasmWithoutTrivia.map((token: RuntimeToken) =>
+      token.type === "named" && token.kind === "IDENT" && token.text === "beta"
+        ? { ...token, span: { ...token.span, end: token.span.start } }
+        : token
+    );
+    const strictMalformedTs = runtimes.ts.parseTokens(source, malformedTs);
+    const strictMalformedWasm = runtimes.wasm.parseTokens(
+      source,
+      malformedWasm,
+    );
+    assertJsonEquals(
+      normalizeParseResult(strictMalformedTs),
+      normalizeParseResult(strictMalformedWasm),
+    );
+    assertEquals(strictMalformedTs.ok, false);
+    assertEquals(strictMalformedWasm.ok, false);
+    assert(
+      strictMalformedTs.diagnostics.some((diagnostic) =>
+        diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
+      ),
+    );
+    assert(
+      strictMalformedWasm.diagnostics.some((diagnostic) =>
+        diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
+      ),
+    );
+
+    const uncheckedMalformedTs = runtimes.ts.parseTokensUnchecked(
+      source,
+      malformedTs,
+    );
+    const uncheckedMalformedWasm = runtimes.wasm.parseTokensUnchecked(
+      source,
+      malformedWasm,
+    );
+    assertJsonEquals(
+      normalizeParseResult(uncheckedMalformedTs),
+      normalizeParseResult(uncheckedMalformedWasm),
+    );
+    assert(
+      !uncheckedMalformedTs.diagnostics.some((diagnostic) =>
+        diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
+      ),
+    );
+    assert(
+      !uncheckedMalformedWasm.diagnostics.some((diagnostic) =>
+        diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
+      ),
     );
   } finally {
     await runtimes.cleanup();

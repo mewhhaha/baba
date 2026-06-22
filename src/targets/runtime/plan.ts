@@ -339,6 +339,7 @@ function runtimeTokenOverlapDiagnostics(
               tokenLabel(selected)
             } before ${tokenLabel(shadowed)} for this trivia input.`,
             span: shadowed.span,
+            related: overlapRelated(left, right),
           });
           continue;
         }
@@ -357,10 +358,29 @@ function runtimeTokenOverlapDiagnostics(
               tokenLabel(shadowed)
             } cannot reach the parser for this input.`,
             span: selected.span,
+            related: overlapRelated(left, right),
           });
           continue;
         }
-        if (shadowed.kind === "skip") continue;
+        if (shadowed.kind === "skip") {
+          diagnostics.push({
+            code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
+            severity: "warning",
+            backend: config.backend,
+            message: `${tokenLabel(left)} and ${
+              tokenLabel(right)
+            } can both match ${
+              JSON.stringify(witness)
+            }. Priority ${selected.priority} selects ${
+              tokenLabel(selected)
+            } before ${
+              tokenLabel(shadowed)
+            }; the parser token remains reachable, but this input is not trivia for portable targets.`,
+            span: shadowed.span,
+            related: overlapRelated(left, right),
+          });
+          continue;
+        }
         diagnostics.push({
           code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
           severity: "error",
@@ -375,6 +395,7 @@ function runtimeTokenOverlapDiagnostics(
             tokenLabel(shadowed)
           } may be unavailable in parser states that expect it.`,
           span: shadowed.span,
+          related: overlapRelated(left, right),
         });
         continue;
       }
@@ -388,6 +409,7 @@ function runtimeTokenOverlapDiagnostics(
           tokenLabel(shadowed)
         } for this input by declaration order.`,
         span: right.span,
+        related: overlapRelated(left, right),
       });
     }
   }
@@ -472,6 +494,7 @@ function runtimeLiteralOverlapDiagnostics(
             JSON.stringify(witness)
           }. Trivia cannot overlap a reachable literal because that literal may be skipped before the parser can consume it.`,
           span: token.span,
+          related: tokenLiteralOverlapRelated(token, literal),
         });
         continue;
       }
@@ -487,6 +510,7 @@ function runtimeLiteralOverlapDiagnostics(
           tokenLabel(token)
         } before the literal, making the literal unavailable for this input.`,
         span: token.span,
+        related: tokenLiteralOverlapRelated(token, literal),
       });
     }
   }
@@ -685,6 +709,29 @@ function retargetRuntimeMessage(message: string, label: string): string {
 
 function tokenLabel(token: AnalyzedGrammar["tokens"][number]): string {
   return `${token.kind} ${token.name}`;
+}
+
+function overlapRelated(
+  left: AnalyzedGrammar["tokens"][number],
+  right: AnalyzedGrammar["tokens"][number],
+): NonNullable<Diagnostic["related"]> {
+  return [
+    { message: `Left declaration: ${tokenLabel(left)}`, span: left.span },
+    { message: `Right declaration: ${tokenLabel(right)}`, span: right.span },
+  ];
+}
+
+function tokenLiteralOverlapRelated(
+  token: AnalyzedGrammar["tokens"][number],
+  literal: AnalyzedGrammar["literals"][number],
+): NonNullable<Diagnostic["related"]> {
+  return [
+    { message: `Token declaration: ${tokenLabel(token)}`, span: token.span },
+    {
+      message: `Literal occurrence: ${JSON.stringify(literal.value)}`,
+      span: literal.span,
+    },
+  ];
 }
 
 function selectNamedToken(

@@ -26,11 +26,18 @@ import {
   createParserProductionRuntimeProgram,
   createParserReducerRuntimeProgram,
   createParserTraceRuntimeProgram,
+  RUNTIME_ACCEPTED_ROOT_STATUS_DIRECT,
+  RUNTIME_ACCEPTED_ROOT_STATUS_FRAGMENT_VALUE,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_NONE,
   RUNTIME_ACTION_PAYLOAD_MASK,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
+  RUNTIME_DIAGNOSTIC_CODE_STATUS_OK,
+  RUNTIME_DIAGNOSTIC_MERGE_BOTH,
+  RUNTIME_DIAGNOSTIC_MERGE_EMPTY,
+  RUNTIME_DIAGNOSTIC_MERGE_LEFT,
+  RUNTIME_DIAGNOSTIC_MERGE_RIGHT,
   RUNTIME_FIELD_ARRAY,
   RUNTIME_FIELD_ARRAY_VALUE_MISSING,
   RUNTIME_FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA,
@@ -406,6 +413,8 @@ const TRACE_STATUS_BRANCH_LIMIT = ${RUNTIME_TRACE_STATUS_BRANCH_LIMIT};
 const REPLAY_ACTION_SHIFT = ${RUNTIME_REPLAY_ACTION_STATUS_SHIFT};
 const REPLAY_ACTION_REDUCE = ${RUNTIME_REPLAY_ACTION_STATUS_REDUCE};
 const REPLAY_ACTION_ACCEPT = ${RUNTIME_REPLAY_ACTION_STATUS_ACCEPT};
+const ACCEPTED_ROOT_DIRECT = ${RUNTIME_ACCEPTED_ROOT_STATUS_DIRECT};
+const ACCEPTED_ROOT_FRAGMENT_VALUE = ${RUNTIME_ACCEPTED_ROOT_STATUS_FRAGMENT_VALUE};
 const NO_GOTO = ${RUNTIME_NO_GOTO};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
 const NO_PRODUCTION = ${RUNTIME_NO_PRODUCTION};
@@ -457,6 +466,11 @@ const FIELD_SCALAR_VALUE_NULL = ${RUNTIME_FIELD_SCALAR_VALUE_NULL};
 const FIELD_FINAL_BUILD_ARRAY = ${RUNTIME_FIELD_FINAL_BUILD_ARRAY};
 const FIELD_FINAL_BUILD_REQUIRED_MISSING = ${RUNTIME_FIELD_FINAL_BUILD_REQUIRED_MISSING};
 const FIELD_FINAL_BUILD_TOO_MANY = ${RUNTIME_FIELD_FINAL_BUILD_TOO_MANY};
+const DIAGNOSTIC_MERGE_EMPTY = ${RUNTIME_DIAGNOSTIC_MERGE_EMPTY};
+const DIAGNOSTIC_MERGE_LEFT = ${RUNTIME_DIAGNOSTIC_MERGE_LEFT};
+const DIAGNOSTIC_MERGE_RIGHT = ${RUNTIME_DIAGNOSTIC_MERGE_RIGHT};
+const DIAGNOSTIC_MERGE_BOTH = ${RUNTIME_DIAGNOSTIC_MERGE_BOTH};
+const DIAGNOSTIC_CODE_OK = ${RUNTIME_DIAGNOSTIC_CODE_STATUS_OK};
 const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
 const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
@@ -692,7 +706,10 @@ function compactTraceTokenStream(
     const token = tokens[index] ?? materializeSourceEofToken(sourceText);
     const traceTokenStatus = traceTokenStreamStatus(token);
     streamTokens[streamTokenCount] = token;
-    streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
+    streamTokenIndices[streamTokenCount] = parserTraceTokenStreamPublicIndex(
+      index,
+      tokens.length,
+    );
     streamTokenCount++;
     terminals[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
     terminalCount++;
@@ -780,7 +797,10 @@ function compactTokenStream(
     const token = tokens[index] ?? materializeSourceEofToken(sourceText);
     const traceTokenStatus = traceTokenStreamStatus(token);
     streamTokens[streamTokenCount] = token;
-    streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
+    streamTokenIndices[streamTokenCount] = parserTraceTokenStreamPublicIndex(
+      index,
+      tokens.length,
+    );
     streamTokenCount++;
     terminalIds[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
     terminalCount++;
@@ -1295,13 +1315,21 @@ function acceptedParseResult(
   tokens: readonly Token[],
   accepted: unknown,
 ): ParseResult<RootNode> {
-  const root = isRuleNode(accepted)
-    ? accepted as RootNode
-    : isFragment(accepted) && isRuleNode(accepted.value)
-    ? accepted.value as RootNode
-    : null;
-  if (root) {
-    return successfulParseResult(sourceText.source, tokens, root);
+  const acceptedFragment = isFragment(accepted) ? accepted : null;
+  const status = parserAcceptedRootStatus(
+    isRuleNode(accepted) ? 1 : 0,
+    acceptedFragment ? 1 : 0,
+    acceptedFragment && isRuleNode(acceptedFragment.value) ? 1 : 0,
+  );
+  if (status === ACCEPTED_ROOT_DIRECT) {
+    return successfulParseResult(sourceText.source, tokens, accepted as RootNode);
+  }
+  if (status === ACCEPTED_ROOT_FRAGMENT_VALUE) {
+    return successfulParseResult(
+      sourceText.source,
+      tokens,
+      acceptedFragment!.value as RootNode,
+    );
   }
   return failedParseResult(
     sourceText.source,

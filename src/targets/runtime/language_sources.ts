@@ -50,6 +50,8 @@ export const RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA = 4;
 export const RUNTIME_LEXICAL_TOKEN_STATUS_OK = 0;
 export const RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN = 1;
 export const RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL = 2;
+export const RUNTIME_LEXER_TOKEN_EMIT_SKIP = 0;
+export const RUNTIME_LEXER_TOKEN_EMIT_TOKEN = 1;
 export const RUNTIME_TOKEN_STREAM_STATUS_OK = 0;
 export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN = 1;
 export const RUNTIME_TOKEN_STREAM_STATUS_GAP = 2;
@@ -82,6 +84,9 @@ export const RUNTIME_REPLAY_ACTION_STATUS_UNKNOWN = 0;
 export const RUNTIME_REPLAY_ACTION_STATUS_SHIFT = 1;
 export const RUNTIME_REPLAY_ACTION_STATUS_REDUCE = 2;
 export const RUNTIME_REPLAY_ACTION_STATUS_ACCEPT = 3;
+export const RUNTIME_ACCEPTED_ROOT_STATUS_MISSING = 0;
+export const RUNTIME_ACCEPTED_ROOT_STATUS_DIRECT = 1;
+export const RUNTIME_ACCEPTED_ROOT_STATUS_FRAGMENT_VALUE = 2;
 export const RUNTIME_NO_GOTO = 0xffff_ffff;
 export const RUNTIME_NO_PRODUCTION = 0xffff_ffff;
 export const RUNTIME_REDUCER_UNKNOWN = 0;
@@ -169,6 +174,12 @@ export const RUNTIME_FIELD_FINAL_BUILD_ARRAY = 0;
 export const RUNTIME_FIELD_FINAL_BUILD_SCALAR = 1;
 export const RUNTIME_FIELD_FINAL_BUILD_REQUIRED_MISSING = 2;
 export const RUNTIME_FIELD_FINAL_BUILD_TOO_MANY = 3;
+export const RUNTIME_DIAGNOSTIC_MERGE_EMPTY = 0;
+export const RUNTIME_DIAGNOSTIC_MERGE_LEFT = 1;
+export const RUNTIME_DIAGNOSTIC_MERGE_RIGHT = 2;
+export const RUNTIME_DIAGNOSTIC_MERGE_BOTH = 3;
+export const RUNTIME_DIAGNOSTIC_CODE_STATUS_OK = 0;
+export const RUNTIME_DIAGNOSTIC_CODE_STATUS_MISMATCH = 1;
 
 const TRACE_STATUS = 1;
 const TRACE_ERROR_STATE = 2;
@@ -368,12 +379,28 @@ const UTF16_CODE_POINT_FROM_UNITS_FUNCTION: RuntimeLanguageFunction = {
   ],
 };
 
+const UTF16_HAS_CODE_UNIT_FUNCTION: RuntimeLanguageFunction = {
+  name: "utf16HasCodeUnit",
+  parameters: [
+    { name: "offset", type: "u32" },
+    { name: "length", type: "u32" },
+  ],
+  result: "u32",
+  body: [{
+    kind: "if",
+    condition: lt(local("offset"), local("length")),
+    consequent: [{ kind: "return", expression: u32(1) }],
+    alternate: [{ kind: "return", expression: u32(0) }],
+  }],
+};
+
 export const UTF16_CODE_POINT_WIDTH_PROGRAM: RuntimeLanguageProgram = {
   name: "utf16_code_point_width",
   entry: "utf16CodePointWidth",
   functions: [
     UTF16_CODE_POINT_WIDTH_FUNCTION,
     UTF16_CODE_POINT_FROM_UNITS_FUNCTION,
+    UTF16_HAS_CODE_UNIT_FUNCTION,
   ],
 };
 
@@ -473,13 +500,16 @@ export function createLexerRuntimeProgram(
     functions: [
       UTF16_CODE_POINT_WIDTH_FUNCTION,
       UTF16_CODE_POINT_FROM_UNITS_FUNCTION,
+      UTF16_HAS_CODE_UNIT_FUNCTION,
       dfaTransitionFunction(input.asciiTransitions !== null),
       ...(input.accepts
         ? [
           lexerScanResetFunction(),
           lexerScanAdvanceFunction(),
+          lexerScanNextOffsetFunction(),
           lexerScanBestSpecFunction(),
           lexerScanBestEndFunction(),
+          lexerScanCandidateEndFunction(),
         ]
         : []),
       ...(input.specs ? lexerSpecFunctions(input.specs.length) : []),
@@ -1744,6 +1774,8 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserDiagnosticSpanEndFunction(),
     parserDiagnosticDetailFunction(),
     parserDiagnosticDetailKindIdFunction(),
+    parserDiagnosticCodeStatusFunction(),
+    parserDiagnosticMergeStatusFunction(),
     parserTokenStreamSpanBoundsStatusFunction(),
     parserTokenStreamSpanPositionStatusFunction(),
     parserTokenStreamWidthStatusFunction(),
@@ -1754,8 +1786,10 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamFinalStatusFunction(),
     parserTokenStreamPublicTokenStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
+    parserTraceTokenStreamPublicIndexFunction(),
     parserTraceTerminalFunction(),
     parserShiftedTokenStatusFunction(),
+    parserAcceptedRootStatusFunction(),
     parserRuleNodeFromFragmentFunction(),
     parserRuleNodeRuleIdFunction(),
     parserRuleNodeSpanStartFunction(),
@@ -2691,6 +2725,74 @@ function parserDiagnosticDetailKindIdFunction(): RuntimeLanguageFunction {
   };
 }
 
+function parserDiagnosticCodeStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserDiagnosticCodeStatus",
+    parameters: [
+      { name: "actual", type: "u32" },
+      { name: "expected", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("actual"), local("expected")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_DIAGNOSTIC_CODE_STATUS_OK),
+        }],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_DIAGNOSTIC_CODE_STATUS_MISMATCH),
+        }],
+      },
+    ],
+  };
+}
+
+function parserDiagnosticMergeStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserDiagnosticMergeStatus",
+    parameters: [
+      { name: "leftCount", type: "u32" },
+      { name: "rightCount", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("leftCount"), u32(0)),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(local("rightCount"), u32(0)),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_DIAGNOSTIC_MERGE_EMPTY),
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(RUNTIME_DIAGNOSTIC_MERGE_RIGHT),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(local("rightCount"), u32(0)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_DIAGNOSTIC_MERGE_LEFT),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_DIAGNOSTIC_MERGE_BOTH),
+      },
+    ],
+  };
+}
+
 function parserTokenStreamSpanBoundsStatusFunction(): RuntimeLanguageFunction {
   return {
     name: "parserTokenStreamSpanBoundsStatus",
@@ -3218,6 +3320,31 @@ function parserTraceTokenStreamStatusFunction(): RuntimeLanguageFunction {
   };
 }
 
+function parserTraceTokenStreamPublicIndexFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceTokenStreamPublicIndex",
+    parameters: [
+      { name: "index", type: "u32" },
+      { name: "tokenCount", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: ltu(local("index"), local("tokenCount")),
+        consequent: [{
+          kind: "return",
+          expression: local("index"),
+        }],
+        alternate: [{
+          kind: "return",
+          expression: local("tokenCount"),
+        }],
+      },
+    ],
+  };
+}
+
 function parserTraceTerminalFunction(): RuntimeLanguageFunction {
   return {
     name: "parserTraceTerminal",
@@ -3293,6 +3420,46 @@ function parserShiftedTokenStatusFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_SHIFTED_TOKEN_STATUS_INVALID),
+      },
+    ],
+  };
+}
+
+function parserAcceptedRootStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserAcceptedRootStatus",
+    parameters: [
+      { name: "isRuleNode", type: "u32" },
+      { name: "isFragment", type: "u32" },
+      { name: "fragmentValueIsRuleNode", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("isRuleNode"), u32(1)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_ACCEPTED_ROOT_STATUS_DIRECT),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("isFragment"), u32(1)),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(local("fragmentValueIsRuleNode"), u32(1)),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_ACCEPTED_ROOT_STATUS_FRAGMENT_VALUE),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_ACCEPTED_ROOT_STATUS_MISSING),
       },
     ],
   };
@@ -3640,6 +3807,26 @@ function lexerScanAdvanceFunction(): RuntimeLanguageFunction {
   };
 }
 
+function lexerScanNextOffsetFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerScanNextOffset",
+    parameters: [
+      { name: "offset", type: "u32" },
+      { name: "codePoint", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: add(
+          local("offset"),
+          call("utf16CodePointWidth", [local("codePoint")]),
+        ),
+      },
+    ],
+  };
+}
+
 function lexerScanBestSpecFunction(): RuntimeLanguageFunction {
   return {
     name: "lexerScanBestSpec",
@@ -3666,6 +3853,25 @@ function lexerScanBestEndFunction(): RuntimeLanguageFunction {
   };
 }
 
+function lexerScanCandidateEndFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerScanCandidateEnd",
+    parameters: [
+      { name: "startOffset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: add(
+          local("startOffset"),
+          call("lexerScanBestEnd", []),
+        ),
+      },
+    ],
+  };
+}
+
 function lexerSpecFunctions(
   specCount: number,
   options: { includePublicTokenStatus?: boolean } = {},
@@ -3685,6 +3891,8 @@ function lexerSpecFunctions(
       2,
       RUNTIME_NO_TERMINAL,
     ),
+    lexerPublicTokenClassFunction(),
+    lexerTokenEmitStatusFunction(),
   ];
   if (options.includePublicTokenStatus) {
     functions.push(lexerSpecPublicTokenStatusFunction(specCount));
@@ -3704,6 +3912,72 @@ function lexerSpecTable(
       payload < 0 ? RUNTIME_NO_LEXER_SPEC : payload,
       terminal < 0 ? RUNTIME_NO_TERMINAL : terminal,
     ]),
+  };
+}
+
+function lexerPublicTokenClassFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerPublicTokenClass",
+    parameters: [
+      { name: "tokenClass", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenClass"),
+          u32(RUNTIME_LEXER_TOKEN_LITERAL),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenClass"),
+          u32(RUNTIME_LEXER_TOKEN_TRIVIA),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+        }],
+      },
+      { kind: "return", expression: u32(RUNTIME_PUBLIC_TOKEN_MAIN) },
+    ],
+  };
+}
+
+function lexerTokenEmitStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerTokenEmitStatus",
+    parameters: [
+      { name: "tokenClass", type: "u32" },
+      { name: "preserveTrivia", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenClass"),
+          u32(RUNTIME_LEXER_TOKEN_TRIVIA),
+        ),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(local("preserveTrivia"), u32(0)),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_LEXER_TOKEN_EMIT_SKIP),
+            }],
+          },
+        ],
+      },
+      { kind: "return", expression: u32(RUNTIME_LEXER_TOKEN_EMIT_TOKEN) },
+    ],
   };
 }
 

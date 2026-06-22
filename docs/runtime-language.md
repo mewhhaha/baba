@@ -33,58 +33,66 @@ remain a future step before Baba can claim the full parser runtime is emitted
 from one runtime-language implementation.
 
 The first runtime-language-backed parser helpers are used by generated
-TypeScript lexers and parsers: `utf16CodePointFromUnits` decodes UTF-16 code
-units into code points, `utf16CodePointWidth` advances over UTF-16 code points,
-`dfaTransition` performs DFA transition lookup from generated read-only tables,
-and `lexerScan*` helpers track longest-match accepting candidates from generated
-DFA accept tables. `lexerSpecTokenClass`, `lexerSpecPayload`, and
-`lexerSpecTerminal` map accepted lexer spec indexes to token object
-classification data and parser terminal ids for generated TypeScript
-`parse(source)`, while `lexerSpecFlags` remains the lower-level table helper.
-Standalone TypeScript lexers and generated Wasm JavaScript adapters allocate
-runtime-language token records for matched literals, named tokens, preserved
-trivia, lexical error tokens, and EOF tokens, then read class, payload,
-terminal, and span data back through `parserToken*` accessors before wrapping
-public API token objects through one shared runtime-target materializer helper.
-Lexical unexpected-character diagnostics are allocated through one shared
-runtime-target lex diagnostic materializer in both generated TypeScript lexers
-and generated Wasm JavaScript adapters. Public lex result objects are allocated
-through one shared runtime-target lex result materializer in both lexer targets.
-The generated materializer stores the parser-terminal hint as a non-enumerable
-`__babaTerminal` property on main and literal public tokens. That hint is
-plan-local provenance for generated parser fast paths, not a public token API,
-and consumers should not serialize, mutate, or reuse it across parser plans.
-External token streams keep public token-kind/literal spelling at the API
-boundary, but generated parsers map those spellings to lexer spec indexes and
-use the same runtime-language helpers for channel and terminal classification.
-`lexerSpecPublicTokenStatus` decides whether a mapped public literal/main/trivia
-token is compatible with the spec row; TypeScript still validates object
-shape/text and emits public diagnostics. `parserTokenStreamSpanBoundsStatus`,
-`parserTokenStreamSpanPositionStatus`, `parserTokenStreamWidthStatus`, and
-`parserTokenStreamEofStatus` classify external token-stream span ordering and
-EOF-shape errors before TypeScript allocates public diagnostics.
-`parserTokenStreamGapTokenStatus` classifies canonical lexer tokens inside
-omitted source gaps as safely omitted trivia or invalid nontrivia source.
-`parserTokenStreamTokenMatchStatus` compares canonical and supplied token
-numeric identity, terminal, spec index, and span after host text/channel checks.
-`parserTokenStreamCanonicalMatchStatus` classifies canonical lexer replay
-advancement as a supplied-token match, an omitted-trivia skip, or a mismatch.
-`parserTokenStreamFinalStatus` classifies end-of-stream EOF placement and
-trailing source gaps before TypeScript allocates final token-stream diagnostics.
-`parserTokenStreamPublicTokenStatus` classifies public literal/named/error token
-shape after host type/channel/text spelling is mapped to numeric classes.
-`lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
-accepted, lexical error tokens, or not in the parser terminal set before
-TypeScript allocates the public diagnostic object.
+TypeScript lexers and parsers: `utf16HasCodeUnit` classifies UTF-16 source-unit
+availability, `utf16CodePointFromUnits` decodes UTF-16 code units into code
+points, `utf16CodePointWidth` advances over UTF-16 code points, `dfaTransition`
+performs DFA transition lookup from generated read-only tables, and `lexerScan*`
+helpers track longest-match accepting candidates from generated DFA accept
+tables. Generated TypeScript lexer source access still reads host-owned strings,
+but `lexerScanNextOffset` and `lexerScanCandidateEnd` own the numeric
+UTF-16/code-point offset advancement and accepted-length accounting.
+`lexerSpecTokenClass`, `lexerSpecPayload`, and `lexerSpecTerminal` map accepted
+lexer spec indexes to token object classification data and parser terminal ids
+for generated TypeScript `parse(source)`, while `lexerSpecFlags` remains the
+lower-level table helper. Standalone TypeScript lexers and generated Wasm
+JavaScript adapters allocate runtime-language token records for matched
+literals, named tokens, preserved trivia, lexical error tokens, and EOF tokens,
+then read class, payload, terminal, and span data back through `parserToken*`
+accessors before wrapping public API token objects through one shared
+runtime-target materializer helper. `lexerPublicTokenClass` and
+`lexerTokenEmitStatus` own the literal/main/trivia public class and
+preserve-trivia emission decisions used by both generated TypeScript lexers and
+generated Wasm JavaScript adapters. Lexical unexpected-character diagnostics are
+allocated through one shared runtime-target lex diagnostic materializer in both
+generated TypeScript lexers and generated Wasm JavaScript adapters. Public lex
+result objects are allocated through one shared runtime-target lex result
+materializer in both lexer targets. The generated materializer stores the
+parser-terminal hint as a non-enumerable `__babaTerminal` property on main and
+literal public tokens. That hint is plan-local provenance for generated parser
+fast paths, not a public token API, and consumers should not serialize, mutate,
+or reuse it across parser plans. External token streams keep public
+token-kind/literal spelling at the API boundary, but generated parsers map those
+spellings to lexer spec indexes and use the same runtime-language helpers for
+channel and terminal classification. `lexerSpecPublicTokenStatus` decides
+whether a mapped public literal/main/trivia token is compatible with the spec
+row; TypeScript still validates object shape/text and emits public diagnostics.
+`parserTokenStreamSpanBoundsStatus`, `parserTokenStreamSpanPositionStatus`,
+`parserTokenStreamWidthStatus`, and `parserTokenStreamEofStatus` classify
+external token-stream span ordering and EOF-shape errors before TypeScript
+allocates public diagnostics. `parserTokenStreamGapTokenStatus` classifies
+canonical lexer tokens inside omitted source gaps as safely omitted trivia or
+invalid nontrivia source. `parserTokenStreamTokenMatchStatus` compares canonical
+and supplied token numeric identity, terminal, spec index, and span after host
+text/channel checks. `parserTokenStreamCanonicalMatchStatus` classifies
+canonical lexer replay advancement as a supplied-token match, an omitted-trivia
+skip, or a mismatch. `parserTokenStreamFinalStatus` classifies end-of-stream EOF
+placement and trailing source gaps before TypeScript allocates final
+token-stream diagnostics. `parserTokenStreamPublicTokenStatus` classifies public
+literal/named/error token shape after host type/channel/text spelling is mapped
+to numeric classes. `lexerTokenDiagnosticStatus` classifies external tokens as
+diagnostically accepted, lexical error tokens, or not in the parser terminal set
+before TypeScript allocates the public diagnostic object.
 `parserTraceTokenStreamStatus` classifies public token records as parser-trace
 input, skippable trivia, or EOF stop tokens before generated TypeScript parsers
-and Wasm adapters compact public tokens into terminal streams. Deterministic
-parsers also call `parserTraceTerminal` to select EOF, trusted runtime, spec, or
-missing parser terminals before tracing. `parserShiftedTokenStatus` classifies
-literal/main public tokens as valid shifted CST token fragments and rejects
-trivia, lexical error, and EOF records before generated replay allocates runtime
-token fragments. Deterministic parsers use `parserAction`/`parserGoto` for
-parser table lookup, and conflict parsers use generated
+and Wasm adapters compact public tokens into terminal streams.
+`parserTraceTokenStreamPublicIndex` owns the public-token-index sentinel used
+when the compacted trace reaches synthetic EOF. Deterministic parsers also call
+`parserTraceTerminal` to select EOF, trusted runtime, spec, or missing parser
+terminals before tracing. `parserShiftedTokenStatus` classifies literal/main
+public tokens as valid shifted CST token fragments and rejects trivia, lexical
+error, and EOF records before generated replay allocates runtime token
+fragments. Deterministic parsers use `parserAction`/`parserGoto` for parser
+table lookup, and conflict parsers use generated
 `parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
 fan-out and goto lookup. Generated parsers also use the `parserExpectedStart`
 and `parserExpectedEnd` helpers to map parser states to flattened
@@ -132,26 +140,31 @@ TypeScript parsers and Wasm adapters before those hosts allocate public
 diagnostics. Public parse diagnostics now allocate runtime-language diagnostic
 records first, read span data back through
 `parserDiagnosticSpanStart`/`parserDiagnosticSpanEnd`, and then materialize the
-public JavaScript diagnostic object at the API boundary. Generated TypeScript
-parsers and generated Wasm adapters allocate parse success/failure results
-through one shared runtime-target parse-result materializer, keeping the public
-discriminated union object shape centralized at the host boundary. Deterministic
-TypeScript parsers use a runtime-language `parserTrace` helper whose parser
-state stack and accepted-action trace are stored in arena-backed growable
-vectors for LR shift/reduce/accept control flow. Declared-conflict TypeScript
-parsers use a runtime-language conflict `parserTrace` helper whose active stack,
-accepted action trace, and saved branch snapshots are stored as arena-backed
-growable vectors before TypeScript replays the accepted action trace to build
-the CST. The core Wasm parser trace uses the same shared action kind/payload
-masks, and generated Wasm adapters now instantiate a runtime-language Wasm
-parser trace module for LR control flow, trace status classification, and trace
-action reads. The core Wasm module still owns lexing and low-level parser table
-lookup exports, but it no longer emits a separate `parse_trace` LR execution
-function. The same runtime-language source shapes are also compiled to Wasm in
-conformance tests. Because generated parser runtime code depends on
-runtime-language compiler output, the checked runtime implementation manifest
-includes both runtime language sources, the Stage-0 compiler, and the checked
-runtime-language artifact manifest.
+public JavaScript diagnostic object at the API boundary. Diagnostic-list merge
+decisions use the runtime-language `parserDiagnosticMergeStatus` helper for
+empty-left/empty-right/both classification while the host still owns JavaScript
+array allocation and identity. Generated TypeScript parsers and generated Wasm
+adapters allocate parse success/failure results through one shared
+runtime-target parse-result materializer, using `parserAcceptedRootStatus` to
+classify direct rule-node roots, fragment-value rule-node roots, and invalid
+accepted roots while keeping the public discriminated union object shape
+centralized at the host boundary. Deterministic TypeScript parsers use a
+runtime-language `parserTrace` helper whose parser state stack and
+accepted-action trace are stored in arena-backed growable vectors for LR
+shift/reduce/accept control flow. Declared-conflict TypeScript parsers use a
+runtime-language conflict `parserTrace` helper whose active stack, accepted
+action trace, and saved branch snapshots are stored as arena-backed growable
+vectors before TypeScript replays the accepted action trace to build the CST.
+The core Wasm parser trace uses the same shared action kind/payload masks, and
+generated Wasm adapters now instantiate a runtime-language Wasm parser trace
+module for LR control flow, trace status classification, and trace action reads.
+The core Wasm module still owns lexing and low-level parser table lookup
+exports, but it no longer emits a separate `parse_trace` LR execution function.
+The same runtime-language source shapes are also compiled to Wasm in conformance
+tests. Because generated parser runtime code depends on runtime-language
+compiler output, the checked runtime implementation manifest includes both
+runtime language sources, the Stage-0 compiler, and the checked runtime-language
+artifact manifest.
 
 ## Current Executable Subset
 
@@ -232,10 +245,11 @@ execute both outputs and compare returned values or traps.
   validation route host source access through one shared `SourceTextBoundary`
   helper. The boundary carries the immutable source string and UTF-16 length and
   owns generated slice, text-match, and code-unit reads. TypeScript lexer
-  code-point decoding is delegated from that boundary to runtime-language
-  `utf16CodePointFromUnits`. It is still a JavaScript host wrapper, but it is
-  the single generated handle contract to replace when dynamic host source
-  buffers are lowered into runtime-language handles.
+  code-point decoding delegates UTF-16 trail-unit availability to
+  `utf16HasCodeUnit` and surrogate decoding to `utf16CodePointFromUnits`. It is
+  still a JavaScript host wrapper, but it is the single generated handle
+  contract to replace when dynamic host source buffers are lowered into
+  runtime-language handles.
 - Generated JavaScript-hosted Wasm adapters treat `WasmSourceBuffer` values
   returned by `writeSource()` as adapter-owned source capabilities. The adapter
   tracks those buffers by object provenance and input epoch, rejects forged
@@ -255,6 +269,10 @@ execute both outputs and compare returned values or traps.
   statuses, adapter handle model, and numeric parser diagnostic IDs. Non-JS host
   tooling should consume the descriptor instead of scraping generated
   TypeScript.
+- CI installs `wasm-tools` and `wasmtime` so release checks validate the core
+  module outside Deno's JavaScript `WebAssembly.instantiate` path. Local tests
+  skip those independent-engine checks when the binaries are missing and still
+  exercise the JavaScript-hosted adapter path.
 - Generated JavaScript-hosted Wasm adapters export trace status constants and
   include both numeric `statusKind` and string `failureKind` fields on
   `parseTrace()` failures before public parser diagnostics are materialized.
@@ -275,6 +293,8 @@ execute both outputs and compare returned values or traps.
 - `utf16CodePointFromUnits(leadUnit, trailUnit, hasTrail)` combines a valid
   high-surrogate/low-surrogate pair into one scalar value and otherwise returns
   the lead code unit unchanged.
+- `utf16HasCodeUnit(offset, length)` returns `1` when a UTF-16 code-unit offset
+  is inside the source length and `0` at or beyond the end.
 - Scratch-memory growth traps if the requested capacity exceeds the Wasm-backed
   implementation limit.
 - Scratch-memory loads and stores trap on indexes outside the current capacity.
@@ -353,8 +373,9 @@ execute both outputs and compare returned values or traps.
 - Generated public parse diagnostics are emitted from one shared runtime-target
   diagnostic materializer helper. The helper allocates runtime diagnostic
   records, reads span data back from those records, asks the runtime-language
-  `parserDiagnosticDetailKindId` helper for the numeric detail payload kind, and
-  then materializes public JavaScript diagnostic objects.
+  `parserDiagnosticCodeStatus` helper to verify the runtime code matches the
+  allocated record, asks `parserDiagnosticDetailKindId` for the numeric detail
+  payload kind, and then materializes public JavaScript diagnostic objects.
 - Boundary failures visible to Baba users are structured diagnostics: grammar
   validation and target planning return compiler diagnostics, lexing returns
   `LexDiagnostic`, parsing returns `ParseDiagnostic`, invalid external token

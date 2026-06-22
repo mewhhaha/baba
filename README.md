@@ -181,6 +181,12 @@ arithmetic is checked against the 32-bit Wasm address space. The core module
 declares a maximum of 65,535 Wasm pages; the adapter checks the same page limit
 before calling `memory.grow()`.
 
+CI installs `wasm-tools` and `wasmtime` so the Wasm target is validated both by
+the JavaScript-hosted adapter tests and by an independent core-Wasm toolchain.
+Local `deno task test` runs the Deno/JavaScript adapter path by default and
+skips the independent-engine checks with an install hint when those binaries are
+not available.
+
 Internally, standalone parser targets lower the analyzed grammar once into a
 versioned portable parser plan:
 
@@ -195,10 +201,11 @@ versioned portable parser plan:
 That plan contains the deterministic lexer DFA, BNF productions and reducers, LR
 ACTION/GOTO tables, token/literal metadata, and CST field schema consumed by the
 TypeScript, Wasm, and parser-kit planning paths. It is separate from Baba's
-package version, metadata schema version, parser-kit schema version, and Wasm
-adapter ABI version. Generated TypeScript, generated Wasm adapters, and
-parser-kit JSON all expose the same `parserPlanHash` or `portablePlan.hash` when
-they were built from the same portable parser plan.
+package version, metadata schema version, runtime-language runtime artifact
+manifest version, parser-kit schema version, and Wasm adapter ABI version.
+Generated TypeScript, generated Wasm adapters, and parser-kit JSON all expose
+the same `parserPlanHash` or `portablePlan.hash` when they were built from the
+same portable parser plan.
 
 Generated TypeScript, generated Wasm adapters, and parser-kit JSON also expose a
 runtime implementation identity with format `"baba-runtime-implementation"`,

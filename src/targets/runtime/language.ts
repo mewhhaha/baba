@@ -2480,13 +2480,6 @@ function localType(
   return type;
 }
 
-function assertKnownLocal(
-  name: string,
-  locals: ReadonlyMap<string, RuntimeScalarType>,
-): void {
-  localType(name, locals);
-}
-
 function assertExpressionType(
   actual: RuntimeScalarType,
   expected: RuntimeScalarType,

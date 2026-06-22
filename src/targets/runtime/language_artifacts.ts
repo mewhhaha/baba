@@ -267,9 +267,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "utf16_code_point_width",
       entry: "utf16CodePointWidth",
-      sourceHash: "fnv1a64:548fa4450115643e",
-      typescriptHash: "fnv1a64:0b4948b0d6309f2d",
-      wasmHash: "fnv1a64:edd2bbbaaa8c1909",
+      sourceHash: "fnv1a64:32262db38de3bc0e",
+      typescriptHash: "fnv1a64:04ee22e3bf64949e",
+      wasmHash: "fnv1a64:76415b4fa17f925c",
     },
     {
       name: "runtime_arena",
@@ -281,16 +281,16 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_object_runtime",
       entry: "parserFragmentNew",
-      sourceHash: "fnv1a64:6d64c1f2c75d2c21",
-      typescriptHash: "fnv1a64:68877220124640f4",
-      wasmHash: "fnv1a64:fb057f9dd3f95751",
+      sourceHash: "fnv1a64:5c5d5a287aa0020a",
+      typescriptHash: "fnv1a64:aaa58afa7385fae6",
+      wasmHash: "fnv1a64:6af86a2d555ce690",
     },
     {
       name: "lexer_runtime",
       entry: "dfaTransition",
-      sourceHash: "fnv1a64:2a3a958e670e7eac",
-      typescriptHash: "fnv1a64:c93894a473cfeb7d",
-      wasmHash: "fnv1a64:9099efd234030f23",
+      sourceHash: "fnv1a64:1b67c225ea139ead",
+      typescriptHash: "fnv1a64:dae825d37d904894",
+      wasmHash: "fnv1a64:0da4336974278d61",
     },
     {
       name: "parser_table_runtime",
@@ -372,7 +372,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:ceb4b413feab2b21" as const;
+  "fnv1a64:27fa4798431fd65c" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

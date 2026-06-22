@@ -96,9 +96,13 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(lexerRuntimeSource, "function bestCandidate");
   assertIncludes(lexerRuntimeSource, "lexerScanAdvance");
+  assertIncludes(lexerRuntimeSource, "lexerScanNextOffset");
+  assertIncludes(lexerRuntimeSource, "lexerScanCandidateEnd");
   assertIncludes(lexerRuntimeSource, "lexerSpecTokenClass");
   assertIncludes(lexerRuntimeSource, "lexerSpecPayload");
   assertIncludes(lexerRuntimeSource, "lexerSpecTerminal");
+  assertIncludes(lexerRuntimeSource, "lexerPublicTokenClass");
+  assertIncludes(lexerRuntimeSource, "lexerTokenEmitStatus");
   assertIncludes(lexerRuntimeSource, "createLexerRuntimeProgram");
   assertIncludes(lexerRuntimeSource, "emitRuntimeLanguageTypeScriptFunction");
   assertIncludes(lexerRuntimeSource, "parserTokenNew");
@@ -135,6 +139,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(
     publicSourceTextBoundarySource,
     "utf16CodePointFromUnits",
+  );
+  assertIncludes(publicSourceTextBoundarySource, "utf16HasCodeUnit");
+  assertNotIncludes(
+    publicSourceTextBoundarySource,
+    "trailOffset < sourceText.length",
   );
   assertIncludes(
     publicSourceTextBoundarySource,
@@ -174,6 +183,13 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(lexerRuntimeSource, "const SPECS");
   assertNotIncludes(lexerRuntimeSource, "function codePointLength");
   assertNotIncludes(lexerRuntimeSource, "function transition");
+  assertNotIncludes(lexerRuntimeSource, "function publicTokenClass");
+  assertNotIncludes(lexerRuntimeSource, "index += utf16CodePointWidth");
+  assertNotIncludes(lexerRuntimeSource, "offset + lexerScanBestEnd()");
+  assertNotIncludes(
+    lexerRuntimeSource,
+    "tokenClass !== TOKEN_TRIVIA || preserveTrivia",
+  );
   assertNotIncludes(lexerRuntimeSource, '"LEX_UNEXPECTED_CHARACTER"');
   assertNotIncludes(
     lexerRuntimeSource,
@@ -335,7 +351,15 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(
     parserRuntimeSource,
+    "parserTraceTokenStreamPublicIndex",
+  );
+  assertIncludes(
+    parserRuntimeSource,
     "parserTraceTerminal",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserAcceptedRootStatus",
   );
   assertIncludes(
     parserRuntimeSource,
@@ -363,6 +387,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertNotIncludes(parserRuntimeSource, 'token.channel !== "error"');
   assertNotIncludes(parserRuntimeSource, "function isTraceTriviaToken");
+  assertNotIncludes(
+    parserRuntimeSource,
+    "index < tokens.length ? index : tokens.length",
+  );
   assertNotIncludes(
     parserRuntimeSource,
     "canonical.span.end <= token.span.start",
@@ -396,6 +424,21 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(
     publicDiagnosticMaterializerSource,
     "const detailKindId = parserDiagnosticDetailKindId(runtimeCode)",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "parserDiagnosticCodeStatus",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "const status = parserDiagnosticMergeStatus(left.length, right.length)",
+  );
+  assertIncludes(runtimeLanguageSourcesSource, "parserDiagnosticMergeStatus");
+  assertNotIncludes(publicDiagnosticMaterializerSource, "left.length === 0");
+  assertNotIncludes(publicDiagnosticMaterializerSource, "right.length === 0");
+  assertNotIncludes(
+    publicDiagnosticMaterializerSource,
+    "parserDiagnosticCode(handle) !== runtimeCode",
   );
   assertIncludes(
     publicDiagnosticMaterializerSource,

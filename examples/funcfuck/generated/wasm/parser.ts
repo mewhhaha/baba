@@ -51,6 +51,8 @@ const TRACE_STATUS_BRANCH_LIMIT = 3;
 const REPLAY_ACTION_SHIFT = 1;
 const REPLAY_ACTION_REDUCE = 2;
 const REPLAY_ACTION_ACCEPT = 3;
+const ACCEPTED_ROOT_DIRECT = 1;
+const ACCEPTED_ROOT_FRAGMENT_VALUE = 2;
 const NO_GOTO = 4294967295;
 const NO_TERMINAL = 4294967295;
 const NO_PRODUCTION = 4294967295;
@@ -102,6 +104,11 @@ const FIELD_SCALAR_VALUE_NULL = 0;
 const FIELD_FINAL_BUILD_ARRAY = 0;
 const FIELD_FINAL_BUILD_REQUIRED_MISSING = 2;
 const FIELD_FINAL_BUILD_TOO_MANY = 3;
+const DIAGNOSTIC_MERGE_EMPTY = 0;
+const DIAGNOSTIC_MERGE_LEFT = 1;
+const DIAGNOSTIC_MERGE_RIGHT = 2;
+const DIAGNOSTIC_MERGE_BOTH = 3;
+const DIAGNOSTIC_CODE_OK = 0;
 const PUBLIC_TOKEN_LITERAL = 1;
 const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
@@ -629,6 +636,27 @@ function lexerSpecTerminal(specIndex: number): number {
     return (__baba_load_lexerSpecs(offset) >>> 0) >>> 0;
   }
   return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerPublicTokenClass(tokenClass: number): number {
+  if (((((tokenClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((tokenClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  return (2) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerTokenEmitStatus(tokenClass: number, preserveTrivia: number): number {
+  if (((((tokenClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((preserveTrivia) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+  }
+  return (1) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -1574,6 +1602,30 @@ function parserDiagnosticDetailKindId(code: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserDiagnosticCodeStatus(actual: number, expected: number): number {
+  if (((((actual) >>> 0) === ((expected) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  } else {
+    return (1) >>> 0;
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserDiagnosticMergeStatus(leftCount: number, rightCount: number): number {
+  if (((((leftCount) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((rightCount) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (2) >>> 0;
+    }
+  }
+  if (((((rightCount) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  return (3) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTokenStreamSpanBoundsStatus(start: number, end: number, sourceLength: number): number {
   if (((((sourceLength) >>> 0) < ((end) >>> 0) ? 1 : 0)) !== 0) {
     return (1) >>> 0;
@@ -1741,6 +1793,15 @@ function parserTraceTokenStreamStatus(publicClass: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTraceTokenStreamPublicIndex(index: number, tokenCount: number): number {
+  if (((((index) >>> 0) < ((tokenCount) >>> 0) ? 1 : 0)) !== 0) {
+    return (index) >>> 0;
+  } else {
+    return (tokenCount) >>> 0;
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTraceTerminal(publicClass: number, trustedTerminal: number, specTerminal: number, eofTerminal: number): number {
   if (((((publicClass) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
     return (eofTerminal) >>> 0;
@@ -1761,6 +1822,19 @@ function parserShiftedTokenStatus(publicClass: number): number {
     return (0) >>> 0;
   }
   return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserAcceptedRootStatus(isRuleNode: number, isFragment: number, fragmentValueIsRuleNode: number): number {
+  if (((((isRuleNode) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((isFragment) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((fragmentValueIsRuleNode) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  return (0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -1906,8 +1980,11 @@ function combineDiagnostics(
   left: readonly ParseDiagnostic[],
   right: readonly ParseDiagnostic[],
 ): readonly ParseDiagnostic[] {
-  if (left.length === 0) return right;
-  if (right.length === 0) return left;
+  const status = parserDiagnosticMergeStatus(left.length, right.length);
+  if (status === DIAGNOSTIC_MERGE_EMPTY) return right;
+  if (status === DIAGNOSTIC_MERGE_LEFT) return left;
+  if (status === DIAGNOSTIC_MERGE_RIGHT) return right;
+  if (status === DIAGNOSTIC_MERGE_BOTH) return [...left, ...right];
   return [...left, ...right];
 }
 
@@ -1923,7 +2000,12 @@ function parseDiagnostic(
     span.end,
     detail,
   );
-  if (parserDiagnosticCode(handle) !== runtimeCode) {
+  if (
+    parserDiagnosticCodeStatus(
+      parserDiagnosticCode(handle),
+      runtimeCode,
+    ) !== DIAGNOSTIC_CODE_OK
+  ) {
     throw new Error("Runtime diagnostic code mismatch.");
   }
   const detailKindId = parserDiagnosticDetailKindId(runtimeCode);
@@ -2342,7 +2424,10 @@ function compactTokenStream(
     const token = tokens[index] ?? materializeSourceEofToken(sourceText);
     const traceTokenStatus = traceTokenStreamStatus(token);
     streamTokens[streamTokenCount] = token;
-    streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
+    streamTokenIndices[streamTokenCount] = parserTraceTokenStreamPublicIndex(
+      index,
+      tokens.length,
+    );
     streamTokenCount++;
     terminalIds[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
     terminalCount++;
@@ -2851,13 +2936,21 @@ function acceptedParseResult(
   tokens: readonly Token[],
   accepted: unknown,
 ): ParseResult<RootNode> {
-  const root = isRuleNode(accepted)
-    ? accepted as RootNode
-    : isFragment(accepted) && isRuleNode(accepted.value)
-    ? accepted.value as RootNode
-    : null;
-  if (root) {
-    return successfulParseResult(sourceText.source, tokens, root);
+  const acceptedFragment = isFragment(accepted) ? accepted : null;
+  const status = parserAcceptedRootStatus(
+    isRuleNode(accepted) ? 1 : 0,
+    acceptedFragment ? 1 : 0,
+    acceptedFragment && isRuleNode(acceptedFragment.value) ? 1 : 0,
+  );
+  if (status === ACCEPTED_ROOT_DIRECT) {
+    return successfulParseResult(sourceText.source, tokens, accepted as RootNode);
+  }
+  if (status === ACCEPTED_ROOT_FRAGMENT_VALUE) {
+    return successfulParseResult(
+      sourceText.source,
+      tokens,
+      acceptedFragment!.value as RootNode,
+    );
   }
   return failedParseResult(
     sourceText.source,

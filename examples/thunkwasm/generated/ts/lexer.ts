@@ -223,8 +223,7 @@ const LITERAL_SPECS: readonly {
 const NO_ACCEPT = 4294967295;
 const NO_LEXER_SPEC = 4294967295;
 const NO_TERMINAL = 4294967295;
-const TOKEN_LITERAL = 1;
-const TOKEN_TRIVIA = 2;
+const LEXER_TOKEN_EMIT_TOKEN = 1;
 const PUBLIC_TOKEN_LITERAL = 1;
 const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
@@ -355,6 +354,15 @@ function utf16CodePointFromUnits(leadUnit: number, trailUnit: number, hasTrail: 
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function utf16HasCodeUnit(offset: number, length: number): number {
+  if (((((offset) | 0) < ((length) | 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  } else {
+    return (0) >>> 0;
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function dfaTransition(state: number, codePoint: number): number {
   let index = 0;
   let low = 0;
@@ -429,6 +437,11 @@ function lexerScanAdvance(codePoint: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function lexerScanNextOffset(offset: number, codePoint: number): number {
+  return (((offset) + (utf16CodePointWidth(codePoint) >>> 0)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function lexerScanBestSpec(): number {
   return (__baba_load_scratch(2) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -436,6 +449,11 @@ function lexerScanBestSpec(): number {
 
 function lexerScanBestEnd(): number {
   return (__baba_load_scratch(3) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerScanCandidateEnd(startOffset: number): number {
+  return (((startOffset) + (lexerScanBestEnd() >>> 0)) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -484,6 +502,27 @@ function lexerSpecTerminal(specIndex: number): number {
     return (__baba_load_lexerSpecs(offset) >>> 0) >>> 0;
   }
   return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerPublicTokenClass(tokenClass: number): number {
+  if (((((tokenClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((tokenClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  return (2) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerTokenEmitStatus(tokenClass: number, preserveTrivia: number): number {
+  if (((((tokenClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((preserveTrivia) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+  }
+  return (1) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -624,7 +663,7 @@ function sourceTextCodePointAt(
 ): number {
   const leadUnit = sourceTextCodeUnitAt(sourceText, offset);
   const trailOffset = offset + 1;
-  const hasTrail = trailOffset < sourceText.length ? 1 : 0;
+  const hasTrail = utf16HasCodeUnit(trailOffset, sourceText.length);
   const trailUnit = hasTrail === 1
     ? sourceTextCodeUnitAt(sourceText, trailOffset)
     : 0;
@@ -743,9 +782,12 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
       const tokenClass = lexerSpecTokenClass(candidate.specIndex);
       const specPayload = runtimeSpecPayload(candidate.specIndex);
       const terminal = runtimeTerminal(candidate.specIndex);
-      if (tokenClass !== TOKEN_TRIVIA || preserveTrivia) {
+      if (
+        lexerTokenEmitStatus(tokenClass, preserveTrivia ? 1 : 0) ===
+          LEXER_TOKEN_EMIT_TOKEN
+      ) {
         const handle = parserTokenNew(
-          publicTokenClass(tokenClass),
+          lexerPublicTokenClass(tokenClass),
           specPayload,
           terminal < 0 ? NO_TERMINAL : terminal,
           start,
@@ -783,12 +825,6 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
   return lexResult(sourceText.source, tokens, diagnostics);
 }
 
-function publicTokenClass(tokenClass: number): number {
-  if (tokenClass === TOKEN_LITERAL) return PUBLIC_TOKEN_LITERAL;
-  if (tokenClass === TOKEN_TRIVIA) return PUBLIC_TOKEN_TRIVIA;
-  return PUBLIC_TOKEN_MAIN;
-}
-
 function runtimeSpecPayload(specIndex: number): number {
   const payload = lexerSpecPayload(specIndex);
   if (payload === NO_LEXER_SPEC) {
@@ -812,10 +848,10 @@ function bestCandidate(
   while (index < sourceText.length) {
     const codePoint = sourceTextCodePointAt(sourceText, index);
     if (lexerScanAdvance(codePoint) === 0) break;
-    index += utf16CodePointWidth(codePoint);
+    index = lexerScanNextOffset(index, codePoint);
   }
 
   const specIndex = lexerScanBestSpec();
   if (specIndex === NO_ACCEPT) return null;
-  return { specIndex, end: offset + lexerScanBestEnd() };
+  return { specIndex, end: lexerScanCandidateEnd(offset) };
 }

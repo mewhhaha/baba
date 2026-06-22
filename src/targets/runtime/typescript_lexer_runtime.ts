@@ -3,8 +3,7 @@ import {
   createLexerRuntimeProgram,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_TRIVIA,
-  RUNTIME_LEXER_TOKEN_LITERAL,
-  RUNTIME_LEXER_TOKEN_TRIVIA,
+  RUNTIME_LEXER_TOKEN_EMIT_TOKEN,
   RUNTIME_NO_ACCEPT,
   RUNTIME_NO_LEXER_SPEC,
   RUNTIME_NO_TERMINAL,
@@ -104,8 +103,7 @@ const LITERAL_SPECS: readonly {
 const NO_ACCEPT = ${RUNTIME_NO_ACCEPT};
 const NO_LEXER_SPEC = ${RUNTIME_NO_LEXER_SPEC};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
-const TOKEN_LITERAL = ${RUNTIME_LEXER_TOKEN_LITERAL};
-const TOKEN_TRIVIA = ${RUNTIME_LEXER_TOKEN_TRIVIA};
+const LEXER_TOKEN_EMIT_TOKEN = ${RUNTIME_LEXER_TOKEN_EMIT_TOKEN};
 const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
 const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
@@ -142,9 +140,12 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
       const tokenClass = lexerSpecTokenClass(candidate.specIndex);
       const specPayload = runtimeSpecPayload(candidate.specIndex);
       const terminal = runtimeTerminal(candidate.specIndex);
-      if (tokenClass !== TOKEN_TRIVIA || preserveTrivia) {
+      if (
+        lexerTokenEmitStatus(tokenClass, preserveTrivia ? 1 : 0) ===
+          LEXER_TOKEN_EMIT_TOKEN
+      ) {
         const handle = parserTokenNew(
-          publicTokenClass(tokenClass),
+          lexerPublicTokenClass(tokenClass),
           specPayload,
           terminal < 0 ? NO_TERMINAL : terminal,
           start,
@@ -182,12 +183,6 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
   return lexResult(sourceText.source, tokens, diagnostics);
 }
 
-function publicTokenClass(tokenClass: number): number {
-  if (tokenClass === TOKEN_LITERAL) return PUBLIC_TOKEN_LITERAL;
-  if (tokenClass === TOKEN_TRIVIA) return PUBLIC_TOKEN_TRIVIA;
-  return PUBLIC_TOKEN_MAIN;
-}
-
 function runtimeSpecPayload(specIndex: number): number {
   const payload = lexerSpecPayload(specIndex);
   if (payload === NO_LEXER_SPEC) {
@@ -211,12 +206,12 @@ function bestCandidate(
   while (index < sourceText.length) {
     const codePoint = sourceTextCodePointAt(sourceText, index);
     if (lexerScanAdvance(codePoint) === 0) break;
-    index += utf16CodePointWidth(codePoint);
+    index = lexerScanNextOffset(index, codePoint);
   }
 
   const specIndex = lexerScanBestSpec();
   if (specIndex === NO_ACCEPT) return null;
-  return { specIndex, end: offset + lexerScanBestEnd() };
+  return { specIndex, end: lexerScanCandidateEnd(offset) };
 }
 `;
 }

@@ -141,10 +141,28 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
     });
     assertIncludes(explainLogs.join("\n"), "Target support:");
     assertIncludes(explainLogs.join("\n"), "Tree-sitter: supported");
+    assertIncludes(explainLogs.join("\n"), "TypeScript: supported");
+    assertIncludes(explainLogs.join("\n"), "Wasm: supported");
     assertIncludes(explainLogs.join("\n"), "Kit: supported");
     assertIncludes(
       explainLogs.join("\n"),
       "TypeScript, Wasm, and kit share portable parser plan v1",
+    );
+    assertIncludes(
+      explainLogs.join("\n"),
+      "identical Baba regex/DFA semantics",
+    );
+    assertIncludes(
+      explainLogs.join("\n"),
+      "External tokens are not supported by portable runtime targets",
+    );
+    assertIncludes(
+      explainLogs.join("\n"),
+      "Contextual token overlap status is reported",
+    );
+    assertIncludes(
+      explainLogs.join("\n"),
+      "unsupported backend constructs are reported per target",
     );
 
     const externalMetadataPath = `${dir}/externals.json`;
@@ -177,9 +195,19 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
       externalExplainLogs.join("\n"),
       "TypeScript: unsupported",
     );
+    assertIncludes(externalExplainLogs.join("\n"), "Wasm: unsupported");
+    assertIncludes(externalExplainLogs.join("\n"), "Kit: unsupported");
     assertIncludes(
       externalExplainLogs.join("\n"),
       "TS_EXTERNAL_TOKENS_UNSUPPORTED",
+    );
+    assertIncludes(
+      externalExplainLogs.join("\n"),
+      "WASM_EXTERNAL_TOKENS_UNSUPPORTED",
+    );
+    assertIncludes(
+      externalExplainLogs.join("\n"),
+      "KIT_EXTERNAL_TOKENS_UNSUPPORTED",
     );
 
     const tsOutDir = `${dir}/ts-out`;

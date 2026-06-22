@@ -30,6 +30,16 @@ import {
   validateGrammar,
 } from "./helpers.ts";
 
+function assertRelatedMessages(
+  diagnostic: { related?: readonly { message: string }[] },
+  messages: readonly string[],
+): void {
+  assertEquals(
+    diagnostic.related?.map((entry) => entry.message).join("\n"),
+    messages.join("\n"),
+  );
+}
+
 Deno.test("generates standalone TypeScript lexer and parser", async () => {
   const source = `
     token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -156,6 +166,10 @@ Deno.test("TypeScript lexer reports overlapping named tokens", () => {
   assertEquals(result.bundle, undefined);
   assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
   assertIncludes(result.diagnostics[0].message, '"x"');
+  assertRelatedMessages(result.diagnostics[0], [
+    "Left declaration: token A",
+    "Right declaration: token B",
+  ]);
 });
 
 Deno.test("TypeScript lexer reports skip and token overlaps", () => {
@@ -172,6 +186,10 @@ Deno.test("TypeScript lexer reports skip and token overlaps", () => {
   assertIncludes(result.diagnostics[0].message, "skip IGNORED_X");
   assertIncludes(result.diagnostics[0].message, "token X");
   assertIncludes(result.diagnostics[0].message, '"x"');
+  assertRelatedMessages(result.diagnostics[0], [
+    "Left declaration: skip IGNORED_X",
+    "Right declaration: token X",
+  ]);
 });
 
 Deno.test("TypeScript lexer warns for overlapping skip declarations", () => {
@@ -186,6 +204,10 @@ Deno.test("TypeScript lexer warns for overlapping skip declarations", () => {
   assert(result.bundle);
   assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
   assertEquals(result.diagnostics[0].severity, "warning");
+  assertRelatedMessages(result.diagnostics[0], [
+    "Left declaration: skip A",
+    "Right declaration: skip B",
+  ]);
 });
 
 Deno.test("Lexical priority resolves Tree-sitter token overlaps but not portable ones", () => {
@@ -209,6 +231,10 @@ Deno.test("Lexical priority resolves Tree-sitter token overlaps but not portable
   assertEquals(portable.bundle, undefined);
   assertEquals(portable.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
   assertIncludes(portable.diagnostics[0].message, "portable global lexer");
+  assertRelatedMessages(portable.diagnostics[0], [
+    "Left declaration: token IDENT",
+    "Right declaration: token TYPE_IDENT",
+  ]);
 });
 
 Deno.test("Lexical priority can keep a token above overlapping trivia", async () => {
@@ -218,8 +244,17 @@ Deno.test("Lexical priority can keep a token above overlapping trivia", async ()
     module = X ;
   `;
   const result = compile(source, { targets: ["typescript"] });
-  assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
+  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].severity, "warning");
+  assertIncludes(
+    result.diagnostics[0].message,
+    "parser token remains reachable",
+  );
+  assertRelatedMessages(result.diagnostics[0], [
+    "Left declaration: skip IGNORED_X",
+    "Right declaration: token X",
+  ]);
 
   const dir = await Deno.makeTempDir();
   try {
@@ -246,6 +281,10 @@ Deno.test("Lexical priority cannot let trivia shadow a reachable token", () => {
   assertEquals(result.bundle, undefined);
   assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
   assertIncludes(result.diagnostics[0].message, "cannot reach the parser");
+  assertRelatedMessages(result.diagnostics[0], [
+    "Left declaration: skip IGNORED_X",
+    "Right declaration: token X",
+  ]);
 });
 
 Deno.test("Lexical priority cannot hide a reachable literal", () => {
@@ -259,6 +298,10 @@ Deno.test("Lexical priority cannot hide a reachable literal", () => {
   assertEquals(result.bundle, undefined);
   assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
   assertIncludes(result.diagnostics[0].message, 'literal "if"');
+  assertRelatedMessages(result.diagnostics[0], [
+    "Token declaration: token WORD",
+    'Literal occurrence: "if"',
+  ]);
 });
 
 Deno.test("Trivia cannot overlap a reachable literal", () => {
@@ -273,6 +316,10 @@ Deno.test("Trivia cannot overlap a reachable literal", () => {
   assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
   assertIncludes(result.diagnostics[0].message, "skip WORDS");
   assertIncludes(result.diagnostics[0].message, 'literal "if"');
+  assertRelatedMessages(result.diagnostics[0], [
+    "Token declaration: skip WORDS",
+    'Literal occurrence: "if"',
+  ]);
 });
 
 Deno.test("TypeScript lexer reports real overlap witnesses", () => {

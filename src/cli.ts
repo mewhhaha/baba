@@ -532,19 +532,30 @@ function emitTargetExplanation(
   );
 
   console.log("");
-  console.log("Portable guarantees:");
+  console.log("Portable guarantees and limitations:");
   if (
     reports
       .filter((report) => report.target !== "tree-sitter")
       .every((report) => !hasErrors(report.diagnostics))
   ) {
-    console.log("  ✓ TypeScript, Wasm, and kit share portable parser plan v1");
+    console.log(
+      "  ✓ TypeScript, Wasm, and kit share portable parser plan v1 and identical Baba regex/DFA semantics",
+    );
   }
   if (
     !hasErrors(reports.find((report) => report.target === "kit")!.diagnostics)
   ) {
     console.log("  ✓ parser-kit schema v1 is available");
   }
+  console.log(
+    "  - Tree-sitter regex output is lowered from the same Baba regex AST; unsupported backend constructs are reported per target",
+  );
+  console.log(
+    "  - External tokens are not supported by portable runtime targets; reachable externals are reported per target",
+  );
+  console.log(
+    "  - Contextual token overlap status is reported through target capability diagnostics",
+  );
   if (targetDiagnostics.length === 0) {
     console.log("  ✓ no target capability diagnostics");
     return;

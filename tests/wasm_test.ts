@@ -12,6 +12,9 @@ import {
   main,
 } from "./helpers.ts";
 
+const hasWasmTools = await commandAvailable("wasm-tools");
+const hasWasmtime = await commandAvailable("wasmtime");
+
 Deno.test("generates standalone Wasm lexer and parser", async () => {
   const source = `
     token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -270,6 +273,64 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+});
+
+Deno.test({
+  name: hasWasmTools
+    ? "Wasm core module validates with wasm-tools"
+    : "Wasm core module validation skipped: install wasm-tools",
+  ignore: !hasWasmTools,
+  async fn() {
+    const { dir, wasmPath } = await writeGeneratedCoreWasm(`
+      token A = /a/ ;
+      module = A ;
+    `);
+    try {
+      const result = await runCommandResult("wasm-tools", [
+        "validate",
+        wasmPath,
+      ]);
+      assert(
+        result.success,
+        `wasm-tools validate failed:\n${result.stdout}${result.stderr}`,
+      );
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: hasWasmtime
+    ? "Wasm core ABI exports execute in Wasmtime"
+    : "Wasmtime core ABI execution skipped: install wasmtime",
+  ignore: !hasWasmtime,
+  async fn() {
+    const { dir, wasmPath } = await writeGeneratedCoreWasm(`
+      token A = /a/ ;
+      module = A ;
+    `);
+    try {
+      const attempts = [
+        ["--invoke", "abi_version", wasmPath],
+        ["run", "--invoke", "abi_version", wasmPath],
+      ];
+      let lastResult: CommandResult | null = null;
+      for (const args of attempts) {
+        const result = await runCommandResult("wasmtime", args);
+        if (result.success) return;
+        lastResult = result;
+      }
+      assert(
+        false,
+        `wasmtime could not invoke abi_version:\n${
+          lastResult ? lastResult.stdout + lastResult.stderr : ""
+        }`,
+      );
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  },
 });
 
 Deno.test("Wasm runtime reset keeps repeated parses within high-water memory", async () => {
@@ -571,4 +632,61 @@ function expressionSource(count: number): string {
     parts.push(String(index), index % 3 === 0 ? " * 2" : "");
   }
   return parts.join("");
+}
+
+interface CommandResult {
+  readonly success: boolean;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+async function commandAvailable(commandName: string): Promise<boolean> {
+  try {
+    const result = await new Deno.Command(commandName, {
+      args: ["--version"],
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    return result.success;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw error;
+  }
+}
+
+async function runCommandResult(
+  commandName: string,
+  args: readonly string[],
+): Promise<CommandResult> {
+  const result = await new Deno.Command(commandName, {
+    args: [...args],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  const decoder = new TextDecoder();
+  return {
+    success: result.success,
+    stdout: decoder.decode(result.stdout),
+    stderr: decoder.decode(result.stderr),
+  };
+}
+
+async function writeGeneratedCoreWasm(
+  source: string,
+): Promise<{ readonly dir: string; readonly wasmPath: string }> {
+  const result = compile(source, { targets: ["wasm"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    const mod = await import(`file://${dir}/wasm/mod.ts`);
+    const wasmPath = `${dir}/parser.wasm`;
+    await Deno.writeFile(wasmPath, mod.wasmBytes);
+    return { dir, wasmPath };
+  } catch (error) {
+    await Deno.remove(dir, { recursive: true });
+    throw error;
+  }
 }

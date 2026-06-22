@@ -43,7 +43,8 @@ runtime language:
   and `parseTokens()` validation. Dynamic host source buffers are still not
   lowered into runtime-language text handles, but the remaining generated host
   source length, slice, match, and code-point reads now have a single generated
-  handle boundary.
+  handle boundary; TypeScript lexer trail-unit availability now goes through the
+  runtime-language `utf16HasCodeUnit` helper before surrogate decoding.
 - Added core Wasm ABI metadata exports for host ownership and result lifetime,
   plus a generated adapter handle capability model constant for the current
   epoch-checked JavaScript-owned `WasmSourceBuffer` and `ParseTraceInput`
@@ -73,9 +74,13 @@ runtime language:
 - Moved parser diagnostic detail-kind ID classification onto the
   runtime-language `parserDiagnosticDetailKindId` helper, leaving generated
   JavaScript wrappers to map the numeric ID to the public string label.
-- Added deterministic generated Wasm output coverage. Local independent-engine
-  validation remains unavailable because `wasm-tools`, `wasm-validate`, and
-  `wasmtime` are not installed in this environment.
+- Moved parse diagnostic list merge classification onto the runtime-language
+  `parserDiagnosticMergeStatus` helper, leaving JavaScript hosts to preserve
+  public array allocation and identity.
+- Added deterministic generated Wasm output coverage plus independent-engine
+  Wasm checks. Local tests skip the `wasm-tools validate` and Wasmtime core ABI
+  execution checks when those binaries are absent, while CI provisions
+  `wasm-tools` and `wasmtime` before running the release test task.
 - Clarified the Wasm product boundary as a JavaScript-hosted core Wasm adapter,
   exported `wasmTargetKind`, and documented that Baba does not yet emit WASI,
   Component/WIT, browser-only, or host-neutral Wasm packages.
@@ -433,6 +438,20 @@ runtime language:
   runtime-language `parserReplayStackDepth`, so generated TypeScript no longer
   subtracts the sentinel value stack slot directly when validating reductions or
   selecting the accepted root value.
+- Moved generated TypeScript lexer source offset advancement and accepted
+  candidate-end arithmetic onto runtime-language `lexerScanNextOffset` and
+  `lexerScanCandidateEnd` helpers.
+- Moved generated TypeScript lexer and Wasm JavaScript adapter public token
+  class/emission decisions onto runtime-language `lexerPublicTokenClass` and
+  `lexerTokenEmitStatus` helpers.
+- Moved generated parser trace public-token index sentinel selection onto
+  runtime-language `parserTraceTokenStreamPublicIndex`.
+- Moved accepted parse-result root classification onto runtime-language
+  `parserAcceptedRootStatus`, leaving JavaScript hosts to allocate the public
+  discriminated union object.
+- Moved parser diagnostic runtime-code consistency checks onto runtime-language
+  `parserDiagnosticCodeStatus`, leaving JavaScript hosts to render public
+  diagnostic strings and detail payloads.
 
 Still unresolved:
 

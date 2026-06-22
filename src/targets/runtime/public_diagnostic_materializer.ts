@@ -3,8 +3,11 @@ export function emitPublicDiagnosticMaterializer(): string {
   left: readonly ParseDiagnostic[],
   right: readonly ParseDiagnostic[],
 ): readonly ParseDiagnostic[] {
-  if (left.length === 0) return right;
-  if (right.length === 0) return left;
+  const status = parserDiagnosticMergeStatus(left.length, right.length);
+  if (status === DIAGNOSTIC_MERGE_EMPTY) return right;
+  if (status === DIAGNOSTIC_MERGE_LEFT) return left;
+  if (status === DIAGNOSTIC_MERGE_RIGHT) return right;
+  if (status === DIAGNOSTIC_MERGE_BOTH) return [...left, ...right];
   return [...left, ...right];
 }
 
@@ -20,7 +23,12 @@ function parseDiagnostic(
     span.end,
     detail,
   );
-  if (parserDiagnosticCode(handle) !== runtimeCode) {
+  if (
+    parserDiagnosticCodeStatus(
+      parserDiagnosticCode(handle),
+      runtimeCode,
+    ) !== DIAGNOSTIC_CODE_OK
+  ) {
     throw new Error("Runtime diagnostic code mismatch.");
   }
   const detailKindId = parserDiagnosticDetailKindId(runtimeCode);
