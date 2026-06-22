@@ -126,7 +126,10 @@ Both generated parser runtimes export the same main TypeScript API:
 - parser diagnostic numeric ID constants such as
   `parserDiagnosticCodeParseLexicalError` and
   `parserDiagnosticCodeInternalError`, matching the runtime diagnostic record
-  taxonomy while public diagnostics continue to use string `code` values;
+  taxonomy while public diagnostics continue to use string `code` values.
+  `ParseDiagnostic` objects also expose `runtimeCode` and `runtimeDetail`;
+  `runtimeCode` matches the exported numeric ID, and `runtimeDetail` carries the
+  runtime payload such as parser state for unexpected/trailing tokens;
 - `positionAt(source, offset)` and `createSourceMap(source)` for UTF-16
   offset-to-line/column diagnostics;
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia

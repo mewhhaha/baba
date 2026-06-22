@@ -207,6 +207,14 @@ Deno.test("Wasm parser reports trailing input through trace replay", async () =>
     const parsed = mod.parse("aa");
     assertEquals(parsed.ok, false);
     assertEquals(parsed.diagnostics[0].code, "PARSE_TRAILING_INPUT");
+    assertEquals(
+      parsed.diagnostics[0].runtimeCode,
+      mod.parserDiagnosticCodeParseTrailingInput,
+    );
+    assertEquals(
+      Number.isInteger(parsed.diagnostics[0].runtimeDetail),
+      true,
+    );
     assertEquals(parsed.diagnostics[0].found, JSON.stringify("a"));
   } finally {
     await Deno.remove(dir, { recursive: true });

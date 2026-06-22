@@ -73,6 +73,8 @@ export interface ParseDiagnostic {
     | "PARSER_INTERNAL_ERROR";
   message: string;
   span: Span;
+  runtimeCode: number;
+  runtimeDetail: number;
   expected?: readonly string[];
   found?: string;
 }

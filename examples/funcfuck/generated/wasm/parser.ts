@@ -1553,6 +1553,8 @@ function parseDiagnostic(
     code,
     message,
     span: diagnosticSpan(handle),
+    runtimeCode: parserDiagnosticCode(handle),
+    runtimeDetail: parserDiagnosticDetail(handle),
   };
 }
 

@@ -46,6 +46,10 @@ runtime language:
 - Exported generated parser diagnostic numeric ID constants from TypeScript and
   Wasm parser modules, matching the runtime diagnostic record taxonomy while
   public parser diagnostics keep their string `code` values.
+- Exposed runtime diagnostic record payloads on public TypeScript/Wasm
+  `ParseDiagnostic` objects via `runtimeCode` and `runtimeDetail`, so downstream
+  hosts can consume numeric diagnostic codes and state/detail payloads without
+  parsing user-facing messages.
 - Added deterministic generated Wasm output coverage. Local independent-engine
   validation remains unavailable because `wasm-tools`, `wasm-validate`, and
   `wasmtime` are not installed in this environment.
@@ -390,12 +394,12 @@ Still unresolved:
   opaque host-neutral handle capabilities beyond that metadata, host source-text
   handles plus source decoding fully lowered into the runtime language, complete
   generated parser-runtime lowering for remaining host public object
-  materialization outside the shared wrapper helpers, and a richer host-neutral
-  error payload taxonomy beyond the current trace status metadata and parser
-  diagnostic IDs. The compiler now has a shared lowered control-flow/value IR
-  and checked helper artifact hashes, but it still needs broader parser-runtime
-  lowering before the release can fully satisfy "one runtime implementation, two
-  execution targets."
+  materialization outside the shared wrapper helpers, and richer host-neutral
+  error payload variants beyond the current trace status metadata plus parser
+  diagnostic code/detail records. The compiler now has a shared lowered
+  control-flow/value IR and checked helper artifact hashes, but it still needs
+  broader parser-runtime lowering before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

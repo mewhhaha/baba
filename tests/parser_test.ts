@@ -110,6 +110,28 @@ if (result.ok) {
   }
 });
 
+Deno.test("TypeScript parser diagnostics expose runtime payloads", async () => {
+  const result = compile(`module = "a" ;`, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("aa");
+    assertEquals(parsed.ok, false);
+    assertEquals(parsed.diagnostics[0].code, "PARSE_TRAILING_INPUT");
+    assertEquals(
+      parsed.diagnostics[0].runtimeCode,
+      mod.parserDiagnosticCodeParseTrailingInput,
+    );
+    assertEquals(Number.isInteger(parsed.diagnostics[0].runtimeDetail), true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("TypeScript syntax separates main/trivia tokens and maps positions", async () => {
   const source = `
     token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;

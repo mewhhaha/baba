@@ -280,6 +280,8 @@ function normalizeDiagnostic(diagnostic: RuntimeDiagnostic): unknown {
     code: diagnostic.code,
     message: diagnostic.message,
     span: diagnostic.span,
+    runtimeCode: diagnostic.runtimeCode,
+    runtimeDetail: diagnostic.runtimeDetail,
     expected: diagnostic.expected,
     found: diagnostic.found,
   };
@@ -357,6 +359,8 @@ interface RuntimeDiagnostic {
   code: string;
   message: string;
   span: RuntimeSpan;
+  runtimeCode: number;
+  runtimeDetail: number;
   expected?: string[];
   found?: string;
 }
