@@ -81,6 +81,10 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertEquals(mod.wasmSpanUnit, 1);
     assertEquals(mod.wasmLexResultI32Count, 2);
     assertEquals(mod.wasmTokenRecordI32Count, 3);
+    assertEquals(mod.wasmTraceStatusOk, 0);
+    assertEquals(mod.wasmTraceStatusUnexpected, 1);
+    assertEquals(mod.wasmTraceStatusInternal, 2);
+    assertEquals(mod.wasmTraceStatusBranchLimit, 3);
     assertEquals(mod.parserPlanFormat, "baba-parser-plan");
     assertEquals(mod.parserPlanVersion, 1);
     assertEquals(mod.parserPlanSemantics, "baba-portable-v1");
@@ -209,6 +213,13 @@ Deno.test("Wasm runtime validates parse trace input bounds", async () => {
       "terminalCapacity must be a positive integer",
     );
     const input = runtime.createParseTraceInput(1);
+    input.terminals[0] = 0;
+    const unexpected = runtime.parseTrace(input, 1);
+    assertEquals(unexpected.ok, false);
+    assertEquals(unexpected.failureKind, "unexpected");
+    assertEquals(unexpected.statusKind, runtime.wasmTraceStatusUnexpected);
+    assertEquals(unexpected.internal, false);
+    assertEquals(unexpected.limit, false);
     assertThrowsIncludes(
       () => runtime.parseTrace(input, 2),
       "terminalCount exceeds parse input terminalCapacity",

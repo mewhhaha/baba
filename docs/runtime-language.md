@@ -195,6 +195,9 @@ execute both outputs and compare returned values or traps.
   input base, maximum page count, source encoding, span unit, lex-result record
   width, and token-record width. The generated JavaScript adapter validates
   those core exports against its generated constants before using the module.
+- Generated JavaScript-hosted Wasm adapters export trace status constants and
+  include both numeric `statusKind` and string `failureKind` fields on
+  `parseTrace()` failures before public parser diagnostics are materialized.
 - Generated JavaScript-hosted Wasm adapters treat `ParseTraceInput` values
   returned by `createParseTraceInput()` as adapter-owned parser-trace
   capabilities. The adapter rejects forged plain objects and invalidates

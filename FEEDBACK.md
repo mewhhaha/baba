@@ -24,6 +24,9 @@ runtime language:
 - Added discoverable core Wasm ABI metadata exports for input base, maximum page
   count, source encoding, span unit, lex-result width, and token-record width,
   with generated JavaScript adapter validation against its table constants.
+- Added generated Wasm adapter trace status constants and structured
+  `parseTrace()` failure metadata (`statusKind` and `failureKind`) while keeping
+  the older compatibility booleans.
 - Added JavaScript-hosted Wasm adapter source-buffer provenance checks:
   `WasmSourceBuffer` values are now adapter-owned capabilities, forged buffers
   are rejected, and previous buffers become stale after `reset()` or after
@@ -376,11 +379,12 @@ Still unresolved:
   JavaScript-hosted capability gates, first-class runtime-language text values
   if source decoding moves fully into the runtime language, plus complete
   generated parser-runtime lowering for remaining host public object
-  materialization outside the shared wrapper helpers and a richer
-  structured-error taxonomy for a future host-neutral Wasm ABI. The compiler now
-  has a shared lowered control-flow/value IR and checked helper artifact hashes,
-  but it still needs broader parser-runtime lowering before the release can
-  fully satisfy "one runtime implementation, two execution targets."
+  materialization outside the shared wrapper helpers and a richer structured
+  error taxonomy beyond the current trace status metadata for a future
+  host-neutral Wasm ABI. The compiler now has a shared lowered
+  control-flow/value IR and checked helper artifact hashes, but it still needs
+  broader parser-runtime lowering before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

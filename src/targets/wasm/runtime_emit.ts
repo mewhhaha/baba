@@ -4,6 +4,7 @@ import {
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_INTERNAL,
   RUNTIME_TRACE_STATUS_OK,
+  RUNTIME_TRACE_STATUS_UNEXPECTED,
 } from "../runtime/language_sources.ts";
 import type { WasmModuleImage } from "./module_emit.ts";
 
@@ -34,6 +35,7 @@ const WASM_SPAN_UNIT_UTF16 = 1;
 const LEX_RESULT_I32_COUNT = 2;
 const TOKEN_RECORD_I32_COUNT = 3;
 const TRACE_STATUS_OK = ${RUNTIME_TRACE_STATUS_OK};
+const TRACE_STATUS_UNEXPECTED = ${RUNTIME_TRACE_STATUS_UNEXPECTED};
 const TRACE_STATUS_INTERNAL = ${RUNTIME_TRACE_STATUS_INTERNAL};
 const TRACE_STATUS_BRANCH_LIMIT = ${RUNTIME_TRACE_STATUS_BRANCH_LIMIT};
 
@@ -85,6 +87,10 @@ export const wasmSourceEncoding = wasm.source_encoding();
 export const wasmSpanUnit = wasm.span_unit();
 export const wasmLexResultI32Count = wasm.lex_result_i32_count();
 export const wasmTokenRecordI32Count = wasm.token_record_i32_count();
+export const wasmTraceStatusOk = TRACE_STATUS_OK;
+export const wasmTraceStatusUnexpected = TRACE_STATUS_UNEXPECTED;
+export const wasmTraceStatusInternal = TRACE_STATUS_INTERNAL;
+export const wasmTraceStatusBranchLimit = TRACE_STATUS_BRANCH_LIMIT;
 export const parserPlanFormat = ${
     JSON.stringify(portableMetadata.format)
   } as const;
@@ -203,7 +209,15 @@ export function lexAll(buffer: WasmSourceBuffer): Int32Array {
 
 export type ParseTraceResult =
   | { ok: true; trace: Int32Array }
-  | { ok: false; state: number; index: number; internal: boolean; limit: boolean };
+  | {
+    ok: false;
+    state: number;
+    index: number;
+    statusKind: number;
+    failureKind: "unexpected" | "internal" | "branch-limit";
+    internal: boolean;
+    limit: boolean;
+  };
 
 export interface ParseTraceInput {
   terminals: Int32Array;
@@ -243,6 +257,12 @@ export function parseTrace(
         ok: false,
         state: parserTraceRuntime.parserTraceErrorState(),
         index: parserTraceRuntime.parserTraceErrorIndex(),
+        statusKind: traceStatus,
+        failureKind: traceStatus === TRACE_STATUS_INTERNAL
+          ? "internal"
+          : traceStatus === TRACE_STATUS_BRANCH_LIMIT
+          ? "branch-limit"
+          : "unexpected",
         internal: traceStatus === TRACE_STATUS_INTERNAL,
         limit: traceStatus === TRACE_STATUS_BRANCH_LIMIT,
       };
@@ -261,6 +281,8 @@ export function parseTrace(
       ok: false,
       state: 0,
       index: terminalCount,
+      statusKind: TRACE_STATUS_INTERNAL,
+      failureKind: "internal",
       internal: true,
       limit: false,
     };
