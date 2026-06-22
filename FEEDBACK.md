@@ -335,6 +335,10 @@ runtime language:
   `parserFieldBuildStatus`, so public field assembly no longer directly decides
   in TypeScript whether to throw for captures without schema, allocate an empty
   field object, or continue materializing schema-backed fields.
+- Moved generated field storage classification onto runtime-language
+  `parserFieldStorageStatus`, so public field assembly no longer directly
+  compares field value classes in TypeScript to decide which fields need runtime
+  vectors or array materialization.
 - Moved public scalar field value classification onto runtime-language
   `parserFieldScalarValueStatus`, so the shared field materializer no longer
   directly decides that a missing scalar capture means public `null`.
@@ -440,6 +444,7 @@ Still unresolved:
   helpers, and generated field assembly now gets value-class and
   count-validation/no-schema/array-value/scalar-value decisions from
   runtime-language helpers, generated field-object build classification is
+  runtime-language-backed, generated field storage classification is
   runtime-language-backed, and public rule-node materialization gets child-list
   classification from runtime-language helpers. Generated TypeScript lexing,
   Wasm JavaScript adapter token wrapping, and parser fallback EOF creation now

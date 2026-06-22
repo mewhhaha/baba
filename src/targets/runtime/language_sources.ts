@@ -154,6 +154,8 @@ export const RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA = 1;
 export const RUNTIME_FIELD_BUILD_EMPTY = 0;
 export const RUNTIME_FIELD_BUILD_PRESENT = 1;
 export const RUNTIME_FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA = 2;
+export const RUNTIME_FIELD_STORAGE_SCALAR = 0;
+export const RUNTIME_FIELD_STORAGE_ARRAY = 1;
 export const RUNTIME_FIELD_ARRAY_VALUE_OK = 0;
 export const RUNTIME_FIELD_ARRAY_VALUE_MISSING = 1;
 export const RUNTIME_FIELD_SCALAR_VALUE_NULL = 0;
@@ -4531,6 +4533,7 @@ function parserFieldFunctions(
     parserFieldEntryFunction("parserFieldFlags", fieldEntryCount, 1, 0),
     parserFieldIndexFunction(ruleCount),
     parserFieldValueClassFunction(fieldEntryCount),
+    parserFieldStorageStatusFunction(),
     parserFieldSchemaStatusFunction(),
     parserFieldBuildStatusFunction(),
     parserFieldArrayValueStatusFunction(),
@@ -4699,6 +4702,30 @@ function parserFieldValueClassFunction(
         ],
       },
       { kind: "return", expression: u32(RUNTIME_FIELD_VALUE_REQUIRED) },
+    ],
+  };
+}
+
+function parserFieldStorageStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldStorageStatus",
+    parameters: [
+      { name: "entry", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          call("parserFieldValueClass", [local("entry")]),
+          u32(RUNTIME_FIELD_VALUE_ARRAY),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_FIELD_STORAGE_ARRAY),
+        }],
+      },
+      { kind: "return", expression: u32(RUNTIME_FIELD_STORAGE_SCALAR) },
     ],
   };
 }

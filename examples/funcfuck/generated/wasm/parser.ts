@@ -92,8 +92,7 @@ const RULE_NODE_CHILD_LIST_EMPTY = 0;
 const SHIFTED_TOKEN_OK = 0;
 const NO_FIELD = 4294967295;
 const FIELD_ARRAY_VALUE_MISSING = 1;
-const FIELD_VALUE_ARRAY = 3;
-const FIELD_VALUE_NULLABLE = 2;
+const FIELD_STORAGE_ARRAY = 1;
 const FIELD_CAPTURE_ARRAY = 2;
 const FIELD_CAPTURE_SCALAR = 1;
 const FIELD_CAPTURE_TOO_MANY = 3;
@@ -771,6 +770,14 @@ function parserFieldValueClass(entry: number): number {
     }
   }
   return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldStorageStatus(entry: number): number {
+  if (((((parserFieldValueClass(entry) >>> 0) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  return (0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -2743,8 +2750,7 @@ function buildFields(
   const counts = runtimeArrayNew(end - start);
   const fieldValues = runtimeRecordNew(ruleId, end - start);
   for (let entry = start; entry < end; entry++) {
-    const valueClass = parserFieldValueClass(entry);
-    if (valueClass === FIELD_VALUE_ARRAY) {
+    if (parserFieldStorageStatus(entry) === FIELD_STORAGE_ARRAY) {
       runtimeRecordStore(fieldValues, entry - start, runtimeVectorNew(0));
     }
   }
@@ -2785,8 +2791,7 @@ function buildFields(
     const name = fieldName(fieldId);
     const valueIndex = entry - start;
     const count = runtimeArrayLoad(counts, valueIndex);
-    const valueClass = parserFieldValueClass(entry);
-    if (valueClass === FIELD_VALUE_ARRAY) {
+    if (parserFieldStorageStatus(entry) === FIELD_STORAGE_ARRAY) {
       storePublicField(fields, name, materializeFieldArray(
         name,
         runtimeRecordLoad(fieldValues, valueIndex),

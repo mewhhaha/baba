@@ -221,9 +221,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "values.length - 1");
   assertIncludes(parserRuntimeSource, "lexerSpecTerminal");
   assertIncludes(parserRuntimeSource, "lexerSpecPublicTokenStatus");
-  assertIncludes(parserRuntimeSource, "parserFieldValueClass");
+  assertIncludes(parserRuntimeSource, "parserFieldStorageStatus");
   assertIncludes(parserRuntimeSource, "parserFieldSchemaStatus");
   assertIncludes(parserRuntimeSource, "parserFieldBuildStatus");
+  assertIncludes(runtimeLanguageSourcesSource, "parserFieldValueClass");
+  assertIncludes(runtimeLanguageSourcesSource, "parserFieldStorageStatus");
   assertIncludes(parserRuntimeSource, "parserFieldCaptureStatus");
   assertIncludes(parserRuntimeSource, "parserFieldFinalStatus");
   assertNotIncludes(parserRuntimeSource, "captureCount > 0");
@@ -232,6 +234,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "schemaStatus === FIELD_SCHEMA_CAPTURE_WITHOUT_SCHEMA",
   );
   assertNotIncludes(parserRuntimeSource, "if (end <= start)");
+  assertNotIncludes(parserRuntimeSource, "valueClass === FIELD_VALUE_ARRAY");
+  assertNotIncludes(
+    parserRuntimeSource,
+    "const valueClass = parserFieldValueClass(entry)",
+  );
   assertIncludes(publicFieldMaterializerSource, "parserFieldArrayValueStatus");
   assertIncludes(publicFieldMaterializerSource, "parserFieldScalarValueStatus");
   assertNotIncludes(publicFieldMaterializerSource, "vectorHandle === 0");

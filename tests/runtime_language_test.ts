@@ -51,6 +51,8 @@ import {
   RUNTIME_FIELD_SCALAR_VALUE_NULL,
   RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA,
   RUNTIME_FIELD_SCHEMA_STATUS_OK,
+  RUNTIME_FIELD_STORAGE_ARRAY,
+  RUNTIME_FIELD_STORAGE_SCALAR,
   RUNTIME_FIELD_VALUE_ARRAY,
   RUNTIME_FIELD_VALUE_NULLABLE,
   RUNTIME_FIELD_VALUE_REQUIRED,
@@ -675,6 +677,28 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                 u32(2),
                 u32(RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA),
               ]),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserFieldStorageStatusProgram: RuntimeLanguageProgram = {
+    ...parserFieldBaseProgram,
+    name: "parser_field_storage_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserFieldBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserFieldStorageStatus", [u32(0)]), u32(100)),
+            add(
+              mul(call("parserFieldStorageStatus", [u32(1)]), u32(10)),
+              call("parserFieldStorageStatus", [u32(999)]),
             ),
           ),
         }],
@@ -4002,6 +4026,16 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         value: RUNTIME_FIELD_BUILD_PRESENT * 100 +
           RUNTIME_FIELD_BUILD_EMPTY * 10 +
           RUNTIME_FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA,
+      },
+    },
+    {
+      name: "parser field storage status classifies array-backed fields",
+      program: parserFieldStorageStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_FIELD_STORAGE_ARRAY * 100 +
+          RUNTIME_FIELD_STORAGE_SCALAR * 10 +
+          RUNTIME_FIELD_STORAGE_SCALAR,
       },
     },
     {

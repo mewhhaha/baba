@@ -42,8 +42,7 @@ import {
   RUNTIME_FIELD_FINAL_TOO_MANY,
   RUNTIME_FIELD_NULLABLE,
   RUNTIME_FIELD_SCALAR_VALUE_NULL,
-  RUNTIME_FIELD_VALUE_ARRAY,
-  RUNTIME_FIELD_VALUE_NULLABLE,
+  RUNTIME_FIELD_STORAGE_ARRAY,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL,
   RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN,
@@ -447,8 +446,7 @@ const RULE_NODE_CHILD_LIST_EMPTY = ${RUNTIME_RULE_NODE_CHILD_LIST_EMPTY};
 const SHIFTED_TOKEN_OK = ${RUNTIME_SHIFTED_TOKEN_STATUS_OK};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
 const FIELD_ARRAY_VALUE_MISSING = ${RUNTIME_FIELD_ARRAY_VALUE_MISSING};
-const FIELD_VALUE_ARRAY = ${RUNTIME_FIELD_VALUE_ARRAY};
-const FIELD_VALUE_NULLABLE = ${RUNTIME_FIELD_VALUE_NULLABLE};
+const FIELD_STORAGE_ARRAY = ${RUNTIME_FIELD_STORAGE_ARRAY};
 const FIELD_CAPTURE_ARRAY = ${RUNTIME_FIELD_CAPTURE_ARRAY};
 const FIELD_CAPTURE_SCALAR = ${RUNTIME_FIELD_CAPTURE_SCALAR};
 const FIELD_CAPTURE_TOO_MANY = ${RUNTIME_FIELD_CAPTURE_TOO_MANY};
@@ -1219,8 +1217,7 @@ function buildFields(
   const counts = runtimeArrayNew(end - start);
   const fieldValues = runtimeRecordNew(ruleId, end - start);
   for (let entry = start; entry < end; entry++) {
-    const valueClass = parserFieldValueClass(entry);
-    if (valueClass === FIELD_VALUE_ARRAY) {
+    if (parserFieldStorageStatus(entry) === FIELD_STORAGE_ARRAY) {
       runtimeRecordStore(fieldValues, entry - start, runtimeVectorNew(0));
     }
   }
@@ -1261,8 +1258,7 @@ function buildFields(
     const name = fieldName(fieldId);
     const valueIndex = entry - start;
     const count = runtimeArrayLoad(counts, valueIndex);
-    const valueClass = parserFieldValueClass(entry);
-    if (valueClass === FIELD_VALUE_ARRAY) {
+    if (parserFieldStorageStatus(entry) === FIELD_STORAGE_ARRAY) {
       storePublicField(fields, name, materializeFieldArray(
         name,
         runtimeRecordLoad(fieldValues, valueIndex),
