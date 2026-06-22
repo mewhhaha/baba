@@ -15,6 +15,7 @@ import type {
 } from "./syntax.ts";
 
 interface Fragment {
+  runtimeHandle: number;
   value: unknown;
   children: SyntaxElement[];
   fields: FieldCapture[];
@@ -1406,6 +1407,516 @@ function parserFieldFinalStatus(entry: number, count: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserFragmentNew(value: number, spanStart: number, spanEnd: number, tokenStart: number, tokenEnd: number): number {
+  let handle = 0;
+  let children = 0;
+  let fields = 0;
+  children = (runtimeVectorNew(0) >>> 0) >>> 0;
+  fields = (runtimeVectorNew(0) >>> 0) >>> 0;
+  handle = (runtimeArenaAlloc(8) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 4);
+  __baba_store_scratch(((handle) + (1)) >>> 0, value);
+  __baba_store_scratch(((handle) + (2)) >>> 0, spanStart);
+  __baba_store_scratch(((handle) + (3)) >>> 0, spanEnd);
+  __baba_store_scratch(((handle) + (4)) >>> 0, tokenStart);
+  __baba_store_scratch(((handle) + (5)) >>> 0, tokenEnd);
+  __baba_store_scratch(((handle) + (6)) >>> 0, children);
+  __baba_store_scratch(((handle) + (7)) >>> 0, fields);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentValue(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentSpanStart(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentSpanEnd(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentTokenStart(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (4)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentTokenEnd(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentChildren(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (6)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentFields(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (7)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentChildCount(handle: number): number {
+  return (runtimeVectorLength(parserFragmentChildren(handle) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentChildAt(handle: number, index: number): number {
+  return (runtimeVectorLoad(parserFragmentChildren(handle) >>> 0, index) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentAppendChild(handle: number, value: number): number {
+  let vector = 0;
+  let discard = 0;
+  vector = (parserFragmentChildren(handle) >>> 0) >>> 0;
+  discard = (runtimeVectorAppend(vector, value) >>> 0) >>> 0;
+  return (value) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentFieldCount(handle: number): number {
+  return (runtimeVectorLength(parserFragmentFields(handle) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentFieldAt(handle: number, index: number): number {
+  return (runtimeVectorLoad(parserFragmentFields(handle) >>> 0, index) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentAppendField(fragment: number, capture: number): number {
+  let kind = 0;
+  let fields = 0;
+  let discard = 0;
+  kind = (runtimeObjectKind(capture) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  fields = (parserFragmentFields(fragment) >>> 0) >>> 0;
+  discard = (runtimeVectorAppend(fields, capture) >>> 0) >>> 0;
+  return (capture) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentSetValue(fragment: number, value: number): number {
+  let discard = 0;
+  discard = (parserFragmentValue(fragment) >>> 0) >>> 0;
+  __baba_store_scratch(((fragment) + (1)) >>> 0, value);
+  return (value) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentMergeFrom(target: number, part: number): number {
+  let targetStart = 0;
+  let targetEnd = 0;
+  let targetTokenStart = 0;
+  let targetTokenEnd = 0;
+  let partStart = 0;
+  let partEnd = 0;
+  let partTokenStart = 0;
+  let partTokenEnd = 0;
+  let discard = 0;
+  targetStart = (parserFragmentSpanStart(target) >>> 0) >>> 0;
+  targetEnd = (parserFragmentSpanEnd(target) >>> 0) >>> 0;
+  targetTokenStart = (parserFragmentTokenStart(target) >>> 0) >>> 0;
+  targetTokenEnd = (parserFragmentTokenEnd(target) >>> 0) >>> 0;
+  partStart = (parserFragmentSpanStart(part) >>> 0) >>> 0;
+  partEnd = (parserFragmentSpanEnd(part) >>> 0) >>> 0;
+  partTokenStart = (parserFragmentTokenStart(part) >>> 0) >>> 0;
+  partTokenEnd = (parserFragmentTokenEnd(part) >>> 0) >>> 0;
+  if (((((partStart) >>> 0) < ((targetStart) >>> 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(((target) + (2)) >>> 0, partStart);
+  }
+  if (((((targetEnd) >>> 0) < ((partEnd) >>> 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(((target) + (3)) >>> 0, partEnd);
+  }
+  if (((((partTokenStart) >>> 0) < ((targetTokenStart) >>> 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(((target) + (4)) >>> 0, partTokenStart);
+  }
+  if (((((targetTokenEnd) >>> 0) < ((partTokenEnd) >>> 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(((target) + (5)) >>> 0, partTokenEnd);
+  }
+  discard = (runtimeVectorAppendAll(parserFragmentChildren(target) >>> 0, parserFragmentChildren(part) >>> 0) >>> 0) >>> 0;
+  discard = (runtimeVectorAppendAll(parserFragmentFields(target) >>> 0, parserFragmentFields(part) >>> 0) >>> 0) >>> 0;
+  return (target) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentEmpty(value: number, offset: number, tokenIndex: number): number {
+  return (parserFragmentNew(value, offset, offset, tokenIndex, tokenIndex) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentSequenceNew(offset: number, tokenIndex: number): number {
+  let values = 0;
+  values = (runtimeVectorNew(0) >>> 0) >>> 0;
+  return (parserFragmentNew(values, offset, offset, tokenIndex, tokenIndex) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentSequenceAppend(sequence: number, part: number): number {
+  let values = 0;
+  let length = 0;
+  let discard = 0;
+  values = (parserFragmentValue(sequence) >>> 0) >>> 0;
+  length = (runtimeVectorLength(values) >>> 0) >>> 0;
+  discard = (runtimeVectorAppend(values, parserFragmentValue(part) >>> 0) >>> 0) >>> 0;
+  if (((((length) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(((sequence) + (2)) >>> 0, parserFragmentSpanStart(part) >>> 0);
+    __baba_store_scratch(((sequence) + (3)) >>> 0, parserFragmentSpanEnd(part) >>> 0);
+    __baba_store_scratch(((sequence) + (4)) >>> 0, parserFragmentTokenStart(part) >>> 0);
+    __baba_store_scratch(((sequence) + (5)) >>> 0, parserFragmentTokenEnd(part) >>> 0);
+  }
+  discard = (parserFragmentMergeFrom(sequence, part) >>> 0) >>> 0;
+  return (sequence) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentWrapValueVector(fragment: number): number {
+  let oldValue = 0;
+  let values = 0;
+  let discard = 0;
+  oldValue = (parserFragmentValue(fragment) >>> 0) >>> 0;
+  values = (runtimeVectorNew(1) >>> 0) >>> 0;
+  discard = (runtimeVectorAppend(values, oldValue) >>> 0) >>> 0;
+  discard = (parserFragmentSetValue(fragment, values) >>> 0) >>> 0;
+  return (fragment) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentAppendValue(list: number, item: number): number {
+  let discard = 0;
+  discard = (runtimeVectorAppend(parserFragmentValue(list) >>> 0, parserFragmentValue(item) >>> 0) >>> 0) >>> 0;
+  discard = (parserFragmentMergeFrom(list, item) >>> 0) >>> 0;
+  return (list) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentAppendSeparatedValue(list: number, separator: number, item: number): number {
+  let discard = 0;
+  discard = (runtimeVectorAppend(parserFragmentValue(list) >>> 0, parserFragmentValue(item) >>> 0) >>> 0) >>> 0;
+  discard = (parserFragmentMergeFrom(list, separator) >>> 0) >>> 0;
+  discard = (parserFragmentMergeFrom(list, item) >>> 0) >>> 0;
+  return (list) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldCaptureNew(fieldId: number, value: number): number {
+  let handle = 0;
+  handle = (runtimeArenaAlloc(3) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 5);
+  __baba_store_scratch(((handle) + (1)) >>> 0, fieldId);
+  __baba_store_scratch(((handle) + (2)) >>> 0, value);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldCaptureFieldId(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldCaptureValue(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenNew(tokenClass: number, payload: number, terminal: number, spanStart: number, spanEnd: number): number {
+  let handle = 0;
+  handle = (runtimeArenaAlloc(6) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 7);
+  __baba_store_scratch(((handle) + (1)) >>> 0, tokenClass);
+  __baba_store_scratch(((handle) + (2)) >>> 0, payload);
+  __baba_store_scratch(((handle) + (3)) >>> 0, terminal);
+  __baba_store_scratch(((handle) + (4)) >>> 0, spanStart);
+  __baba_store_scratch(((handle) + (5)) >>> 0, spanEnd);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenClass(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenPayload(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenTerminal(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenSpanStart(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (4)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenSpanEnd(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFragmentFromToken(token: number, tokenIndex: number): number {
+  let fragment = 0;
+  let discard = 0;
+  fragment = (parserFragmentNew(token, parserTokenSpanStart(token) >>> 0, parserTokenSpanEnd(token) >>> 0, tokenIndex, ((tokenIndex) + (1)) >>> 0) >>> 0) >>> 0;
+  discard = (parserFragmentAppendChild(fragment, token) >>> 0) >>> 0;
+  return (fragment) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserDiagnosticNew(code: number, spanStart: number, spanEnd: number, detail: number): number {
+  let handle = 0;
+  handle = (runtimeArenaAlloc(5) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 8);
+  __baba_store_scratch(((handle) + (1)) >>> 0, code);
+  __baba_store_scratch(((handle) + (2)) >>> 0, spanStart);
+  __baba_store_scratch(((handle) + (3)) >>> 0, spanEnd);
+  __baba_store_scratch(((handle) + (4)) >>> 0, detail);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserDiagnosticCode(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((8) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserDiagnosticSpanStart(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((8) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserDiagnosticSpanEnd(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((8) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserDiagnosticDetail(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((8) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (4)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeFromFragment(ruleId: number, fragment: number): number {
+  let handle = 0;
+  handle = (runtimeArenaAlloc(8) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 6);
+  __baba_store_scratch(((handle) + (1)) >>> 0, ruleId);
+  __baba_store_scratch(((handle) + (2)) >>> 0, parserFragmentSpanStart(fragment) >>> 0);
+  __baba_store_scratch(((handle) + (3)) >>> 0, parserFragmentSpanEnd(fragment) >>> 0);
+  __baba_store_scratch(((handle) + (4)) >>> 0, parserFragmentTokenStart(fragment) >>> 0);
+  __baba_store_scratch(((handle) + (5)) >>> 0, parserFragmentTokenEnd(fragment) >>> 0);
+  __baba_store_scratch(((handle) + (6)) >>> 0, parserFragmentChildren(fragment) >>> 0);
+  __baba_store_scratch(((handle) + (7)) >>> 0, parserFragmentFields(fragment) >>> 0);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeRuleId(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeSpanStart(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeSpanEnd(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeTokenStart(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (4)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeTokenEnd(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeChildren(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (6)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeFields(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (7)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeChildCount(handle: number): number {
+  return (runtimeVectorLength(parserRuleNodeChildren(handle) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeFieldCount(handle: number): number {
+  return (runtimeVectorLength(parserRuleNodeFields(handle) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 export function parse(
   source: string,
   options: ParseOptions = {},
@@ -1724,6 +2235,8 @@ function replayTrace(
   };
 }
 
+const RUNTIME_NODE_HANDLES = new WeakMap<object, number>();
+
 function reduceProduction(
   reducerOperation: number,
   reducerPayload: number,
@@ -1737,14 +2250,19 @@ function reduceProduction(
       return reducerChild(reducerOperation, rhs, 0);
     case REDUCER_RESULT_RULE_NODE: {
       const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
+      const runtimeHandle = parserRuleNodeFromFragment(
+        reducerPayload,
+        fragment.runtimeHandle,
+      );
       const node = {
         type: "rule",
         name: RULE_NAMES[reducerPayload],
-        span: fragment.span ?? spanFromChildren(fragment.children) ?? { start: 0, end: 0 },
-        tokenRange: fragment.tokenRange ?? tokenRangeFromChildren(fragment.children) ?? { start: tokenIndex, end: tokenIndex },
+        span: ruleNodeSpan(runtimeHandle),
+        tokenRange: ruleNodeTokenRange(runtimeHandle),
         children: fragment.children,
         fields: buildFields(reducerPayload, fragment.fields),
       };
+      RUNTIME_NODE_HANDLES.set(node, runtimeHandle);
       return node as unknown as AnyRuleNode;
     }
     case REDUCER_RESULT_CHILD_FRAGMENT:
@@ -1762,7 +2280,10 @@ function reduceProduction(
       );
     case REDUCER_RESULT_FIRST_ARRAY_FRAGMENT: {
       const item = reducerFragmentChild(reducerOperation, rhs, 0);
+      parserFragmentWrapValueVector(item.runtimeHandle);
       item.value = [item.value];
+      item.span = fragmentSpan(item.runtimeHandle);
+      item.tokenRange = fragmentTokenRange(item.runtimeHandle);
       return item;
     }
     case REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT:
@@ -1773,6 +2294,11 @@ function reduceProduction(
       );
     case REDUCER_RESULT_FIELD_FRAGMENT: {
       const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
+      const captureHandle = parserFieldCaptureNew(
+        reducerPayload,
+        fragment.runtimeHandle,
+      );
+      parserFragmentAppendField(fragment.runtimeHandle, captureHandle);
       fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;
     }
@@ -1787,6 +2313,16 @@ function tokenFragment(shifted: ShiftedToken): Fragment {
     throw new Error("Expected shifted main syntax token.");
   }
   return {
+    runtimeHandle: parserFragmentFromToken(
+      parserTokenNew(
+        publicTokenClass(token),
+        tokenSpecIndex(token),
+        tokenToTerminal(token),
+        token.span.start,
+        token.span.end,
+      ),
+      shifted.tokenIndex,
+    ),
     value: token,
     children: [token],
     fields: [],
@@ -1796,13 +2332,38 @@ function tokenFragment(shifted: ShiftedToken): Fragment {
 }
 
 function ruleFragment(node: AnyRuleNode): Fragment {
+  const runtimeHandle = runtimeRuleNodeFragmentHandle(node);
   return {
+    runtimeHandle,
     value: node,
     children: [node],
     fields: [],
-    span: node.span,
-    tokenRange: node.tokenRange,
+    span: fragmentSpan(runtimeHandle),
+    tokenRange: fragmentTokenRange(runtimeHandle),
   };
+}
+
+function runtimeRuleNodeFragmentHandle(node: AnyRuleNode): number {
+  const existing = RUNTIME_NODE_HANDLES.get(node as object);
+  if (existing !== undefined) {
+    const fragment = parserFragmentNew(
+      existing,
+      parserRuleNodeSpanStart(existing),
+      parserRuleNodeSpanEnd(existing),
+      parserRuleNodeTokenStart(existing),
+      parserRuleNodeTokenEnd(existing),
+    );
+    parserFragmentAppendChild(fragment, existing);
+    return fragment;
+  }
+  const fragment = parserFragmentNew(
+    0,
+    node.span.start,
+    node.span.end,
+    node.tokenRange.start,
+    node.tokenRange.end,
+  );
+  return fragment;
 }
 
 function reducerChild(
@@ -1843,25 +2404,24 @@ function sequenceFragment(
   offset: number,
   tokenIndex: number,
 ): Fragment {
+  const runtimeHandle = parserFragmentSequenceNew(offset, tokenIndex);
   const fragmentValues: unknown[] = [];
   const children: SyntaxElement[] = [];
   const fields: FieldCapture[] = [];
-  let span: Span | null = null;
-  let tokenRange: TokenRange | null = null;
   for (let index = 0; index < values.length; index++) {
     const part = reducerFragmentChild(reducerOperation, values, index);
+    parserFragmentSequenceAppend(runtimeHandle, part.runtimeHandle);
     fragmentValues.push(part.value);
     appendAll(children, part.children);
     appendAll(fields, part.fields);
-    span = combineSpans(span, part.span);
-    tokenRange = combineTokenRanges(tokenRange, part.tokenRange);
   }
   return {
+    runtimeHandle,
     value: fragmentValues,
     children,
     fields,
-    span: span ?? { start: offset, end: offset },
-    tokenRange: tokenRange ?? { start: tokenIndex, end: tokenIndex },
+    span: fragmentSpan(runtimeHandle),
+    tokenRange: fragmentTokenRange(runtimeHandle),
   };
 }
 
@@ -1870,26 +2430,32 @@ function emptyFragment(
   offset: number,
   tokenIndex: number,
 ): Fragment {
+  const runtimeHandle = Array.isArray(value)
+    ? parserFragmentSequenceNew(offset, tokenIndex)
+    : parserFragmentEmpty(0, offset, tokenIndex);
   return {
+    runtimeHandle,
     value,
     children: [],
     fields: [],
-    span: { start: offset, end: offset },
-    tokenRange: { start: tokenIndex, end: tokenIndex },
+    span: fragmentSpan(runtimeHandle),
+    tokenRange: fragmentTokenRange(runtimeHandle),
   };
 }
 
 function appendFragment(list: Fragment, item: Fragment): Fragment {
+  parserFragmentAppendValue(list.runtimeHandle, item.runtimeHandle);
   const values = asMutableArray(list.value);
   values.push(item.value);
   appendAll(list.children, item.children);
   appendAll(list.fields, item.fields);
   return {
+    runtimeHandle: list.runtimeHandle,
     value: values,
     children: list.children,
     fields: list.fields,
-    span: combineSpans(list.span, item.span),
-    tokenRange: combineTokenRanges(list.tokenRange, item.tokenRange),
+    span: fragmentSpan(list.runtimeHandle),
+    tokenRange: fragmentTokenRange(list.runtimeHandle),
   };
 }
 
@@ -1898,6 +2464,11 @@ function appendSeparatedFragment(
   separator: Fragment,
   item: Fragment,
 ): Fragment {
+  parserFragmentAppendSeparatedValue(
+    list.runtimeHandle,
+    separator.runtimeHandle,
+    item.runtimeHandle,
+  );
   const values = asMutableArray(list.value);
   values.push(item.value);
   appendAll(list.children, separator.children);
@@ -1905,14 +2476,12 @@ function appendSeparatedFragment(
   appendAll(list.fields, separator.fields);
   appendAll(list.fields, item.fields);
   return {
+    runtimeHandle: list.runtimeHandle,
     value: values,
     children: list.children,
     fields: list.fields,
-    span: combineSpans(combineSpans(list.span, separator.span), item.span),
-    tokenRange: combineTokenRanges(
-      combineTokenRanges(list.tokenRange, separator.tokenRange),
-      item.tokenRange,
-    ),
+    span: fragmentSpan(list.runtimeHandle),
+    tokenRange: fragmentTokenRange(list.runtimeHandle),
   };
 }
 
@@ -1931,6 +2500,34 @@ function asMutableArray(value: unknown): unknown[] {
 function appendAll<T>(target: T[], values: readonly T[]): T[] {
   for (const value of values) target.push(value);
   return target;
+}
+
+function fragmentSpan(handle: number): Span {
+  return {
+    start: parserFragmentSpanStart(handle),
+    end: parserFragmentSpanEnd(handle),
+  };
+}
+
+function fragmentTokenRange(handle: number): TokenRange {
+  return {
+    start: parserFragmentTokenStart(handle),
+    end: parserFragmentTokenEnd(handle),
+  };
+}
+
+function ruleNodeSpan(handle: number): Span {
+  return {
+    start: parserRuleNodeSpanStart(handle),
+    end: parserRuleNodeSpanEnd(handle),
+  };
+}
+
+function ruleNodeTokenRange(handle: number): TokenRange {
+  return {
+    start: parserRuleNodeTokenStart(handle),
+    end: parserRuleNodeTokenEnd(handle),
+  };
 }
 
 function combineDiagnostics(
@@ -2182,6 +2779,7 @@ function isShiftedToken(value: unknown): value is ShiftedToken {
 function isFragment(value: unknown): value is Fragment {
   return !!value &&
     typeof value === "object" &&
+    "runtimeHandle" in value &&
     "value" in value &&
     "children" in value &&
     "fields" in value &&

@@ -277,15 +277,20 @@ export const RUNTIME_ARENA_PROGRAM: RuntimeLanguageProgram = {
   functions: runtimeArenaFunctions(),
 };
 
-export function createParserObjectRuntimeProgram(): RuntimeLanguageProgram {
+export function createParserObjectRuntimeProgram(
+  options: { includeArena?: boolean } = {},
+): RuntimeLanguageProgram {
+  const includeArena = options.includeArena ?? true;
   return {
     name: "parser_object_runtime",
     entry: "parserFragmentNew",
     scratchMemoryWords: RUNTIME_ARENA_FIRST_WORD,
-    functions: [
-      ...runtimeArenaFunctions(),
-      ...parserObjectFunctions(),
-    ],
+    functions: includeArena
+      ? [
+        ...runtimeArenaFunctions(),
+        ...parserObjectFunctions(),
+      ]
+      : parserObjectFunctions(),
   };
 }
 

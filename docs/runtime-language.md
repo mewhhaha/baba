@@ -66,12 +66,12 @@ from `parserReducerOperation`, and required payload status from
 `parserReducerResultKind`, all backed by numeric reducer tables. CST field
 assembly now reads field row/config metadata through
 `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
-`parserFieldFlags`/`parserFieldIndex` helpers. JavaScript still executes reducer
-fragment assembly and builds public CST objects, but it now gets the result
-shape from the runtime-language helper before allocating raw child, rule-node,
-fragment, sequence, empty, append, separated-append, or field-capture results.
-Field value-class/count validation now uses
-`parserFieldValueClass`/`parserFieldCaptureStatus`/`parserFieldFinalStatus`
+`parserFieldFlags`/`parserFieldIndex` helpers. JavaScript still materializes the
+public CST object shape, but replay now carries runtime-language parser object
+handles and calls runtime-language fragment helpers while reducing raw child,
+rule-node, token-fragment, sequence, empty, append, separated-append,
+first-array, and field-capture results. Field value-class/count validation now
+uses `parserFieldValueClass`/`parserFieldCaptureStatus`/`parserFieldFinalStatus`
 helpers, replay reduction validity uses `parserReplayReductionStatus`, and
 span/token-range merge arithmetic uses `parserMergeStart`/`parserMergeEnd`
 helpers. Generated parser action decoding uses
@@ -119,7 +119,9 @@ functions with statement bodies. The current conformance subset supports:
   substrate;
 - arena-backed parser fragment assembly helpers for empty fragments, sequence
   fragments, first-array wrapping, list append, separated-list append, child and
-  field vector copying, and span/token-range merging;
+  field vector copying, and span/token-range merging, now used by generated
+  TypeScript parser replay and generated Wasm adapter replay as the runtime
+  handle substrate for public CST materialization;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - bitwise AND;
@@ -191,6 +193,10 @@ execute both outputs and compare returned values or traps.
 - Parser fragment assembly helpers represent reducer list values as arena
   vectors and preserve child/field vectors plus span/token-range extents across
   sequence, append, and separated-append operations.
+- Generated parser replay may wrap host tokens, fragments, and rule nodes with
+  runtime-language parser object handles during reduction, then read spans and
+  token ranges back from those handles before constructing public JavaScript CST
+  objects.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
@@ -200,8 +206,8 @@ These rules must be specified before the parser runtime can be fully lowered:
 - ownership and opaque typed handle provenance;
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
-- complete generated-parser lowering onto the host-visible token and diagnostic
-  memory layout.
+- complete generated-parser lowering for public CST field objects/arrays plus
+  host-visible token and diagnostic object emission.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from

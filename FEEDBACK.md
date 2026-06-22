@@ -80,6 +80,12 @@ runtime language:
   shapes: empty fragments, sequences, first-array wrapping, list append,
   separated-list append, child/field vector copying, and span/token-range
   merging, with TypeScript/Wasm conformance coverage.
+- Wired generated TypeScript parser replay and generated Wasm adapter replay to
+  carry runtime-language parser object handles for tokens, fragments, field
+  captures, and rule nodes. Replay now calls the runtime-language fragment
+  assembly helpers for token fragments, rule-node fragments, sequence fragments,
+  empty fragments, list append, separated-list append, first-array wrapping, and
+  field-capture attachment before materializing the public JavaScript CST shape.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source program, with the same source compiled through both
   TypeScript and Wasm conformance tests.
@@ -250,18 +256,20 @@ Still unresolved:
   diagnostic code selection uses runtime-language expected-state flags, reducer
   result-shape classification is runtime-language-backed, and parser replay
   action dispatch, parser trace status, plus replay reduction validity
-  classification now use runtime-language helpers, but the actual
-  allocation/assembly of fragments, field objects/arrays, CST nodes, and
-  generated token/diagnostic object emission is still not mechanically emitted
+  classification now use runtime-language helpers. Generated replay also now
+  carries runtime-language parser object handles and calls runtime-language
+  fragment assembly helpers during token/rule/sequence/empty/list/field
+  reductions, but public JavaScript field objects/arrays, CST node objects, and
+  generated token/diagnostic object emission are still not mechanically emitted
   from one runtime-language implementation. The runtime language now has a
   checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
   growable vectors, and initial parser fragment/field/rule-node/token/
-  diagnostic layouts plus reduction-shaped fragment assembly helpers, but it
-  still lacks opaque typed handle provenance and generated parser-runtime
-  lowering that would use those allocation helpers. The compiler now has a
-  shared lowered control-flow/value IR and checked helper artifact hashes, but
-  it still needs broader parser-runtime lowering before the release can fully
-  satisfy "one runtime implementation, two execution targets."
+  diagnostic layouts plus reduction-shaped fragment assembly helpers that
+  generated replay is beginning to use, but it still lacks opaque typed handle
+  provenance and complete generated parser-runtime lowering. The compiler now
+  has a shared lowered control-flow/value IR and checked helper artifact hashes,
+  but it still needs broader parser-runtime lowering before the release can
+  fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a
