@@ -91,6 +91,9 @@ import {
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_START,
   RUNTIME_REDUCER_TERMINAL,
+  RUNTIME_REPLAY_ACTION_STATUS_ACCEPT,
+  RUNTIME_REPLAY_ACTION_STATUS_REDUCE,
+  RUNTIME_REPLAY_ACTION_STATUS_SHIFT,
   RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING,
   RUNTIME_REPLAY_REDUCTION_STATUS_OK,
   RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
@@ -349,6 +352,9 @@ const ACTION_ACCEPT = ${RUNTIME_ACTION_ACCEPT};
 const TRACE_STATUS_OK = ${RUNTIME_TRACE_STATUS_OK};
 const TRACE_STATUS_UNEXPECTED = ${RUNTIME_TRACE_STATUS_UNEXPECTED};
 const TRACE_STATUS_BRANCH_LIMIT = ${RUNTIME_TRACE_STATUS_BRANCH_LIMIT};
+const REPLAY_ACTION_SHIFT = ${RUNTIME_REPLAY_ACTION_STATUS_SHIFT};
+const REPLAY_ACTION_REDUCE = ${RUNTIME_REPLAY_ACTION_STATUS_REDUCE};
+const REPLAY_ACTION_ACCEPT = ${RUNTIME_REPLAY_ACTION_STATUS_ACCEPT};
 const NO_GOTO = ${RUNTIME_NO_GOTO};
 const NO_SPAN = ${RUNTIME_NO_SPAN};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
@@ -734,8 +740,9 @@ function replayTraceRuntime(label: string): string {
     const encoded = trace[traceIndex];
     const kind = parserActionKind(encoded);
     const payload = parserActionPayload(encoded);
+    const actionStatus = parserReplayActionStatus(kind);
 
-    if (kind === ACTION_SHIFT) {
+    if (actionStatus === REPLAY_ACTION_SHIFT) {
       values.push(shiftedToken(
         streamTokens[index] ?? eofToken(source.length),
         streamTokenIndices[index] ?? tokens.length,
@@ -744,12 +751,12 @@ function replayTraceRuntime(label: string): string {
       continue;
     }
 
-    if (kind === ACTION_ACCEPT) {
+    if (actionStatus === REPLAY_ACTION_ACCEPT) {
       return acceptedParseResult(source, tokens, values[values.length - 1]);
     }
 
     const token = streamTokens[index] ?? eofToken(source.length);
-    if (kind !== ACTION_REDUCE) {
+    if (actionStatus !== REPLAY_ACTION_REDUCE) {
       return {
         ok: false,
         root: null,

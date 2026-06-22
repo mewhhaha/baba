@@ -123,6 +123,10 @@ runtime language:
 - Added a runtime-language `andU32` operator and moved generated parser action
   kind/payload decoding plus `parserTrace` action classification onto
   `parserActionKind`/`parserActionPayload` helpers.
+- Moved generated parser replay shift/reduce/accept action dispatch
+  classification onto runtime-language `parserReplayActionStatus`, so accepted
+  trace replay no longer directly interprets raw action kind numbers before
+  executing host object allocation.
 - Switched the core Wasm parser trace decoder to the same shared runtime action
   kind/payload masks used by the runtime-language helpers.
 - Added a runtime-language `parserActionCount` helper so generated conflict
@@ -220,14 +224,15 @@ Still unresolved:
   through runtime-language lexer spec helpers. Parser replay span and
   token-range merge arithmetic is runtime-language-backed, trailing-input
   diagnostic code selection uses runtime-language expected-state flags, reducer
-  result-shape classification is runtime-language-backed, and parser trace
-  status plus replay reduction validity classification now use runtime-language
-  helpers, but the actual allocation/assembly of fragments, field
-  objects/arrays, CST nodes, and generated token/diagnostic object emission is
-  still not mechanically emitted from one runtime-language implementation. The
-  compiler now has a shared lowered control-flow/value IR and checked helper
-  artifact hashes, but it still needs broader parser-runtime lowering before the
-  release can fully satisfy "one runtime implementation, two execution targets."
+  result-shape classification is runtime-language-backed, and parser replay
+  action dispatch, parser trace status, plus replay reduction validity
+  classification now use runtime-language helpers, but the actual
+  allocation/assembly of fragments, field objects/arrays, CST nodes, and
+  generated token/diagnostic object emission is still not mechanically emitted
+  from one runtime-language implementation. The compiler now has a shared
+  lowered control-flow/value IR and checked helper artifact hashes, but it still
+  needs broader parser-runtime lowering before the release can fully satisfy
+  "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

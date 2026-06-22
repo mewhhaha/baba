@@ -53,6 +53,9 @@ const ACTION_ACCEPT = 50331648;
 const TRACE_STATUS_OK = 0;
 const TRACE_STATUS_UNEXPECTED = 1;
 const TRACE_STATUS_BRANCH_LIMIT = 3;
+const REPLAY_ACTION_SHIFT = 1;
+const REPLAY_ACTION_REDUCE = 2;
+const REPLAY_ACTION_ACCEPT = 3;
 const NO_GOTO = 4294967295;
 const NO_SPAN = 4294967295;
 const NO_TERMINAL = 4294967295;
@@ -318,6 +321,20 @@ function parserActionKind(action: number): number {
 
 function parserActionPayload(action: number): number {
   return (((action) & (16777215)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayActionStatus(actionKind: number): number {
+  if (((((actionKind) >>> 0) === ((16777216) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((actionKind) >>> 0) === ((33554432) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((actionKind) >>> 0) === ((50331648) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  return (0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -1226,8 +1243,9 @@ function replayTrace(
     const encoded = trace[traceIndex];
     const kind = parserActionKind(encoded);
     const payload = parserActionPayload(encoded);
+    const actionStatus = parserReplayActionStatus(kind);
 
-    if (kind === ACTION_SHIFT) {
+    if (actionStatus === REPLAY_ACTION_SHIFT) {
       values.push(shiftedToken(
         streamTokens[index] ?? eofToken(source.length),
         streamTokenIndices[index] ?? tokens.length,
@@ -1236,12 +1254,12 @@ function replayTrace(
       continue;
     }
 
-    if (kind === ACTION_ACCEPT) {
+    if (actionStatus === REPLAY_ACTION_ACCEPT) {
       return acceptedParseResult(source, tokens, values[values.length - 1]);
     }
 
     const token = streamTokens[index] ?? eofToken(source.length);
-    if (kind !== ACTION_REDUCE) {
+    if (actionStatus !== REPLAY_ACTION_REDUCE) {
       return {
         ok: false,
         root: null,

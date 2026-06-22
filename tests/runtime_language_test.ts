@@ -93,6 +93,10 @@ import {
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_UNKNOWN,
+  RUNTIME_REPLAY_ACTION_STATUS_ACCEPT,
+  RUNTIME_REPLAY_ACTION_STATUS_REDUCE,
+  RUNTIME_REPLAY_ACTION_STATUS_SHIFT,
+  RUNTIME_REPLAY_ACTION_STATUS_UNKNOWN,
   RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING,
   RUNTIME_REPLAY_REDUCTION_STATUS_OK,
   RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
@@ -358,6 +362,44 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           expression: add(
             call("parserActionKind", [u32(RUNTIME_ACTION_REDUCE + 42)]),
             call("parserActionPayload", [u32(RUNTIME_ACTION_REDUCE + 42)]),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserReplayActionStatusProgram: RuntimeLanguageProgram = {
+    ...parserActionBaseProgram,
+    name: "parser_replay_action_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserActionBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserReplayActionStatus", [u32(RUNTIME_ACTION_SHIFT)]),
+              u32(1_000),
+            ),
+            add(
+              mul(
+                call("parserReplayActionStatus", [
+                  u32(RUNTIME_ACTION_REDUCE),
+                ]),
+                u32(100),
+              ),
+              add(
+                mul(
+                  call("parserReplayActionStatus", [
+                    u32(RUNTIME_ACTION_ACCEPT),
+                  ]),
+                  u32(10),
+                ),
+                call("parserReplayActionStatus", [u32(99)]),
+              ),
+            ),
           ),
         }],
       },
@@ -1614,6 +1656,17 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "parser action lookup splits kind and payload",
       program: parserActionRuntimeProgram,
       expected: { kind: "value", value: RUNTIME_ACTION_REDUCE + 42 },
+    },
+    {
+      name: "parser replay action helper classifies trace action kinds",
+      program: parserReplayActionStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_REPLAY_ACTION_STATUS_SHIFT * 1_000 +
+          RUNTIME_REPLAY_ACTION_STATUS_REDUCE * 100 +
+          RUNTIME_REPLAY_ACTION_STATUS_ACCEPT * 10 +
+          RUNTIME_REPLAY_ACTION_STATUS_UNKNOWN,
+      },
     },
     {
       name: "parser conflict lookup finds first action",

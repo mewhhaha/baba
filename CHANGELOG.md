@@ -61,6 +61,8 @@
 - Added a runtime-language `andU32` operator plus parser action kind/payload
   helpers for generated TypeScript, Wasm-adapter, and parser trace action
   decoding.
+- Added a runtime-language parser replay action status helper for generated
+  trace replay shift/reduce/accept dispatch.
 - Switched the core Wasm parser trace decoder to the shared runtime action
   kind/payload masks.
 - Added a runtime-language `parserActionCount` helper for conflict parser action

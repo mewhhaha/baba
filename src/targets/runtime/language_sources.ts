@@ -39,6 +39,10 @@ export const RUNTIME_TRACE_STATUS_OK = 0;
 export const RUNTIME_TRACE_STATUS_UNEXPECTED = 1;
 export const RUNTIME_TRACE_STATUS_INTERNAL = 2;
 export const RUNTIME_TRACE_STATUS_BRANCH_LIMIT = 3;
+export const RUNTIME_REPLAY_ACTION_STATUS_UNKNOWN = 0;
+export const RUNTIME_REPLAY_ACTION_STATUS_SHIFT = 1;
+export const RUNTIME_REPLAY_ACTION_STATUS_REDUCE = 2;
+export const RUNTIME_REPLAY_ACTION_STATUS_ACCEPT = 3;
 export const RUNTIME_NO_GOTO = 0xffff_ffff;
 export const RUNTIME_NO_PRODUCTION = 0xffff_ffff;
 export const RUNTIME_REDUCER_UNKNOWN = 0;
@@ -1892,6 +1896,7 @@ function parserActionFunctions(): RuntimeLanguageFunction[] {
   return [
     parserActionKindFunction(),
     parserActionPayloadFunction(),
+    parserReplayActionStatusFunction(),
   ];
 }
 
@@ -1922,6 +1927,46 @@ function parserActionPayloadFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: and(local("action"), u32(RUNTIME_ACTION_PAYLOAD_MASK)),
+      },
+    ],
+  };
+}
+
+function parserReplayActionStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserReplayActionStatus",
+    parameters: [
+      { name: "actionKind", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("actionKind"), u32(RUNTIME_ACTION_SHIFT)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_REPLAY_ACTION_STATUS_SHIFT),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("actionKind"), u32(RUNTIME_ACTION_REDUCE)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_REPLAY_ACTION_STATUS_REDUCE),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("actionKind"), u32(RUNTIME_ACTION_ACCEPT)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_REPLAY_ACTION_STATUS_ACCEPT),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_REPLAY_ACTION_STATUS_UNKNOWN),
       },
     ],
   };

@@ -76,15 +76,17 @@ helpers, replay reduction validity uses `parserReplayReductionStatus`, and
 span/token-range merge arithmetic uses `parserMergeStart`/`parserMergeEnd`
 helpers. Generated parser action decoding uses
 `parserActionKind`/`parserActionPayload` helpers, and `parserTrace` uses the
-same helpers to classify encoded actions. `parserTraceStatusKind` classifies
-parser trace status values for generated TypeScript parsers and Wasm adapters
-before those hosts allocate public diagnostics. Deterministic TypeScript parsers
-use a runtime-language `parserTrace` helper backed by growable scratch memory
-for LR shift/reduce/accept control flow. Declared-conflict TypeScript parsers
-use a runtime-language conflict `parserTrace` helper that stores and restores
-branch frames as scratch-memory `u32` data before TypeScript replays the
-accepted action trace to build the CST. The core Wasm parser trace uses the same
-shared action kind/payload masks, and generated Wasm adapters now instantiate a
+same helpers to classify encoded actions. `parserReplayActionStatus` classifies
+shift/reduce/accept/unknown action kinds before generated TypeScript replay
+dispatches the accepted trace. `parserTraceStatusKind` classifies parser trace
+status values for generated TypeScript parsers and Wasm adapters before those
+hosts allocate public diagnostics. Deterministic TypeScript parsers use a
+runtime-language `parserTrace` helper backed by growable scratch memory for LR
+shift/reduce/accept control flow. Declared-conflict TypeScript parsers use a
+runtime-language conflict `parserTrace` helper that stores and restores branch
+frames as scratch-memory `u32` data before TypeScript replays the accepted
+action trace to build the CST. The core Wasm parser trace uses the same shared
+action kind/payload masks, and generated Wasm adapters now instantiate a
 runtime-language Wasm parser trace module for LR control flow, trace status
 classification, and trace action reads. The core Wasm module still owns lexing
 and low-level parser table lookup exports, but it no longer emits a separate
