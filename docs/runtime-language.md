@@ -85,23 +85,26 @@ same helpers to classify encoded actions. `parserReplayActionStatus` classifies
 shift/reduce/accept/unknown action kinds before generated TypeScript replay
 dispatches the accepted trace. `parserTraceStatusKind` classifies parser trace
 status values for generated TypeScript parsers and Wasm adapters before those
-hosts allocate public diagnostics. Deterministic TypeScript parsers use a
-runtime-language `parserTrace` helper whose parser state stack and
-accepted-action trace are stored in arena-backed growable vectors for LR
-shift/reduce/accept control flow. Declared-conflict TypeScript parsers use a
-runtime-language conflict `parserTrace` helper whose active stack, accepted
-action trace, and saved branch snapshots are stored as arena-backed growable
-vectors before TypeScript replays the accepted action trace to build the CST.
-The core Wasm parser trace uses the same shared action kind/payload masks, and
-generated Wasm adapters now instantiate a runtime-language Wasm parser trace
-module for LR control flow, trace status classification, and trace action reads.
-The core Wasm module still owns lexing and low-level parser table lookup
-exports, but it no longer emits a separate `parse_trace` LR execution function.
-The same runtime-language source shapes are also compiled to Wasm in conformance
-tests. Because generated parser runtime code depends on runtime-language
-compiler output, the checked runtime implementation manifest includes both
-runtime language sources, the Stage-0 compiler, and the checked runtime-language
-artifact manifest.
+hosts allocate public diagnostics. Public parse diagnostics now allocate
+runtime-language diagnostic records first, read span data back through
+`parserDiagnosticSpanStart`/`parserDiagnosticSpanEnd`, and then materialize the
+public JavaScript diagnostic object at the API boundary. Deterministic
+TypeScript parsers use a runtime-language `parserTrace` helper whose parser
+state stack and accepted-action trace are stored in arena-backed growable
+vectors for LR shift/reduce/accept control flow. Declared-conflict TypeScript
+parsers use a runtime-language conflict `parserTrace` helper whose active stack,
+accepted action trace, and saved branch snapshots are stored as arena-backed
+growable vectors before TypeScript replays the accepted action trace to build
+the CST. The core Wasm parser trace uses the same shared action kind/payload
+masks, and generated Wasm adapters now instantiate a runtime-language Wasm
+parser trace module for LR control flow, trace status classification, and trace
+action reads. The core Wasm module still owns lexing and low-level parser table
+lookup exports, but it no longer emits a separate `parse_trace` LR execution
+function. The same runtime-language source shapes are also compiled to Wasm in
+conformance tests. Because generated parser runtime code depends on
+runtime-language compiler output, the checked runtime implementation manifest
+includes both runtime language sources, the Stage-0 compiler, and the checked
+runtime-language artifact manifest.
 
 ## Current Executable Subset
 
@@ -208,6 +211,9 @@ execute both outputs and compare returned values or traps.
 - Generated public child assembly consumes runtime rule-node child vectors and
   resolves runtime token/rule-node handles through a per-replay syntax handle
   map; it no longer carries an independent JavaScript fragment child list.
+- Generated public parse diagnostics allocate runtime diagnostic records and
+  read span data back from those records before materializing public JavaScript
+  diagnostic objects.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
@@ -218,7 +224,7 @@ These rules must be specified before the parser runtime can be fully lowered:
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
 - complete generated-parser lowering for public CST field objects/arrays plus
-  host-visible token and diagnostic object emission.
+  host-visible token object emission.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from

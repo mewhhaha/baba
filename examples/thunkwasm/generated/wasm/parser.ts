@@ -105,6 +105,12 @@ const SPEC_STATUS_NOT_LITERAL = 2;
 const SPEC_STATUS_NOT_MAIN = 3;
 const SPEC_STATUS_NOT_TRIVIA = 4;
 const LEXICAL_TOKEN_OK = 0;
+const DIAGNOSTIC_PARSE_LEXICAL_ERROR = 1;
+const DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN = 2;
+const DIAGNOSTIC_PARSE_TRAILING_INPUT = 3;
+const DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM = 4;
+const DIAGNOSTIC_PARSER_INTERNAL_ERROR = 5;
+const DIAGNOSTIC_PARSER_BRANCH_LIMIT = 6;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -1607,6 +1613,7 @@ export function parse(
   source: string,
   options: ParseOptions = {},
 ): ParseResult<RootNode> {
+  runtimeArenaReset();
   const lexed = lexForParse(source, options);
   return parseTokenList(
     source,
@@ -1621,6 +1628,7 @@ export function parseTokens(
   source: string,
   tokens: readonly Token[],
 ): ParseResult<RootNode> {
+  runtimeArenaReset();
   const streamDiagnostics = validateTokenStream(source, tokens);
   const tokenDiagnostics = lexicalTokenDiagnostics(tokens);
   return parseTokenList(
@@ -1636,6 +1644,7 @@ export function parseTokensUnchecked(
   source: string,
   tokens: readonly Token[],
 ): ParseResult<RootNode> {
+  runtimeArenaReset();
   return parseTokenList(
     source,
     tokens,
@@ -1673,11 +1682,7 @@ function parseTokenList(
         root: null,
         source,
         tokens,
-        diagnostics: [{
-          code: "PARSER_BRANCH_LIMIT",
-          message: "Parser exceeded the branch exploration limit.",
-          span: { start: source.length, end: source.length },
-        }],
+        diagnostics: [branchLimitDiagnostic(source.length)],
       };
     }
     if (traced.internal) {
@@ -1686,11 +1691,10 @@ function parseTokenList(
         root: null,
         source,
         tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Wasm parser trace failed.",
-          span: currentSpan(token),
-        }],
+        diagnostics: [parserInternalMessageDiagnostic(
+          "Wasm parser trace failed.",
+          currentSpan(token),
+        )],
       };
     }
     return {
@@ -1786,11 +1790,10 @@ function replayTrace(
         root: null,
         source,
         tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Wasm parser trace contained an unknown action kind.",
-          span: currentSpan(token),
-        }],
+        diagnostics: [parserInternalMessageDiagnostic(
+          "Wasm parser trace contained an unknown action kind.",
+          currentSpan(token),
+        )],
       };
     }
 
@@ -1810,11 +1813,10 @@ function replayTrace(
         root: null,
         source,
         tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Wasm parser trace referenced an unknown production.",
-          span: currentSpan(token),
-        }],
+        diagnostics: [parserInternalMessageDiagnostic(
+          "Wasm parser trace referenced an unknown production.",
+          currentSpan(token),
+        )],
       };
     }
     if (
@@ -1826,13 +1828,12 @@ function replayTrace(
         root: null,
         source,
         tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING
+        diagnostics: [parserInternalMessageDiagnostic(
+          replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING
             ? "Rule reducer is missing its rule id payload."
             : "Field reducer is missing its field id payload.",
-          span: currentSpan(token),
-        }],
+          currentSpan(token),
+        )],
       };
     }
     if (replayReductionStatus === REPLAY_REDUCTION_STACK_UNDERFLOW) {
@@ -1841,11 +1842,10 @@ function replayTrace(
         root: null,
         source,
         tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Wasm parser trace underflowed the replay stack.",
-          span: currentSpan(token),
-        }],
+        diagnostics: [parserInternalMessageDiagnostic(
+          "Wasm parser trace underflowed the replay stack.",
+          currentSpan(token),
+        )],
       };
     }
     if (replayReductionStatus !== REPLAY_REDUCTION_OK) {
@@ -1854,11 +1854,10 @@ function replayTrace(
         root: null,
         source,
         tokens,
-        diagnostics: [{
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Wasm parser trace reduction validation failed.",
-          span: currentSpan(token),
-        }],
+        diagnostics: [parserInternalMessageDiagnostic(
+          "Wasm parser trace reduction validation failed.",
+          currentSpan(token),
+        )],
       };
     }
     const rhsValues = rhsLength === 0
@@ -1890,11 +1889,10 @@ function replayTrace(
     root: null,
     source,
     tokens,
-    diagnostics: [{
-      code: "PARSER_INTERNAL_ERROR",
-      message: "Wasm parser trace ended without accepting.",
-      span: { start: source.length, end: source.length },
-    }],
+    diagnostics: [parserInternalMessageDiagnostic(
+      "Wasm parser trace ended without accepting.",
+      { start: source.length, end: source.length },
+    )],
   };
 }
 
@@ -2210,6 +2208,53 @@ function combineDiagnostics(
   return [...left, ...right];
 }
 
+function parseDiagnostic(
+  code: ParseDiagnostic["code"],
+  message: string,
+  span: Span,
+  detail = 0,
+): ParseDiagnostic {
+  const expectedCode = diagnosticCodeId(code);
+  const handle = parserDiagnosticNew(
+    expectedCode,
+    span.start,
+    span.end,
+    detail,
+  );
+  if (parserDiagnosticCode(handle) !== expectedCode) {
+    throw new Error("Runtime diagnostic code mismatch.");
+  }
+  return {
+    code,
+    message,
+    span: diagnosticSpan(handle),
+  };
+}
+
+function diagnosticCodeId(code: ParseDiagnostic["code"]): number {
+  switch (code) {
+    case "PARSE_LEXICAL_ERROR":
+      return DIAGNOSTIC_PARSE_LEXICAL_ERROR;
+    case "PARSE_UNEXPECTED_TOKEN":
+      return DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN;
+    case "PARSE_TRAILING_INPUT":
+      return DIAGNOSTIC_PARSE_TRAILING_INPUT;
+    case "PARSE_INVALID_TOKEN_STREAM":
+      return DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM;
+    case "PARSER_INTERNAL_ERROR":
+      return DIAGNOSTIC_PARSER_INTERNAL_ERROR;
+    case "PARSER_BRANCH_LIMIT":
+      return DIAGNOSTIC_PARSER_BRANCH_LIMIT;
+  }
+}
+
+function diagnosticSpan(handle: number): Span {
+  return {
+    start: parserDiagnosticSpanStart(handle),
+    end: parserDiagnosticSpanEnd(handle),
+  };
+}
+
 function lexicalDiagnostics(
   diagnostics: readonly LexDiagnostic[],
 ): readonly ParseDiagnostic[] {
@@ -2356,11 +2401,10 @@ function acceptedParseResult(
     root: null,
     source,
     tokens,
-    diagnostics: [{
-      code: "PARSER_INTERNAL_ERROR",
-      message: "Parser accepted without producing a root node.",
-      span: { start: source.length, end: source.length },
-    }],
+    diagnostics: [parserInternalMessageDiagnostic(
+      "Parser accepted without producing a root node.",
+      { start: source.length, end: source.length },
+    )],
   };
 }
 
@@ -2378,9 +2422,12 @@ function unexpectedTokenDiagnostic(token: Token, state: number): ParseDiagnostic
     ? "PARSE_TRAILING_INPUT"
     : "PARSE_UNEXPECTED_TOKEN";
   return {
-    code,
-    message: `Unexpected token ${found}.`,
-    span: token.span,
+    ...parseDiagnostic(
+      code,
+      `Unexpected token ${found}.`,
+      token.span,
+      state,
+    ),
     expected,
     found,
   };
@@ -2432,16 +2479,20 @@ function isTriviaToken(token: Token): boolean {
 function lexicalTokenDiagnostic(token: Token): ParseDiagnostic {
   if (token.type === "error") {
     return {
-      code: "PARSE_LEXICAL_ERROR",
-      message: `Unexpected character ${JSON.stringify(token.text)}.`,
-      span: token.span,
+      ...parseDiagnostic(
+        "PARSE_LEXICAL_ERROR",
+        `Unexpected character ${JSON.stringify(token.text)}.`,
+        token.span,
+      ),
       found: JSON.stringify(token.text),
     };
   }
   return {
-    code: "PARSE_LEXICAL_ERROR",
-    message: `Token ${tokenDisplay(token)} is not part of this parser's terminal set.`,
-    span: token.span,
+    ...parseDiagnostic(
+      "PARSE_LEXICAL_ERROR",
+      `Token ${tokenDisplay(token)} is not part of this parser's terminal set.`,
+      token.span,
+    ),
     found: tokenDisplay(token),
   };
 }
@@ -2755,11 +2806,7 @@ function sameToken(left: Token, right: Token): boolean {
 }
 
 function invalidTokenStream(message: string, span: Span): ParseDiagnostic {
-  return {
-    code: "PARSE_INVALID_TOKEN_STREAM",
-    message,
-    span,
-  };
+  return parseDiagnostic("PARSE_INVALID_TOKEN_STREAM", message, span);
 }
 
 function clampSpan(span: Span, sourceLength: number): Span {
@@ -2769,11 +2816,25 @@ function clampSpan(span: Span, sourceLength: number): Span {
 }
 
 function internalParserDiagnostic(error: unknown, span: Span): ParseDiagnostic {
-  return {
-    code: "PARSER_INTERNAL_ERROR",
-    message: error instanceof Error ? error.message : String(error),
+  return parserInternalMessageDiagnostic(
+    error instanceof Error ? error.message : String(error),
     span,
-  };
+  );
+}
+
+function parserInternalMessageDiagnostic(
+  message: string,
+  span: Span,
+): ParseDiagnostic {
+  return parseDiagnostic("PARSER_INTERNAL_ERROR", message, span);
+}
+
+function branchLimitDiagnostic(offset: number): ParseDiagnostic {
+  return parseDiagnostic(
+    "PARSER_BRANCH_LIMIT",
+    "Parser exceeded the branch exploration limit.",
+    { start: offset, end: offset },
+  );
 }
 
 function tokenDisplay(token: Token): string {
@@ -2792,11 +2853,11 @@ function skipTrivia(tokens: readonly Token[], start: number): number {
 }
 
 function lexicalDiagnostic(diagnostic: LexDiagnostic): ParseDiagnostic {
-  return {
-    code: "PARSE_LEXICAL_ERROR",
-    message: diagnostic.message,
-    span: diagnostic.span,
-  };
+  return parseDiagnostic(
+    "PARSE_LEXICAL_ERROR",
+    diagnostic.message,
+    diagnostic.span,
+  );
 }
 
 function eofToken(offset: number): Token {

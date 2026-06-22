@@ -95,6 +95,10 @@ runtime language:
   Public CST node children now come from the runtime-language rule-node child
   vector, with runtime token/rule-node handles resolved through a per-replay
   syntax handle map before allocating the public node object shape.
+- Wired generated parse diagnostics through runtime-language diagnostic records.
+  Public parse diagnostics now allocate a runtime diagnostic handle, read the
+  runtime span back through diagnostic accessors, and then materialize the
+  public JavaScript diagnostic object at the API boundary.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source program, with the same source compiled through both
   TypeScript and Wasm conformance tests.
@@ -271,17 +275,19 @@ Still unresolved:
   reductions. Public field assembly now consumes runtime-language field-capture
   vectors instead of a parallel JavaScript capture list, and public CST children
   now consume runtime-language child vectors instead of a parallel JavaScript
-  child list. Public JavaScript field objects/arrays, CST node objects, and
-  generated token/diagnostic object emission are still not mechanically emitted
-  from one runtime-language implementation. The runtime language now has a
-  checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
-  growable vectors, and initial parser fragment/field/rule-node/token/
-  diagnostic layouts plus reduction-shaped fragment assembly helpers that
-  generated replay is beginning to use, but it still lacks opaque typed handle
-  provenance and complete generated parser-runtime lowering. The compiler now
-  has a shared lowered control-flow/value IR and checked helper artifact hashes,
-  but it still needs broader parser-runtime lowering before the release can
-  fully satisfy "one runtime implementation, two execution targets."
+  child list. Public parse diagnostics now pass through runtime-language
+  diagnostic handles before public object materialization. Public JavaScript
+  field objects/arrays, CST node objects, and generated token object emission
+  are still not mechanically emitted from one runtime-language implementation.
+  The runtime language now has a checked resettable arena plus tagged
+  arena-backed `u32` arrays, fixed records, growable vectors, and initial parser
+  fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
+  fragment assembly helpers that generated replay is beginning to use, but it
+  still lacks opaque typed handle provenance and complete generated
+  parser-runtime lowering. The compiler now has a shared lowered
+  control-flow/value IR and checked helper artifact hashes, but it still needs
+  broader parser-runtime lowering before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a
