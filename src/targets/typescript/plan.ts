@@ -135,7 +135,7 @@ function typeScriptSources(
     },
     {
       path: "lexer.ts",
-      content: emitLexer(analyzed, options, dfa),
+      content: emitLexer(analyzed, bnf, options, dfa),
     },
     {
       path: "parser.ts",

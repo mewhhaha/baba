@@ -331,6 +331,24 @@ Deno.test("TypeScript parser ignores trivia in parseTokens and rejects unknown t
       "PARSE_INVALID_TOKEN_STREAM",
     );
 
+    const spoofedUnchecked = mod.parseTokensUnchecked("if value", [
+      ...lexed.tokens.slice(0, 2),
+      {
+        type: "literal",
+        literal: "value",
+        text: "value",
+        span: { start: 3, end: 8 },
+        channel: "main",
+        __babaTerminal: 2,
+      },
+      lexed.tokens.at(-1),
+    ]);
+    assertEquals(spoofedUnchecked.ok, false);
+    assertEquals(
+      spoofedUnchecked.diagnostics[0].code,
+      "PARSE_LEXICAL_ERROR",
+    );
+
     const eofBeforeMore = mod.parseTokens("if value", [
       lexed.tokens.at(-1),
       ...lexed.tokens.slice(0, -1),

@@ -82,6 +82,7 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
           asciiRow([]),
         ],
         accepts: [-1, 0, 1],
+        specTerminals: [4, -1, 8],
       }),
     },
     {
@@ -251,9 +252,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "lexer_runtime",
       entry: "dfaTransition",
-      sourceHash: "fnv1a64:82f6fd7a717f9948",
-      typescriptHash: "fnv1a64:c6116960ad204dbe",
-      wasmHash: "fnv1a64:22ce9c2eac89e145",
+      sourceHash: "fnv1a64:d6135618dd36efad",
+      typescriptHash: "fnv1a64:4d82771de8ae9ca9",
+      wasmHash: "fnv1a64:b826bcc9da0cd1e2",
     },
     {
       name: "parser_table_runtime",
@@ -328,7 +329,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:54c4487a54a522c4" as const;
+  "fnv1a64:b912aca6cc648faa" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

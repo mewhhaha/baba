@@ -37,6 +37,7 @@ import {
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
+  RUNTIME_NO_TERMINAL,
   RUNTIME_NO_TRANSITION,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_RULE,
@@ -81,6 +82,41 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     asciiTransitions: null,
     accepts: [-1, 5, 7],
   });
+  const lexerSpecBaseProgram = createLexerRuntimeProgram({
+    transitions: [
+      [],
+    ],
+    asciiTransitions: null,
+    specTerminals: [4, -1, 8],
+  });
+  const lexerSpecRuntimeProgram: RuntimeLanguageProgram = {
+    ...lexerSpecBaseProgram,
+    name: "lexer_spec_terminal_conformance",
+    entry: "main",
+    functions: [
+      ...lexerSpecBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("lexerSpecTerminal", [u32(0)]), u32(100)),
+            add(
+              mul(
+                eq(
+                  call("lexerSpecTerminal", [u32(1)]),
+                  u32(RUNTIME_NO_TERMINAL),
+                ),
+                u32(10),
+              ),
+              call("lexerSpecTerminal", [u32(2)]),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const lexerScanRuntimeProgram: RuntimeLanguageProgram = {
     ...lexerScanBaseProgram,
     name: "lexer_scan_conformance",
@@ -1018,6 +1054,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "lexer scan helper tracks longest accepting candidate",
       program: lexerScanRuntimeProgram,
       expected: { kind: "value", value: 1072 },
+    },
+    {
+      name: "lexer spec terminal helper maps accepted specs",
+      program: lexerSpecRuntimeProgram,
+      expected: { kind: "value", value: 418 },
     },
     {
       name: "parser table lookup finds shift actions",

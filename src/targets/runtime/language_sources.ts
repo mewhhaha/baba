@@ -8,6 +8,7 @@ import type {
 
 export const RUNTIME_NO_TRANSITION = 0xffff_ffff;
 export const RUNTIME_NO_ACCEPT = RUNTIME_NO_TRANSITION;
+export const RUNTIME_NO_TERMINAL = 0xffff_ffff;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -65,6 +66,7 @@ export interface LexerRuntimeProgramInput {
   readonly transitions: readonly (readonly LexerRuntimeTransition[])[];
   readonly asciiTransitions: readonly (readonly number[])[] | null;
   readonly accepts?: readonly number[];
+  readonly specTerminals?: readonly number[];
 }
 
 export type ParserRuntimeLookupEntry = readonly [key: number, value: number];
@@ -180,6 +182,16 @@ export function createLexerRuntimeProgram(
     });
   }
 
+  if (input.specTerminals) {
+    tables.push({
+      name: "lexerSpecTerminals",
+      type: "u32" as const,
+      values: input.specTerminals.map((terminal) =>
+        terminal < 0 ? RUNTIME_NO_TERMINAL : terminal
+      ),
+    });
+  }
+
   return {
     name: "lexer_runtime",
     entry: "dfaTransition",
@@ -195,6 +207,9 @@ export function createLexerRuntimeProgram(
           lexerScanBestSpecFunction(),
           lexerScanBestEndFunction(),
         ]
+        : []),
+      ...(input.specTerminals
+        ? [lexerSpecTerminalFunction(input.specTerminals.length)]
         : []),
     ],
   };
@@ -619,6 +634,31 @@ function lexerScanBestEndFunction(): RuntimeLanguageFunction {
         kind: "return",
         expression: loadScratch(u32(LEXER_SCAN_BEST_END)),
       },
+    ],
+  };
+}
+
+function lexerSpecTerminalFunction(
+  specCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "lexerSpecTerminal",
+    parameters: [
+      { name: "specIndex", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("specIndex"), u32(specCount)),
+        consequent: [
+          {
+            kind: "return",
+            expression: load("lexerSpecTerminals", local("specIndex")),
+          },
+        ],
+      },
+      { kind: "return", expression: u32(RUNTIME_NO_TERMINAL) },
     ],
   };
 }

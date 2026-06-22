@@ -275,6 +275,7 @@ export function parse(
     lexed.tokens,
     lexicalDiagnostics(lexed.diagnostics),
     lexed.parseStream,
+    true,
   );
 }
 
@@ -288,6 +289,8 @@ export function parseTokens(
     source,
     tokens,
     combineDiagnostics(streamDiagnostics, tokenDiagnostics),
+    undefined,
+    false,
   );
 }
 
@@ -295,7 +298,13 @@ export function parseTokensUnchecked(
   source: string,
   tokens: readonly Token[],
 ): ParseResult<RootNode> {
-  return parseTokenList(source, tokens, lexicalTokenDiagnostics(tokens));
+  return parseTokenList(
+    source,
+    tokens,
+    lexicalTokenDiagnostics(tokens),
+    undefined,
+    false,
+  );
 }
 
 function parseTokenList(
@@ -303,6 +312,7 @@ function parseTokenList(
   tokens: readonly Token[],
   lexicalDiagnostics: readonly ParseDiagnostic[],
   parseStream?: WasmParseStream,
+  trustRuntimeTerminals = false,
 ): ParseResult<RootNode> {
   if (lexicalDiagnostics.length > 0) {
     return {
@@ -314,7 +324,8 @@ function parseTokenList(
     };
   }
 
-  const stream = parseStream ?? compactTokenStream(source, tokens);
+  const stream = parseStream ??
+    compactTokenStream(source, tokens, trustRuntimeTerminals);
   const traced = parseTrace(stream.input, stream.terminalCount);
   if (!traced.ok) {
     const token = stream.tokens[traced.index] ?? eofToken(source.length);
@@ -372,6 +383,7 @@ interface CompactTokenStream {
 function compactTokenStream(
   source: string,
   tokens: readonly Token[],
+  trustRuntimeTerminals: boolean,
 ): CompactTokenStream {
   const streamTokens: Token[] = new Array(tokens.length + 1);
   const streamTokenIndices: number[] = new Array(tokens.length + 1);
@@ -385,7 +397,7 @@ function compactTokenStream(
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
-    terminalIds[terminalCount] = tokenToTerminal(token);
+    terminalIds[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
     terminalCount++;
     if (token.type === "eof" || index >= tokens.length) break;
     index++;
@@ -857,8 +869,12 @@ function unexpectedTokenDiagnostic(token: Token, state: number): ParseDiagnostic
   };
 }
 
-function tokenToTerminal(token: Token): number {
+function tokenToTerminal(token: Token, trustRuntimeTerminal = false): number {
   if (token.type === "eof") return EOF_TERMINAL;
+  if (trustRuntimeTerminal) {
+    const terminal = runtimeTokenTerminal(token);
+    if (terminal >= 0) return terminal;
+  }
   if (token.type === "named" && token.channel === "main") {
     return NAMED_TERMINALS.get(token.kind) ?? -1;
   }
@@ -866,6 +882,14 @@ function tokenToTerminal(token: Token): number {
     return LITERAL_TERMINALS.get(token.literal) ?? -1;
   }
   return -1;
+}
+
+function runtimeTokenTerminal(token: Token): number {
+  const terminal = (token as { __babaTerminal?: unknown }).__babaTerminal;
+  return typeof terminal === "number" && Number.isInteger(terminal) &&
+      terminal >= 0
+    ? terminal
+    : -1;
 }
 
 function isTriviaToken(token: Token): boolean {

@@ -4,12 +4,24 @@ import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { RegexAst } from "../../compiler/regex/ast.ts";
 import { buildLexerDfa } from "../../compiler/regex/lexer.ts";
 import { emitTypeScriptLexerRuntime } from "../runtime/typescript_lexer_runtime.ts";
+import type { BnfGrammar } from "./bnf.ts";
 
 export function emitLexer(
   analyzed: AnalyzedGrammar,
+  bnf: BnfGrammar,
   options: TypeScriptTargetOptions = {},
   plannedDfa?: Dfa,
 ): string {
+  const namedTerminals = new Map(
+    bnf.terminals
+      .filter((terminal) => terminal.kind === "named")
+      .map((terminal) => [terminal.tokenId, terminal.id]),
+  );
+  const literalTerminals = new Map(
+    bnf.terminals
+      .filter((terminal) => terminal.kind === "literal")
+      .map((terminal) => [terminal.literalId, terminal.id]),
+  );
   const namedTokens = analyzed.tokens
     .filter((token) =>
       token.kind === "skip" ||
@@ -20,6 +32,7 @@ export function emitLexer(
       kind: token.name,
       pattern: token.patternSource,
       channel: token.kind === "skip" ? "trivia" as const : "main" as const,
+      terminal: token.kind === "skip" ? -1 : namedTerminals.get(token.id) ?? -1,
       priority: token.priority,
       order: token.declarationOrder,
     }));
@@ -27,6 +40,7 @@ export function emitLexer(
     .filter((literal) => analyzed.reachableLiterals.has(literal.id))
     .map((literal) => ({
       literal: literal.value,
+      terminal: literalTerminals.get(literal.id) ?? -1,
       priority: 0,
       order: literal.sourceOrder,
     }));

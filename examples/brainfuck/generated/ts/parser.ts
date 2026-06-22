@@ -570,6 +570,8 @@ export function parse(
     source,
     lexed.tokens,
     lexicalDiagnostics(lexed.diagnostics),
+    undefined,
+    true,
   );
 }
 
@@ -583,6 +585,8 @@ export function parseTokens(
     source,
     tokens,
     combineDiagnostics(streamDiagnostics, tokenDiagnostics),
+    undefined,
+    false,
   );
 }
 
@@ -590,13 +594,21 @@ export function parseTokensUnchecked(
   source: string,
   tokens: readonly Token[],
 ): ParseResult<RootNode> {
-  return parseTokenList(source, tokens, lexicalTokenDiagnostics(tokens));
+  return parseTokenList(
+    source,
+    tokens,
+    lexicalTokenDiagnostics(tokens),
+    undefined,
+    false,
+  );
 }
 
 function parseTokenList(
   source: string,
   tokens: readonly Token[],
   lexicalDiagnostics: readonly ParseDiagnostic[],
+  _parseStream: undefined = undefined,
+  trustRuntimeTerminals = false,
 ): ParseResult<RootNode> {
   if (lexicalDiagnostics.length > 0) {
     return {
@@ -608,7 +620,7 @@ function parseTokenList(
     };
   }
 
-  const stream = compactTraceTokenStream(source, tokens);
+  const stream = compactTraceTokenStream(source, tokens, trustRuntimeTerminals);
   let status = 0;
   try {
     for (let index = 0; index < stream.terminalCount; index++) {
@@ -694,6 +706,7 @@ interface CompactTraceTokenStream {
 function compactTraceTokenStream(
   source: string,
   tokens: readonly Token[],
+  trustRuntimeTerminals: boolean,
 ): CompactTraceTokenStream {
   const streamTokens: Token[] = new Array(tokens.length + 1);
   const streamTokenIndices: number[] = new Array(tokens.length + 1);
@@ -707,7 +720,7 @@ function compactTraceTokenStream(
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
-    terminals[terminalCount] = tokenToTerminal(token);
+    terminals[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
     terminalCount++;
     if (token.type === "eof" || index >= tokens.length) break;
     index++;
@@ -1177,8 +1190,12 @@ function unexpectedTokenDiagnostic(token: Token, state: number): ParseDiagnostic
   };
 }
 
-function tokenToTerminal(token: Token): number {
+function tokenToTerminal(token: Token, trustRuntimeTerminal = false): number {
   if (token.type === "eof") return EOF_TERMINAL;
+  if (trustRuntimeTerminal) {
+    const terminal = runtimeTokenTerminal(token);
+    if (terminal >= 0) return terminal;
+  }
   if (token.type === "named" && token.channel === "main") {
     return NAMED_TERMINALS.get(token.kind) ?? -1;
   }
@@ -1186,6 +1203,14 @@ function tokenToTerminal(token: Token): number {
     return LITERAL_TERMINALS.get(token.literal) ?? -1;
   }
   return -1;
+}
+
+function runtimeTokenTerminal(token: Token): number {
+  const terminal = (token as { __babaTerminal?: unknown }).__babaTerminal;
+  return typeof terminal === "number" && Number.isInteger(terminal) &&
+      terminal >= 0
+    ? terminal
+    : -1;
 }
 
 function isTriviaToken(token: Token): boolean {
