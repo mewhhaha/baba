@@ -269,9 +269,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "runtime_arena",
       entry: "runtimeArenaReset",
-      sourceHash: "fnv1a64:413a5ca0792cd0dc",
-      typescriptHash: "fnv1a64:9a87400e8553c7e3",
-      wasmHash: "fnv1a64:abd192580d887d5f",
+      sourceHash: "fnv1a64:0b528dff75822905",
+      typescriptHash: "fnv1a64:671ca217b4da99fc",
+      wasmHash: "fnv1a64:b9160a9746404807",
     },
     {
       name: "lexer_runtime",
@@ -360,7 +360,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:342c2a7933c93189" as const;
+  "fnv1a64:f5eddebc07ac74c9" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

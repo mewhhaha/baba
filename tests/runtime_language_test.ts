@@ -1375,6 +1375,73 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const arenaVectorProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_vector_conformance",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeVectorNew", [u32(1)])),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [local("handle"), u32(5)]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [local("handle"), u32(7)]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [local("handle"), u32(11)]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorStore", [local("handle"), u32(1), u32(9)]),
+          ),
+          {
+            kind: "return",
+            expression: add(
+              mul(call("runtimeArenaUsed", []), u32(1_000_000)),
+              add(
+                mul(
+                  call("runtimeVectorLength", [local("handle")]),
+                  u32(100_000),
+                ),
+                add(
+                  mul(
+                    call("runtimeVectorCapacity", [local("handle")]),
+                    u32(10_000),
+                  ),
+                  add(
+                    mul(
+                      call("runtimeVectorLoad", [local("handle"), u32(0)]),
+                      u32(100),
+                    ),
+                    add(
+                      mul(
+                        call("runtimeVectorLoad", [local("handle"), u32(1)]),
+                        u32(10),
+                      ),
+                      call("runtimeVectorLoad", [local("handle"), u32(2)]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          },
+        ],
+      },
+    ],
+  };
   const arenaResetProgram: RuntimeLanguageProgram = {
     ...RUNTIME_ARENA_PROGRAM,
     name: "arena_reset_conformance",
@@ -1456,6 +1523,30 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const arenaVectorBoundsProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_vector_bounds",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeVectorNew", [u32(0)])),
+          {
+            kind: "return",
+            expression: call("runtimeVectorLoad", [local("handle"), u32(0)]),
+          },
+        ],
+      },
+    ],
+  };
   const arenaWrongKindProgram: RuntimeLanguageProgram = {
     ...RUNTIME_ARENA_PROGRAM,
     name: "arena_wrong_kind",
@@ -1475,6 +1566,30 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           {
             kind: "return",
             expression: call("runtimeRecordTag", [local("handle")]),
+          },
+        ],
+      },
+    ],
+  };
+  const arenaVectorWrongKindProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_vector_wrong_kind",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeArrayNew", [u32(1)])),
+          {
+            kind: "return",
+            expression: call("runtimeVectorLength", [local("handle")]),
           },
         ],
       },
@@ -1723,6 +1838,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 6_242_281 },
     },
     {
+      name: "runtime arena vectors append, grow, and preserve values",
+      program: arenaVectorProgram,
+      expected: { kind: "value", value: 18_340_601 },
+    },
+    {
       name: "runtime arena reset reuses allocation lifetime",
       program: arenaResetProgram,
       expected: { kind: "value", value: 40 },
@@ -1738,8 +1858,18 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "trap" },
     },
     {
+      name: "runtime vector access traps out of bounds",
+      program: arenaVectorBoundsProgram,
+      expected: { kind: "trap" },
+    },
+    {
       name: "runtime object helpers trap on wrong handle kind",
       program: arenaWrongKindProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime vector helpers trap on wrong handle kind",
+      program: arenaVectorWrongKindProgram,
       expected: { kind: "trap" },
     },
     {

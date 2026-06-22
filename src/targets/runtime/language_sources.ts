@@ -135,11 +135,16 @@ const RUNTIME_ARENA_NEXT_WORD = 0;
 const RUNTIME_ARENA_FIRST_WORD = 1;
 const RUNTIME_OBJECT_ARRAY = 1;
 const RUNTIME_OBJECT_RECORD = 2;
+const RUNTIME_OBJECT_VECTOR = 3;
 const RUNTIME_ARRAY_LENGTH_WORD_OFFSET = 1;
 const RUNTIME_ARRAY_DATA_WORD_OFFSET = 2;
 const RUNTIME_RECORD_TAG_WORD_OFFSET = 1;
 const RUNTIME_RECORD_FIELD_COUNT_WORD_OFFSET = 2;
 const RUNTIME_RECORD_DATA_WORD_OFFSET = 3;
+const RUNTIME_VECTOR_LENGTH_WORD_OFFSET = 1;
+const RUNTIME_VECTOR_CAPACITY_WORD_OFFSET = 2;
+const RUNTIME_VECTOR_DATA_WORD_OFFSET = 3;
+const RUNTIME_VECTOR_HEADER_WORDS = 4;
 
 export type LexerRuntimeTransition = readonly [
   start: number,
@@ -610,6 +615,13 @@ function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
     runtimeRecordFieldOffsetFunction(),
     runtimeRecordLoadFunction(),
     runtimeRecordStoreFunction(),
+    runtimeVectorNewFunction(),
+    runtimeVectorLengthFunction(),
+    runtimeVectorCapacityFunction(),
+    runtimeVectorDataFunction(),
+    runtimeVectorLoadFunction(),
+    runtimeVectorStoreFunction(),
+    runtimeVectorAppendFunction(),
   ];
 }
 
@@ -1091,6 +1103,273 @@ function runtimeRecordStoreFunction(): RuntimeLanguageFunction {
         ]),
       ),
       storeScratch(local("offset"), local("value")),
+      { kind: "return", expression: local("value") },
+    ],
+  };
+}
+
+function runtimeVectorNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorNew",
+    parameters: [
+      { name: "capacity", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+      { name: "data", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("data", call("runtimeArrayNew", [local("capacity")])),
+      setLocal(
+        "handle",
+        call("runtimeArenaAlloc", [u32(RUNTIME_VECTOR_HEADER_WORDS)]),
+      ),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_VECTOR)),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_VECTOR_LENGTH_WORD_OFFSET)),
+        u32(0),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_VECTOR_CAPACITY_WORD_OFFSET)),
+        local("capacity"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_VECTOR_DATA_WORD_OFFSET)),
+        local("data"),
+      ),
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function runtimeVectorLengthFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorLength",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "kind", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
+      {
+        kind: "if",
+        condition: eq(local("kind"), u32(RUNTIME_OBJECT_VECTOR)),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      {
+        kind: "return",
+        expression: loadScratch(
+          add(local("handle"), u32(RUNTIME_VECTOR_LENGTH_WORD_OFFSET)),
+        ),
+      },
+    ],
+  };
+}
+
+function runtimeVectorCapacityFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorCapacity",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "length", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("length", call("runtimeVectorLength", [local("handle")])),
+      {
+        kind: "return",
+        expression: loadScratch(
+          add(local("handle"), u32(RUNTIME_VECTOR_CAPACITY_WORD_OFFSET)),
+        ),
+      },
+    ],
+  };
+}
+
+function runtimeVectorDataFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorData",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "length", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("length", call("runtimeVectorLength", [local("handle")])),
+      {
+        kind: "return",
+        expression: loadScratch(
+          add(local("handle"), u32(RUNTIME_VECTOR_DATA_WORD_OFFSET)),
+        ),
+      },
+    ],
+  };
+}
+
+function runtimeVectorLoadFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorLoad",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "index", type: "u32" },
+    ],
+    locals: [
+      { name: "length", type: "u32" },
+      { name: "data", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("length", call("runtimeVectorLength", [local("handle")])),
+      {
+        kind: "if",
+        condition: ltu(local("index"), local("length")),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      setLocal("data", call("runtimeVectorData", [local("handle")])),
+      {
+        kind: "return",
+        expression: call("runtimeArrayLoad", [
+          local("data"),
+          local("index"),
+        ]),
+      },
+    ],
+  };
+}
+
+function runtimeVectorStoreFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorStore",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    locals: [
+      { name: "length", type: "u32" },
+      { name: "data", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("length", call("runtimeVectorLength", [local("handle")])),
+      {
+        kind: "if",
+        condition: ltu(local("index"), local("length")),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      setLocal("data", call("runtimeVectorData", [local("handle")])),
+      {
+        kind: "return",
+        expression: call("runtimeArrayStore", [
+          local("data"),
+          local("index"),
+          local("value"),
+        ]),
+      },
+    ],
+  };
+}
+
+function runtimeVectorAppendFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorAppend",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    locals: [
+      { name: "length", type: "u32" },
+      { name: "capacity", type: "u32" },
+      { name: "newCapacity", type: "u32" },
+      { name: "oldData", type: "u32" },
+      { name: "newData", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "copied", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("length", call("runtimeVectorLength", [local("handle")])),
+      setLocal("capacity", call("runtimeVectorCapacity", [local("handle")])),
+      setLocal("oldData", call("runtimeVectorData", [local("handle")])),
+      {
+        kind: "if",
+        condition: ltu(local("length"), local("capacity")),
+        consequent: [],
+        alternate: [
+          {
+            kind: "if",
+            condition: eq(local("capacity"), u32(0)),
+            consequent: [
+              setLocal("newCapacity", u32(1)),
+            ],
+            alternate: [
+              setLocal(
+                "newCapacity",
+                add(local("capacity"), local("capacity")),
+              ),
+              {
+                kind: "if",
+                condition: ltu(local("newCapacity"), local("capacity")),
+                consequent: [{ kind: "trap" }],
+              },
+            ],
+          },
+          setLocal("newData", call("runtimeArrayNew", [local("newCapacity")])),
+          setLocal("index", u32(0)),
+          {
+            kind: "while",
+            condition: ltu(local("index"), local("length")),
+            body: [
+              setLocal(
+                "copied",
+                call("runtimeArrayLoad", [local("oldData"), local("index")]),
+              ),
+              setLocal(
+                "copied",
+                call("runtimeArrayStore", [
+                  local("newData"),
+                  local("index"),
+                  local("copied"),
+                ]),
+              ),
+              setLocal("index", add(local("index"), u32(1))),
+            ],
+          },
+          storeScratch(
+            add(local("handle"), u32(RUNTIME_VECTOR_CAPACITY_WORD_OFFSET)),
+            local("newCapacity"),
+          ),
+          storeScratch(
+            add(local("handle"), u32(RUNTIME_VECTOR_DATA_WORD_OFFSET)),
+            local("newData"),
+          ),
+          setLocal("capacity", local("newCapacity")),
+          setLocal("oldData", local("newData")),
+        ],
+      },
+      setLocal(
+        "copied",
+        call("runtimeArrayStore", [
+          local("oldData"),
+          local("length"),
+          local("value"),
+        ]),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_VECTOR_LENGTH_WORD_OFFSET)),
+        add(local("length"), u32(1)),
+      ),
       { kind: "return", expression: local("value") },
     ],
   };

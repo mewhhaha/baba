@@ -110,8 +110,8 @@ functions with statement bodies. The current conformance subset supports:
 - calls between `u32` functions;
 - checked read-only table loads by constant or local index;
 - checked scratch-memory growth, loads, and stores by computed `u32` index;
-- tagged arena-backed `u32` arrays and fixed records represented as
-  scratch-memory handles with resettable allocation lifetime;
+- tagged arena-backed `u32` arrays, fixed records, and growable vectors
+  represented as scratch-memory handles with resettable allocation lifetime;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - bitwise AND;
@@ -159,9 +159,13 @@ execute both outputs and compare returned values or traps.
   cursor.
 - Arena-backed heap objects start with a kind word. Array objects store a length
   word followed by `u32` element words. Record objects store a tag word, field
-  count word, and fixed `u32` field words. New array elements and record fields
+  count word, and fixed `u32` field words. Vector objects store length,
+  capacity, and backing array handle words. New array elements and record fields
   are initialized to zero.
-- Arena-backed array and record helpers trap for handle `0`, stale or
+- Vector append grows capacity from `0` to `1`, then doubles capacity, copying
+  existing elements into a new arena-backed array before storing the appended
+  value and advancing length.
+- Arena-backed array, record, and vector helpers trap for handle `0`, stale or
   out-of-range handles, wrong object kind, out-of-bounds indexes, and offset
   overflow. Handles are currently raw arena offsets with checked object-kind
   tags, not opaque capabilities with full provenance.
@@ -171,7 +175,7 @@ execute both outputs and compare returned values or traps.
 
 These rules must be specified before the parser runtime can be fully lowered:
 
-- growable vectors, ownership, and opaque typed handle provenance;
+- ownership and opaque typed handle provenance;
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
 - host-visible memory layout.
