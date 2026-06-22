@@ -102,6 +102,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const publicFieldMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_field_materializer.ts",
   );
+  const publicRuleNodeMaterializerSource = await Deno.readTextFile(
+    "src/targets/runtime/public_rule_node_materializer.ts",
+  );
   assertIncludes(parserRuntimeSource, "function parseTokenList");
   assertIncludes(parserRuntimeSource, "function reduceProduction");
   assertIncludes(
@@ -143,11 +146,21 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(publicFieldMaterializerSource, "Object.create(null)");
   assertIncludes(publicFieldMaterializerSource, "fields[name] = value");
   assertIncludes(parserRuntimeSource, "parserExpectedHasEof");
-  assertIncludes(parserRuntimeSource, "parserRuleNodeChildCount");
-  assertIncludes(parserRuntimeSource, "parserRuleNodeChildren");
-  assertIncludes(parserRuntimeSource, "function materializeRuleNode");
-  assertIncludes(parserRuntimeSource, "parserRuleNodeRuleId(runtimeHandle)");
-  assertIncludes(parserRuntimeSource, "RUNTIME_SYNTAX_VALUES");
+  assertIncludes(parserRuntimeSource, "emitPublicRuleNodeMaterializer");
+  assertIncludes(parserRuntimeSource, "hostRuleNodeRuntimeHandle");
+  assertIncludes(parserRuntimeSource, "resetPublicSyntaxMaterialization");
+  assertIncludes(
+    publicRuleNodeMaterializerSource,
+    "function materializeRuleNode",
+  );
+  assertIncludes(
+    publicRuleNodeMaterializerSource,
+    "parserRuleNodeRuleId(runtimeHandle)",
+  );
+  assertIncludes(publicRuleNodeMaterializerSource, "function buildChildren");
+  assertIncludes(publicRuleNodeMaterializerSource, "parserRuleNodeChildren");
+  assertIncludes(publicRuleNodeMaterializerSource, "RUNTIME_NODE_HANDLES");
+  assertIncludes(publicRuleNodeMaterializerSource, "RUNTIME_SYNTAX_VALUES");
   assertIncludes(parserRuntimeSource, "parserDiagnosticNew");
   assertIncludes(parserRuntimeSource, "parserDiagnosticSpanStart");
   assertIncludes(parserRuntimeSource, "parserTraceStatusKind");
@@ -193,6 +206,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "const fieldValues = runtimeArrayNew");
   assertNotIncludes(parserRuntimeSource, "const values = fields[name]");
   assertNotIncludes(parserRuntimeSource, "fields[name] =");
+  assertNotIncludes(parserRuntimeSource, "function materializeRuleNode");
+  assertNotIncludes(parserRuntimeSource, "function buildChildren");
+  assertNotIncludes(parserRuntimeSource, "RUNTIME_NODE_HANDLES");
+  assertNotIncludes(parserRuntimeSource, "RUNTIME_SYNTAX_VALUES");
   assertNotIncludes(parserRuntimeSource, "interface ParseBranch");
   assertNotIncludes(parserRuntimeSource, "function findActions");
 });
@@ -242,7 +259,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 8);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 9);
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {

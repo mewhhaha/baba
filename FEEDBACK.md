@@ -118,7 +118,8 @@ runtime language:
   rule-node handles. Rule reducers now return a public node by passing the
   runtime rule-node handle to one materializer, which reads rule id, span, token
   range, children, and fields back through runtime accessors before wrapping the
-  public JavaScript object.
+  public JavaScript object through one shared runtime-target rule-node
+  materializer helper.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source program, with the same source compiled through both
   TypeScript and Wasm conformance tests.
@@ -331,20 +332,21 @@ Still unresolved:
   parallel JavaScript child list. Public parse diagnostics now pass through
   runtime-language diagnostic handles before public object materialization.
   Public CST rule-node object materialization is now centralized behind
-  runtime-language rule-node handles, though final JavaScript object allocation
-  still happens at the API boundary. Public token object wrapping is now emitted
-  from one shared runtime-target helper for TypeScript and Wasm adapters, and
-  public field object allocation is now emitted from one shared runtime-target
-  helper. The runtime language now has a checked resettable arena plus tagged
-  arena-backed `u32` arrays, fixed records, growable vectors, and initial parser
-  fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
-  fragment assembly helpers that generated replay is beginning to use. It now
-  has a shared in-runtime object-kind provenance gate for arena handles and a
-  non-enumerable plan-local terminal hint for public tokens, but it still lacks
-  a complete host-boundary ownership and handle capability contract for future
-  non-JS Wasm hosts, first-class runtime-language text values if source decoding
-  moves fully into the runtime language, plus complete generated parser-runtime
-  lowering for remaining host public object materialization and a richer
+  runtime-language rule-node handles, and final JavaScript object allocation for
+  public rule nodes is now emitted from one shared runtime-target helper. Public
+  token object wrapping is now emitted from one shared runtime-target helper for
+  TypeScript and Wasm adapters, and public field object allocation is now
+  emitted from one shared runtime-target helper. The runtime language now has a
+  checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
+  growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
+  layouts plus reduction-shaped fragment assembly helpers that generated replay
+  is beginning to use. It now has a shared in-runtime object-kind provenance
+  gate for arena handles and a non-enumerable plan-local terminal hint for
+  public tokens, but it still lacks a complete host-boundary ownership and
+  handle capability contract for future non-JS Wasm hosts, first-class
+  runtime-language text values if source decoding moves fully into the runtime
+  language, plus complete generated parser-runtime lowering for remaining host
+  public object materialization outside the shared wrapper helpers and a richer
   structured-error taxonomy for a future host-neutral Wasm ABI. The compiler now
   has a shared lowered control-flow/value IR and checked helper artifact hashes,
   but it still needs broader parser-runtime lowering before the release can

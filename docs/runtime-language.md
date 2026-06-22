@@ -253,10 +253,11 @@ execute both outputs and compare returned values or traps.
 - Generated public child assembly consumes runtime rule-node child vectors and
   resolves runtime token/rule-node handles through a per-replay syntax handle
   map; it no longer carries an independent JavaScript fragment child list.
-- Generated public rule-node object materialization is centralized behind
-  runtime rule-node handles. The materializer reads rule id, span, token range,
-  child vector, and field vector data through runtime accessors before
-  allocating the public JavaScript CST node object.
+- Generated public rule-node object materialization is emitted from one shared
+  runtime-target rule-node materializer helper behind runtime rule-node handles.
+  The materializer reads rule id, span, token range, child vector, and field
+  vector data through runtime accessors before allocating the public JavaScript
+  CST node object.
 - Generated public parse diagnostics allocate runtime diagnostic records and
   read span data back from those records before materializing public JavaScript
   diagnostic objects.
@@ -280,8 +281,8 @@ These rules must be specified before the parser runtime can be fully lowered:
   the runtime language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
 - complete generated-parser lowering for remaining host public object
-  materialization, if public JavaScript CST objects become runtime-language
-  emitted values instead of API-boundary wrappers.
+  materialization that still sits outside the shared token, field, and rule-node
+  public wrapper helpers.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from

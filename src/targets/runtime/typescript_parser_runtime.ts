@@ -104,6 +104,7 @@ import {
   RUNTIME_TRACE_STATUS_UNEXPECTED,
 } from "./language_sources.ts";
 import { emitPublicFieldMaterializer } from "./public_field_materializer.ts";
+import { emitPublicRuleNodeMaterializer } from "./public_rule_node_materializer.ts";
 
 export type ParserEmitMode = "typescript" | "wasm";
 
@@ -267,6 +268,7 @@ ${
 
 ${parserTableRuntime(runtimeWithFields)}
 ${emitPublicFieldMaterializer()}
+${emitPublicRuleNodeMaterializer()}
 
 ${parseEntryPoints(mode)}
 
@@ -724,8 +726,8 @@ ${replayTraceRuntime("Wasm")}`;
 
 function replayTraceRuntime(label: string): string {
   const replayPrelude = label === "Wasm"
-    ? "  runtimeArenaReset();\n  RUNTIME_FRAGMENT_VALUES.clear();\n  RUNTIME_SYNTAX_VALUES.clear();\n"
-    : "  RUNTIME_FRAGMENT_VALUES.clear();\n  RUNTIME_SYNTAX_VALUES.clear();\n";
+    ? "  runtimeArenaReset();\n  RUNTIME_FRAGMENT_VALUES.clear();\n  resetPublicSyntaxMaterialization();\n"
+    : "  RUNTIME_FRAGMENT_VALUES.clear();\n  resetPublicSyntaxMaterialization();\n";
   return `function replayTrace(
   source: string,
   tokens: readonly Token[],
@@ -870,9 +872,7 @@ ${replayPrelude}  const values: unknown[] = [null];
 }
 
 function reductionRuntime(): string {
-  return `const RUNTIME_NODE_HANDLES = new WeakMap<object, number>();
-const RUNTIME_FRAGMENT_VALUES = new Map<number, unknown>();
-const RUNTIME_SYNTAX_VALUES = new Map<number, SyntaxElement>();
+  return `const RUNTIME_FRAGMENT_VALUES = new Map<number, unknown>();
 
 function reduceProduction(
   reducerOperation: number,
@@ -973,7 +973,7 @@ function ruleFragment(node: AnyRuleNode): Fragment {
 }
 
 function runtimeRuleNodeFragmentHandle(node: AnyRuleNode): number {
-  const existing = RUNTIME_NODE_HANDLES.get(node as object);
+  const existing = hostRuleNodeRuntimeHandle(node);
   if (existing !== undefined) {
     const fragment = parserFragmentNew(
       existing,
@@ -1015,21 +1015,6 @@ function reducerChild(
     return ruleFragment(value as AnyRuleNode);
   }
   throw new Error("Unexpected parser reducer child role.");
-}
-
-function materializeRuleNode(runtimeHandle: number): AnyRuleNode {
-  const ruleId = parserRuleNodeRuleId(runtimeHandle);
-  const node = {
-    type: "rule",
-    name: RULE_NAMES[ruleId],
-    span: ruleNodeSpan(runtimeHandle),
-    tokenRange: ruleNodeTokenRange(runtimeHandle),
-    children: buildChildren(runtimeHandle),
-    fields: buildFields(ruleId, runtimeHandle),
-  };
-  RUNTIME_NODE_HANDLES.set(node, runtimeHandle);
-  rememberSyntaxValue(runtimeHandle, node as unknown as SyntaxElement);
-  return node as unknown as AnyRuleNode;
 }
 
 function reducerFragmentChild(
@@ -1138,18 +1123,6 @@ function hostFragmentValue(handle: number): unknown {
   return RUNTIME_FRAGMENT_VALUES.get(handle);
 }
 
-function rememberSyntaxValue(handle: number, value: SyntaxElement): void {
-  RUNTIME_SYNTAX_VALUES.set(handle, value);
-}
-
-function hostSyntaxValue(handle: number): SyntaxElement {
-  const value = RUNTIME_SYNTAX_VALUES.get(handle);
-  if (value === undefined) {
-    throw new Error("Runtime syntax object is missing its host value.");
-  }
-  return value;
-}
-
 function fragmentSpan(handle: number): Span {
   return {
     start: parserFragmentSpanStart(handle),
@@ -1161,20 +1134,6 @@ function fragmentTokenRange(handle: number): TokenRange {
   return {
     start: parserFragmentTokenStart(handle),
     end: parserFragmentTokenEnd(handle),
-  };
-}
-
-function ruleNodeSpan(handle: number): Span {
-  return {
-    start: parserRuleNodeSpanStart(handle),
-    end: parserRuleNodeSpanEnd(handle),
-  };
-}
-
-function ruleNodeTokenRange(handle: number): TokenRange {
-  return {
-    start: parserRuleNodeTokenStart(handle),
-    end: parserRuleNodeTokenEnd(handle),
   };
 }
 
@@ -1347,17 +1306,6 @@ function buildFields(
     );
   }
   return fields;
-}
-
-function buildChildren(ruleNodeHandle: number): SyntaxElement[] {
-  const count = parserRuleNodeChildCount(ruleNodeHandle);
-  if (count === 0) return [];
-  const children = parserRuleNodeChildren(ruleNodeHandle);
-  const values: SyntaxElement[] = [];
-  for (let index = 0; index < count; index++) {
-    values.push(hostSyntaxValue(runtimeVectorLoad(children, index)));
-  }
-  return values;
 }
 
 function fieldName(fieldId: number): string {

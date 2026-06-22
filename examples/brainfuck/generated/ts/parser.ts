@@ -1804,6 +1804,76 @@ function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
 function materializeFieldScalar(count: number, valueHandle: number): unknown {
   return count === 0 ? null : hostFragmentValue(valueHandle);
 }
+let RUNTIME_NODE_HANDLES: WeakMap<object, number> = new WeakMap();
+const RUNTIME_SYNTAX_VALUES = new Map<number, SyntaxElement>();
+
+function resetPublicSyntaxMaterialization(): void {
+  RUNTIME_NODE_HANDLES = new WeakMap<object, number>();
+  RUNTIME_SYNTAX_VALUES.clear();
+}
+
+function hostRuleNodeRuntimeHandle(node: AnyRuleNode): number | undefined {
+  return RUNTIME_NODE_HANDLES.get(node as object);
+}
+
+function materializeRuleNode(runtimeHandle: number): AnyRuleNode {
+  const ruleId = parserRuleNodeRuleId(runtimeHandle);
+  const node = {
+    type: "rule",
+    name: RULE_NAMES[ruleId],
+    span: ruleNodeSpan(runtimeHandle),
+    tokenRange: ruleNodeTokenRange(runtimeHandle),
+    children: buildChildren(runtimeHandle),
+    fields: buildFields(ruleId, runtimeHandle),
+  };
+  rememberRuleNodeRuntimeHandle(node as unknown as AnyRuleNode, runtimeHandle);
+  rememberSyntaxValue(runtimeHandle, node as unknown as SyntaxElement);
+  return node as unknown as AnyRuleNode;
+}
+
+function rememberRuleNodeRuntimeHandle(
+  node: AnyRuleNode,
+  runtimeHandle: number,
+): void {
+  RUNTIME_NODE_HANDLES.set(node as object, runtimeHandle);
+}
+
+function rememberSyntaxValue(handle: number, value: SyntaxElement): void {
+  RUNTIME_SYNTAX_VALUES.set(handle, value);
+}
+
+function hostSyntaxValue(handle: number): SyntaxElement {
+  const value = RUNTIME_SYNTAX_VALUES.get(handle);
+  if (value === undefined) {
+    throw new Error("Runtime syntax object is missing its host value.");
+  }
+  return value;
+}
+
+function buildChildren(ruleNodeHandle: number): SyntaxElement[] {
+  const count = parserRuleNodeChildCount(ruleNodeHandle);
+  if (count === 0) return [];
+  const children = parserRuleNodeChildren(ruleNodeHandle);
+  const values: SyntaxElement[] = [];
+  for (let index = 0; index < count; index++) {
+    values.push(hostSyntaxValue(runtimeVectorLoad(children, index)));
+  }
+  return values;
+}
+
+function ruleNodeSpan(handle: number): Span {
+  return {
+    start: parserRuleNodeSpanStart(handle),
+    end: parserRuleNodeSpanEnd(handle),
+  };
+}
+
+function ruleNodeTokenRange(handle: number): TokenRange {
+  return {
+    start: parserRuleNodeTokenStart(handle),
+    end: parserRuleNodeTokenEnd(handle),
+  };
+}
 
 export function parse(
   source: string,
@@ -1981,7 +2051,7 @@ function replayTrace(
   trace: Int32Array,
 ): ParseResult<RootNode> {
   RUNTIME_FRAGMENT_VALUES.clear();
-  RUNTIME_SYNTAX_VALUES.clear();
+  resetPublicSyntaxMaterialization();
   const values: unknown[] = [null];
   let index = 0;
 
@@ -2117,9 +2187,7 @@ function replayTrace(
   };
 }
 
-const RUNTIME_NODE_HANDLES = new WeakMap<object, number>();
 const RUNTIME_FRAGMENT_VALUES = new Map<number, unknown>();
-const RUNTIME_SYNTAX_VALUES = new Map<number, SyntaxElement>();
 
 function reduceProduction(
   reducerOperation: number,
@@ -2220,7 +2288,7 @@ function ruleFragment(node: AnyRuleNode): Fragment {
 }
 
 function runtimeRuleNodeFragmentHandle(node: AnyRuleNode): number {
-  const existing = RUNTIME_NODE_HANDLES.get(node as object);
+  const existing = hostRuleNodeRuntimeHandle(node);
   if (existing !== undefined) {
     const fragment = parserFragmentNew(
       existing,
@@ -2262,21 +2330,6 @@ function reducerChild(
     return ruleFragment(value as AnyRuleNode);
   }
   throw new Error("Unexpected parser reducer child role.");
-}
-
-function materializeRuleNode(runtimeHandle: number): AnyRuleNode {
-  const ruleId = parserRuleNodeRuleId(runtimeHandle);
-  const node = {
-    type: "rule",
-    name: RULE_NAMES[ruleId],
-    span: ruleNodeSpan(runtimeHandle),
-    tokenRange: ruleNodeTokenRange(runtimeHandle),
-    children: buildChildren(runtimeHandle),
-    fields: buildFields(ruleId, runtimeHandle),
-  };
-  RUNTIME_NODE_HANDLES.set(node, runtimeHandle);
-  rememberSyntaxValue(runtimeHandle, node as unknown as SyntaxElement);
-  return node as unknown as AnyRuleNode;
 }
 
 function reducerFragmentChild(
@@ -2385,18 +2438,6 @@ function hostFragmentValue(handle: number): unknown {
   return RUNTIME_FRAGMENT_VALUES.get(handle);
 }
 
-function rememberSyntaxValue(handle: number, value: SyntaxElement): void {
-  RUNTIME_SYNTAX_VALUES.set(handle, value);
-}
-
-function hostSyntaxValue(handle: number): SyntaxElement {
-  const value = RUNTIME_SYNTAX_VALUES.get(handle);
-  if (value === undefined) {
-    throw new Error("Runtime syntax object is missing its host value.");
-  }
-  return value;
-}
-
 function fragmentSpan(handle: number): Span {
   return {
     start: parserFragmentSpanStart(handle),
@@ -2408,20 +2449,6 @@ function fragmentTokenRange(handle: number): TokenRange {
   return {
     start: parserFragmentTokenStart(handle),
     end: parserFragmentTokenEnd(handle),
-  };
-}
-
-function ruleNodeSpan(handle: number): Span {
-  return {
-    start: parserRuleNodeSpanStart(handle),
-    end: parserRuleNodeSpanEnd(handle),
-  };
-}
-
-function ruleNodeTokenRange(handle: number): TokenRange {
-  return {
-    start: parserRuleNodeTokenStart(handle),
-    end: parserRuleNodeTokenEnd(handle),
   };
 }
 
@@ -2594,17 +2621,6 @@ function buildFields(
     );
   }
   return fields;
-}
-
-function buildChildren(ruleNodeHandle: number): SyntaxElement[] {
-  const count = parserRuleNodeChildCount(ruleNodeHandle);
-  if (count === 0) return [];
-  const children = parserRuleNodeChildren(ruleNodeHandle);
-  const values: SyntaxElement[] = [];
-  for (let index = 0; index < count; index++) {
-    values.push(hostSyntaxValue(runtimeVectorLoad(children, index)));
-  }
-  return values;
 }
 
 function fieldName(fieldId: number): string {
