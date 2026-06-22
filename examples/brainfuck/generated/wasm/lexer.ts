@@ -316,6 +316,13 @@ function lexUnexpectedCharacterDiagnostic(token: Token): LexDiagnostic {
     span: token.span,
   };
 }
+function lexResult(
+  source: string,
+  tokens: readonly Token[],
+  diagnostics: readonly LexDiagnostic[],
+): LexResult {
+  return { source, tokens, diagnostics };
+}
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   return lexInternal(source, options, false);
@@ -469,5 +476,5 @@ function lexInternal(
       },
     };
   }
-  return { source, tokens, diagnostics };
+  return lexResult(source, tokens, diagnostics);
 }

@@ -79,6 +79,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const publicLexDiagnosticMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_lex_diagnostic_materializer.ts",
   );
+  const publicLexResultMaterializerSource = await Deno.readTextFile(
+    "src/targets/runtime/public_lex_result_materializer.ts",
+  );
   const publicTokenMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_token_materializer.ts",
   );
@@ -92,6 +95,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(lexerRuntimeSource, "parserTokenNew");
   assertIncludes(lexerRuntimeSource, "emitPublicTokenMaterializer");
   assertIncludes(lexerRuntimeSource, "emitPublicLexDiagnosticMaterializer");
+  assertIncludes(lexerRuntimeSource, "emitPublicLexResultMaterializer");
   assertIncludes(publicTokenMaterializerSource, "function materializeToken");
   assertIncludes(publicTokenMaterializerSource, "function materializeEofToken");
   assertIncludes(publicTokenMaterializerSource, "parserTokenSpanStart");
@@ -105,11 +109,20 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     publicLexDiagnosticMaterializerSource,
     '"LEX_UNEXPECTED_CHARACTER"',
   );
+  assertIncludes(publicLexResultMaterializerSource, "function lexResult");
+  assertIncludes(
+    publicLexResultMaterializerSource,
+    "return { source, tokens, diagnostics }",
+  );
   assertNotIncludes(lexerRuntimeSource, "const DFA_ACCEPTS");
   assertNotIncludes(lexerRuntimeSource, "const SPECS");
   assertNotIncludes(lexerRuntimeSource, "function codePointLength");
   assertNotIncludes(lexerRuntimeSource, "function transition");
   assertNotIncludes(lexerRuntimeSource, '"LEX_UNEXPECTED_CHARACTER"');
+  assertNotIncludes(
+    lexerRuntimeSource,
+    "return { source, tokens, diagnostics }",
+  );
 
   const parserRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_parser_runtime.ts",
@@ -319,7 +332,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 12);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 13);
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {

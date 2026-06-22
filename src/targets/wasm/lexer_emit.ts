@@ -10,6 +10,7 @@ import {
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
 } from "../runtime/language_sources.ts";
 import { emitPublicLexDiagnosticMaterializer } from "../runtime/public_lex_diagnostic_materializer.ts";
+import { emitPublicLexResultMaterializer } from "../runtime/public_lex_result_materializer.ts";
 import { emitPublicTokenMaterializer } from "../runtime/public_token_materializer.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
 
@@ -83,6 +84,7 @@ const LITERAL_SPECS: readonly {
 ${emitRuntimeLanguageTypeScriptFunction(runtimeProgram).trimEnd()}
 ${emitPublicTokenMaterializer({ label: "Wasm lexer" })}
 ${emitPublicLexDiagnosticMaterializer()}
+${emitPublicLexResultMaterializer()}
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   return lexInternal(source, options, false);
@@ -236,7 +238,7 @@ function lexInternal(
       },
     };
   }
-  return { source, tokens, diagnostics };
+  return lexResult(source, tokens, diagnostics);
 }
 `;
 }

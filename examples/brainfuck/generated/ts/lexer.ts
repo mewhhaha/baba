@@ -538,6 +538,13 @@ function lexUnexpectedCharacterDiagnostic(token: Token): LexDiagnostic {
     span: token.span,
   };
 }
+function lexResult(
+  source: string,
+  tokens: readonly Token[],
+  diagnostics: readonly LexDiagnostic[],
+): LexResult {
+  return { source, tokens, diagnostics };
+}
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   runtimeArenaReset();
@@ -591,7 +598,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     source.length,
   );
   tokens.push(materializeToken(source, eofHandle));
-  return { source, tokens, diagnostics };
+  return lexResult(source, tokens, diagnostics);
 }
 
 function publicTokenClass(tokenClass: number): number {

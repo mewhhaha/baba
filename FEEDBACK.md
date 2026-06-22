@@ -182,6 +182,8 @@ runtime language:
 - Centralized generated public lex diagnostic object wrapping in one
   runtime-target helper shared by TypeScript lexers and Wasm JavaScript
   adapters.
+- Centralized generated public `LexResult` object wrapping in one runtime-target
+  helper shared by TypeScript lexers and Wasm JavaScript adapters.
 - Hid the plan-local public-token terminal hint behind a non-enumerable
   `__babaTerminal` property. Generated parsers can still use it for same-plan
   fast paths, but it is no longer serialized or exposed through ordinary token
@@ -353,27 +355,28 @@ Still unresolved:
   public rule nodes is now emitted from one shared runtime-target helper. Public
   token object wrapping is now emitted from one shared runtime-target helper for
   TypeScript and Wasm adapters, public lex diagnostic object wrapping is now
-  emitted from one shared runtime-target helper, public parse diagnostic object
-  wrapping is now emitted from one shared runtime-target helper, public field
-  object allocation is now emitted from one shared runtime-target helper, and
-  public parse result object allocation is now emitted from one shared
-  runtime-target helper. The runtime language now has a checked resettable arena
-  plus tagged arena-backed `u32` arrays, fixed records, growable vectors, and
-  initial parser fragment/field/rule-node/token/diagnostic layouts plus
-  reduction-shaped fragment assembly helpers that generated replay is beginning
-  to use. It now has a shared in-runtime object-kind provenance gate for arena
-  handles, a non-enumerable plan-local terminal hint for public tokens, plus
-  adapter-owned `WasmSourceBuffer` and `ParseTraceInput` provenance/epoch gates
-  for the current JavaScript-hosted Wasm adapter, but it still lacks a complete
-  host-boundary ownership and handle capability contract for future non-JS Wasm
-  hosts, first-class runtime-language text values if source decoding moves fully
-  into the runtime language, plus complete generated parser-runtime lowering for
-  remaining host public object materialization outside the shared wrapper
-  helpers and a richer structured-error taxonomy for a future host-neutral Wasm
-  ABI. The compiler now has a shared lowered control-flow/value IR and checked
-  helper artifact hashes, but it still needs broader parser-runtime lowering
-  before the release can fully satisfy "one runtime implementation, two
-  execution targets."
+  emitted from one shared runtime-target helper, public lex result object
+  wrapping is now emitted from one shared runtime-target helper, public parse
+  diagnostic object wrapping is now emitted from one shared runtime-target
+  helper, public field object allocation is now emitted from one shared
+  runtime-target helper, and public parse result object allocation is now
+  emitted from one shared runtime-target helper. The runtime language now has a
+  checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
+  growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
+  layouts plus reduction-shaped fragment assembly helpers that generated replay
+  is beginning to use. It now has a shared in-runtime object-kind provenance
+  gate for arena handles, a non-enumerable plan-local terminal hint for public
+  tokens, plus adapter-owned `WasmSourceBuffer` and `ParseTraceInput`
+  provenance/epoch gates for the current JavaScript-hosted Wasm adapter, but it
+  still lacks a complete host-boundary ownership and handle capability contract
+  for future non-JS Wasm hosts, first-class runtime-language text values if
+  source decoding moves fully into the runtime language, plus complete generated
+  parser-runtime lowering for remaining host public object materialization
+  outside the shared wrapper helpers and a richer structured-error taxonomy for
+  a future host-neutral Wasm ABI. The compiler now has a shared lowered
+  control-flow/value IR and checked helper artifact hashes, but it still needs
+  broader parser-runtime lowering before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

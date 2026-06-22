@@ -15,6 +15,7 @@ import {
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
 } from "./language_sources.ts";
 import { emitPublicLexDiagnosticMaterializer } from "./public_lex_diagnostic_materializer.ts";
+import { emitPublicLexResultMaterializer } from "./public_lex_result_materializer.ts";
 import { emitPublicTokenMaterializer } from "./public_token_materializer.ts";
 
 export interface TypeScriptLexerNamedSpec {
@@ -120,6 +121,7 @@ ${
   }
 ${emitPublicTokenMaterializer({ label: "Lexer" })}
 ${emitPublicLexDiagnosticMaterializer()}
+${emitPublicLexResultMaterializer()}
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   runtimeArenaReset();
@@ -173,7 +175,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     source.length,
   );
   tokens.push(materializeToken(source, eofHandle));
-  return { source, tokens, diagnostics };
+  return lexResult(source, tokens, diagnostics);
 }
 
 function publicTokenClass(tokenClass: number): number {
