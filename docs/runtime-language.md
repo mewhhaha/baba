@@ -113,7 +113,7 @@ Public child assembly similarly iterates the runtime-language rule-node child
 vector and resolves runtime token/rule-node handles through the per-replay
 syntax handle map; empty/non-empty child-list classification comes from
 `parserRuleNodeChildListStatus`. Field value-class/count validation now uses
-`parserFieldValueClass`/`parserFieldSchemaStatus`/
+`parserFieldValueClass`/`parserFieldSchemaStatus`/`parserFieldBuildStatus`/
 `parserFieldArrayValueStatus`/`parserFieldScalarValueStatus`/
 `parserFieldCaptureStatus`/`parserFieldFinalStatus` helpers. Replay reduction
 validity, sentinel stack-depth calculation, and RHS stack slicing use

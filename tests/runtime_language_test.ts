@@ -37,6 +37,9 @@ import {
   RUNTIME_FIELD_ARRAY,
   RUNTIME_FIELD_ARRAY_VALUE_MISSING,
   RUNTIME_FIELD_ARRAY_VALUE_OK,
+  RUNTIME_FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA,
+  RUNTIME_FIELD_BUILD_EMPTY,
+  RUNTIME_FIELD_BUILD_PRESENT,
   RUNTIME_FIELD_CAPTURE_ARRAY,
   RUNTIME_FIELD_CAPTURE_SCALAR,
   RUNTIME_FIELD_CAPTURE_TOO_MANY,
@@ -632,6 +635,46 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                 ),
                 call("parserFieldSchemaStatus", [u32(3), u32(2), u32(1)]),
               ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserFieldBuildStatusProgram: RuntimeLanguageProgram = {
+    ...parserFieldBaseProgram,
+    name: "parser_field_build_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserFieldBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserFieldBuildStatus", [
+                u32(0),
+                u32(2),
+                u32(RUNTIME_FIELD_SCHEMA_STATUS_OK),
+              ]),
+              u32(100),
+            ),
+            add(
+              mul(
+                call("parserFieldBuildStatus", [
+                  u32(2),
+                  u32(2),
+                  u32(RUNTIME_FIELD_SCHEMA_STATUS_OK),
+                ]),
+                u32(10),
+              ),
+              call("parserFieldBuildStatus", [
+                u32(2),
+                u32(2),
+                u32(RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA),
+              ]),
             ),
           ),
         }],
@@ -3949,6 +3992,16 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_FIELD_SCHEMA_STATUS_OK * 100 +
           RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA * 10 +
           RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA,
+      },
+    },
+    {
+      name: "parser field build status classifies empty field objects",
+      program: parserFieldBuildStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_FIELD_BUILD_PRESENT * 100 +
+          RUNTIME_FIELD_BUILD_EMPTY * 10 +
+          RUNTIME_FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA,
       },
     },
     {
