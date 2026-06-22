@@ -63,7 +63,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/diagnostic_codes.ts",
       role: "parser-diagnostic-codes",
-      hash: "fnv1a64:430d9937d9a0aa4a",
+      hash: "fnv1a64:30b75c8ec7dd9a74",
     },
     {
       path: "src/targets/runtime/language_sources.ts",
@@ -97,7 +97,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:bd8d31e3392ca9a0" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:89091ae82f54f13e" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

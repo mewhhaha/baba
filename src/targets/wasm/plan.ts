@@ -10,7 +10,11 @@ import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
 import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
 import { compileRuntimeLanguageWasm } from "../runtime/language.ts";
-import { PARSER_DIAGNOSTIC_CODES } from "../runtime/diagnostic_codes.ts";
+import {
+  PARSER_DIAGNOSTIC_CODES,
+  PARSER_DIAGNOSTIC_DETAIL_KINDS,
+  PARSER_DIAGNOSTIC_SCHEMAS,
+} from "../runtime/diagnostic_codes.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
 import {
   createParserConflictTraceRuntimeProgram,
@@ -315,6 +319,10 @@ function wasmAbiDescriptor(plan: WasmPlan): unknown {
       branchLimit: RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
     },
     parserDiagnosticCodes: PARSER_DIAGNOSTIC_CODES,
+    parserDiagnostics: {
+      detailKinds: PARSER_DIAGNOSTIC_DETAIL_KINDS,
+      schemas: PARSER_DIAGNOSTIC_SCHEMAS,
+    },
   };
 }
 

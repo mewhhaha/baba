@@ -12,7 +12,7 @@
     "format": "baba-runtime-implementation",
     "version": 1,
     "semantics": "baba-runtime-portable-v1",
-    "hash": "fnv1a64:bd8d31e3392ca9a0"
+    "hash": "fnv1a64:89091ae82f54f13e"
   },
   "core": {
     "abiVersion": 1,
@@ -189,5 +189,69 @@
     "parseInvalidTokenStream": 4,
     "internalError": 5,
     "branchLimit": 6
+  },
+  "parserDiagnostics": {
+    "detailKinds": {
+      "none": 0,
+      "parserState": 1
+    },
+    "schemas": [
+      {
+        "name": "parseLexicalError",
+        "publicCode": "PARSE_LEXICAL_ERROR",
+        "runtimeCode": 1,
+        "detailKind": "none",
+        "detailKindId": 0,
+        "payloadFields": [
+          "found"
+        ]
+      },
+      {
+        "name": "parseUnexpectedToken",
+        "publicCode": "PARSE_UNEXPECTED_TOKEN",
+        "runtimeCode": 2,
+        "detailKind": "parser-state",
+        "detailKindId": 1,
+        "payloadFields": [
+          "expected",
+          "found"
+        ]
+      },
+      {
+        "name": "parseTrailingInput",
+        "publicCode": "PARSE_TRAILING_INPUT",
+        "runtimeCode": 3,
+        "detailKind": "parser-state",
+        "detailKindId": 1,
+        "payloadFields": [
+          "expected",
+          "found"
+        ]
+      },
+      {
+        "name": "parseInvalidTokenStream",
+        "publicCode": "PARSE_INVALID_TOKEN_STREAM",
+        "runtimeCode": 4,
+        "detailKind": "none",
+        "detailKindId": 0,
+        "payloadFields": []
+      },
+      {
+        "name": "internalError",
+        "publicCode": "PARSER_INTERNAL_ERROR",
+        "runtimeCode": 5,
+        "detailKind": "none",
+        "detailKindId": 0,
+        "payloadFields": []
+      },
+      {
+        "name": "branchLimit",
+        "publicCode": "PARSER_BRANCH_LIMIT",
+        "runtimeCode": 6,
+        "detailKind": "none",
+        "detailKindId": 0,
+        "payloadFields": []
+      }
+    ]
   }
 }

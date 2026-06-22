@@ -178,6 +178,26 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
       abi.parserDiagnosticCodes.branchLimit,
       mod.parserDiagnosticCodeBranchLimit,
     );
+    assertEquals(abi.parserDiagnostics.detailKinds.none, 0);
+    assertEquals(abi.parserDiagnostics.detailKinds.parserState, 1);
+    const unexpectedSchema = abi.parserDiagnostics.schemas.find((
+      schema: { name: string },
+    ) => schema.name === "parseUnexpectedToken");
+    assert(unexpectedSchema);
+    assertEquals(unexpectedSchema.publicCode, "PARSE_UNEXPECTED_TOKEN");
+    assertEquals(
+      unexpectedSchema.runtimeCode,
+      mod.parserDiagnosticCodeParseUnexpectedToken,
+    );
+    assertEquals(unexpectedSchema.detailKind, "parser-state");
+    assertEquals(unexpectedSchema.detailKindId, 1);
+    assertEquals(unexpectedSchema.payloadFields.join(","), "expected,found");
+    const lexicalSchema = abi.parserDiagnostics.schemas.find((
+      schema: { name: string },
+    ) => schema.name === "parseLexicalError");
+    assert(lexicalSchema);
+    assertEquals(lexicalSchema.detailKind, "none");
+    assertEquals(lexicalSchema.payloadFields.join(","), "found");
     assertEquals(mod.parserPlanFormat, "baba-parser-plan");
     assertEquals(mod.parserPlanVersion, 1);
     assertEquals(mod.parserPlanSemantics, "baba-portable-v1");

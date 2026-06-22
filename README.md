@@ -129,7 +129,9 @@ Both generated parser runtimes export the same main TypeScript API:
   taxonomy while public diagnostics continue to use string `code` values.
   `ParseDiagnostic` objects also expose `runtimeCode` and `runtimeDetail`;
   `runtimeCode` matches the exported numeric ID, and `runtimeDetail` carries the
-  runtime payload such as parser state for unexpected/trailing tokens;
+  runtime payload such as parser state for unexpected/trailing tokens. The Wasm
+  target's `abi.json` includes `parserDiagnostics.schemas` describing the
+  `runtimeDetail` kind and public payload fields for each numeric code;
 - `positionAt(source, offset)` and `createSourceMap(source)` for UTF-16
   offset-to-line/column diagnostics;
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia
@@ -138,8 +140,8 @@ Both generated parser runtimes export the same main TypeScript API:
 The Wasm target also writes `wasm/abi.json`, a host-neutral descriptor for the
 core Wasm ABI, parser-plan identity, runtime implementation identity, memory
 layout, UTF-16 source/span conventions, trace statuses, adapter handle model,
-and numeric parser diagnostic IDs. Non-JS hosts should read that JSON rather
-than scraping the generated TypeScript adapter.
+numeric parser diagnostic IDs, and diagnostic payload schemas. Non-JS hosts
+should read that JSON rather than scraping the generated TypeScript adapter.
 
 The Wasm target also exports `wasmTargetKind`, `wasmBytes`, `wasmAbiVersion`,
 core ABI metadata constants, `memory`, and `reset()` from `wasm/mod.ts`.
