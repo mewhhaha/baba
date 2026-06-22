@@ -8,7 +8,10 @@ import type {
 
 export const RUNTIME_NO_TRANSITION = 0xffff_ffff;
 export const RUNTIME_NO_ACCEPT = RUNTIME_NO_TRANSITION;
+export const RUNTIME_NO_LEXER_SPEC = 0xffff_ffff;
 export const RUNTIME_NO_TERMINAL = 0xffff_ffff;
+export const RUNTIME_LEXER_SPEC_LITERAL = 1;
+export const RUNTIME_LEXER_SPEC_TRIVIA = 2;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -61,12 +64,17 @@ export type LexerRuntimeTransition = readonly [
   end: number,
   target: number,
 ];
+export type LexerRuntimeSpecEntry = readonly [
+  flags: number,
+  payload: number,
+  terminal: number,
+];
 
 export interface LexerRuntimeProgramInput {
   readonly transitions: readonly (readonly LexerRuntimeTransition[])[];
   readonly asciiTransitions: readonly (readonly number[])[] | null;
   readonly accepts?: readonly number[];
-  readonly specTerminals?: readonly number[];
+  readonly specs?: readonly LexerRuntimeSpecEntry[];
 }
 
 export type ParserRuntimeLookupEntry = readonly [key: number, value: number];
@@ -182,13 +190,15 @@ export function createLexerRuntimeProgram(
     });
   }
 
-  if (input.specTerminals) {
+  if (input.specs) {
     tables.push({
-      name: "lexerSpecTerminals",
+      name: "lexerSpecs",
       type: "u32" as const,
-      values: input.specTerminals.map((terminal) =>
-        terminal < 0 ? RUNTIME_NO_TERMINAL : terminal
-      ),
+      values: input.specs.flatMap(([flags, payload, terminal]) => [
+        flags,
+        payload < 0 ? RUNTIME_NO_LEXER_SPEC : payload,
+        terminal < 0 ? RUNTIME_NO_TERMINAL : terminal,
+      ]),
     });
   }
 
@@ -208,9 +218,7 @@ export function createLexerRuntimeProgram(
           lexerScanBestEndFunction(),
         ]
         : []),
-      ...(input.specTerminals
-        ? [lexerSpecTerminalFunction(input.specTerminals.length)]
-        : []),
+      ...(input.specs ? lexerSpecFunctions(input.specs.length) : []),
     ],
   };
 }
@@ -638,13 +646,39 @@ function lexerScanBestEndFunction(): RuntimeLanguageFunction {
   };
 }
 
-function lexerSpecTerminalFunction(
+function lexerSpecFunctions(
   specCount: number,
+): RuntimeLanguageFunction[] {
+  return [
+    lexerSpecLoadFunction("lexerSpecFlags", specCount, 0, 0),
+    lexerSpecLoadFunction(
+      "lexerSpecPayload",
+      specCount,
+      1,
+      RUNTIME_NO_LEXER_SPEC,
+    ),
+    lexerSpecLoadFunction(
+      "lexerSpecTerminal",
+      specCount,
+      2,
+      RUNTIME_NO_TERMINAL,
+    ),
+  ];
+}
+
+function lexerSpecLoadFunction(
+  name: string,
+  specCount: number,
+  fieldOffset: number,
+  missing: number,
 ): RuntimeLanguageFunction {
   return {
-    name: "lexerSpecTerminal",
+    name,
     parameters: [
       { name: "specIndex", type: "u32" },
+    ],
+    locals: [
+      { name: "offset", type: "u32" },
     ],
     result: "u32",
     body: [
@@ -652,13 +686,17 @@ function lexerSpecTerminalFunction(
         kind: "if",
         condition: lt(local("specIndex"), u32(specCount)),
         consequent: [
+          setLocal(
+            "offset",
+            add(mul(local("specIndex"), u32(3)), u32(fieldOffset)),
+          ),
           {
             kind: "return",
-            expression: load("lexerSpecTerminals", local("specIndex")),
+            expression: load("lexerSpecs", local("offset")),
           },
         ],
       },
-      { kind: "return", expression: u32(RUNTIME_NO_TERMINAL) },
+      { kind: "return", expression: u32(missing) },
     ],
   };
 }

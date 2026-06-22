@@ -101,9 +101,9 @@
 - Generated parsers now read CST field schema rows/config through
   runtime-language `parserField*` helpers instead of generated field-schema
   lookup object tables.
-- Generated TypeScript `parse(source)` now carries trusted terminal ids from
-  runtime-language `lexerSpecTerminal` tables instead of remapping generated
-  tokens through public token string maps.
+- Generated TypeScript lexers now read token spec classification, payload, and
+  terminal metadata through runtime-language `lexerSpec*` helpers instead of a
+  generated JavaScript spec-discriminant table.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical

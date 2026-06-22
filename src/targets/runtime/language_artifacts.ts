@@ -23,6 +23,8 @@ import {
   RUNTIME_ACTION_SHIFT,
   RUNTIME_FIELD_ARRAY,
   RUNTIME_FIELD_NULLABLE,
+  RUNTIME_LEXER_SPEC_LITERAL,
+  RUNTIME_LEXER_SPEC_TRIVIA,
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_RULE,
@@ -82,7 +84,11 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
           asciiRow([]),
         ],
         accepts: [-1, 0, 1],
-        specTerminals: [4, -1, 8],
+        specs: [
+          [0, 0, 4],
+          [RUNTIME_LEXER_SPEC_TRIVIA, 1, -1],
+          [RUNTIME_LEXER_SPEC_LITERAL, 2, 8],
+        ],
       }),
     },
     {
@@ -252,9 +258,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "lexer_runtime",
       entry: "dfaTransition",
-      sourceHash: "fnv1a64:d6135618dd36efad",
-      typescriptHash: "fnv1a64:4d82771de8ae9ca9",
-      wasmHash: "fnv1a64:b826bcc9da0cd1e2",
+      sourceHash: "fnv1a64:1631166363ba82ee",
+      typescriptHash: "fnv1a64:8ecbdd435b7139d8",
+      wasmHash: "fnv1a64:925e34ab10bdd454",
     },
     {
       name: "parser_table_runtime",
@@ -329,7 +335,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:b912aca6cc648faa" as const;
+  "fnv1a64:4fa2d2e666e23ad4" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

@@ -33,6 +33,8 @@ import {
   RUNTIME_ACTION_SHIFT,
   RUNTIME_FIELD_ARRAY,
   RUNTIME_FIELD_NULLABLE,
+  RUNTIME_LEXER_SPEC_LITERAL,
+  RUNTIME_LEXER_SPEC_TRIVIA,
   RUNTIME_NO_FIELD,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
@@ -87,7 +89,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       [],
     ],
     asciiTransitions: null,
-    specTerminals: [4, -1, 8],
+    specs: [
+      [0, 0, 4],
+      [RUNTIME_LEXER_SPEC_TRIVIA, 1, -1],
+      [RUNTIME_LEXER_SPEC_LITERAL, 2, 8],
+    ],
   });
   const lexerSpecRuntimeProgram: RuntimeLanguageProgram = {
     ...lexerSpecBaseProgram,
@@ -101,16 +107,19 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         body: [{
           kind: "return",
           expression: add(
-            mul(call("lexerSpecTerminal", [u32(0)]), u32(100)),
+            mul(call("lexerSpecTerminal", [u32(0)]), u32(10000)),
             add(
-              mul(
-                eq(
-                  call("lexerSpecTerminal", [u32(1)]),
-                  u32(RUNTIME_NO_TERMINAL),
+              mul(call("lexerSpecFlags", [u32(1)]), u32(1000)),
+              add(
+                mul(call("lexerSpecPayload", [u32(2)]), u32(100)),
+                add(
+                  mul(call("lexerSpecTerminal", [u32(2)]), u32(10)),
+                  eq(
+                    call("lexerSpecTerminal", [u32(1)]),
+                    u32(RUNTIME_NO_TERMINAL),
+                  ),
                 ),
-                u32(10),
               ),
-              call("lexerSpecTerminal", [u32(2)]),
             ),
           ),
         }],
@@ -1056,9 +1065,9 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 1072 },
     },
     {
-      name: "lexer spec terminal helper maps accepted specs",
+      name: "lexer spec helper maps accepted spec metadata",
       program: lexerSpecRuntimeProgram,
-      expected: { kind: "value", value: 418 },
+      expected: { kind: "value", value: 42281 },
     },
     {
       name: "parser table lookup finds shift actions",
