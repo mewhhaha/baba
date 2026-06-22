@@ -164,6 +164,10 @@ runtime language:
   helper shared by TypeScript lexers and Wasm JavaScript adapters. Both targets
   now materialize runtime token records through the same named/literal payload
   convention before returning public API token objects.
+- Hid the plan-local public-token terminal hint behind a non-enumerable
+  `__babaTerminal` property. Generated parsers can still use it for same-plan
+  fast paths, but it is no longer serialized or exposed through ordinary token
+  property enumeration.
 - Moved generated deterministic TypeScript parser action/goto table lookup onto
   a runtime-language source program backed by read-only `u32` tables, replacing
   the previous generated `findAction()`/`findGoto()` table scans for unambiguous
@@ -335,14 +339,15 @@ Still unresolved:
   growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
   layouts plus reduction-shaped fragment assembly helpers that generated replay
   is beginning to use. It now has a shared in-runtime object-kind provenance
-  gate for arena handles, but it still lacks a complete host-boundary ownership
-  and handle capability contract, first-class runtime-language text values if
-  source decoding moves fully into the runtime language, plus complete generated
-  parser-runtime lowering and a richer structured-error taxonomy for a future
-  host-neutral Wasm ABI. The compiler now has a shared lowered
-  control-flow/value IR and checked helper artifact hashes, but it still needs
-  broader parser-runtime lowering before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  gate for arena handles and a non-enumerable plan-local terminal hint for
+  public tokens, but it still lacks a complete host-boundary ownership and
+  handle capability contract for future non-JS Wasm hosts, first-class
+  runtime-language text values if source decoding moves fully into the runtime
+  language, plus complete generated parser-runtime lowering and a richer
+  structured-error taxonomy for a future host-neutral Wasm ABI. The compiler now
+  has a shared lowered control-flow/value IR and checked helper artifact hashes,
+  but it still needs broader parser-runtime lowering before the release can
+  fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

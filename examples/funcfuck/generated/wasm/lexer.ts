@@ -318,37 +318,32 @@ function materializeToken(source: string, handle: number): Token {
     end: parserTokenSpanEnd(handle),
   };
   const terminal = parserTokenTerminal(handle);
-  const runtimeTerminal: RuntimeTerminalToken = {
-    __babaTerminal: terminal === NO_TERMINAL ? -1 : terminal,
-  };
 
   if (tokenClass === PUBLIC_TOKEN_LITERAL) {
     const spec = LITERAL_SPECS[payload];
     if (!spec) {
       throw new Error("Wasm lexer" + " runtime emitted an invalid literal token.");
     }
-    return {
+    return attachRuntimeTerminal({
       type: "literal",
       literal: spec.literal as never,
       text: spec.literal as never,
       span,
       channel: "main",
-      ...runtimeTerminal,
-    } as Token & RuntimeTerminalToken;
+    } as Token, terminal);
   }
   if (tokenClass === PUBLIC_TOKEN_MAIN || tokenClass === PUBLIC_TOKEN_TRIVIA) {
     const spec = NAMED_SPECS[payload];
     if (!spec) {
       throw new Error("Wasm lexer" + " runtime emitted an invalid named token.");
     }
-    return {
+    return attachRuntimeTerminal({
       type: "named",
       kind: spec.kind as never,
       text: source.slice(span.start, span.end),
       span,
       channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
-      ...runtimeTerminal,
-    } as Token & RuntimeTerminalToken;
+    } as Token, terminal);
   }
   if (tokenClass === PUBLIC_TOKEN_ERROR) {
     return {
@@ -367,6 +362,14 @@ function materializeToken(source: string, handle: number): Token {
     };
   }
   throw new Error("Wasm lexer" + " runtime emitted an unknown public token class.");
+}
+
+function attachRuntimeTerminal(token: Token, terminal: number): Token & RuntimeTerminalToken {
+  Object.defineProperty(token, "__babaTerminal", {
+    value: terminal === NO_TERMINAL ? -1 : terminal,
+    enumerable: false,
+  });
+  return token as Token & RuntimeTerminalToken;
 }
 
 export function lex(source: string, options: LexOptions = {}): LexResult {

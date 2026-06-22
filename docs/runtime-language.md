@@ -45,6 +45,10 @@ runtime-language token records for matched literals, named tokens, preserved
 trivia, lexical error tokens, and EOF tokens, then read class, payload,
 terminal, and span data back through `parserToken*` accessors before wrapping
 public API token objects through one shared runtime-target materializer helper.
+The generated materializer stores the parser-terminal hint as a non-enumerable
+`__babaTerminal` property on main and literal public tokens. That hint is
+plan-local provenance for generated parser fast paths, not a public token API,
+and consumers should not serialize, mutate, or reuse it across parser plans.
 External token streams keep public token-kind/literal spelling at the API
 boundary, but generated parsers map those spellings to lexer spec indexes and
 use the same runtime-language helpers for channel and terminal classification.
@@ -223,6 +227,10 @@ execute both outputs and compare returned values or traps.
   token records for public tokens, including EOF, and read those records through
   runtime token accessors before materializing public JavaScript token objects
   through one shared runtime-target helper.
+- Generated main/literal public tokens carry their plan-local terminal hint as a
+  non-enumerable `__babaTerminal` property. Parser APIs may read it when the
+  token came from the same generated runtime, but it is not enumerable,
+  serialized, or part of the public token contract.
 - Generated parser fallback EOF tokens allocate runtime token records and read
   span data through runtime token accessors before materializing public
   JavaScript token objects.
@@ -265,7 +273,8 @@ execute both outputs and compare returned values or traps.
 
 These rules must be specified before the parser runtime can be fully lowered:
 
-- host-boundary ownership and handle capability lifetimes;
+- host-boundary ownership and handle capability lifetimes for future non-JS Wasm
+  hosts;
 - first-class runtime-language text values, if source decoding moves fully into
   the runtime language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
