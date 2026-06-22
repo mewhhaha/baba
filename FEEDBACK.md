@@ -123,6 +123,8 @@ runtime language:
 - Added a runtime-language `andU32` operator and moved generated parser action
   kind/payload decoding plus `parserTrace` action classification onto
   `parserActionKind`/`parserActionPayload` helpers.
+- Switched the core Wasm parser trace decoder to the same shared runtime action
+  kind/payload masks used by the runtime-language helpers.
 
 Still unresolved:
 
@@ -132,8 +134,9 @@ Still unresolved:
   selection, expected-terminal diagnostic ranges, and parser trace control flow
   from the runtime language. Production LHS/RHS-length metadata lookup is also
   runtime-language-backed now, and action kind/payload decoding uses
-  runtime-language helpers in generated parser replay and `parserTrace`, but
-  conflict branch scheduling, Wasm parser control flow, generated token object
+  runtime-language helpers in generated parser replay and `parserTrace`, while
+  core Wasm trace decoding uses the same shared masks. Conflict branch
+  scheduling, the rest of Wasm parser control flow, generated token object
   emission/diagnostics, and reducer/CST algorithms are still not mechanically
   emitted from one runtime-language implementation. The compiler now has a
   shared lowered control-flow/value IR and checked helper artifact hashes, but

@@ -2,6 +2,13 @@
 import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
 import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
+import {
+  RUNTIME_ACTION_ACCEPT as ACTION_ACCEPT,
+  RUNTIME_ACTION_KIND_MASK,
+  RUNTIME_ACTION_PAYLOAD_MASK,
+  RUNTIME_ACTION_REDUCE as ACTION_REDUCE,
+  RUNTIME_ACTION_SHIFT as ACTION_SHIFT,
+} from "./language_sources.ts";
 
 export interface WasmModuleImage {
   bytes: Uint8Array;
@@ -28,10 +35,6 @@ const WASM_ABI_VERSION = 1;
 const I32 = 0x7f;
 const FUNC = 0x60;
 const EMPTY_BLOCK = 0x40;
-
-const ACTION_SHIFT = 0x01_00_00_00;
-const ACTION_REDUCE = 0x02_00_00_00;
-const ACTION_ACCEPT = 0x03_00_00_00;
 
 export function emitWasmModule(
   dfa: Dfa,
@@ -188,7 +191,7 @@ function encodeAction(action: LrAction | number): number {
 }
 
 function encodePayload(kind: number, payload: number): number {
-  if (payload < 0 || payload > 0x00_ff_ff_ff) {
+  if (payload < 0 || payload > RUNTIME_ACTION_PAYLOAD_MASK) {
     throw new Error(`Wasm parser table payload ${payload} exceeds 24 bits.`);
   }
   return kind | payload;
@@ -1113,16 +1116,16 @@ function parseTraceFunction(layout: DataLayout): number[] {
     0x0b,
 
     ...get(action),
-    ...i32(24),
-    0x76,
+    ...i32(RUNTIME_ACTION_KIND_MASK),
+    0x71,
     ...set(kind),
     ...get(action),
-    ...i32(0x00_ff_ff_ff),
+    ...i32(RUNTIME_ACTION_PAYLOAD_MASK),
     0x71,
     ...set(payload),
 
     ...get(kind),
-    ...i32(1),
+    ...i32(ACTION_SHIFT),
     0x46,
     0x04,
     EMPTY_BLOCK,
@@ -1147,7 +1150,7 @@ function parseTraceFunction(layout: DataLayout): number[] {
     0x0b,
 
     ...get(kind),
-    ...i32(2),
+    ...i32(ACTION_REDUCE),
     0x46,
     0x04,
     EMPTY_BLOCK,
@@ -1194,7 +1197,7 @@ function parseTraceFunction(layout: DataLayout): number[] {
     0x0b,
 
     ...get(kind),
-    ...i32(3),
+    ...i32(ACTION_ACCEPT),
     0x46,
     0x04,
     EMPTY_BLOCK,
