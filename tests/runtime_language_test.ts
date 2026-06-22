@@ -18,6 +18,7 @@ import {
 } from "../src/targets/runtime/language_manifest.ts";
 import {
   createLexerRuntimeProgram,
+  createLexerSpecRuntimeProgram,
   createParserActionRuntimeProgram,
   createParserConflictTableRuntimeProgram,
   createParserConflictTraceRuntimeProgram,
@@ -43,6 +44,11 @@ import {
   RUNTIME_FIELD_VALUE_NULLABLE,
   RUNTIME_FIELD_VALUE_REQUIRED,
   RUNTIME_LEXER_SPEC_LITERAL,
+  RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL,
+  RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN,
+  RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA,
+  RUNTIME_LEXER_SPEC_STATUS_OK,
+  RUNTIME_LEXER_SPEC_STATUS_UNKNOWN,
   RUNTIME_LEXER_SPEC_TRIVIA,
   RUNTIME_LEXER_TOKEN_LITERAL,
   RUNTIME_LEXER_TOKEN_MAIN,
@@ -53,6 +59,9 @@ import {
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_TERMINAL,
   RUNTIME_NO_TRANSITION,
+  RUNTIME_PUBLIC_TOKEN_LITERAL,
+  RUNTIME_PUBLIC_TOKEN_MAIN,
+  RUNTIME_PUBLIC_TOKEN_TRIVIA,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_SEQUENCE,
@@ -96,11 +105,7 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     asciiTransitions: null,
     accepts: [-1, 5, 7],
   });
-  const lexerSpecBaseProgram = createLexerRuntimeProgram({
-    transitions: [
-      [],
-    ],
-    asciiTransitions: null,
+  const lexerSpecBaseProgram = createLexerSpecRuntimeProgram({
     specs: [
       [0, 0, 4],
       [RUNTIME_LEXER_SPEC_TRIVIA, 1, -1],
@@ -119,18 +124,51 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         body: [{
           kind: "return",
           expression: add(
-            mul(call("lexerSpecTerminal", [u32(0)]), u32(100000)),
+            mul(call("lexerSpecTerminal", [u32(0)]), u32(100_000_000)),
             add(
-              mul(call("lexerSpecTokenClass", [u32(0)]), u32(10000)),
+              mul(call("lexerSpecTokenClass", [u32(0)]), u32(10_000_000)),
               add(
-                mul(call("lexerSpecTokenClass", [u32(1)]), u32(1000)),
+                mul(call("lexerSpecTokenClass", [u32(1)]), u32(1_000_000)),
                 add(
-                  mul(call("lexerSpecPayload", [u32(2)]), u32(100)),
+                  mul(call("lexerSpecPayload", [u32(2)]), u32(100_000)),
                   add(
-                    mul(call("lexerSpecTokenClass", [u32(2)]), u32(10)),
-                    eq(
-                      call("lexerSpecTerminal", [u32(1)]),
-                      u32(RUNTIME_NO_TERMINAL),
+                    mul(call("lexerSpecTokenClass", [u32(2)]), u32(10_000)),
+                    add(
+                      mul(
+                        eq(
+                          call("lexerSpecTerminal", [u32(1)]),
+                          u32(RUNTIME_NO_TERMINAL),
+                        ),
+                        u32(1_000),
+                      ),
+                      add(
+                        call("lexerSpecPublicTokenStatus", [
+                          u32(2),
+                          u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+                        ]),
+                        add(
+                          call("lexerSpecPublicTokenStatus", [
+                            u32(99),
+                            u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                          ]),
+                          add(
+                            call("lexerSpecPublicTokenStatus", [
+                              u32(0),
+                              u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+                            ]),
+                            add(
+                              call("lexerSpecPublicTokenStatus", [
+                                u32(1),
+                                u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                              ]),
+                              call("lexerSpecPublicTokenStatus", [
+                                u32(0),
+                                u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                              ]),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1133,9 +1171,15 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       program: lexerSpecRuntimeProgram,
       expected: {
         kind: "value",
-        value: 4 * 100000 + RUNTIME_LEXER_TOKEN_MAIN * 10000 +
-          RUNTIME_LEXER_TOKEN_TRIVIA * 1000 + 2 * 100 +
-          RUNTIME_LEXER_TOKEN_LITERAL * 10 + 1,
+        value: 4 * 100_000_000 +
+          RUNTIME_LEXER_TOKEN_MAIN * 10_000_000 +
+          RUNTIME_LEXER_TOKEN_TRIVIA * 1_000_000 + 2 * 100_000 +
+          RUNTIME_LEXER_TOKEN_LITERAL * 10_000 + 1_000 +
+          RUNTIME_LEXER_SPEC_STATUS_OK +
+          RUNTIME_LEXER_SPEC_STATUS_UNKNOWN +
+          RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL +
+          RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN +
+          RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA,
       },
     },
     {

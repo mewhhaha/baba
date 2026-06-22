@@ -31,14 +31,20 @@ import {
   RUNTIME_FIELD_VALUE_ARRAY,
   RUNTIME_FIELD_VALUE_NULLABLE,
   RUNTIME_LEXER_SPEC_LITERAL,
+  RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL,
+  RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN,
+  RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA,
+  RUNTIME_LEXER_SPEC_STATUS_OK,
   RUNTIME_LEXER_SPEC_TRIVIA,
-  RUNTIME_LEXER_TOKEN_TRIVIA,
   RUNTIME_NO_FIELD,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_SPAN,
   RUNTIME_NO_TERMINAL,
+  RUNTIME_PUBLIC_TOKEN_LITERAL,
+  RUNTIME_PUBLIC_TOKEN_MAIN,
+  RUNTIME_PUBLIC_TOKEN_TRIVIA,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_IDENTITY,
   RUNTIME_REDUCER_OPTIONAL_EMPTY,
@@ -331,7 +337,13 @@ const FIELD_CAPTURE_SCALAR = ${RUNTIME_FIELD_CAPTURE_SCALAR};
 const FIELD_CAPTURE_TOO_MANY = ${RUNTIME_FIELD_CAPTURE_TOO_MANY};
 const FIELD_FINAL_REQUIRED_MISSING = ${RUNTIME_FIELD_FINAL_REQUIRED_MISSING};
 const FIELD_FINAL_TOO_MANY = ${RUNTIME_FIELD_FINAL_TOO_MANY};
-const TOKEN_TRIVIA = ${RUNTIME_LEXER_TOKEN_TRIVIA};
+const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
+const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
+const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
+const SPEC_STATUS_OK = ${RUNTIME_LEXER_SPEC_STATUS_OK};
+const SPEC_STATUS_NOT_LITERAL = ${RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL};
+const SPEC_STATUS_NOT_MAIN = ${RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN};
+const SPEC_STATUS_NOT_TRIVIA = ${RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA};
 
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
 }
@@ -1311,11 +1323,28 @@ function validateTokenStream(
           span,
         ));
       }
-      if (tokenSpecIndex(token) < 0) {
+      const specIndex = tokenSpecIndex(token);
+      if (specIndex < 0) {
         diagnostics.push(invalidTokenStream(
           \`Literal token \${JSON.stringify(token.literal)} is not part of this parser's terminal set.\`,
           span,
         ));
+      } else {
+        const status = lexerSpecPublicTokenStatus(
+          specIndex,
+          PUBLIC_TOKEN_LITERAL,
+        );
+        if (status === SPEC_STATUS_NOT_LITERAL) {
+          diagnostics.push(invalidTokenStream(
+            \`Literal token \${JSON.stringify(token.literal)} is not a literal token kind.\`,
+            span,
+          ));
+        } else if (status !== SPEC_STATUS_OK) {
+          diagnostics.push(invalidTokenStream(
+            \`Literal token \${JSON.stringify(token.literal)} is not part of this parser's terminal set.\`,
+            span,
+          ));
+        }
       }
     } else if (token.type === "named") {
       if (token.channel !== "main" && token.channel !== "trivia") {
@@ -1331,16 +1360,25 @@ function validateTokenStream(
             span,
           ));
         } else {
-          const tokenClass = lexerSpecTokenClass(specIndex);
-          if (token.channel === "main" && tokenClass === TOKEN_TRIVIA) {
+          const status = lexerSpecPublicTokenStatus(
+            specIndex,
+            token.channel === "trivia"
+              ? PUBLIC_TOKEN_TRIVIA
+              : PUBLIC_TOKEN_MAIN,
+          );
+          if (status === SPEC_STATUS_NOT_MAIN) {
             diagnostics.push(invalidTokenStream(
               \`Named token kind '\${token.kind}' is not a main token kind.\`,
               span,
             ));
-          }
-          if (token.channel === "trivia" && tokenClass !== TOKEN_TRIVIA) {
+          } else if (status === SPEC_STATUS_NOT_TRIVIA) {
             diagnostics.push(invalidTokenStream(
               \`Named token kind '\${token.kind}' is not a trivia token kind.\`,
+              span,
+            ));
+          } else if (status !== SPEC_STATUS_OK) {
+            diagnostics.push(invalidTokenStream(
+              \`Named token kind '\${token.kind}' is not part of this parser's lexer spec set.\`,
               span,
             ));
           }

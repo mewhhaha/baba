@@ -109,6 +109,9 @@
   generated JavaScript spec-discriminant table.
 - Generated TypeScript lexers and parser token-stream validation now use
   runtime-language `lexerSpecTokenClass` for literal/main/trivia classification.
+- Generated parser token-stream validation now delegates public token
+  literal/main/trivia compatibility decisions to runtime-language
+  `lexerSpecPublicTokenStatus`.
 - Generated parsers now map external `parseTokens()` token strings to lexer spec
   indexes and use runtime-language `lexerSpec*` helpers for channel and terminal
   metadata instead of generated terminal/channel lookup tables.

@@ -80,7 +80,13 @@ const FIELD_CAPTURE_SCALAR = 1;
 const FIELD_CAPTURE_TOO_MANY = 3;
 const FIELD_FINAL_REQUIRED_MISSING = 1;
 const FIELD_FINAL_TOO_MANY = 2;
-const TOKEN_TRIVIA = 2;
+const PUBLIC_TOKEN_LITERAL = 1;
+const PUBLIC_TOKEN_MAIN = 2;
+const PUBLIC_TOKEN_TRIVIA = 3;
+const SPEC_STATUS_OK = 0;
+const SPEC_STATUS_NOT_LITERAL = 2;
+const SPEC_STATUS_NOT_MAIN = 3;
+const SPEC_STATUS_NOT_TRIVIA = 4;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -281,6 +287,41 @@ function lexerSpecTerminal(specIndex: number): number {
     return (__baba_load_lexerSpecs(offset) >>> 0) >>> 0;
   }
   return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerSpecPublicTokenStatus(specIndex: number, publicClass: number): number {
+  let specClass = 0;
+  if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (1) >>> 0;
+  }
+  specClass = (lexerSpecTokenClass(specIndex) >>> 0) >>> 0;
+  if (((((specClass) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((specClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (2) >>> 0;
+    }
+  }
+  if (((((publicClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((specClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (3) >>> 0;
+    }
+  }
+  if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((specClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (4) >>> 0;
+    }
+  }
+  return (1) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -1238,11 +1279,28 @@ function validateTokenStream(
           span,
         ));
       }
-      if (tokenSpecIndex(token) < 0) {
+      const specIndex = tokenSpecIndex(token);
+      if (specIndex < 0) {
         diagnostics.push(invalidTokenStream(
           `Literal token ${JSON.stringify(token.literal)} is not part of this parser's terminal set.`,
           span,
         ));
+      } else {
+        const status = lexerSpecPublicTokenStatus(
+          specIndex,
+          PUBLIC_TOKEN_LITERAL,
+        );
+        if (status === SPEC_STATUS_NOT_LITERAL) {
+          diagnostics.push(invalidTokenStream(
+            `Literal token ${JSON.stringify(token.literal)} is not a literal token kind.`,
+            span,
+          ));
+        } else if (status !== SPEC_STATUS_OK) {
+          diagnostics.push(invalidTokenStream(
+            `Literal token ${JSON.stringify(token.literal)} is not part of this parser's terminal set.`,
+            span,
+          ));
+        }
       }
     } else if (token.type === "named") {
       if (token.channel !== "main" && token.channel !== "trivia") {
@@ -1258,16 +1316,25 @@ function validateTokenStream(
             span,
           ));
         } else {
-          const tokenClass = lexerSpecTokenClass(specIndex);
-          if (token.channel === "main" && tokenClass === TOKEN_TRIVIA) {
+          const status = lexerSpecPublicTokenStatus(
+            specIndex,
+            token.channel === "trivia"
+              ? PUBLIC_TOKEN_TRIVIA
+              : PUBLIC_TOKEN_MAIN,
+          );
+          if (status === SPEC_STATUS_NOT_MAIN) {
             diagnostics.push(invalidTokenStream(
               `Named token kind '${token.kind}' is not a main token kind.`,
               span,
             ));
-          }
-          if (token.channel === "trivia" && tokenClass !== TOKEN_TRIVIA) {
+          } else if (status === SPEC_STATUS_NOT_TRIVIA) {
             diagnostics.push(invalidTokenStream(
               `Named token kind '${token.kind}' is not a trivia token kind.`,
+              span,
+            ));
+          } else if (status !== SPEC_STATUS_OK) {
+            diagnostics.push(invalidTokenStream(
+              `Named token kind '${token.kind}' is not part of this parser's lexer spec set.`,
               span,
             ));
           }
