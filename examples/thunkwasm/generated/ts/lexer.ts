@@ -224,6 +224,10 @@ const NO_LEXER_SPEC = 4294967295;
 const NO_TERMINAL = 4294967295;
 const TOKEN_LITERAL = 1;
 const TOKEN_TRIVIA = 2;
+const PUBLIC_TOKEN_LITERAL = 1;
+const PUBLIC_TOKEN_MAIN = 2;
+const PUBLIC_TOKEN_TRIVIA = 3;
+const PUBLIC_TOKEN_ERROR = 4;
 
 interface Candidate {
   specIndex: number;
@@ -465,7 +469,125 @@ function lexerSpecTerminal(specIndex: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function runtimeArenaReset(): number {
+  return (runtimeArenaResetTo(1) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArenaResetTo(firstWord: number): number {
+  let capacity = 0;
+  if (((((firstWord) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  capacity = (__baba_ensure_scratch(firstWord) >>> 0) >>> 0;
+  __baba_store_scratch(0, firstWord);
+  return (firstWord) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArenaAlloc(words: number): number {
+  let base = 0;
+  let next = 0;
+  let capacity = 0;
+  base = (__baba_load_scratch(0) >>> 0) >>> 0;
+  if (((((base) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    base = (1) >>> 0;
+    __baba_store_scratch(0, base);
+  }
+  next = (((base) + (words)) >>> 0) >>> 0;
+  if (((((next) >>> 0) < ((base) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  capacity = (__baba_ensure_scratch(next) >>> 0) >>> 0;
+  __baba_store_scratch(0, next);
+  return (base) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeObjectKind(handle: number): number {
+  let used = 0;
+  if (((((handle) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  used = (__baba_load_scratch(0) >>> 0) >>> 0;
+  if (((((handle) >>> 0) < ((used) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(handle) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenNew(tokenClass: number, payload: number, terminal: number, spanStart: number, spanEnd: number): number {
+  let handle = 0;
+  handle = (runtimeArenaAlloc(6) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 7);
+  __baba_store_scratch(((handle) + (1)) >>> 0, tokenClass);
+  __baba_store_scratch(((handle) + (2)) >>> 0, payload);
+  __baba_store_scratch(((handle) + (3)) >>> 0, terminal);
+  __baba_store_scratch(((handle) + (4)) >>> 0, spanStart);
+  __baba_store_scratch(((handle) + (5)) >>> 0, spanEnd);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenClass(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenPayload(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenTerminal(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenSpanStart(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (4)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenSpanEnd(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 export function lex(source: string, options: LexOptions = {}): LexResult {
+  runtimeArenaReset();
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
   const tokens: Token[] = [];
   const diagnostics: LexDiagnostic[] = [];
@@ -479,39 +601,15 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
       const tokenClass = lexerSpecTokenClass(candidate.specIndex);
       const specPayload = runtimeSpecPayload(candidate.specIndex);
       const terminal = runtimeTerminal(candidate.specIndex);
-      if (tokenClass === TOKEN_LITERAL) {
-        const spec = LITERAL_SPECS[specPayload];
-        tokens.push({
-          type: "literal",
-          literal: spec.literal as never,
-          text: spec.literal as never,
-          span: { start, end },
-          channel: "main",
-          __babaTerminal: terminal,
-        } as Token & RuntimeTerminalToken);
-      } else {
-        const spec = NAMED_SPECS[specPayload];
-        if (tokenClass === TOKEN_TRIVIA) {
-          if (preserveTrivia) {
-            tokens.push({
-              type: "named",
-              kind: spec.kind as never,
-              text: source.slice(start, end),
-              span: { start, end },
-              channel: "trivia",
-              __babaTerminal: terminal,
-            } as Token & RuntimeTerminalToken);
-          }
-        } else {
-          tokens.push({
-            type: "named",
-            kind: spec.kind as never,
-            text: source.slice(start, end),
-            span: { start, end },
-            channel: "main",
-            __babaTerminal: terminal,
-          } as Token & RuntimeTerminalToken);
-        }
+      if (tokenClass !== TOKEN_TRIVIA || preserveTrivia) {
+        const handle = parserTokenNew(
+          publicTokenClass(tokenClass),
+          specPayload,
+          terminal < 0 ? NO_TERMINAL : terminal,
+          start,
+          end,
+        );
+        tokens.push(materializeToken(source, handle));
       }
       offset = end;
       continue;
@@ -520,17 +618,19 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     const start = offset;
     const codePoint = source.codePointAt(offset);
     offset += codePoint === undefined ? 1 : utf16CodePointWidth(codePoint);
-    const text = source.slice(start, offset);
-    tokens.push({
-      type: "error",
-      text,
-      span: { start, end: offset },
-      channel: "error",
-    });
+    const handle = parserTokenNew(
+      PUBLIC_TOKEN_ERROR,
+      0,
+      NO_TERMINAL,
+      start,
+      offset,
+    );
+    const token = materializeToken(source, handle);
+    tokens.push(token);
     diagnostics.push({
       code: "LEX_UNEXPECTED_CHARACTER",
-      message: `Unexpected character ${JSON.stringify(text)}.`,
-      span: { start, end: offset },
+      message: `Unexpected character ${JSON.stringify(token.text)}.`,
+      span: token.span,
     });
   }
 
@@ -541,6 +641,57 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     channel: "main",
   });
   return { source, tokens, diagnostics };
+}
+
+function publicTokenClass(tokenClass: number): number {
+  if (tokenClass === TOKEN_LITERAL) return PUBLIC_TOKEN_LITERAL;
+  if (tokenClass === TOKEN_TRIVIA) return PUBLIC_TOKEN_TRIVIA;
+  return PUBLIC_TOKEN_MAIN;
+}
+
+function materializeToken(source: string, handle: number): Token {
+  const tokenClass = parserTokenClass(handle);
+  const payload = parserTokenPayload(handle);
+  const span = {
+    start: parserTokenSpanStart(handle),
+    end: parserTokenSpanEnd(handle),
+  };
+  const terminal = parserTokenTerminal(handle);
+  const runtimeTerminal: RuntimeTerminalToken = {
+    __babaTerminal: terminal === NO_TERMINAL ? -1 : terminal,
+  };
+
+  if (tokenClass === PUBLIC_TOKEN_LITERAL) {
+    const spec = LITERAL_SPECS[payload];
+    return {
+      type: "literal",
+      literal: spec.literal as never,
+      text: spec.literal as never,
+      span,
+      channel: "main",
+      ...runtimeTerminal,
+    } as Token & RuntimeTerminalToken;
+  }
+  if (tokenClass === PUBLIC_TOKEN_MAIN || tokenClass === PUBLIC_TOKEN_TRIVIA) {
+    const spec = NAMED_SPECS[payload];
+    return {
+      type: "named",
+      kind: spec.kind as never,
+      text: source.slice(span.start, span.end),
+      span,
+      channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
+      ...runtimeTerminal,
+    } as Token & RuntimeTerminalToken;
+  }
+  if (tokenClass === PUBLIC_TOKEN_ERROR) {
+    return {
+      type: "error",
+      text: source.slice(span.start, span.end),
+      span,
+      channel: "error",
+    };
+  }
+  throw new Error("Lexer runtime emitted an unknown public token class.");
 }
 
 function runtimeSpecPayload(specIndex: number): number {

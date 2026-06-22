@@ -197,6 +197,7 @@ export interface LexerRuntimeProgramInput {
   readonly asciiTransitions: readonly (readonly number[])[] | null;
   readonly accepts?: readonly number[];
   readonly specs?: readonly LexerRuntimeSpecEntry[];
+  readonly includeTokenRecords?: boolean;
 }
 
 export interface LexerSpecRuntimeProgramInput {
@@ -348,7 +349,11 @@ export function createLexerRuntimeProgram(
   return {
     name: "lexer_runtime",
     entry: "dfaTransition",
-    scratchMemoryWords: input.accepts ? 5 : undefined,
+    scratchMemoryWords: input.includeTokenRecords
+      ? Math.max(input.accepts ? 5 : 0, RUNTIME_ARENA_FIRST_WORD)
+      : input.accepts
+      ? 5
+      : undefined,
     tables,
     functions: [
       UTF16_CODE_POINT_WIDTH_FUNCTION,
@@ -362,6 +367,7 @@ export function createLexerRuntimeProgram(
         ]
         : []),
       ...(input.specs ? lexerSpecFunctions(input.specs.length) : []),
+      ...(input.includeTokenRecords ? parserTokenRecordFunctions() : []),
     ],
   };
 }
@@ -1605,6 +1611,21 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserRuleNodeFieldsFunction(),
     parserRuleNodeChildCountFunction(),
     parserRuleNodeFieldCountFunction(),
+  ];
+}
+
+function parserTokenRecordFunctions(): RuntimeLanguageFunction[] {
+  return [
+    runtimeArenaResetFunction(),
+    runtimeArenaResetToFunction(),
+    runtimeArenaAllocFunction(),
+    runtimeObjectKindFunction(),
+    parserTokenNewFunction(),
+    parserTokenClassFunction(),
+    parserTokenPayloadFunction(),
+    parserTokenTerminalFunction(),
+    parserTokenSpanStartFunction(),
+    parserTokenSpanEndFunction(),
   ];
 }
 

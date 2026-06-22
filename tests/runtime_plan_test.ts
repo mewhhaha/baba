@@ -83,6 +83,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(lexerRuntimeSource, "lexerSpecTerminal");
   assertIncludes(lexerRuntimeSource, "createLexerRuntimeProgram");
   assertIncludes(lexerRuntimeSource, "emitRuntimeLanguageTypeScriptFunction");
+  assertIncludes(lexerRuntimeSource, "parserTokenNew");
+  assertIncludes(lexerRuntimeSource, "parserTokenSpanStart");
+  assertIncludes(lexerRuntimeSource, "function materializeToken");
   assertNotIncludes(lexerRuntimeSource, "const DFA_ACCEPTS");
   assertNotIncludes(lexerRuntimeSource, "const SPECS");
   assertNotIncludes(lexerRuntimeSource, "function codePointLength");

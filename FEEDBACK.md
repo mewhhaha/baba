@@ -118,8 +118,13 @@ runtime language:
 - Moved generated TypeScript lexer longest-match accept/candidate selection onto
   runtime-language `lexerScan*` helpers backed by generated DFA accept tables
   and scratch memory. Generated TypeScript still decodes JavaScript strings and
-  emits token objects, but it no longer carries a standalone `DFA_ACCEPTS` table
-  or accept-tracking loop.
+  wraps public API token objects at the boundary, but it no longer carries a
+  standalone `DFA_ACCEPTS` table or accept-tracking loop.
+- Moved generated TypeScript lexer public non-EOF token materialization through
+  runtime-language parser token records. The lexer now allocates a runtime token
+  handle for matched literals, named tokens, preserved trivia, and lexical error
+  tokens, then reads class/payload/terminal/span data back through token
+  accessors before wrapping the public JavaScript object.
 - Moved generated deterministic TypeScript parser action/goto table lookup onto
   a runtime-language source program backed by read-only `u32` tables, replacing
   the previous generated `findAction()`/`findGoto()` table scans for unambiguous
@@ -260,7 +265,8 @@ Still unresolved:
   helpers, and generated field assembly now gets value-class and
   count-validation decisions from runtime-language helpers. Generated TypeScript
   lexing now reads token class, payload, and terminal metadata from
-  runtime-language helpers before emitting public token objects. External
+  runtime-language helpers and materializes public non-EOF tokens through
+  runtime-language token records before wrapping public token objects. External
   `parseTokens()` mapping still accepts public strings/literals at the API
   boundary, but terminal/channel classification and public token class
   compatibility plus token-level lexical diagnostic classification now go
@@ -277,10 +283,11 @@ Still unresolved:
   now consume runtime-language child vectors instead of a parallel JavaScript
   child list. Public parse diagnostics now pass through runtime-language
   diagnostic handles before public object materialization. Public JavaScript
-  field objects/arrays, CST node objects, and generated token object emission
-  are still not mechanically emitted from one runtime-language implementation.
-  The runtime language now has a checked resettable arena plus tagged
-  arena-backed `u32` arrays, fixed records, growable vectors, and initial parser
+  field objects/arrays, CST node objects, final public token object wrapping,
+  EOF token wrapping, and Wasm adapter token materialization are still not
+  mechanically emitted from one runtime-language implementation. The runtime
+  language now has a checked resettable arena plus tagged arena-backed `u32`
+  arrays, fixed records, growable vectors, and initial parser
   fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
   fragment assembly helpers that generated replay is beginning to use, but it
   still lacks opaque typed handle provenance and complete generated
