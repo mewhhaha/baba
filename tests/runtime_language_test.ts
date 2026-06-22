@@ -22,6 +22,7 @@ import {
   createParserConflictTableRuntimeProgram,
   createParserConflictTraceRuntimeProgram,
   createParserExpectedRuntimeProgram,
+  createParserFieldRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserProductionRuntimeProgram,
   createParserReducerRuntimeProgram,
@@ -30,6 +31,9 @@ import {
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
+  RUNTIME_FIELD_ARRAY,
+  RUNTIME_FIELD_NULLABLE,
+  RUNTIME_NO_FIELD,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
@@ -196,6 +200,47 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                 add(
                   call("parserExpectedStart", [u32(99)]),
                   call("parserExpectedEnd", [u32(99)]),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserFieldBaseProgram = createParserFieldRuntimeProgram({
+    fieldRows: [
+      [[2, RUNTIME_FIELD_ARRAY], [5, RUNTIME_FIELD_NULLABLE]],
+      [],
+      [[7, 0]],
+    ],
+  });
+  const parserFieldRuntimeProgram: RuntimeLanguageProgram = {
+    ...parserFieldBaseProgram,
+    name: "parser_field_conformance",
+    entry: "main",
+    functions: [
+      ...parserFieldBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserFieldEnd", [u32(0)]), u32(10000)),
+            add(
+              mul(call("parserFieldId", [u32(1)]), u32(1000)),
+              add(
+                mul(call("parserFieldFlags", [u32(1)]), u32(100)),
+                add(
+                  mul(call("parserFieldIndex", [u32(2), u32(7)]), u32(10)),
+                  add(
+                    call("parserFieldStart", [u32(0)]),
+                    eq(
+                      call("parserFieldIndex", [u32(1), u32(7)]),
+                      u32(RUNTIME_NO_FIELD),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1048,6 +1093,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "parser expected lookup returns flattened row ranges",
       program: parserExpectedRuntimeProgram,
       expected: { kind: "value", value: 225 },
+    },
+    {
+      name: "parser field lookup returns row and config metadata",
+      program: parserFieldRuntimeProgram,
+      expected: { kind: "value", value: 25221 },
     },
     {
       name: "parser production lookup returns row fields",

@@ -141,6 +141,10 @@ runtime language:
   `parserReducerKind`/`parserReducerPayload` helpers backed by numeric reducer
   tables, replacing generated `PRODUCTION_REDUCERS` object tables during trace
   replay.
+- Moved generated CST field schema metadata lookup onto runtime-language
+  `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/`parserFieldFlags`/
+  `parserFieldIndex` helpers backed by numeric field rows, replacing generated
+  `RULE_FIELD_SCHEMAS` object tables during CST field assembly.
 
 Still unresolved:
 
@@ -155,13 +159,13 @@ Still unresolved:
   counting and generated TypeScript conflict branch scheduling are now
   runtime-language-backed, and generated Wasm adapters now call a
   runtime-language Wasm parser trace module instead of a core `parse_trace`
-  export. Reducer descriptor lookup is now runtime-language-backed, but the
-  reducer operations that assemble fragments/fields/CST nodes and generated
-  token object emission/diagnostics are still not mechanically emitted from one
-  runtime-language implementation. The compiler now has a shared lowered
-  control-flow/value IR and checked helper artifact hashes, but it still needs
-  broader parser-runtime lowering before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  export. Reducer descriptor lookup and field schema lookup are now
+  runtime-language-backed, but the reducer operations that assemble
+  fragments/fields/CST nodes and generated token object emission/diagnostics are
+  still not mechanically emitted from one runtime-language implementation. The
+  compiler now has a shared lowered control-flow/value IR and checked helper
+  artifact hashes, but it still needs broader parser-runtime lowering before the
+  release can fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

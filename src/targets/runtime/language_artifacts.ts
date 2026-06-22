@@ -12,6 +12,7 @@ import {
   createParserConflictTableRuntimeProgram,
   createParserConflictTraceRuntimeProgram,
   createParserExpectedRuntimeProgram,
+  createParserFieldRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserProductionRuntimeProgram,
   createParserReducerRuntimeProgram,
@@ -20,6 +21,8 @@ import {
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
+  RUNTIME_FIELD_ARRAY,
+  RUNTIME_FIELD_NULLABLE,
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_RULE,
@@ -181,6 +184,16 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
       }),
     },
     {
+      name: "parser_field_runtime",
+      program: createParserFieldRuntimeProgram({
+        fieldRows: [
+          [[2, RUNTIME_FIELD_ARRAY], [5, RUNTIME_FIELD_NULLABLE]],
+          [],
+          [[7, 0]],
+        ],
+      }),
+    },
+    {
       name: "parser_production_runtime",
       program: createParserProductionRuntimeProgram({
         productions: [
@@ -285,6 +298,13 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
       wasmHash: "fnv1a64:d0e99b8fb067ed2d",
     },
     {
+      name: "parser_field_runtime",
+      entry: "parserFieldStart",
+      sourceHash: "fnv1a64:8d4857149d457e94",
+      typescriptHash: "fnv1a64:15933e2ea63c45bb",
+      wasmHash: "fnv1a64:27aeadb3eb0dcb7b",
+    },
+    {
       name: "parser_production_runtime",
       entry: "parserProductionLhs",
       sourceHash: "fnv1a64:d1d307c12ba4f27d",
@@ -308,7 +328,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:2bc775f365d27b70" as const;
+  "fnv1a64:54c4487a54a522c4" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

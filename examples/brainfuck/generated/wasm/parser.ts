@@ -38,15 +38,7 @@ interface ShiftedToken {
   tokenIndex: number;
 }
 
-interface FieldConfig {
-  array: boolean;
-  nullable: boolean;
-}
 
-interface RuntimeRuleFieldSchema {
-  entries: readonly (readonly [fieldId: number, name: string, config: FieldConfig])[];
-  byFieldId: Record<number, readonly [name: string, config: FieldConfig]>;
-}
 const EOF_TERMINAL = 0;
 const EXPECTED_TERMINALS: readonly string[] = ["\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"]\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"}\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"]\"","\"}\"","\"]\"","\"}\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER"];
 const NAMED_TERMINALS = new Map<string, number>([["INTEGER",1]]);
@@ -56,25 +48,6 @@ const TRIVIA_TOKEN_KINDS = new Set<string>(["ignored"]);
 const RULE_NAMES: readonly string[] = ["module","instruction","increment","decrement","move_left","move_right","output","input","loop","fork","join"];
 const FIELD_NAMES: readonly string[] = ["body","count"];
 const EMPTY_PARSE_DIAGNOSTICS: readonly ParseDiagnostic[] = [];
-const RULE_FIELD_SCHEMA_ENTRIES: readonly (
-  readonly [
-    ruleId: number,
-    fields: readonly (readonly [
-      fieldId: number,
-      name: string,
-      config: FieldConfig,
-    ])[],
-  ]
-)[] = [[0,[]],[1,[[1,"count",{"array":false,"nullable":false}]]],[2,[]],[3,[]],[4,[]],[5,[]],[6,[]],[7,[]],[8,[[0,"body",{"array":false,"nullable":false}]]],[9,[[0,"body",{"array":false,"nullable":false}]]],[10,[]]];
-const RULE_FIELD_SCHEMAS: readonly (RuntimeRuleFieldSchema | undefined)[] = (() => {
-  const schemas: (RuntimeRuleFieldSchema | undefined)[] = [];
-  for (const [ruleId, entries] of RULE_FIELD_SCHEMA_ENTRIES) {
-    const byFieldId = Object.create(null) as Record<number, readonly [string, FieldConfig]>;
-    for (const [fieldId, name, config] of entries) byFieldId[fieldId] = [name, config];
-    schemas[ruleId] = { entries, byFieldId };
-  }
-  return schemas;
-})();
 
 const ACTION_NONE = 0;
 const ACTION_SHIFT = 16777216;
@@ -99,6 +72,9 @@ const REDUCER_SEPARATED_FIRST = 13;
 const REDUCER_SEPARATED_APPEND = 14;
 const REDUCER_FIELD = 15;
 const NO_REDUCER_PAYLOAD = 4294967295;
+const NO_FIELD = 4294967295;
+const FIELD_ARRAY = 1;
+const FIELD_NULLABLE = 2;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -116,6 +92,8 @@ function divU32(left: number, right: number): number {
 const __baba_table_parserProductions: readonly number[] = [0,1,12,1,12,2,1,1,15,0,15,1,14,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,13,2,2,1,17,1,3,1,18,1,4,1,19,1,5,1,20,1,6,1,21,1,7,1,22,1,8,1,25,0,25,2,24,1,23,3,9,1,28,0,28,2,27,1,26,3,10,1,29,1,11,1];
 const __baba_table_parserExpectedRows: readonly number[] = [0,10,19,20,31,42,53,62,71,82,93,104,115,126,137,148,159,170,181,192,203,214,225,236,247,258,269,280,291,302,313,324,335,346,357,368,379,390,391,402,403,414,425,436,447,456,467,478,489,498,509,520,531,542,553,564,575,586,597,608,619,630,641,652,663,674,685,696,707,718,729,740,751,762,773,784,795,806,817,828,839,850,861,872,883,894,905,916,927,938,949,960,971,982,993,1004,1015,1026,1037,1048,1059,1070,1081,1092,1103,1114,1115,1116,1117,1118,1129,1140,1151,1162];
 const __baba_table_parserReducers: readonly number[] = [1,4294967295,11,4294967295,12,4294967295,2,0,7,4294967295,8,4294967295,15,1,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,6,4294967295,2,1,3,4294967295,2,2,3,4294967295,2,3,3,4294967295,2,4,3,4294967295,2,5,3,4294967295,2,6,3,4294967295,2,7,9,4294967295,10,4294967295,15,0,6,4294967295,2,8,9,4294967295,10,4294967295,15,0,6,4294967295,2,9,3,4294967295,2,10];
+const __baba_table_parserFieldRows: readonly number[] = [0,0,1,1,1,1,1,1,1,2,3,3];
+const __baba_table_parserFieldEntries: readonly number[] = [1,0,0,0,0,0];
 function __baba_load_parserProductions(index: number): number {
   const normalized = index >>> 0;
   if (normalized >= __baba_table_parserProductions.length) {
@@ -138,6 +116,22 @@ function __baba_load_parserReducers(index: number): number {
     throw new RuntimeLanguageTrap("table index out of bounds");
   }
   return __baba_table_parserReducers[normalized] >>> 0;
+}
+
+function __baba_load_parserFieldRows(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_table_parserFieldRows.length) {
+    throw new RuntimeLanguageTrap("table index out of bounds");
+  }
+  return __baba_table_parserFieldRows[normalized] >>> 0;
+}
+
+function __baba_load_parserFieldEntries(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_table_parserFieldEntries.length) {
+    throw new RuntimeLanguageTrap("table index out of bounds");
+  }
+  return __baba_table_parserFieldEntries[normalized] >>> 0;
 }
 
 
@@ -205,6 +199,67 @@ function parserReducerPayload(production: number): number {
   if (((((production) | 0) < ((42) | 0) ? 1 : 0)) !== 0) {
     offset = (((Math.imul((production) >>> 0, (2) >>> 0) >>> 0) + (1)) >>> 0) >>> 0;
     return (__baba_load_parserReducers(offset) >>> 0) >>> 0;
+  }
+  return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldStart(ruleId: number): number {
+  let index = 0;
+  if (((((ruleId) | 0) < ((11) | 0) ? 1 : 0)) !== 0) {
+    index = (((ruleId) + (0)) >>> 0) >>> 0;
+    return (__baba_load_parserFieldRows(index) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldEnd(ruleId: number): number {
+  let index = 0;
+  if (((((ruleId) | 0) < ((11) | 0) ? 1 : 0)) !== 0) {
+    index = (((ruleId) + (1)) >>> 0) >>> 0;
+    return (__baba_load_parserFieldRows(index) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldId(entry: number): number {
+  let index = 0;
+  if (((((entry) | 0) < ((3) | 0) ? 1 : 0)) !== 0) {
+    index = (((Math.imul((entry) >>> 0, (2) >>> 0) >>> 0) + (0)) >>> 0) >>> 0;
+    return (__baba_load_parserFieldEntries(index) >>> 0) >>> 0;
+  }
+  return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldFlags(entry: number): number {
+  let index = 0;
+  if (((((entry) | 0) < ((3) | 0) ? 1 : 0)) !== 0) {
+    index = (((Math.imul((entry) >>> 0, (2) >>> 0) >>> 0) + (1)) >>> 0) >>> 0;
+    return (__baba_load_parserFieldEntries(index) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldIndex(ruleId: number, fieldId: number): number {
+  let entry = 0;
+  let end = 0;
+  let entryOffset = 0;
+  if (((((ruleId) | 0) < ((11) | 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (4294967295) >>> 0;
+  }
+  entry = (parserFieldStart(ruleId) >>> 0) >>> 0;
+  end = (parserFieldEnd(ruleId) >>> 0) >>> 0;
+  while (((((entry) | 0) < ((end) | 0) ? 1 : 0)) !== 0) {
+    entryOffset = (Math.imul((entry) >>> 0, (2) >>> 0) >>> 0) >>> 0;
+    if (((((__baba_load_parserFieldEntries(entryOffset) >>> 0) >>> 0) === ((fieldId) >>> 0) ? 1 : 0)) !== 0) {
+      return (entry) >>> 0;
+    }
+    entry = (((entry) + (1)) >>> 0) >>> 0;
   }
   return (4294967295) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -681,8 +736,9 @@ function buildFields(
   ruleId: number,
   captures: readonly FieldCapture[],
 ): Record<string, unknown> {
-  const schema = RULE_FIELD_SCHEMAS[ruleId];
-  if (!schema || schema.entries.length === 0) {
+  const start = parserFieldStart(ruleId);
+  const end = parserFieldEnd(ruleId);
+  if (end <= start) {
     if (captures.length > 0) {
       throw new Error("Rule has field captures but no field schema.");
     }
@@ -690,19 +746,26 @@ function buildFields(
   }
   const fields = Object.create(null) as Record<string, unknown>;
   const counts = Object.create(null) as Record<number, number>;
-  for (const [fieldId, name, config] of schema.entries) {
-    fields[name] = config.array ? [] : config.nullable ? null : undefined;
+  for (let entry = start; entry < end; entry++) {
+    const fieldId = parserFieldId(entry);
+    const flags = parserFieldFlags(entry);
+    const name = fieldName(fieldId);
+    fields[name] = (flags & FIELD_ARRAY) !== 0
+      ? []
+      : (flags & FIELD_NULLABLE) !== 0
+      ? null
+      : undefined;
     counts[fieldId] = 0;
   }
   for (const capture of captures) {
-    const entry = schema.byFieldId[capture.fieldId];
-    if (!entry) {
-      const fieldName = FIELD_NAMES[capture.fieldId] ?? `#${capture.fieldId}`;
-      throw new Error(`Unknown field capture '${fieldName}'.`);
+    const entry = parserFieldIndex(ruleId, capture.fieldId);
+    if (entry === NO_FIELD) {
+      throw new Error(`Unknown field capture '${fieldName(capture.fieldId)}'.`);
     }
-    const [name, config] = entry;
+    const flags = parserFieldFlags(entry);
+    const name = fieldName(capture.fieldId);
     counts[capture.fieldId] = (counts[capture.fieldId] ?? 0) + 1;
-    if (config.array) {
+    if ((flags & FIELD_ARRAY) !== 0) {
       const values = fields[name];
       if (!Array.isArray(values)) {
         throw new Error(`Array field '${name}' was not initialized as an array.`);
@@ -715,22 +778,29 @@ function buildFields(
       fields[name] = capture.value;
     }
   }
-  for (const [fieldId, name, config] of schema.entries) {
+  for (let entry = start; entry < end; entry++) {
+    const fieldId = parserFieldId(entry);
+    const flags = parserFieldFlags(entry);
+    const name = fieldName(fieldId);
     const count = counts[fieldId] ?? 0;
-    if (config.array) {
+    if ((flags & FIELD_ARRAY) !== 0) {
       if (!Array.isArray(fields[name])) {
         throw new Error(`Array field '${name}' was not initialized as an array.`);
       }
       continue;
     }
-    if (!config.nullable && count !== 1) {
+    if ((flags & FIELD_NULLABLE) === 0 && count !== 1) {
       throw new Error(`Required field '${name}' was captured ${count} times.`);
     }
-    if (config.nullable && count > 1) {
+    if ((flags & FIELD_NULLABLE) !== 0 && count > 1) {
       throw new Error(`Nullable field '${name}' was captured more than once.`);
     }
   }
   return fields;
+}
+
+function fieldName(fieldId: number): string {
+  return FIELD_NAMES[fieldId] ?? `#${fieldId}`;
 }
 
 function acceptedParseResult(

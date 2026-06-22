@@ -33,6 +33,9 @@ export const RUNTIME_REDUCER_SEPARATED_FIRST = 13;
 export const RUNTIME_REDUCER_SEPARATED_APPEND = 14;
 export const RUNTIME_REDUCER_FIELD = 15;
 export const RUNTIME_NO_REDUCER_PAYLOAD = 0xffff_ffff;
+export const RUNTIME_NO_FIELD = 0xffff_ffff;
+export const RUNTIME_FIELD_ARRAY = 1;
+export const RUNTIME_FIELD_NULLABLE = 2;
 
 const TRACE_STATUS = 0;
 const TRACE_ERROR_STATE = 1;
@@ -73,6 +76,10 @@ export type ParserRuntimeReducerEntry = readonly [
   kind: number,
   payload: number,
 ];
+export type ParserRuntimeFieldEntry = readonly [
+  fieldId: number,
+  flags: number,
+];
 
 export interface ParserTableRuntimeProgramInput {
   readonly actionRows: readonly (readonly ParserRuntimeLookupEntry[])[];
@@ -85,6 +92,10 @@ export interface ParserProductionRuntimeProgramInput {
 
 export interface ParserReducerRuntimeProgramInput {
   readonly reducers: readonly ParserRuntimeReducerEntry[];
+}
+
+export interface ParserFieldRuntimeProgramInput {
+  readonly fieldRows: readonly (readonly ParserRuntimeFieldEntry[])[];
 }
 
 export interface ParserTraceRuntimeProgramInput
@@ -361,6 +372,35 @@ export function createParserReducerRuntimeProgram(
       parserReducersTable(input.reducers),
     ],
     functions: parserReducerFunctions(input.reducers.length),
+  };
+}
+
+export function createParserFieldRuntimeProgram(
+  input: ParserFieldRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  const rows: number[] = [];
+  const values: number[] = [];
+  for (const entries of input.fieldRows) {
+    rows.push(values.length / 2);
+    for (const [fieldId, flags] of entries) values.push(fieldId, flags);
+  }
+  rows.push(values.length / 2);
+  return {
+    name: "parser_field_runtime",
+    entry: "parserFieldStart",
+    tables: [
+      {
+        name: "parserFieldRows",
+        type: "u32",
+        values: rows,
+      },
+      {
+        name: "parserFieldEntries",
+        type: "u32",
+        values,
+      },
+    ],
+    functions: parserFieldFunctions(input.fieldRows.length, values.length / 2),
   };
 }
 
@@ -700,6 +740,136 @@ function parserReducerLoadFunction(
         ],
       },
       { kind: "return", expression: u32(missing) },
+    ],
+  };
+}
+
+function parserFieldFunctions(
+  ruleCount: number,
+  fieldEntryCount: number,
+): RuntimeLanguageFunction[] {
+  return [
+    parserFieldRowFunction("parserFieldStart", ruleCount, 0),
+    parserFieldRowFunction("parserFieldEnd", ruleCount, 1),
+    parserFieldEntryFunction(
+      "parserFieldId",
+      fieldEntryCount,
+      0,
+      RUNTIME_NO_FIELD,
+    ),
+    parserFieldEntryFunction("parserFieldFlags", fieldEntryCount, 1, 0),
+    parserFieldIndexFunction(ruleCount),
+  ];
+}
+
+function parserFieldRowFunction(
+  name: string,
+  ruleCount: number,
+  rowOffset: number,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "ruleId", type: "u32" },
+    ],
+    locals: [
+      { name: "index", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("ruleId"), u32(ruleCount)),
+        consequent: [
+          setLocal("index", add(local("ruleId"), u32(rowOffset))),
+          {
+            kind: "return",
+            expression: load("parserFieldRows", local("index")),
+          },
+        ],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserFieldEntryFunction(
+  name: string,
+  fieldEntryCount: number,
+  fieldOffset: number,
+  missing: number,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "entry", type: "u32" },
+    ],
+    locals: [
+      { name: "index", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("entry"), u32(fieldEntryCount)),
+        consequent: [
+          setLocal("index", add(mul(local("entry"), u32(2)), u32(fieldOffset))),
+          {
+            kind: "return",
+            expression: load("parserFieldEntries", local("index")),
+          },
+        ],
+      },
+      { kind: "return", expression: u32(missing) },
+    ],
+  };
+}
+
+function parserFieldIndexFunction(
+  ruleCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldIndex",
+    parameters: [
+      { name: "ruleId", type: "u32" },
+      { name: "fieldId", type: "u32" },
+    ],
+    locals: [
+      { name: "entry", type: "u32" },
+      { name: "end", type: "u32" },
+      { name: "entryOffset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("ruleId"), u32(ruleCount)),
+        consequent: [],
+        alternate: [
+          { kind: "return", expression: u32(RUNTIME_NO_FIELD) },
+        ],
+      },
+      setLocal("entry", call("parserFieldStart", [local("ruleId")])),
+      setLocal("end", call("parserFieldEnd", [local("ruleId")])),
+      {
+        kind: "while",
+        condition: lt(local("entry"), local("end")),
+        body: [
+          setLocal("entryOffset", mul(local("entry"), u32(2))),
+          {
+            kind: "if",
+            condition: eq(
+              load("parserFieldEntries", local("entryOffset")),
+              local("fieldId"),
+            ),
+            consequent: [
+              { kind: "return", expression: local("entry") },
+            ],
+          },
+          setLocal("entry", add(local("entry"), u32(1))),
+        ],
+      },
+      { kind: "return", expression: u32(RUNTIME_NO_FIELD) },
     ],
   };
 }
