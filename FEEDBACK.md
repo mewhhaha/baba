@@ -99,6 +99,11 @@ runtime language:
   Public parse diagnostics now allocate a runtime diagnostic handle, read the
   runtime span back through diagnostic accessors, and then materialize the
   public JavaScript diagnostic object at the API boundary.
+- Centralized public CST rule-node materialization behind runtime-language
+  rule-node handles. Rule reducers now return a public node by passing the
+  runtime rule-node handle to one materializer, which reads rule id, span, token
+  range, children, and fields back through runtime accessors before wrapping the
+  public JavaScript object.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source program, with the same source compiled through both
   TypeScript and Wasm conformance tests.
@@ -290,11 +295,13 @@ Still unresolved:
   JavaScript capture list, and public CST children now consume runtime-language
   child vectors instead of a parallel JavaScript child list. Public parse
   diagnostics now pass through runtime-language diagnostic handles before public
-  object materialization. Public JavaScript field objects/arrays, CST node
-  objects and final public token object wrapping are still not mechanically
-  emitted from one runtime-language implementation. The runtime language now has
-  a checked resettable arena plus tagged arena-backed `u32` arrays, fixed
-  records, growable vectors, and initial parser
+  object materialization. Public CST rule-node object materialization is now
+  centralized behind runtime-language rule-node handles, though final JavaScript
+  object allocation still happens at the API boundary. Public JavaScript field
+  objects/arrays and final public token object wrapping are still not
+  mechanically emitted from one runtime-language implementation. The runtime
+  language now has a checked resettable arena plus tagged arena-backed `u32`
+  arrays, fixed records, growable vectors, and initial parser
   fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
   fragment assembly helpers that generated replay is beginning to use, but it
   still lacks opaque typed handle provenance and complete generated

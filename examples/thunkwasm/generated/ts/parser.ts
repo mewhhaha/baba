@@ -2221,17 +2221,7 @@ function reduceProduction(
         reducerPayload,
         fragment.runtimeHandle,
       );
-      const node = {
-        type: "rule",
-        name: RULE_NAMES[reducerPayload],
-        span: ruleNodeSpan(runtimeHandle),
-        tokenRange: ruleNodeTokenRange(runtimeHandle),
-        children: buildChildren(runtimeHandle),
-        fields: buildFields(reducerPayload, runtimeHandle),
-      };
-      RUNTIME_NODE_HANDLES.set(node, runtimeHandle);
-      rememberSyntaxValue(runtimeHandle, node as unknown as SyntaxElement);
-      return node as unknown as AnyRuleNode;
+      return materializeRuleNode(runtimeHandle);
     }
     case REDUCER_RESULT_CHILD_FRAGMENT:
       return reducerChild(reducerOperation, rhs, 0);
@@ -2355,6 +2345,21 @@ function reducerChild(
     return ruleFragment(value as AnyRuleNode);
   }
   throw new Error("Unexpected parser reducer child role.");
+}
+
+function materializeRuleNode(runtimeHandle: number): AnyRuleNode {
+  const ruleId = parserRuleNodeRuleId(runtimeHandle);
+  const node = {
+    type: "rule",
+    name: RULE_NAMES[ruleId],
+    span: ruleNodeSpan(runtimeHandle),
+    tokenRange: ruleNodeTokenRange(runtimeHandle),
+    children: buildChildren(runtimeHandle),
+    fields: buildFields(ruleId, runtimeHandle),
+  };
+  RUNTIME_NODE_HANDLES.set(node, runtimeHandle);
+  rememberSyntaxValue(runtimeHandle, node as unknown as SyntaxElement);
+  return node as unknown as AnyRuleNode;
 }
 
 function reducerFragmentChild(

@@ -221,6 +221,10 @@ execute both outputs and compare returned values or traps.
 - Generated public child assembly consumes runtime rule-node child vectors and
   resolves runtime token/rule-node handles through a per-replay syntax handle
   map; it no longer carries an independent JavaScript fragment child list.
+- Generated public rule-node object materialization is centralized behind
+  runtime rule-node handles. The materializer reads rule id, span, token range,
+  child vector, and field vector data through runtime accessors before
+  allocating the public JavaScript CST node object.
 - Generated public parse diagnostics allocate runtime diagnostic records and
   read span data back from those records before materializing public JavaScript
   diagnostic objects.
@@ -233,7 +237,7 @@ These rules must be specified before the parser runtime can be fully lowered:
 - ownership and opaque typed handle provenance;
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
-- complete generated-parser lowering for public CST field objects/arrays plus
+- complete generated-parser lowering for public CST field objects/arrays and
   final public token object wrapping.
 
 Until the parser runtime is lowered through this language, Baba does not claim
