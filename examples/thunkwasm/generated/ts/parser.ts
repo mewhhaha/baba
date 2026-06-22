@@ -54,7 +54,6 @@ const NO_GOTO = 4294967295;
 const NO_SPAN = 4294967295;
 const NO_TERMINAL = 4294967295;
 const NO_PRODUCTION = 4294967295;
-const NO_REDUCER_PAYLOAD = 4294967295;
 const REDUCER_OPERATION_UNKNOWN = 0;
 const REDUCER_OPERATION_START = 1;
 const REDUCER_OPERATION_RULE = 2;
@@ -68,6 +67,8 @@ const REDUCER_OPERATION_APPEND = 9;
 const REDUCER_OPERATION_FIRST_ARRAY = 10;
 const REDUCER_OPERATION_SEPARATED_APPEND = 11;
 const REDUCER_OPERATION_FIELD = 12;
+const REDUCER_PAYLOAD_RULE_MISSING = 2;
+const REDUCER_PAYLOAD_FIELD_MISSING = 3;
 const NO_FIELD = 4294967295;
 const FIELD_VALUE_ARRAY = 3;
 const FIELD_VALUE_NULLABLE = 2;
@@ -591,6 +592,27 @@ function parserReducerOperation(production: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserReducerPayloadStatus(production: number): number {
+  let payload = 0;
+  let operation = 0;
+  if (((((production) | 0) < ((195) | 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (1) >>> 0;
+  }
+  payload = (parserReducerPayload(production) >>> 0) >>> 0;
+  if (((((payload) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+    operation = (parserReducerOperation(production) >>> 0) >>> 0;
+    if (((((operation) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+    if (((((operation) >>> 0) === ((12) >>> 0) ? 1 : 0)) !== 0) {
+      return (3) >>> 0;
+    }
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function lexerSpecFlags(specIndex: number): number {
   let offset = 0;
   if (((((specIndex) | 0) < ((31) | 0) ? 1 : 0)) !== 0) {
@@ -1037,6 +1059,7 @@ function replayTrace(
     const rhsLength = parserProductionRhsLength(payload);
     const reducerOperation = parserReducerOperation(payload);
     const reducerPayload = parserReducerPayload(payload);
+    const reducerPayloadStatus = parserReducerPayloadStatus(payload);
     if (
       rhsLength === NO_PRODUCTION ||
       reducerOperation === REDUCER_OPERATION_UNKNOWN
@@ -1049,6 +1072,24 @@ function replayTrace(
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
           message: "Runtime-language parser trace referenced an unknown production.",
+          span: currentSpan(token),
+        }],
+      };
+    }
+    if (
+      reducerPayloadStatus === REDUCER_PAYLOAD_RULE_MISSING ||
+      reducerPayloadStatus === REDUCER_PAYLOAD_FIELD_MISSING
+    ) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [{
+          code: "PARSER_INTERNAL_ERROR",
+          message: reducerPayloadStatus === REDUCER_PAYLOAD_RULE_MISSING
+            ? "Rule reducer is missing its rule id payload."
+            : "Field reducer is missing its field id payload.",
           span: currentSpan(token),
         }],
       };
@@ -1115,9 +1156,6 @@ function reduceProduction(
       return rhs[0];
     case REDUCER_OPERATION_RULE: {
       const fragment = toFragment(rhs[0]);
-      if (reducerPayload === NO_REDUCER_PAYLOAD) {
-        throw new Error("Rule reducer is missing its rule id payload.");
-      }
       const node = {
         type: "rule",
         name: RULE_NAMES[reducerPayload],
@@ -1155,9 +1193,6 @@ function reduceProduction(
       );
     case REDUCER_OPERATION_FIELD: {
       const fragment = toFragment(rhs[0]);
-      if (reducerPayload === NO_REDUCER_PAYLOAD) {
-        throw new Error("Field reducer is missing its field id payload.");
-      }
       fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;
     }

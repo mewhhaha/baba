@@ -63,6 +63,10 @@ export const RUNTIME_REDUCER_OPERATION_APPEND = 9;
 export const RUNTIME_REDUCER_OPERATION_FIRST_ARRAY = 10;
 export const RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND = 11;
 export const RUNTIME_REDUCER_OPERATION_FIELD = 12;
+export const RUNTIME_REDUCER_PAYLOAD_STATUS_OK = 0;
+export const RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN = 1;
+export const RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING = 2;
+export const RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING = 3;
 export const RUNTIME_NO_FIELD = 0xffff_ffff;
 export const RUNTIME_FIELD_ARRAY = 1;
 export const RUNTIME_FIELD_NULLABLE = 2;
@@ -1033,6 +1037,7 @@ function parserReducerFunctions(
       RUNTIME_NO_REDUCER_PAYLOAD,
     ),
     parserReducerOperationFunction(reducerCount),
+    parserReducerPayloadStatusFunction(reducerCount),
   ];
 }
 
@@ -1139,6 +1144,70 @@ function parserReducerLoadFunction(
         ],
       },
       { kind: "return", expression: u32(missing) },
+    ],
+  };
+}
+
+function parserReducerPayloadStatusFunction(
+  reducerCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserReducerPayloadStatus",
+    parameters: [
+      { name: "production", type: "u32" },
+    ],
+    locals: [
+      { name: "payload", type: "u32" },
+      { name: "operation", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("production"), u32(reducerCount)),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN),
+        }],
+      },
+      setLocal("payload", call("parserReducerPayload", [local("production")])),
+      {
+        kind: "if",
+        condition: eq(local("payload"), u32(RUNTIME_NO_REDUCER_PAYLOAD)),
+        consequent: [
+          setLocal(
+            "operation",
+            call("parserReducerOperation", [local("production")]),
+          ),
+          {
+            kind: "if",
+            condition: eq(
+              local("operation"),
+              u32(RUNTIME_REDUCER_OPERATION_RULE),
+            ),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING),
+            }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              local("operation"),
+              u32(RUNTIME_REDUCER_OPERATION_FIELD),
+            ),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_REDUCER_PAYLOAD_STATUS_OK),
+      },
     ],
   };
 }

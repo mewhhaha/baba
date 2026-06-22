@@ -103,6 +103,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "createLexerSpecRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createParserRangeRuntimeProgram");
   assertIncludes(parserRuntimeSource, "parserReducerOperation");
+  assertIncludes(parserRuntimeSource, "parserReducerPayloadStatus");
   assertIncludes(parserRuntimeSource, "lexerSpecTerminal");
   assertIncludes(parserRuntimeSource, "lexerSpecPublicTokenStatus");
   assertIncludes(parserRuntimeSource, "parserFieldValueClass");
@@ -122,6 +123,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "tokenClass === TOKEN_TRIVIA");
   assertNotIncludes(parserRuntimeSource, "case REDUCER_START");
   assertNotIncludes(parserRuntimeSource, "case REDUCER_OPTIONAL_SOME");
+  assertNotIncludes(
+    parserRuntimeSource,
+    "reducerPayload === NO_REDUCER_PAYLOAD",
+  );
   assertNotIncludes(parserRuntimeSource, "PRODUCTION_REDUCERS");
   assertNotIncludes(parserRuntimeSource, "RULE_FIELD_SCHEMA_ENTRIES");
   assertNotIncludes(parserRuntimeSource, "RULE_FIELD_SCHEMAS");

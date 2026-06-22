@@ -67,6 +67,10 @@ import {
   RUNTIME_REDUCER_OPERATION_RULE,
   RUNTIME_REDUCER_OPERATION_SEQUENCE,
   RUNTIME_REDUCER_OPERATION_UNKNOWN,
+  RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING,
+  RUNTIME_REDUCER_PAYLOAD_STATUS_OK,
+  RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING,
+  RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN,
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_UNKNOWN,
@@ -442,6 +446,8 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       [RUNTIME_REDUCER_RULE, 4],
       [RUNTIME_REDUCER_FIELD, 2],
       [RUNTIME_REDUCER_SEQUENCE, RUNTIME_NO_REDUCER_PAYLOAD],
+      [RUNTIME_REDUCER_RULE, RUNTIME_NO_REDUCER_PAYLOAD],
+      [RUNTIME_REDUCER_FIELD, RUNTIME_NO_REDUCER_PAYLOAD],
     ],
   });
   const parserReducerRuntimeProgram: RuntimeLanguageProgram = {
@@ -486,7 +492,29 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                             ),
                             u32(10),
                           ),
-                          call("parserReducerOperation", [u32(99)]),
+                          add(
+                            call("parserReducerOperation", [u32(99)]),
+                            add(
+                              call("parserReducerPayloadStatus", [u32(0)]),
+                              add(
+                                mul(
+                                  call("parserReducerPayloadStatus", [u32(3)]),
+                                  u32(100),
+                                ),
+                                add(
+                                  mul(
+                                    call("parserReducerPayloadStatus", [
+                                      u32(4),
+                                    ]),
+                                    u32(10),
+                                  ),
+                                  call("parserReducerPayloadStatus", [
+                                    u32(99),
+                                  ]),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -1318,7 +1346,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_REDUCER_FIELD * 100_000 + 2 * 10_000 +
           RUNTIME_REDUCER_OPERATION_FIELD * 1_000 +
           RUNTIME_REDUCER_OPERATION_SEQUENCE * 100 + 10 +
-          RUNTIME_REDUCER_OPERATION_UNKNOWN,
+          RUNTIME_REDUCER_OPERATION_UNKNOWN +
+          RUNTIME_REDUCER_PAYLOAD_STATUS_OK +
+          RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING * 100 +
+          RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING * 10 +
+          RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN,
       },
     },
     {

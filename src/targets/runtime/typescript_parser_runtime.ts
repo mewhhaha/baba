@@ -62,6 +62,8 @@ import {
   RUNTIME_REDUCER_OPERATION_UNKNOWN,
   RUNTIME_REDUCER_OPTIONAL_EMPTY,
   RUNTIME_REDUCER_OPTIONAL_SOME,
+  RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING,
+  RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING,
   RUNTIME_REDUCER_REPEAT1_APPEND,
   RUNTIME_REDUCER_REPEAT1_FIRST,
   RUNTIME_REDUCER_REPEAT_APPEND,
@@ -324,7 +326,6 @@ const NO_GOTO = ${RUNTIME_NO_GOTO};
 const NO_SPAN = ${RUNTIME_NO_SPAN};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
 const NO_PRODUCTION = ${RUNTIME_NO_PRODUCTION};
-const NO_REDUCER_PAYLOAD = ${RUNTIME_NO_REDUCER_PAYLOAD};
 const REDUCER_OPERATION_UNKNOWN = ${RUNTIME_REDUCER_OPERATION_UNKNOWN};
 const REDUCER_OPERATION_START = ${RUNTIME_REDUCER_OPERATION_START};
 const REDUCER_OPERATION_RULE = ${RUNTIME_REDUCER_OPERATION_RULE};
@@ -338,6 +339,8 @@ const REDUCER_OPERATION_APPEND = ${RUNTIME_REDUCER_OPERATION_APPEND};
 const REDUCER_OPERATION_FIRST_ARRAY = ${RUNTIME_REDUCER_OPERATION_FIRST_ARRAY};
 const REDUCER_OPERATION_SEPARATED_APPEND = ${RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND};
 const REDUCER_OPERATION_FIELD = ${RUNTIME_REDUCER_OPERATION_FIELD};
+const REDUCER_PAYLOAD_RULE_MISSING = ${RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING};
+const REDUCER_PAYLOAD_FIELD_MISSING = ${RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
 const FIELD_VALUE_ARRAY = ${RUNTIME_FIELD_VALUE_ARRAY};
 const FIELD_VALUE_NULLABLE = ${RUNTIME_FIELD_VALUE_NULLABLE};
@@ -714,6 +717,7 @@ function replayTraceRuntime(label: string): string {
     const rhsLength = parserProductionRhsLength(payload);
     const reducerOperation = parserReducerOperation(payload);
     const reducerPayload = parserReducerPayload(payload);
+    const reducerPayloadStatus = parserReducerPayloadStatus(payload);
     if (
       rhsLength === NO_PRODUCTION ||
       reducerOperation === REDUCER_OPERATION_UNKNOWN
@@ -726,6 +730,24 @@ function replayTraceRuntime(label: string): string {
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
           message: "${label} parser trace referenced an unknown production.",
+          span: currentSpan(token),
+        }],
+      };
+    }
+    if (
+      reducerPayloadStatus === REDUCER_PAYLOAD_RULE_MISSING ||
+      reducerPayloadStatus === REDUCER_PAYLOAD_FIELD_MISSING
+    ) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [{
+          code: "PARSER_INTERNAL_ERROR",
+          message: reducerPayloadStatus === REDUCER_PAYLOAD_RULE_MISSING
+            ? "Rule reducer is missing its rule id payload."
+            : "Field reducer is missing its field id payload.",
           span: currentSpan(token),
         }],
       };
@@ -794,9 +816,6 @@ function reductionRuntime(): string {
       return rhs[0];
     case REDUCER_OPERATION_RULE: {
       const fragment = toFragment(rhs[0]);
-      if (reducerPayload === NO_REDUCER_PAYLOAD) {
-        throw new Error("Rule reducer is missing its rule id payload.");
-      }
       const node = {
         type: "rule",
         name: RULE_NAMES[reducerPayload],
@@ -834,9 +853,6 @@ function reductionRuntime(): string {
       );
     case REDUCER_OPERATION_FIELD: {
       const fragment = toFragment(rhs[0]);
-      if (reducerPayload === NO_REDUCER_PAYLOAD) {
-        throw new Error("Field reducer is missing its field id payload.");
-      }
       fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;
     }

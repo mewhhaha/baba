@@ -57,9 +57,10 @@ scanning display strings. Reduction replay uses
 metadata lookups while generated TypeScript still owns reducer descriptor
 execution and CST construction. Generated parser replay now gets reducer
 descriptor kind/payload metadata from `parserReducerKind`/`parserReducerPayload`
-helpers and reducer operation classes from `parserReducerOperation`, all backed
-by numeric reducer tables. CST field assembly now reads field row/config
-metadata through `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
+helpers, reducer operation classes from `parserReducerOperation`, and required
+payload status from `parserReducerPayloadStatus`, all backed by numeric reducer
+tables. CST field assembly now reads field row/config metadata through
+`parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
 `parserFieldFlags`/`parserFieldIndex` helpers. JavaScript still executes reducer
 fragment assembly and builds public CST objects, but field value-class/count
 validation now uses `parserFieldValueClass`/`parserFieldCaptureStatus`/

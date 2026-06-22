@@ -101,6 +101,8 @@
 - Generated parser replay now classifies reducer operations through
   runtime-language `parserReducerOperation` instead of switching directly on raw
   reducer descriptor kinds.
+- Generated parser replay now validates rule/field reducer payload presence
+  through runtime-language `parserReducerPayloadStatus`.
 - Generated parsers now read CST field schema rows/config through
   runtime-language `parserField*` helpers instead of generated field-schema
   lookup object tables.
