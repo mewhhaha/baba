@@ -148,6 +148,9 @@ runtime language:
 - Moved generated parser rule/field reducer payload-presence validation onto
   runtime-language `parserReducerPayloadStatus`. Generated TypeScript still
   emits the public internal-error diagnostic object.
+- Moved generated parser reducer child-role requirements onto runtime-language
+  `parserReducerChildRole`. Generated TypeScript still performs the object
+  conversion/allocation for fragment, shifted-token, and rule-node roles.
 - Moved generated CST field schema metadata lookup onto runtime-language
   `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/`parserFieldFlags`/
   `parserFieldIndex` helpers backed by numeric field rows, replacing generated
@@ -187,13 +190,13 @@ Still unresolved:
   runtime-language Wasm parser trace module instead of a core `parse_trace`
   export. Reducer descriptor lookup and field schema lookup are now
   runtime-language-backed, generated replay now gets reducer operation
-  classification and rule/field payload-presence validation from
-  runtime-language helpers, and generated field assembly now gets value-class
-  and count-validation decisions from runtime-language helpers. Generated
-  TypeScript lexing now reads token class, payload, and terminal metadata from
-  runtime-language helpers before emitting public token objects. External
-  `parseTokens()` mapping still accepts public strings/literals at the API
-  boundary, but terminal/channel classification and public token class
+  classification, rule/field payload-presence validation, and reducer child-role
+  requirements from runtime-language helpers, and generated field assembly now
+  gets value-class and count-validation decisions from runtime-language helpers.
+  Generated TypeScript lexing now reads token class, payload, and terminal
+  metadata from runtime-language helpers before emitting public token objects.
+  External `parseTokens()` mapping still accepts public strings/literals at the
+  API boundary, but terminal/channel classification and public token class
   compatibility now go through runtime-language lexer spec helpers. Parser
   replay span and token-range merge arithmetic is runtime-language-backed, and
   trailing-input diagnostic code selection uses runtime-language expected-state

@@ -103,6 +103,9 @@
   reducer descriptor kinds.
 - Generated parser replay now validates rule/field reducer payload presence
   through runtime-language `parserReducerPayloadStatus`.
+- Generated parser replay now reads reducer child-role requirements through
+  runtime-language `parserReducerChildRole` before converting reduced values at
+  the TypeScript object boundary.
 - Generated parsers now read CST field schema rows/config through
   runtime-language `parserField*` helpers instead of generated field-schema
   lookup object tables.

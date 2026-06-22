@@ -69,6 +69,10 @@ const REDUCER_OPERATION_SEPARATED_APPEND = 11;
 const REDUCER_OPERATION_FIELD = 12;
 const REDUCER_PAYLOAD_RULE_MISSING = 2;
 const REDUCER_PAYLOAD_FIELD_MISSING = 3;
+const REDUCER_CHILD_RAW = 1;
+const REDUCER_CHILD_FRAGMENT = 2;
+const REDUCER_CHILD_SHIFTED_TOKEN = 3;
+const REDUCER_CHILD_RULE_NODE = 4;
 const NO_FIELD = 4294967295;
 const FIELD_VALUE_ARRAY = 3;
 const FIELD_VALUE_NULLABLE = 2;
@@ -607,6 +611,74 @@ function parserReducerPayloadStatus(production: number): number {
     }
     if (((((operation) >>> 0) === ((12) >>> 0) ? 1 : 0)) !== 0) {
       return (3) >>> 0;
+    }
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReducerChildRole(operation: number, slot: number): number {
+  if (((((operation) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (1) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (3) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (4) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((9) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((9) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((10) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((11) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((11) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((11) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+  }
+  if (((((operation) >>> 0) === ((12) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((slot) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
     }
   }
   return (0) >>> 0;
@@ -1153,9 +1225,9 @@ function reduceProduction(
 ): unknown {
   switch (reducerOperation) {
     case REDUCER_OPERATION_START:
-      return rhs[0];
+      return reducerChild(reducerOperation, rhs, 0);
     case REDUCER_OPERATION_RULE: {
-      const fragment = toFragment(rhs[0]);
+      const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
       const node = {
         type: "rule",
         name: RULE_NAMES[reducerPayload],
@@ -1167,32 +1239,35 @@ function reduceProduction(
       return node as unknown as AnyRuleNode;
     }
     case REDUCER_OPERATION_TERMINAL:
-      return tokenFragment(rhs[0] as ShiftedToken);
+      return reducerChild(reducerOperation, rhs, 0);
     case REDUCER_OPERATION_RULE_REF:
-      return ruleFragment(rhs[0] as AnyRuleNode);
+      return reducerChild(reducerOperation, rhs, 0);
     case REDUCER_OPERATION_IDENTITY:
-      return toFragment(rhs[0]);
+      return reducerChild(reducerOperation, rhs, 0);
     case REDUCER_OPERATION_SEQUENCE:
-      return sequenceFragment(rhs, offset, tokenIndex);
+      return sequenceFragment(reducerOperation, rhs, offset, tokenIndex);
     case REDUCER_OPERATION_EMPTY_NULL:
       return emptyFragment(null, offset, tokenIndex);
     case REDUCER_OPERATION_EMPTY_ARRAY:
       return emptyFragment([], offset, tokenIndex);
     case REDUCER_OPERATION_APPEND:
-      return appendFragment(toFragment(rhs[0]), toFragment(rhs[1]));
+      return appendFragment(
+        reducerFragmentChild(reducerOperation, rhs, 0),
+        reducerFragmentChild(reducerOperation, rhs, 1),
+      );
     case REDUCER_OPERATION_FIRST_ARRAY: {
-      const item = toFragment(rhs[0]);
+      const item = reducerFragmentChild(reducerOperation, rhs, 0);
       item.value = [item.value];
       return item;
     }
     case REDUCER_OPERATION_SEPARATED_APPEND:
       return appendSeparatedFragment(
-        toFragment(rhs[0]),
-        toFragment(rhs[1]),
-        toFragment(rhs[2]),
+        reducerFragmentChild(reducerOperation, rhs, 0),
+        reducerFragmentChild(reducerOperation, rhs, 1),
+        reducerFragmentChild(reducerOperation, rhs, 2),
       );
     case REDUCER_OPERATION_FIELD: {
-      const fragment = toFragment(rhs[0]);
+      const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
       fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;
     }
@@ -1225,7 +1300,40 @@ function ruleFragment(node: AnyRuleNode): Fragment {
   };
 }
 
+function reducerChild(
+  reducerOperation: number,
+  values: readonly unknown[],
+  slot: number,
+): unknown {
+  const role = parserReducerChildRole(reducerOperation, slot);
+  const value = values[slot];
+  if (role === REDUCER_CHILD_RAW) {
+    return value;
+  }
+  if (role === REDUCER_CHILD_FRAGMENT) {
+    return toFragment(value);
+  }
+  if (role === REDUCER_CHILD_SHIFTED_TOKEN) {
+    return tokenFragment(value as ShiftedToken);
+  }
+  if (role === REDUCER_CHILD_RULE_NODE) {
+    return ruleFragment(value as AnyRuleNode);
+  }
+  throw new Error("Unexpected parser reducer child role.");
+}
+
+function reducerFragmentChild(
+  reducerOperation: number,
+  values: readonly unknown[],
+  slot: number,
+): Fragment {
+  const child = reducerChild(reducerOperation, values, slot);
+  if (isFragment(child)) return child;
+  throw new Error("Expected parser reducer child to produce a fragment.");
+}
+
 function sequenceFragment(
+  reducerOperation: number,
   values: readonly unknown[],
   offset: number,
   tokenIndex: number,
@@ -1235,8 +1343,8 @@ function sequenceFragment(
   const fields: FieldCapture[] = [];
   let span: Span | null = null;
   let tokenRange: TokenRange | null = null;
-  for (const value of values) {
-    const part = toFragment(value);
+  for (let index = 0; index < values.length; index++) {
+    const part = reducerFragmentChild(reducerOperation, values, index);
     fragmentValues.push(part.value);
     appendAll(children, part.children);
     appendAll(fields, part.fields);

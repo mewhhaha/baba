@@ -67,6 +67,11 @@ export const RUNTIME_REDUCER_PAYLOAD_STATUS_OK = 0;
 export const RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN = 1;
 export const RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING = 2;
 export const RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING = 3;
+export const RUNTIME_REDUCER_CHILD_UNKNOWN = 0;
+export const RUNTIME_REDUCER_CHILD_RAW = 1;
+export const RUNTIME_REDUCER_CHILD_FRAGMENT = 2;
+export const RUNTIME_REDUCER_CHILD_SHIFTED_TOKEN = 3;
+export const RUNTIME_REDUCER_CHILD_RULE_NODE = 4;
 export const RUNTIME_NO_FIELD = 0xffff_ffff;
 export const RUNTIME_FIELD_ARRAY = 1;
 export const RUNTIME_FIELD_NULLABLE = 2;
@@ -1038,6 +1043,7 @@ function parserReducerFunctions(
     ),
     parserReducerOperationFunction(reducerCount),
     parserReducerPayloadStatusFunction(reducerCount),
+    parserReducerChildRoleFunction(),
   ];
 }
 
@@ -1207,6 +1213,114 @@ function parserReducerPayloadStatusFunction(
       {
         kind: "return",
         expression: u32(RUNTIME_REDUCER_PAYLOAD_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserReducerChildRoleFunction(): RuntimeLanguageFunction {
+  const operationSlotIs = (
+    operation: number,
+    slot: number,
+    role: number,
+  ): RuntimeStatement => ({
+    kind: "if",
+    condition: eq(local("operation"), u32(operation)),
+    consequent: [{
+      kind: "if",
+      condition: eq(local("slot"), u32(slot)),
+      consequent: [{
+        kind: "return",
+        expression: u32(role),
+      }],
+    }],
+  });
+  const operationAllSlots = (
+    operation: number,
+    role: number,
+  ): RuntimeStatement => ({
+    kind: "if",
+    condition: eq(local("operation"), u32(operation)),
+    consequent: [{
+      kind: "return",
+      expression: u32(role),
+    }],
+  });
+  return {
+    name: "parserReducerChildRole",
+    parameters: [
+      { name: "operation", type: "u32" },
+      { name: "slot", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_START,
+        0,
+        RUNTIME_REDUCER_CHILD_RAW,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_RULE,
+        0,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_TERMINAL,
+        0,
+        RUNTIME_REDUCER_CHILD_SHIFTED_TOKEN,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_RULE_REF,
+        0,
+        RUNTIME_REDUCER_CHILD_RULE_NODE,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_IDENTITY,
+        0,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationAllSlots(
+        RUNTIME_REDUCER_OPERATION_SEQUENCE,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_APPEND,
+        0,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_APPEND,
+        1,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_FIRST_ARRAY,
+        0,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
+        0,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
+        1,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
+        2,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      operationSlotIs(
+        RUNTIME_REDUCER_OPERATION_FIELD,
+        0,
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+      ),
+      {
+        kind: "return",
+        expression: u32(RUNTIME_REDUCER_CHILD_UNKNOWN),
       },
     ],
   };

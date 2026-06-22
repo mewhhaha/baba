@@ -62,10 +62,19 @@ import {
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
+  RUNTIME_REDUCER_CHILD_FRAGMENT,
+  RUNTIME_REDUCER_CHILD_RAW,
+  RUNTIME_REDUCER_CHILD_RULE_NODE,
+  RUNTIME_REDUCER_CHILD_SHIFTED_TOKEN,
+  RUNTIME_REDUCER_CHILD_UNKNOWN,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_OPERATION_FIELD,
   RUNTIME_REDUCER_OPERATION_RULE,
+  RUNTIME_REDUCER_OPERATION_RULE_REF,
+  RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
   RUNTIME_REDUCER_OPERATION_SEQUENCE,
+  RUNTIME_REDUCER_OPERATION_START,
+  RUNTIME_REDUCER_OPERATION_TERMINAL,
   RUNTIME_REDUCER_OPERATION_UNKNOWN,
   RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING,
   RUNTIME_REDUCER_PAYLOAD_STATUS_OK,
@@ -508,9 +517,70 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                                     ]),
                                     u32(10),
                                   ),
-                                  call("parserReducerPayloadStatus", [
-                                    u32(99),
-                                  ]),
+                                  add(
+                                    call("parserReducerPayloadStatus", [
+                                      u32(99),
+                                    ]),
+                                    add(
+                                      mul(
+                                        call("parserReducerChildRole", [
+                                          u32(RUNTIME_REDUCER_OPERATION_START),
+                                          u32(0),
+                                        ]),
+                                        u32(1_000_000_000),
+                                      ),
+                                      add(
+                                        mul(
+                                          call("parserReducerChildRole", [
+                                            u32(
+                                              RUNTIME_REDUCER_OPERATION_TERMINAL,
+                                            ),
+                                            u32(0),
+                                          ]),
+                                          u32(100_000_000),
+                                        ),
+                                        add(
+                                          mul(
+                                            call("parserReducerChildRole", [
+                                              u32(
+                                                RUNTIME_REDUCER_OPERATION_RULE_REF,
+                                              ),
+                                              u32(0),
+                                            ]),
+                                            u32(10_000_000),
+                                          ),
+                                          add(
+                                            mul(
+                                              call("parserReducerChildRole", [
+                                                u32(
+                                                  RUNTIME_REDUCER_OPERATION_SEQUENCE,
+                                                ),
+                                                u32(7),
+                                              ]),
+                                              u32(1_000_000),
+                                            ),
+                                            add(
+                                              mul(
+                                                call("parserReducerChildRole", [
+                                                  u32(
+                                                    RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
+                                                  ),
+                                                  u32(2),
+                                                ]),
+                                                u32(100_000),
+                                              ),
+                                              call("parserReducerChildRole", [
+                                                u32(
+                                                  RUNTIME_REDUCER_OPERATION_FIELD,
+                                                ),
+                                                u32(1),
+                                              ]),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -1350,7 +1420,13 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_REDUCER_PAYLOAD_STATUS_OK +
           RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING * 100 +
           RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING * 10 +
-          RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN,
+          RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN +
+          RUNTIME_REDUCER_CHILD_RAW * 1_000_000_000 +
+          RUNTIME_REDUCER_CHILD_SHIFTED_TOKEN * 100_000_000 +
+          RUNTIME_REDUCER_CHILD_RULE_NODE * 10_000_000 +
+          RUNTIME_REDUCER_CHILD_FRAGMENT * 1_000_000 +
+          RUNTIME_REDUCER_CHILD_FRAGMENT * 100_000 +
+          RUNTIME_REDUCER_CHILD_UNKNOWN,
       },
     },
     {
