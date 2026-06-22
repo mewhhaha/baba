@@ -1386,6 +1386,7 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         locals: [
           { name: "discard", type: "u32" },
           { name: "handle", type: "u32" },
+          { name: "clone", type: "u32" },
         ],
         result: "u32",
         body: [
@@ -1415,6 +1416,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
             "discard",
             call("runtimeVectorAppend", [local("handle"), u32(13)]),
           ),
+          setLocal("clone", call("runtimeVectorClone", [local("handle")])),
+          setLocal(
+            "discard",
+            call("runtimeVectorStore", [local("handle"), u32(0), u32(4)]),
+          ),
           {
             kind: "return",
             expression: add(
@@ -1432,14 +1438,20 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                   add(
                     mul(
                       call("runtimeVectorLoad", [local("handle"), u32(0)]),
-                      u32(100),
+                      u32(1000),
                     ),
                     add(
                       mul(
                         call("runtimeVectorLoad", [local("handle"), u32(1)]),
-                        u32(10),
+                        u32(100),
                       ),
-                      call("runtimeVectorLoad", [local("handle"), u32(2)]),
+                      add(
+                        mul(
+                          call("runtimeVectorLoad", [local("handle"), u32(2)]),
+                          u32(10),
+                        ),
+                        call("runtimeVectorLoad", [local("clone"), u32(0)]),
+                      ),
                     ),
                   ),
                 ),
@@ -1875,7 +1887,7 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "runtime arena vectors append, grow, and preserve values",
       program: arenaVectorProgram,
-      expected: { kind: "value", value: 18_340_603 },
+      expected: { kind: "value", value: 27_345_035 },
     },
     {
       name: "runtime arena reset reuses allocation lifetime",

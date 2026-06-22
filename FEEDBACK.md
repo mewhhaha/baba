@@ -107,7 +107,9 @@ runtime language:
   runtime language.
 - Moved deterministic parser trace state-stack and accepted-action storage onto
   arena-backed growable vectors, including vector truncation for LR reductions.
-  Declared-conflict trace branch snapshotting still uses scratch-memory buffers.
+- Moved declared-conflict parser trace active stack, accepted-action storage,
+  and saved branch snapshots onto arena-backed growable vectors using cloned
+  vector handles for branch restore.
 - Moved deterministic generated TypeScript parser LR shift/reduce/accept control
   flow onto a runtime-language `parserTrace` source program backed by generated
   action/goto/production tables and growable scratch memory. Generated
@@ -142,8 +144,9 @@ runtime language:
 - Added a runtime-language `parserActionCount` helper so generated conflict
   parsers get action fan-out from shared table logic before scheduling branches.
 - Moved generated TypeScript conflict-parser branch scheduling onto a
-  runtime-language `parserTrace` helper that saves and restores branch frames in
-  scratch memory before TypeScript replays the accepted action trace.
+  runtime-language `parserTrace` helper that saves and restores branch frames
+  through arena-backed vector snapshots before TypeScript replays the accepted
+  action trace.
 - Moved generated Wasm adapter parser trace control flow onto a runtime-language
   Wasm `parserTrace` module that exports trace input, status, error, count, and
   action accessors for adapter replay.

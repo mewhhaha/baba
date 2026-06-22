@@ -639,6 +639,23 @@ function runtimeVectorTruncate(handle: number, length: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function runtimeVectorClone(handle: number): number {
+  let length = 0;
+  let clone = 0;
+  let index = 0;
+  let value = 0;
+  length = (runtimeVectorLength(handle) >>> 0) >>> 0;
+  clone = (runtimeVectorNew(length) >>> 0) >>> 0;
+  index = (0) >>> 0;
+  while (((((index) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+    value = (runtimeVectorLoad(handle, index) >>> 0) >>> 0;
+    value = (runtimeVectorAppend(clone, value) >>> 0) >>> 0;
+    index = (((index) + (1)) >>> 0) >>> 0;
+  }
+  return (clone) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function runtimeVectorAppend(handle: number, value: number): number {
   let length = 0;
   let capacity = 0;

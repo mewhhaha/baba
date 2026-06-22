@@ -468,12 +468,13 @@ export function createParserConflictTraceRuntimeProgram(
       ),
       ...parserActionFunctions(),
       ...parserProductionFunctions(input.productions.length),
+      ...runtimeArenaFunctions(),
       parserTraceSetTerminalFunction(),
       parserConflictTraceFunction(input.productions.length),
       parserTraceErrorStateFunction(),
       parserTraceErrorIndexFunction(),
       parserTraceCountFunction(),
-      parserTraceActionFunction("scratch"),
+      parserTraceActionFunction("vector"),
       parserTraceStatusKindFunction(),
     ],
   };
@@ -624,6 +625,7 @@ function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
     runtimeVectorLoadFunction(),
     runtimeVectorStoreFunction(),
     runtimeVectorTruncateFunction(),
+    runtimeVectorCloneFunction(),
     runtimeVectorAppendFunction(),
   ];
 }
@@ -1330,6 +1332,43 @@ function runtimeVectorTruncateFunction(): RuntimeLanguageFunction {
         local("length"),
       ),
       { kind: "return", expression: local("length") },
+    ],
+  };
+}
+
+function runtimeVectorCloneFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorClone",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "length", type: "u32" },
+      { name: "clone", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("length", call("runtimeVectorLength", [local("handle")])),
+      setLocal("clone", call("runtimeVectorNew", [local("length")])),
+      setLocal("index", u32(0)),
+      {
+        kind: "while",
+        condition: ltu(local("index"), local("length")),
+        body: [
+          setLocal(
+            "value",
+            call("runtimeVectorLoad", [local("handle"), local("index")]),
+          ),
+          setLocal(
+            "value",
+            call("runtimeVectorAppend", [local("clone"), local("value")]),
+          ),
+          setLocal("index", add(local("index"), u32(1))),
+        ],
+      },
+      { kind: "return", expression: local("clone") },
     ],
   };
 }
@@ -3320,16 +3359,18 @@ function parserConflictTraceFunction(
     ],
     locals: [
       { name: "capacity", type: "u32" },
-      { name: "stackBase", type: "u32" },
+      { name: "stackHandle", type: "u32" },
       { name: "stateCapacity", type: "u32" },
-      { name: "traceBase", type: "u32" },
+      { name: "traceHandle", type: "u32" },
       { name: "traceCapacity", type: "u32" },
-      { name: "branchBase", type: "u32" },
-      { name: "branchStride", type: "u32" },
+      { name: "branchActionHandle", type: "u32" },
+      { name: "branchDepthHandle", type: "u32" },
+      { name: "branchStreamIndexHandle", type: "u32" },
+      { name: "branchTraceCountHandle", type: "u32" },
+      { name: "branchStackHandle", type: "u32" },
+      { name: "branchTraceHandle", type: "u32" },
       { name: "branchCount", type: "u32" },
       { name: "exploredBranches", type: "u32" },
-      { name: "frameBase", type: "u32" },
-      { name: "copyIndex", type: "u32" },
       { name: "depth", type: "u32" },
       { name: "streamIndex", type: "u32" },
       { name: "traceCount", type: "u32" },
@@ -3358,14 +3399,15 @@ function parserConflictTraceFunction(
         ensureScratch(add(u32(TRACE_TERMINALS_BASE), local("terminalCount"))),
       ),
       setLocal(
-        "stackBase",
-        add(u32(TRACE_TERMINALS_BASE), local("terminalCount")),
+        "capacity",
+        call("runtimeArenaResetTo", [
+          add(u32(TRACE_TERMINALS_BASE), local("terminalCount")),
+        ]),
       ),
       setLocal(
         "stateCapacity",
         add(add(local("terminalCount"), u32(productionCount)), u32(16)),
       ),
-      setLocal("traceBase", add(local("stackBase"), local("stateCapacity"))),
       setLocal(
         "traceCapacity",
         add(
@@ -3373,18 +3415,32 @@ function parserConflictTraceFunction(
           add(u32(productionCount), u32(16)),
         ),
       ),
-      setLocal("branchBase", add(local("traceBase"), local("traceCapacity"))),
       setLocal(
-        "branchStride",
-        add(add(u32(4), local("stateCapacity")), local("traceCapacity")),
+        "stackHandle",
+        call("runtimeVectorNew", [local("stateCapacity")]),
       ),
-      setLocal("capacity", ensureScratch(add(local("branchBase"), u32(1)))),
+      setLocal(
+        "traceHandle",
+        call("runtimeVectorNew", [local("traceCapacity")]),
+      ),
+      setLocal("branchActionHandle", call("runtimeVectorNew", [u32(0)])),
+      setLocal("branchDepthHandle", call("runtimeVectorNew", [u32(0)])),
+      setLocal("branchStreamIndexHandle", call("runtimeVectorNew", [u32(0)])),
+      setLocal("branchTraceCountHandle", call("runtimeVectorNew", [u32(0)])),
+      setLocal("branchStackHandle", call("runtimeVectorNew", [u32(0)])),
+      setLocal("branchTraceHandle", call("runtimeVectorNew", [u32(0)])),
+      setLocal(
+        "capacity",
+        call("runtimeVectorAppend", [
+          local("stackHandle"),
+          u32(0),
+        ]),
+      ),
       storeScratch(u32(TRACE_STATUS), u32(TRACE_STATUS_OK)),
       storeScratch(u32(TRACE_ERROR_STATE), u32(0)),
       storeScratch(u32(TRACE_ERROR_INDEX), u32(0)),
       storeScratch(u32(TRACE_COUNT), u32(0)),
-      storeScratch(u32(TRACE_BASE), local("traceBase")),
-      storeScratch(local("stackBase"), u32(0)),
+      storeScratch(u32(TRACE_BASE), local("traceHandle")),
       setLocal("depth", u32(1)),
       setLocal("streamIndex", u32(0)),
       setLocal("traceCount", u32(0)),
@@ -3401,7 +3457,10 @@ function parserConflictTraceFunction(
           setLocal("actionReady", u32(0)),
           setLocal(
             "state",
-            loadScratch(add(local("stackBase"), sub(local("depth"), u32(1)))),
+            call("runtimeVectorLoad", [
+              local("stackHandle"),
+              sub(local("depth"), u32(1)),
+            ]),
           ),
           {
             kind: "if",
@@ -3490,13 +3549,10 @@ function parserConflictTraceFunction(
                     consequent: [
                       setLocal(
                         "capacity",
-                        ensureScratch(
-                          add(add(local("stackBase"), local("depth")), u32(1)),
-                        ),
-                      ),
-                      storeScratch(
-                        add(local("stackBase"), local("depth")),
-                        local("actionPayload"),
+                        call("runtimeVectorAppend", [
+                          local("stackHandle"),
+                          local("actionPayload"),
+                        ]),
                       ),
                       setLocal("depth", add(local("depth"), u32(1))),
                       setLocal(
@@ -3548,13 +3604,18 @@ function parserConflictTraceFunction(
                               sub(local("depth"), local("rhsLength")),
                             ),
                             setLocal(
+                              "capacity",
+                              call("runtimeVectorTruncate", [
+                                local("stackHandle"),
+                                local("depth"),
+                              ]),
+                            ),
+                            setLocal(
                               "state",
-                              loadScratch(
-                                add(
-                                  local("stackBase"),
-                                  sub(local("depth"), u32(1)),
-                                ),
-                              ),
+                              call("runtimeVectorLoad", [
+                                local("stackHandle"),
+                                sub(local("depth"), u32(1)),
+                              ]),
                             ),
                             setLocal(
                               "gotoState",
@@ -3582,19 +3643,10 @@ function parserConflictTraceFunction(
                                   consequent: [
                                     setLocal(
                                       "capacity",
-                                      ensureScratch(
-                                        add(
-                                          add(
-                                            local("stackBase"),
-                                            local("depth"),
-                                          ),
-                                          u32(1),
-                                        ),
-                                      ),
-                                    ),
-                                    storeScratch(
-                                      add(local("stackBase"), local("depth")),
-                                      local("gotoState"),
+                                      call("runtimeVectorAppend", [
+                                        local("stackHandle"),
+                                        local("gotoState"),
+                                      ]),
                                     ),
                                     setLocal(
                                       "depth",
@@ -3862,9 +3914,12 @@ function conflictTraceStoreAction(): RuntimeStatement[] {
     kind: "if",
     condition: lt(local("traceCount"), local("traceCapacity")),
     consequent: [
-      storeScratch(
-        add(local("traceBase"), local("traceCount")),
-        local("action"),
+      setLocal(
+        "capacity",
+        call("runtimeVectorAppend", [
+          local("traceHandle"),
+          local("action"),
+        ]),
       ),
       setLocal("traceCount", add(local("traceCount"), u32(1))),
     ],
@@ -3881,47 +3936,47 @@ function conflictSaveBranchFrame(): RuntimeStatement[] {
       alternate: traceReturnStatements(TRACE_STATUS_BRANCH_LIMIT),
     },
     setLocal(
-      "frameBase",
-      add(
-        local("branchBase"),
-        mul(local("branchCount"), local("branchStride")),
-      ),
+      "capacity",
+      call("runtimeVectorAppend", [
+        local("branchActionHandle"),
+        local("pendingAction"),
+      ]),
     ),
     setLocal(
       "capacity",
-      ensureScratch(add(local("frameBase"), local("branchStride"))),
+      call("runtimeVectorAppend", [
+        local("branchDepthHandle"),
+        local("depth"),
+      ]),
     ),
-    storeScratch(local("frameBase"), local("pendingAction")),
-    storeScratch(add(local("frameBase"), u32(1)), local("depth")),
-    storeScratch(add(local("frameBase"), u32(2)), local("streamIndex")),
-    storeScratch(add(local("frameBase"), u32(3)), local("traceCount")),
-    setLocal("copyIndex", u32(0)),
-    {
-      kind: "while",
-      condition: lt(local("copyIndex"), local("depth")),
-      body: [
-        storeScratch(
-          add(add(local("frameBase"), u32(4)), local("copyIndex")),
-          loadScratch(add(local("stackBase"), local("copyIndex"))),
-        ),
-        setLocal("copyIndex", add(local("copyIndex"), u32(1))),
-      ],
-    },
-    setLocal("copyIndex", u32(0)),
-    {
-      kind: "while",
-      condition: lt(local("copyIndex"), local("traceCount")),
-      body: [
-        storeScratch(
-          add(
-            add(add(local("frameBase"), u32(4)), local("stateCapacity")),
-            local("copyIndex"),
-          ),
-          loadScratch(add(local("traceBase"), local("copyIndex"))),
-        ),
-        setLocal("copyIndex", add(local("copyIndex"), u32(1))),
-      ],
-    },
+    setLocal(
+      "capacity",
+      call("runtimeVectorAppend", [
+        local("branchStreamIndexHandle"),
+        local("streamIndex"),
+      ]),
+    ),
+    setLocal(
+      "capacity",
+      call("runtimeVectorAppend", [
+        local("branchTraceCountHandle"),
+        local("traceCount"),
+      ]),
+    ),
+    setLocal(
+      "capacity",
+      call("runtimeVectorAppend", [
+        local("branchStackHandle"),
+        call("runtimeVectorClone", [local("stackHandle")]),
+      ]),
+    ),
+    setLocal(
+      "capacity",
+      call("runtimeVectorAppend", [
+        local("branchTraceHandle"),
+        call("runtimeVectorClone", [local("traceHandle")]),
+      ]),
+    ),
     setLocal("branchCount", add(local("branchCount"), u32(1))),
   ];
 }
@@ -3941,53 +3996,49 @@ function conflictRestoreBranchOrReturnUnexpected(): RuntimeStatement[] {
       alternate: [
         setLocal("branchCount", sub(local("branchCount"), u32(1))),
         setLocal(
-          "frameBase",
-          add(
-            local("branchBase"),
-            mul(local("branchCount"), local("branchStride")),
-          ),
+          "pendingAction",
+          call("runtimeVectorLoad", [
+            local("branchActionHandle"),
+            local("branchCount"),
+          ]),
         ),
-        setLocal("pendingAction", loadScratch(local("frameBase"))),
-        setLocal("depth", loadScratch(add(local("frameBase"), u32(1)))),
+        setLocal(
+          "depth",
+          call("runtimeVectorLoad", [
+            local("branchDepthHandle"),
+            local("branchCount"),
+          ]),
+        ),
         setLocal(
           "streamIndex",
-          loadScratch(add(local("frameBase"), u32(2))),
+          call("runtimeVectorLoad", [
+            local("branchStreamIndexHandle"),
+            local("branchCount"),
+          ]),
         ),
         setLocal(
           "traceCount",
-          loadScratch(add(local("frameBase"), u32(3))),
+          call("runtimeVectorLoad", [
+            local("branchTraceCountHandle"),
+            local("branchCount"),
+          ]),
         ),
-        setLocal("copyIndex", u32(0)),
-        {
-          kind: "while",
-          condition: lt(local("copyIndex"), local("depth")),
-          body: [
-            storeScratch(
-              add(local("stackBase"), local("copyIndex")),
-              loadScratch(
-                add(add(local("frameBase"), u32(4)), local("copyIndex")),
-              ),
-            ),
-            setLocal("copyIndex", add(local("copyIndex"), u32(1))),
-          ],
-        },
-        setLocal("copyIndex", u32(0)),
-        {
-          kind: "while",
-          condition: lt(local("copyIndex"), local("traceCount")),
-          body: [
-            storeScratch(
-              add(local("traceBase"), local("copyIndex")),
-              loadScratch(
-                add(
-                  add(add(local("frameBase"), u32(4)), local("stateCapacity")),
-                  local("copyIndex"),
-                ),
-              ),
-            ),
-            setLocal("copyIndex", add(local("copyIndex"), u32(1))),
-          ],
-        },
+        setLocal(
+          "stackHandle",
+          call("runtimeVectorLoad", [
+            local("branchStackHandle"),
+            local("branchCount"),
+          ]),
+        ),
+        setLocal(
+          "traceHandle",
+          call("runtimeVectorLoad", [
+            local("branchTraceHandle"),
+            local("branchCount"),
+          ]),
+        ),
+        storeScratch(u32(TRACE_BASE), local("traceHandle")),
+        ...truncateBranchSnapshotVectors(),
         setLocal("exploredBranches", add(local("exploredBranches"), u32(1))),
         {
           kind: "if",
@@ -4001,6 +4052,53 @@ function conflictRestoreBranchOrReturnUnexpected(): RuntimeStatement[] {
         setLocal("hasPendingAction", u32(1)),
       ],
     },
+  ];
+}
+
+function truncateBranchSnapshotVectors(): RuntimeStatement[] {
+  return [
+    setLocal(
+      "capacity",
+      call("runtimeVectorTruncate", [
+        local("branchActionHandle"),
+        local("branchCount"),
+      ]),
+    ),
+    setLocal(
+      "capacity",
+      call("runtimeVectorTruncate", [
+        local("branchDepthHandle"),
+        local("branchCount"),
+      ]),
+    ),
+    setLocal(
+      "capacity",
+      call("runtimeVectorTruncate", [
+        local("branchStreamIndexHandle"),
+        local("branchCount"),
+      ]),
+    ),
+    setLocal(
+      "capacity",
+      call("runtimeVectorTruncate", [
+        local("branchTraceCountHandle"),
+        local("branchCount"),
+      ]),
+    ),
+    setLocal(
+      "capacity",
+      call("runtimeVectorTruncate", [
+        local("branchStackHandle"),
+        local("branchCount"),
+      ]),
+    ),
+    setLocal(
+      "capacity",
+      call("runtimeVectorTruncate", [
+        local("branchTraceHandle"),
+        local("branchCount"),
+      ]),
+    ),
   ];
 }
 
