@@ -69,10 +69,11 @@ shape from the runtime-language helper before allocating raw child, rule-node,
 fragment, sequence, empty, append, separated-append, or field-capture results.
 Field value-class/count validation now uses
 `parserFieldValueClass`/`parserFieldCaptureStatus`/`parserFieldFinalStatus`
-helpers, and span/token-range merge arithmetic uses
-`parserMergeStart`/`parserMergeEnd` helpers. Generated parser action decoding
-uses `parserActionKind`/`parserActionPayload` helpers, and `parserTrace` uses
-the same helpers to classify encoded actions. `parserTraceStatusKind` classifies
+helpers, replay reduction validity uses `parserReplayReductionStatus`, and
+span/token-range merge arithmetic uses `parserMergeStart`/`parserMergeEnd`
+helpers. Generated parser action decoding uses
+`parserActionKind`/`parserActionPayload` helpers, and `parserTrace` uses the
+same helpers to classify encoded actions. `parserTraceStatusKind` classifies
 parser trace status values for generated TypeScript parsers and Wasm adapters
 before those hosts allocate public diagnostics. Deterministic TypeScript parsers
 use a runtime-language `parserTrace` helper backed by growable scratch memory

@@ -89,6 +89,11 @@ import {
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_START,
   RUNTIME_REDUCER_TERMINAL,
+  RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING,
+  RUNTIME_REPLAY_REDUCTION_STATUS_OK,
+  RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
+  RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
+  RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_OK,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
@@ -375,6 +380,11 @@ const REDUCER_RESULT_APPEND_FRAGMENT = ${RUNTIME_REDUCER_RESULT_APPEND_FRAGMENT}
 const REDUCER_RESULT_FIRST_ARRAY_FRAGMENT = ${RUNTIME_REDUCER_RESULT_FIRST_ARRAY_FRAGMENT};
 const REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT = ${RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT};
 const REDUCER_RESULT_FIELD_FRAGMENT = ${RUNTIME_REDUCER_RESULT_FIELD_FRAGMENT};
+const REPLAY_REDUCTION_OK = ${RUNTIME_REPLAY_REDUCTION_STATUS_OK};
+const REPLAY_REDUCTION_UNKNOWN_PRODUCTION = ${RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION};
+const REPLAY_REDUCTION_RULE_PAYLOAD_MISSING = ${RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING};
+const REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING = ${RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING};
+const REPLAY_REDUCTION_STACK_UNDERFLOW = ${RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
 const FIELD_VALUE_ARRAY = ${RUNTIME_FIELD_VALUE_ARRAY};
 const FIELD_VALUE_NULLABLE = ${RUNTIME_FIELD_VALUE_NULLABLE};
@@ -753,10 +763,13 @@ function replayTraceRuntime(label: string): string {
     const reducerOperation = parserReducerOperation(payload);
     const reducerPayload = parserReducerPayload(payload);
     const reducerPayloadStatus = parserReducerPayloadStatus(payload);
-    if (
-      rhsLength === NO_PRODUCTION ||
-      reducerOperation === REDUCER_OPERATION_UNKNOWN
-    ) {
+    const replayReductionStatus = parserReplayReductionStatus(
+      rhsLength,
+      reducerOperation,
+      reducerPayloadStatus,
+      values.length - 1,
+    );
+    if (replayReductionStatus === REPLAY_REDUCTION_UNKNOWN_PRODUCTION) {
       return {
         ok: false,
         root: null,
@@ -770,8 +783,8 @@ function replayTraceRuntime(label: string): string {
       };
     }
     if (
-      reducerPayloadStatus === REDUCER_PAYLOAD_RULE_MISSING ||
-      reducerPayloadStatus === REDUCER_PAYLOAD_FIELD_MISSING
+      replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING ||
+      replayReductionStatus === REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING
     ) {
       return {
         ok: false,
@@ -780,14 +793,14 @@ function replayTraceRuntime(label: string): string {
         tokens,
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
-          message: reducerPayloadStatus === REDUCER_PAYLOAD_RULE_MISSING
+          message: replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING
             ? "Rule reducer is missing its rule id payload."
             : "Field reducer is missing its field id payload.",
           span: currentSpan(token),
         }],
       };
     }
-    if (rhsLength > values.length - 1) {
+    if (replayReductionStatus === REPLAY_REDUCTION_STACK_UNDERFLOW) {
       return {
         ok: false,
         root: null,
@@ -796,6 +809,19 @@ function replayTraceRuntime(label: string): string {
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
           message: "${label} parser trace underflowed the replay stack.",
+          span: currentSpan(token),
+        }],
+      };
+    }
+    if (replayReductionStatus !== REPLAY_REDUCTION_OK) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [{
+          code: "PARSER_INTERNAL_ERROR",
+          message: "${label} parser trace reduction validation failed.",
           span: currentSpan(token),
         }],
       };

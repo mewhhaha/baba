@@ -134,6 +134,10 @@
 - Generated TypeScript parsers and Wasm adapters now classify parser trace
   statuses through runtime-language `parserTraceStatusKind` instead of hardcoded
   status numbers.
+- Generated parser trace replay now classifies reduction validity through
+  runtime-language `parserReplayReductionStatus` before emitting internal
+  diagnostics for unknown productions, missing reducer payloads, or stack
+  underflow.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical

@@ -87,6 +87,11 @@ export const RUNTIME_REDUCER_RESULT_APPEND_FRAGMENT = 7;
 export const RUNTIME_REDUCER_RESULT_FIRST_ARRAY_FRAGMENT = 8;
 export const RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT = 9;
 export const RUNTIME_REDUCER_RESULT_FIELD_FRAGMENT = 10;
+export const RUNTIME_REPLAY_REDUCTION_STATUS_OK = 0;
+export const RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION = 1;
+export const RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING = 2;
+export const RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING = 3;
+export const RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW = 4;
 export const RUNTIME_NO_FIELD = 0xffff_ffff;
 export const RUNTIME_FIELD_ARRAY = 1;
 export const RUNTIME_FIELD_NULLABLE = 2;
@@ -1062,6 +1067,7 @@ function parserReducerFunctions(
     parserReducerPayloadStatusFunction(reducerCount),
     parserReducerChildRoleFunction(),
     parserReducerResultKindFunction(),
+    parserReplayReductionStatusFunction(),
   ];
 }
 
@@ -1414,6 +1420,87 @@ function parserReducerResultKindFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_REDUCER_RESULT_UNKNOWN),
+      },
+    ],
+  };
+}
+
+function parserReplayReductionStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserReplayReductionStatus",
+    parameters: [
+      { name: "rhsLength", type: "u32" },
+      { name: "operation", type: "u32" },
+      { name: "payloadStatus", type: "u32" },
+      { name: "valueDepth", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("rhsLength"), u32(RUNTIME_NO_PRODUCTION)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("operation"),
+          u32(RUNTIME_REDUCER_OPERATION_UNKNOWN),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("payloadStatus"),
+          u32(RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("payloadStatus"),
+          u32(RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("payloadStatus"),
+          u32(RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(
+            RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING,
+          ),
+        }],
+      },
+      {
+        kind: "if",
+        condition: lt(local("valueDepth"), local("rhsLength")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_REPLAY_REDUCTION_STATUS_OK),
       },
     ],
   };

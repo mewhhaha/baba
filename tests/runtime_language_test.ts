@@ -89,6 +89,11 @@ import {
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_UNKNOWN,
+  RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING,
+  RUNTIME_REPLAY_REDUCTION_STATUS_OK,
+  RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
+  RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
+  RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_INTERNAL,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
@@ -656,6 +661,74 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                       ),
                     ),
                   ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserReplayReductionStatusProgram: RuntimeLanguageProgram = {
+    ...parserReducerBaseProgram,
+    name: "parser_replay_reduction_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserReducerBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              eq(
+                call("parserReplayReductionStatus", [
+                  u32(1),
+                  u32(RUNTIME_REDUCER_OPERATION_RULE),
+                  u32(RUNTIME_REDUCER_PAYLOAD_STATUS_OK),
+                  u32(1),
+                ]),
+                u32(RUNTIME_REPLAY_REDUCTION_STATUS_OK),
+              ),
+              u32(10_000),
+            ),
+            add(
+              mul(
+                call("parserReplayReductionStatus", [
+                  u32(RUNTIME_NO_PRODUCTION),
+                  u32(RUNTIME_REDUCER_OPERATION_UNKNOWN),
+                  u32(RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN),
+                  u32(0),
+                ]),
+                u32(1_000),
+              ),
+              add(
+                mul(
+                  call("parserReplayReductionStatus", [
+                    u32(1),
+                    u32(RUNTIME_REDUCER_OPERATION_RULE),
+                    u32(RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING),
+                    u32(1),
+                  ]),
+                  u32(100),
+                ),
+                add(
+                  mul(
+                    call("parserReplayReductionStatus", [
+                      u32(1),
+                      u32(RUNTIME_REDUCER_OPERATION_FIELD),
+                      u32(RUNTIME_REDUCER_PAYLOAD_STATUS_FIELD_MISSING),
+                      u32(1),
+                    ]),
+                    u32(10),
+                  ),
+                  call("parserReplayReductionStatus", [
+                    u32(2),
+                    u32(RUNTIME_REDUCER_OPERATION_SEQUENCE),
+                    u32(RUNTIME_REDUCER_PAYLOAD_STATUS_OK),
+                    u32(1),
+                  ]),
                 ),
               ),
             ),
@@ -1562,6 +1635,18 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT +
           RUNTIME_REDUCER_RESULT_UNKNOWN +
           RUNTIME_REDUCER_RESULT_SEQUENCE_FRAGMENT,
+      },
+    },
+    {
+      name: "parser replay reduction status classifies trace validity",
+      program: parserReplayReductionStatusProgram,
+      expected: {
+        kind: "value",
+        value: 10_000 +
+          RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION * 1_000 +
+          RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING * 100 +
+          RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING * 10 +
+          RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
       },
     },
     {

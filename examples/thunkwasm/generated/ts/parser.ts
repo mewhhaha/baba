@@ -86,6 +86,11 @@ const REDUCER_RESULT_APPEND_FRAGMENT = 7;
 const REDUCER_RESULT_FIRST_ARRAY_FRAGMENT = 8;
 const REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT = 9;
 const REDUCER_RESULT_FIELD_FRAGMENT = 10;
+const REPLAY_REDUCTION_OK = 0;
+const REPLAY_REDUCTION_UNKNOWN_PRODUCTION = 1;
+const REPLAY_REDUCTION_RULE_PAYLOAD_MISSING = 2;
+const REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING = 3;
+const REPLAY_REDUCTION_STACK_UNDERFLOW = 4;
 const NO_FIELD = 4294967295;
 const FIELD_VALUE_ARRAY = 3;
 const FIELD_VALUE_NULLABLE = 2;
@@ -756,6 +761,29 @@ function parserReducerResultKind(operation: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserReplayReductionStatus(rhsLength: number, operation: number, payloadStatus: number, valueDepth: number): number {
+  if (((((rhsLength) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((payloadStatus) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((payloadStatus) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((payloadStatus) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  if (((((valueDepth) | 0) < ((rhsLength) | 0) ? 1 : 0)) !== 0) {
+    return (4) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function lexerSpecFlags(specIndex: number): number {
   let offset = 0;
   if (((((specIndex) | 0) < ((31) | 0) ? 1 : 0)) !== 0) {
@@ -1204,10 +1232,13 @@ function replayTrace(
     const reducerOperation = parserReducerOperation(payload);
     const reducerPayload = parserReducerPayload(payload);
     const reducerPayloadStatus = parserReducerPayloadStatus(payload);
-    if (
-      rhsLength === NO_PRODUCTION ||
-      reducerOperation === REDUCER_OPERATION_UNKNOWN
-    ) {
+    const replayReductionStatus = parserReplayReductionStatus(
+      rhsLength,
+      reducerOperation,
+      reducerPayloadStatus,
+      values.length - 1,
+    );
+    if (replayReductionStatus === REPLAY_REDUCTION_UNKNOWN_PRODUCTION) {
       return {
         ok: false,
         root: null,
@@ -1221,8 +1252,8 @@ function replayTrace(
       };
     }
     if (
-      reducerPayloadStatus === REDUCER_PAYLOAD_RULE_MISSING ||
-      reducerPayloadStatus === REDUCER_PAYLOAD_FIELD_MISSING
+      replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING ||
+      replayReductionStatus === REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING
     ) {
       return {
         ok: false,
@@ -1231,14 +1262,14 @@ function replayTrace(
         tokens,
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
-          message: reducerPayloadStatus === REDUCER_PAYLOAD_RULE_MISSING
+          message: replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING
             ? "Rule reducer is missing its rule id payload."
             : "Field reducer is missing its field id payload.",
           span: currentSpan(token),
         }],
       };
     }
-    if (rhsLength > values.length - 1) {
+    if (replayReductionStatus === REPLAY_REDUCTION_STACK_UNDERFLOW) {
       return {
         ok: false,
         root: null,
@@ -1247,6 +1278,19 @@ function replayTrace(
         diagnostics: [{
           code: "PARSER_INTERNAL_ERROR",
           message: "Runtime-language parser trace underflowed the replay stack.",
+          span: currentSpan(token),
+        }],
+      };
+    }
+    if (replayReductionStatus !== REPLAY_REDUCTION_OK) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [{
+          code: "PARSER_INTERNAL_ERROR",
+          message: "Runtime-language parser trace reduction validation failed.",
           span: currentSpan(token),
         }],
       };
