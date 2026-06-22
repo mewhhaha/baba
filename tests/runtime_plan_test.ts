@@ -221,7 +221,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "parserFieldCaptureStatus");
   assertIncludes(parserRuntimeSource, "parserFieldFinalStatus");
   assertNotIncludes(parserRuntimeSource, "captureCount > 0");
+  assertIncludes(publicFieldMaterializerSource, "parserFieldArrayValueStatus");
   assertIncludes(publicFieldMaterializerSource, "parserFieldScalarValueStatus");
+  assertNotIncludes(publicFieldMaterializerSource, "vectorHandle === 0");
   assertNotIncludes(publicFieldMaterializerSource, "count === 0 ? null");
   assertIncludes(parserRuntimeSource, "const counts = runtimeArrayNew");
   assertIncludes(parserRuntimeSource, "runtimeArrayStore(counts");

@@ -35,6 +35,8 @@ import {
   RUNTIME_ACTION_SHIFT,
   RUNTIME_ARENA_PROGRAM,
   RUNTIME_FIELD_ARRAY,
+  RUNTIME_FIELD_ARRAY_VALUE_MISSING,
+  RUNTIME_FIELD_ARRAY_VALUE_OK,
   RUNTIME_FIELD_CAPTURE_ARRAY,
   RUNTIME_FIELD_CAPTURE_SCALAR,
   RUNTIME_FIELD_CAPTURE_TOO_MANY,
@@ -631,6 +633,25 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           expression: add(
             mul(call("parserFieldScalarValueStatus", [u32(0)]), u32(10)),
             call("parserFieldScalarValueStatus", [u32(2)]),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserFieldArrayValueStatusProgram: RuntimeLanguageProgram = {
+    ...parserFieldBaseProgram,
+    name: "parser_field_array_value_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserFieldBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserFieldArrayValueStatus", [u32(0)]), u32(10)),
+            call("parserFieldArrayValueStatus", [u32(9)]),
           ),
         }],
       },
@@ -3515,6 +3536,15 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         kind: "value",
         value: RUNTIME_FIELD_SCALAR_VALUE_NULL * 10 +
           RUNTIME_FIELD_SCALAR_VALUE_FRAGMENT,
+      },
+    },
+    {
+      name: "parser field array value status classifies missing vectors",
+      program: parserFieldArrayValueStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_FIELD_ARRAY_VALUE_MISSING * 10 +
+          RUNTIME_FIELD_ARRAY_VALUE_OK,
       },
     },
     {

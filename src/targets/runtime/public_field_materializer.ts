@@ -12,7 +12,8 @@ function storePublicField(
 }
 
 function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
-  if (vectorHandle === 0) {
+  const status = parserFieldArrayValueStatus(vectorHandle);
+  if (status === FIELD_ARRAY_VALUE_MISSING) {
     throw new Error(\`Array field '\${name}' was not initialized as a runtime vector.\`);
   }
   const length = runtimeVectorLength(vectorHandle);

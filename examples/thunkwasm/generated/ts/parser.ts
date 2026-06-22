@@ -89,6 +89,7 @@ const REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING = 3;
 const REPLAY_REDUCTION_STACK_UNDERFLOW = 4;
 const SHIFTED_TOKEN_OK = 0;
 const NO_FIELD = 4294967295;
+const FIELD_ARRAY_VALUE_MISSING = 1;
 const FIELD_VALUE_ARRAY = 3;
 const FIELD_VALUE_NULLABLE = 2;
 const FIELD_CAPTURE_ARRAY = 2;
@@ -1376,6 +1377,14 @@ function parserFieldSchemaStatus(start: number, end: number, captureCount: numbe
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserFieldArrayValueStatus(vectorHandle: number): number {
+  if (((((vectorHandle) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserFieldScalarValueStatus(count: number): number {
   if (((((count) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
     return (0) >>> 0;
@@ -2202,7 +2211,8 @@ function storePublicField(
 }
 
 function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
-  if (vectorHandle === 0) {
+  const status = parserFieldArrayValueStatus(vectorHandle);
+  if (status === FIELD_ARRAY_VALUE_MISSING) {
     throw new Error(`Array field '${name}' was not initialized as a runtime vector.`);
   }
   const length = runtimeVectorLength(vectorHandle);

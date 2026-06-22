@@ -58,7 +58,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/public_field_materializer.ts",
       role: "public-field-materializer",
-      hash: "fnv1a64:d9d17c79fa0567fb",
+      hash: "fnv1a64:8832baba9770d873",
     },
     {
       path: "src/targets/runtime/public_rule_node_materializer.ts",
@@ -73,7 +73,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_sources.ts",
       role: "runtime-language-source",
-      hash: "fnv1a64:66d63dfe9a218274",
+      hash: "fnv1a64:d8f05ead5e9babd3",
     },
     {
       path: "src/targets/runtime/language.ts",
@@ -83,12 +83,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_artifacts.ts",
       role: "runtime-language-artifact-manifest",
-      hash: "fnv1a64:691bb9c273bc5e33",
+      hash: "fnv1a64:ddeeb31ab95e363f",
     },
     {
       path: "src/targets/runtime/typescript_parser_runtime.ts",
       role: "typescript-parser-runtime",
-      hash: "fnv1a64:15de2f7f120ae617",
+      hash: "fnv1a64:24bac3ba05a76597",
     },
     {
       path: "src/targets/runtime/wasm_abi.ts",
@@ -102,7 +102,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:ad40d55ff12a36c9" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:f0b02e297ede1a74" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

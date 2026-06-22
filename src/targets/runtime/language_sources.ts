@@ -131,6 +131,8 @@ export const RUNTIME_FIELD_CAPTURE_ARRAY = 2;
 export const RUNTIME_FIELD_CAPTURE_TOO_MANY = 3;
 export const RUNTIME_FIELD_SCHEMA_STATUS_OK = 0;
 export const RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA = 1;
+export const RUNTIME_FIELD_ARRAY_VALUE_OK = 0;
+export const RUNTIME_FIELD_ARRAY_VALUE_MISSING = 1;
 export const RUNTIME_FIELD_SCALAR_VALUE_NULL = 0;
 export const RUNTIME_FIELD_SCALAR_VALUE_FRAGMENT = 1;
 export const RUNTIME_FIELD_FINAL_OK = 0;
@@ -4181,6 +4183,7 @@ function parserFieldFunctions(
     parserFieldIndexFunction(ruleCount),
     parserFieldValueClassFunction(fieldEntryCount),
     parserFieldSchemaStatusFunction(),
+    parserFieldArrayValueStatusFunction(),
     parserFieldScalarValueStatusFunction(),
     parserFieldCaptureStatusFunction(fieldEntryCount),
     parserFieldFinalStatusFunction(fieldEntryCount),
@@ -4378,6 +4381,29 @@ function parserFieldSchemaStatusFunction(): RuntimeLanguageFunction {
         kind: "return",
         expression: u32(RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA),
       },
+    ],
+  };
+}
+
+function parserFieldArrayValueStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldArrayValueStatus",
+    parameters: [
+      { name: "vectorHandle", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("vectorHandle"), u32(0)),
+        consequent: [
+          {
+            kind: "return",
+            expression: u32(RUNTIME_FIELD_ARRAY_VALUE_MISSING),
+          },
+        ],
+      },
+      { kind: "return", expression: u32(RUNTIME_FIELD_ARRAY_VALUE_OK) },
     ],
   };
 }

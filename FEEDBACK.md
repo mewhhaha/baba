@@ -334,6 +334,9 @@ runtime language:
 - Moved public scalar field value classification onto runtime-language
   `parserFieldScalarValueStatus`, so the shared field materializer no longer
   directly decides that a missing scalar capture means public `null`.
+- Moved public array field vector-handle validation onto runtime-language
+  `parserFieldArrayValueStatus`, so the shared field materializer no longer
+  directly decides whether a runtime vector handle is missing.
 - Moved generated TypeScript lexer spec classification and terminal mapping onto
   runtime-language `lexerSpecTokenClass`/`lexerSpecPayload`/`lexerSpecTerminal`
   helpers backed by numeric lexer spec tables. Generated lexed tokens carry an
@@ -403,19 +406,19 @@ Still unresolved:
   classification, rule/field payload-presence validation, reducer child-role
   requirements, and reducer result-shape classification from runtime-language
   helpers, and generated field assembly now gets value-class and
-  count-validation/no-schema/scalar-value decisions from runtime-language
-  helpers. Generated TypeScript lexing, Wasm JavaScript adapter token wrapping,
-  and parser fallback EOF creation now read token class, payload, terminal, and
-  span metadata through runtime-language token records before wrapping public
-  token objects. External `parseTokens()` mapping still accepts public
-  strings/literals at the API boundary, but terminal/channel classification,
-  public token class compatibility, span/EOF-shape status, omitted-gap
-  classification, plus token-level lexical diagnostic classification now go
-  through runtime-language helpers. Parser trace input compaction now uses
-  runtime-language `parserTraceTokenStreamStatus` to classify emitted parser
-  tokens, skippable trivia, and EOF stop records, and parser trace terminal
-  selection now uses runtime-language `parserTraceTerminal` to choose EOF,
-  trusted, spec, or missing parser terminals. Shifted-token syntax
+  count-validation/no-schema/array-value/scalar-value decisions from
+  runtime-language helpers. Generated TypeScript lexing, Wasm JavaScript adapter
+  token wrapping, and parser fallback EOF creation now read token class,
+  payload, terminal, and span metadata through runtime-language token records
+  before wrapping public token objects. External `parseTokens()` mapping still
+  accepts public strings/literals at the API boundary, but terminal/channel
+  classification, public token class compatibility, span/EOF-shape status,
+  omitted-gap classification, plus token-level lexical diagnostic classification
+  now go through runtime-language helpers. Parser trace input compaction now
+  uses runtime-language `parserTraceTokenStreamStatus` to classify emitted
+  parser tokens, skippable trivia, and EOF stop records, and parser trace
+  terminal selection now uses runtime-language `parserTraceTerminal` to choose
+  EOF, trusted, spec, or missing parser terminals. Shifted-token syntax
   classification now uses runtime-language `parserShiftedTokenStatus` to
   distinguish literal/main CST token fragments from trivia/error/EOF records.
   Parser replay span and token-range merge arithmetic is
