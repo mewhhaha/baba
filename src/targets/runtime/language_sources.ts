@@ -659,6 +659,7 @@ export function createParserExpectedRuntimeProgram(
       parserExpectedStartFunction(input.rowLengths.length),
       parserExpectedEndFunction(input.rowLengths.length),
       parserExpectedHasEofFunction(input.rowLengths.length),
+      parserUnexpectedDiagnosticCodeFunction(),
     ],
   };
 }
@@ -5075,6 +5076,34 @@ function parserExpectedHasEofFunction(
         }],
       },
       { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserUnexpectedDiagnosticCodeFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserUnexpectedDiagnosticCode",
+    parameters: [
+      { name: "state", type: "u32" },
+      { name: "isEof", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: and(
+          call("parserExpectedHasEof", [local("state")]),
+          eq(local("isEof"), u32(0)),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(PARSER_DIAGNOSTIC_CODE_PARSE_TRAILING_INPUT),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(PARSER_DIAGNOSTIC_CODE_PARSE_UNEXPECTED_TOKEN),
+      },
     ],
   };
 }

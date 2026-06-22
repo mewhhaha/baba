@@ -262,12 +262,20 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(
     publicDiagnosticMaterializerSource,
-    "parserExpectedHasEof",
+    "parserUnexpectedDiagnosticCode",
   );
   assertIncludes(publicDiagnosticMaterializerSource, "parserDiagnosticNew");
   assertIncludes(
     publicDiagnosticMaterializerSource,
-    "const detailKindId = parserDiagnosticDetailKindId(expectedCode)",
+    "function diagnosticCodeName",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "const detailKindId = parserDiagnosticDetailKindId(runtimeCode)",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "DIAGNOSTIC_PARSE_LEXICAL_ERROR",
   );
   assertIncludes(
     publicDiagnosticMaterializerSource,

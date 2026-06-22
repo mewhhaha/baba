@@ -9,24 +9,23 @@ export function emitPublicDiagnosticMaterializer(): string {
 }
 
 function parseDiagnostic(
-  code: ParseDiagnostic["code"],
+  runtimeCode: number,
   message: string,
   span: Span,
   detail = 0,
 ): ParseDiagnostic {
-  const expectedCode = diagnosticCodeId(code);
   const handle = parserDiagnosticNew(
-    expectedCode,
+    runtimeCode,
     span.start,
     span.end,
     detail,
   );
-  if (parserDiagnosticCode(handle) !== expectedCode) {
+  if (parserDiagnosticCode(handle) !== runtimeCode) {
     throw new Error("Runtime diagnostic code mismatch.");
   }
-  const detailKindId = parserDiagnosticDetailKindId(expectedCode);
+  const detailKindId = parserDiagnosticDetailKindId(runtimeCode);
   return {
-    code,
+    code: diagnosticCodeName(runtimeCode),
     message,
     span: diagnosticSpan(handle),
     runtimeCode: parserDiagnosticCode(handle),
@@ -36,20 +35,20 @@ function parseDiagnostic(
   };
 }
 
-function diagnosticCodeId(code: ParseDiagnostic["code"]): number {
-  switch (code) {
-    case "PARSE_LEXICAL_ERROR":
-      return DIAGNOSTIC_PARSE_LEXICAL_ERROR;
-    case "PARSE_UNEXPECTED_TOKEN":
-      return DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN;
-    case "PARSE_TRAILING_INPUT":
-      return DIAGNOSTIC_PARSE_TRAILING_INPUT;
-    case "PARSE_INVALID_TOKEN_STREAM":
-      return DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM;
-    case "PARSER_INTERNAL_ERROR":
-      return DIAGNOSTIC_PARSER_INTERNAL_ERROR;
-    case "PARSER_BRANCH_LIMIT":
-      return DIAGNOSTIC_PARSER_BRANCH_LIMIT;
+function diagnosticCodeName(runtimeCode: number): ParseDiagnostic["code"] {
+  switch (runtimeCode) {
+    case DIAGNOSTIC_PARSE_LEXICAL_ERROR:
+      return "PARSE_LEXICAL_ERROR";
+    case DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN:
+      return "PARSE_UNEXPECTED_TOKEN";
+    case DIAGNOSTIC_PARSE_TRAILING_INPUT:
+      return "PARSE_TRAILING_INPUT";
+    case DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM:
+      return "PARSE_INVALID_TOKEN_STREAM";
+    case DIAGNOSTIC_PARSER_BRANCH_LIMIT:
+      return "PARSER_BRANCH_LIMIT";
+    default:
+      return "PARSER_INTERNAL_ERROR";
   }
 }
 
@@ -111,12 +110,13 @@ function expectedTerminals(state: number): readonly string[] {
 function unexpectedTokenDiagnostic(token: Token, state: number): ParseDiagnostic {
   const expected = expectedTerminals(state);
   const found = tokenDisplay(token);
-  const code = parserExpectedHasEof(state) !== 0 && token.type !== "eof"
-    ? "PARSE_TRAILING_INPUT"
-    : "PARSE_UNEXPECTED_TOKEN";
+  const runtimeCode = parserUnexpectedDiagnosticCode(
+    state,
+    token.type === "eof" ? 1 : 0,
+  );
   return {
     ...parseDiagnostic(
-      code,
+      runtimeCode,
       \`Unexpected token \${found}.\`,
       token.span,
       state,
@@ -130,7 +130,7 @@ function lexicalTokenDiagnostic(token: Token): ParseDiagnostic {
   if (token.type === "error") {
     return {
       ...parseDiagnostic(
-        "PARSE_LEXICAL_ERROR",
+        DIAGNOSTIC_PARSE_LEXICAL_ERROR,
         \`Unexpected character \${JSON.stringify(token.text)}.\`,
         token.span,
       ),
@@ -139,7 +139,7 @@ function lexicalTokenDiagnostic(token: Token): ParseDiagnostic {
   }
   return {
     ...parseDiagnostic(
-      "PARSE_LEXICAL_ERROR",
+      DIAGNOSTIC_PARSE_LEXICAL_ERROR,
       \`Token \${tokenDisplay(token)} is not part of this parser's terminal set.\`,
       token.span,
     ),
@@ -148,7 +148,7 @@ function lexicalTokenDiagnostic(token: Token): ParseDiagnostic {
 }
 
 function invalidTokenStream(message: string, span: Span): ParseDiagnostic {
-  return parseDiagnostic("PARSE_INVALID_TOKEN_STREAM", message, span);
+  return parseDiagnostic(DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM, message, span);
 }
 
 function internalParserDiagnostic(error: unknown, span: Span): ParseDiagnostic {
@@ -162,12 +162,12 @@ function parserInternalMessageDiagnostic(
   message: string,
   span: Span,
 ): ParseDiagnostic {
-  return parseDiagnostic("PARSER_INTERNAL_ERROR", message, span);
+  return parseDiagnostic(DIAGNOSTIC_PARSER_INTERNAL_ERROR, message, span);
 }
 
 function branchLimitDiagnostic(offset: number): ParseDiagnostic {
   return parseDiagnostic(
-    "PARSER_BRANCH_LIMIT",
+    DIAGNOSTIC_PARSER_BRANCH_LIMIT,
     "Parser exceeded the branch exploration limit.",
     { start: offset, end: offset },
   );
@@ -182,7 +182,7 @@ function tokenDisplay(token: Token): string {
 
 function lexicalDiagnostic(diagnostic: LexDiagnostic): ParseDiagnostic {
   return parseDiagnostic(
-    "PARSE_LEXICAL_ERROR",
+    DIAGNOSTIC_PARSE_LEXICAL_ERROR,
     diagnostic.message,
     diagnostic.span,
   );

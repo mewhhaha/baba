@@ -431,18 +431,36 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         body: [{
           kind: "return",
           expression: add(
-            mul(call("parserExpectedHasEof", [u32(0)]), u32(10000)),
-            add(
-              mul(call("parserExpectedEnd", [u32(0)]), u32(1000)),
+            mul(
               add(
-                mul(call("parserExpectedHasEof", [u32(1)]), u32(100)),
+                mul(call("parserExpectedHasEof", [u32(0)]), u32(10000)),
                 add(
-                  mul(call("parserExpectedStart", [u32(2)]), u32(10)),
+                  mul(call("parserExpectedEnd", [u32(0)]), u32(1000)),
                   add(
-                    call("parserExpectedEnd", [u32(2)]),
-                    call("parserExpectedHasEof", [u32(2)]),
+                    mul(call("parserExpectedHasEof", [u32(1)]), u32(100)),
+                    add(
+                      mul(call("parserExpectedStart", [u32(2)]), u32(10)),
+                      add(
+                        call("parserExpectedEnd", [u32(2)]),
+                        call("parserExpectedHasEof", [u32(2)]),
+                      ),
+                    ),
                   ),
                 ),
+              ),
+              u32(1000),
+            ),
+            add(
+              mul(
+                call("parserUnexpectedDiagnosticCode", [u32(0), u32(0)]),
+                u32(100),
+              ),
+              add(
+                mul(
+                  call("parserUnexpectedDiagnosticCode", [u32(0), u32(1)]),
+                  u32(10),
+                ),
+                call("parserUnexpectedDiagnosticCode", [u32(1), u32(0)]),
               ),
             ),
           ),
@@ -3036,7 +3054,7 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "parser expected lookup returns row ranges and EOF flags",
       program: parserExpectedRuntimeProgram,
-      expected: { kind: "value", value: 12026 },
+      expected: { kind: "value", value: 12_026_322 },
     },
     {
       name: "parser field lookup returns row and config metadata",
