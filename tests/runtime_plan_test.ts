@@ -228,7 +228,8 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(runtimeLanguageSourcesSource, "parserFieldValueClass");
   assertIncludes(runtimeLanguageSourcesSource, "parserFieldStorageStatus");
   assertIncludes(parserRuntimeSource, "parserFieldCaptureStatus");
-  assertIncludes(parserRuntimeSource, "parserFieldFinalStatus");
+  assertIncludes(runtimeLanguageSourcesSource, "parserFieldFinalStatus");
+  assertIncludes(parserRuntimeSource, "parserFieldFinalBuildStatus");
   assertNotIncludes(parserRuntimeSource, "captureCount > 0");
   assertNotIncludes(
     parserRuntimeSource,
@@ -241,6 +242,15 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "const valueClass = parserFieldValueClass(entry)",
   );
   assertNotIncludes(parserRuntimeSource, "entry === NO_FIELD");
+  assertNotIncludes(
+    parserRuntimeSource,
+    "const status = parserFieldFinalStatus(entry, count)",
+  );
+  assertNotIncludes(
+    parserRuntimeSource,
+    "status === FIELD_FINAL_REQUIRED_MISSING",
+  );
+  assertNotIncludes(parserRuntimeSource, "status === FIELD_FINAL_TOO_MANY");
   assertNotIncludes(parserRuntimeSource, "values === 0");
   assertIncludes(publicFieldMaterializerSource, "parserFieldArrayValueStatus");
   assertIncludes(publicFieldMaterializerSource, "parserFieldScalarValueStatus");

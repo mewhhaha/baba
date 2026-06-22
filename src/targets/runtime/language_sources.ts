@@ -165,6 +165,10 @@ export const RUNTIME_FIELD_SCALAR_VALUE_FRAGMENT = 1;
 export const RUNTIME_FIELD_FINAL_OK = 0;
 export const RUNTIME_FIELD_FINAL_REQUIRED_MISSING = 1;
 export const RUNTIME_FIELD_FINAL_TOO_MANY = 2;
+export const RUNTIME_FIELD_FINAL_BUILD_ARRAY = 0;
+export const RUNTIME_FIELD_FINAL_BUILD_SCALAR = 1;
+export const RUNTIME_FIELD_FINAL_BUILD_REQUIRED_MISSING = 2;
+export const RUNTIME_FIELD_FINAL_BUILD_TOO_MANY = 3;
 
 const TRACE_STATUS = 1;
 const TRACE_ERROR_STATE = 2;
@@ -4543,6 +4547,7 @@ function parserFieldFunctions(
     parserFieldScalarValueStatusFunction(),
     parserFieldCaptureStatusFunction(fieldEntryCount),
     parserFieldFinalStatusFunction(fieldEntryCount),
+    parserFieldFinalBuildStatusFunction(),
   ];
 }
 
@@ -4976,6 +4981,66 @@ function parserFieldFinalStatusFunction(
       {
         kind: "return",
         expression: u32(RUNTIME_FIELD_FINAL_REQUIRED_MISSING),
+      },
+    ],
+  };
+}
+
+function parserFieldFinalBuildStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldFinalBuildStatus",
+    parameters: [
+      { name: "entry", type: "u32" },
+      { name: "count", type: "u32" },
+    ],
+    locals: [
+      { name: "finalStatus", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          call("parserFieldStorageStatus", [local("entry")]),
+          u32(RUNTIME_FIELD_STORAGE_ARRAY),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_FIELD_FINAL_BUILD_ARRAY),
+        }],
+      },
+      setLocal(
+        "finalStatus",
+        call("parserFieldFinalStatus", [
+          local("entry"),
+          local("count"),
+        ]),
+      ),
+      {
+        kind: "if",
+        condition: eq(
+          local("finalStatus"),
+          u32(RUNTIME_FIELD_FINAL_REQUIRED_MISSING),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_FIELD_FINAL_BUILD_REQUIRED_MISSING),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("finalStatus"),
+          u32(RUNTIME_FIELD_FINAL_TOO_MANY),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_FIELD_FINAL_BUILD_TOO_MANY),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_FIELD_FINAL_BUILD_SCALAR),
       },
     ],
   };

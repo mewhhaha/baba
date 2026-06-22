@@ -98,8 +98,9 @@ const FIELD_CAPTURE_TOO_MANY = 3;
 const FIELD_BUILD_EMPTY = 0;
 const FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA = 2;
 const FIELD_SCALAR_VALUE_NULL = 0;
-const FIELD_FINAL_REQUIRED_MISSING = 1;
-const FIELD_FINAL_TOO_MANY = 2;
+const FIELD_FINAL_BUILD_ARRAY = 0;
+const FIELD_FINAL_BUILD_REQUIRED_MISSING = 2;
+const FIELD_FINAL_BUILD_TOO_MANY = 3;
 const PUBLIC_TOKEN_LITERAL = 1;
 const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
@@ -1488,6 +1489,22 @@ function parserFieldFinalStatus(entry: number, count: number): number {
   }
   if (((((count) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
     return (0) >>> 0;
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldFinalBuildStatus(entry: number, count: number): number {
+  let finalStatus = 0;
+  if (((((parserFieldStorageStatus(entry) >>> 0) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  finalStatus = (parserFieldFinalStatus(entry, count) >>> 0) >>> 0;
+  if (((((finalStatus) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((finalStatus) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
   }
   return (1) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -3100,18 +3117,18 @@ function buildFields(
     const name = fieldName(fieldId);
     const valueIndex = entry - start;
     const count = runtimeArrayLoad(counts, valueIndex);
-    if (parserFieldStorageStatus(entry) === FIELD_STORAGE_ARRAY) {
+    const finalBuildStatus = parserFieldFinalBuildStatus(entry, count);
+    if (finalBuildStatus === FIELD_FINAL_BUILD_ARRAY) {
       storePublicField(fields, name, materializeFieldArray(
         name,
         runtimeRecordLoad(fieldValues, valueIndex),
       ));
       continue;
     }
-    const status = parserFieldFinalStatus(entry, count);
-    if (status === FIELD_FINAL_REQUIRED_MISSING) {
+    if (finalBuildStatus === FIELD_FINAL_BUILD_REQUIRED_MISSING) {
       throw new Error(`Required field '${name}' was captured ${count} times.`);
     }
-    if (status === FIELD_FINAL_TOO_MANY) {
+    if (finalBuildStatus === FIELD_FINAL_BUILD_TOO_MANY) {
       throw new Error(`Nullable field '${name}' was captured more than once.`);
     }
     storePublicField(

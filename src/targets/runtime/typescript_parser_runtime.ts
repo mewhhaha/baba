@@ -39,8 +39,9 @@ import {
   RUNTIME_FIELD_CAPTURE_SCALAR,
   RUNTIME_FIELD_CAPTURE_TOO_MANY,
   RUNTIME_FIELD_ENTRY_MISSING,
-  RUNTIME_FIELD_FINAL_REQUIRED_MISSING,
-  RUNTIME_FIELD_FINAL_TOO_MANY,
+  RUNTIME_FIELD_FINAL_BUILD_ARRAY,
+  RUNTIME_FIELD_FINAL_BUILD_REQUIRED_MISSING,
+  RUNTIME_FIELD_FINAL_BUILD_TOO_MANY,
   RUNTIME_FIELD_NULLABLE,
   RUNTIME_FIELD_SCALAR_VALUE_NULL,
   RUNTIME_FIELD_STORAGE_ARRAY,
@@ -453,8 +454,9 @@ const FIELD_CAPTURE_TOO_MANY = ${RUNTIME_FIELD_CAPTURE_TOO_MANY};
 const FIELD_BUILD_EMPTY = ${RUNTIME_FIELD_BUILD_EMPTY};
 const FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA = ${RUNTIME_FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA};
 const FIELD_SCALAR_VALUE_NULL = ${RUNTIME_FIELD_SCALAR_VALUE_NULL};
-const FIELD_FINAL_REQUIRED_MISSING = ${RUNTIME_FIELD_FINAL_REQUIRED_MISSING};
-const FIELD_FINAL_TOO_MANY = ${RUNTIME_FIELD_FINAL_TOO_MANY};
+const FIELD_FINAL_BUILD_ARRAY = ${RUNTIME_FIELD_FINAL_BUILD_ARRAY};
+const FIELD_FINAL_BUILD_REQUIRED_MISSING = ${RUNTIME_FIELD_FINAL_BUILD_REQUIRED_MISSING};
+const FIELD_FINAL_BUILD_TOO_MANY = ${RUNTIME_FIELD_FINAL_BUILD_TOO_MANY};
 const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
 const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
@@ -1258,18 +1260,18 @@ function buildFields(
     const name = fieldName(fieldId);
     const valueIndex = entry - start;
     const count = runtimeArrayLoad(counts, valueIndex);
-    if (parserFieldStorageStatus(entry) === FIELD_STORAGE_ARRAY) {
+    const finalBuildStatus = parserFieldFinalBuildStatus(entry, count);
+    if (finalBuildStatus === FIELD_FINAL_BUILD_ARRAY) {
       storePublicField(fields, name, materializeFieldArray(
         name,
         runtimeRecordLoad(fieldValues, valueIndex),
       ));
       continue;
     }
-    const status = parserFieldFinalStatus(entry, count);
-    if (status === FIELD_FINAL_REQUIRED_MISSING) {
+    if (finalBuildStatus === FIELD_FINAL_BUILD_REQUIRED_MISSING) {
       throw new Error(\`Required field '\${name}' was captured \${count} times.\`);
     }
-    if (status === FIELD_FINAL_TOO_MANY) {
+    if (finalBuildStatus === FIELD_FINAL_BUILD_TOO_MANY) {
       throw new Error(\`Nullable field '\${name}' was captured more than once.\`);
     }
     storePublicField(

@@ -45,6 +45,10 @@ import {
   RUNTIME_FIELD_CAPTURE_TOO_MANY,
   RUNTIME_FIELD_ENTRY_MISSING,
   RUNTIME_FIELD_ENTRY_PRESENT,
+  RUNTIME_FIELD_FINAL_BUILD_ARRAY,
+  RUNTIME_FIELD_FINAL_BUILD_REQUIRED_MISSING,
+  RUNTIME_FIELD_FINAL_BUILD_SCALAR,
+  RUNTIME_FIELD_FINAL_BUILD_TOO_MANY,
   RUNTIME_FIELD_FINAL_OK,
   RUNTIME_FIELD_FINAL_REQUIRED_MISSING,
   RUNTIME_FIELD_FINAL_TOO_MANY,
@@ -721,6 +725,46 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           expression: add(
             mul(call("parserFieldEntryStatus", [u32(0)]), u32(10)),
             call("parserFieldEntryStatus", [u32(RUNTIME_NO_FIELD)]),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserFieldFinalBuildStatusProgram: RuntimeLanguageProgram = {
+    ...parserFieldBaseProgram,
+    name: "parser_field_final_build_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserFieldBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserFieldFinalBuildStatus", [u32(0), u32(0)]),
+              u32(10_000),
+            ),
+            add(
+              mul(
+                call("parserFieldFinalBuildStatus", [u32(1), u32(2)]),
+                u32(1_000),
+              ),
+              add(
+                mul(
+                  call("parserFieldFinalBuildStatus", [u32(1), u32(1)]),
+                  u32(100),
+                ),
+                add(
+                  mul(
+                    call("parserFieldFinalBuildStatus", [u32(2), u32(0)]),
+                    u32(10),
+                  ),
+                  call("parserFieldFinalBuildStatus", [u32(2), u32(1)]),
+                ),
+              ),
+            ),
           ),
         }],
       },
@@ -4066,6 +4110,19 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         kind: "value",
         value: RUNTIME_FIELD_ENTRY_PRESENT * 10 +
           RUNTIME_FIELD_ENTRY_MISSING,
+      },
+    },
+    {
+      name:
+        "parser field final build status classifies materialization actions",
+      program: parserFieldFinalBuildStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_FIELD_FINAL_BUILD_ARRAY * 10_000 +
+          RUNTIME_FIELD_FINAL_BUILD_TOO_MANY * 1_000 +
+          RUNTIME_FIELD_FINAL_BUILD_SCALAR * 100 +
+          RUNTIME_FIELD_FINAL_BUILD_REQUIRED_MISSING * 10 +
+          RUNTIME_FIELD_FINAL_BUILD_SCALAR,
       },
     },
     {
