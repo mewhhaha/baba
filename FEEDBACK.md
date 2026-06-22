@@ -76,6 +76,10 @@ runtime language:
   records plus token-fragment construction, with TypeScript/Wasm conformance for
   token fields, diagnostic fields, token spans/token ranges, and wrong-kind
   traps.
+- Added arena-backed runtime-language fragment assembly helpers for reducer
+  shapes: empty fragments, sequences, first-array wrapping, list append,
+  separated-list append, child/field vector copying, and span/token-range
+  merging, with TypeScript/Wasm conformance coverage.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source program, with the same source compiled through both
   TypeScript and Wasm conformance tests.
@@ -252,11 +256,12 @@ Still unresolved:
   from one runtime-language implementation. The runtime language now has a
   checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
   growable vectors, and initial parser fragment/field/rule-node/token/
-  diagnostic layouts, but it still lacks opaque typed handle provenance and
-  generated parser-runtime lowering that would use those allocation helpers. The
-  compiler now has a shared lowered control-flow/value IR and checked helper
-  artifact hashes, but it still needs broader parser-runtime lowering before the
-  release can fully satisfy "one runtime implementation, two execution targets."
+  diagnostic layouts plus reduction-shaped fragment assembly helpers, but it
+  still lacks opaque typed handle provenance and generated parser-runtime
+  lowering that would use those allocation helpers. The compiler now has a
+  shared lowered control-flow/value IR and checked helper artifact hashes, but
+  it still needs broader parser-runtime lowering before the release can fully
+  satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

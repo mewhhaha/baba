@@ -674,6 +674,7 @@ function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
     runtimeVectorTruncateFunction(),
     runtimeVectorCloneFunction(),
     runtimeVectorAppendFunction(),
+    runtimeVectorAppendAllFunction(),
   ];
 }
 
@@ -1514,6 +1515,42 @@ function runtimeVectorAppendFunction(): RuntimeLanguageFunction {
   };
 }
 
+function runtimeVectorAppendAllFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeVectorAppendAll",
+    parameters: [
+      { name: "target", type: "u32" },
+      { name: "source", type: "u32" },
+    ],
+    locals: [
+      { name: "length", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("length", call("runtimeVectorLength", [local("source")])),
+      setLocal("index", u32(0)),
+      {
+        kind: "while",
+        condition: ltu(local("index"), local("length")),
+        body: [
+          setLocal(
+            "value",
+            call("runtimeVectorLoad", [local("source"), local("index")]),
+          ),
+          setLocal(
+            "value",
+            call("runtimeVectorAppend", [local("target"), local("value")]),
+          ),
+          setLocal("index", add(local("index"), u32(1))),
+        ],
+      },
+      { kind: "return", expression: local("target") },
+    ],
+  };
+}
+
 function parserObjectFunctions(): RuntimeLanguageFunction[] {
   return [
     parserFragmentNewFunction(),
@@ -1530,6 +1567,14 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserFragmentFieldCountFunction(),
     parserFragmentFieldAtFunction(),
     parserFragmentAppendFieldFunction(),
+    parserFragmentSetValueFunction(),
+    parserFragmentMergeFromFunction(),
+    parserFragmentEmptyFunction(),
+    parserFragmentSequenceNewFunction(),
+    parserFragmentSequenceAppendFunction(),
+    parserFragmentWrapValueVectorFunction(),
+    parserFragmentAppendValueFunction(),
+    parserFragmentAppendSeparatedValueFunction(),
     parserFieldCaptureNewFunction(),
     parserFieldCaptureFieldIdFunction(),
     parserFieldCaptureValueFunction(),
@@ -1973,6 +2018,369 @@ function parserFragmentAppendFieldFunction(): RuntimeLanguageFunction {
         call("runtimeVectorAppend", [local("fields"), local("capture")]),
       ),
       { kind: "return", expression: local("capture") },
+    ],
+  };
+}
+
+function parserFragmentSetValueFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentSetValue",
+    parameters: [
+      { name: "fragment", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    locals: [
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("discard", call("parserFragmentValue", [local("fragment")])),
+      storeScratch(
+        add(local("fragment"), u32(RUNTIME_PARSER_FRAGMENT_VALUE_WORD_OFFSET)),
+        local("value"),
+      ),
+      { kind: "return", expression: local("value") },
+    ],
+  };
+}
+
+function parserFragmentMergeFromFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentMergeFrom",
+    parameters: [
+      { name: "target", type: "u32" },
+      { name: "part", type: "u32" },
+    ],
+    locals: [
+      { name: "targetStart", type: "u32" },
+      { name: "targetEnd", type: "u32" },
+      { name: "targetTokenStart", type: "u32" },
+      { name: "targetTokenEnd", type: "u32" },
+      { name: "partStart", type: "u32" },
+      { name: "partEnd", type: "u32" },
+      { name: "partTokenStart", type: "u32" },
+      { name: "partTokenEnd", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "targetStart",
+        call("parserFragmentSpanStart", [
+          local("target"),
+        ]),
+      ),
+      setLocal(
+        "targetEnd",
+        call("parserFragmentSpanEnd", [
+          local("target"),
+        ]),
+      ),
+      setLocal(
+        "targetTokenStart",
+        call("parserFragmentTokenStart", [
+          local("target"),
+        ]),
+      ),
+      setLocal(
+        "targetTokenEnd",
+        call("parserFragmentTokenEnd", [
+          local("target"),
+        ]),
+      ),
+      setLocal("partStart", call("parserFragmentSpanStart", [local("part")])),
+      setLocal("partEnd", call("parserFragmentSpanEnd", [local("part")])),
+      setLocal(
+        "partTokenStart",
+        call("parserFragmentTokenStart", [
+          local("part"),
+        ]),
+      ),
+      setLocal(
+        "partTokenEnd",
+        call("parserFragmentTokenEnd", [
+          local("part"),
+        ]),
+      ),
+      {
+        kind: "if",
+        condition: ltu(local("partStart"), local("targetStart")),
+        consequent: [
+          storeScratch(
+            add(
+              local("target"),
+              u32(RUNTIME_PARSER_FRAGMENT_SPAN_START_WORD_OFFSET),
+            ),
+            local("partStart"),
+          ),
+        ],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("targetEnd"), local("partEnd")),
+        consequent: [
+          storeScratch(
+            add(
+              local("target"),
+              u32(RUNTIME_PARSER_FRAGMENT_SPAN_END_WORD_OFFSET),
+            ),
+            local("partEnd"),
+          ),
+        ],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("partTokenStart"), local("targetTokenStart")),
+        consequent: [
+          storeScratch(
+            add(
+              local("target"),
+              u32(RUNTIME_PARSER_FRAGMENT_TOKEN_START_WORD_OFFSET),
+            ),
+            local("partTokenStart"),
+          ),
+        ],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("targetTokenEnd"), local("partTokenEnd")),
+        consequent: [
+          storeScratch(
+            add(
+              local("target"),
+              u32(RUNTIME_PARSER_FRAGMENT_TOKEN_END_WORD_OFFSET),
+            ),
+            local("partTokenEnd"),
+          ),
+        ],
+      },
+      setLocal(
+        "discard",
+        call("runtimeVectorAppendAll", [
+          call("parserFragmentChildren", [local("target")]),
+          call("parserFragmentChildren", [local("part")]),
+        ]),
+      ),
+      setLocal(
+        "discard",
+        call("runtimeVectorAppendAll", [
+          call("parserFragmentFields", [local("target")]),
+          call("parserFragmentFields", [local("part")]),
+        ]),
+      ),
+      { kind: "return", expression: local("target") },
+    ],
+  };
+}
+
+function parserFragmentEmptyFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentEmpty",
+    parameters: [
+      { name: "value", type: "u32" },
+      { name: "offset", type: "u32" },
+      { name: "tokenIndex", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: call("parserFragmentNew", [
+          local("value"),
+          local("offset"),
+          local("offset"),
+          local("tokenIndex"),
+          local("tokenIndex"),
+        ]),
+      },
+    ],
+  };
+}
+
+function parserFragmentSequenceNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentSequenceNew",
+    parameters: [
+      { name: "offset", type: "u32" },
+      { name: "tokenIndex", type: "u32" },
+    ],
+    locals: [
+      { name: "values", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("values", call("runtimeVectorNew", [u32(0)])),
+      {
+        kind: "return",
+        expression: call("parserFragmentNew", [
+          local("values"),
+          local("offset"),
+          local("offset"),
+          local("tokenIndex"),
+          local("tokenIndex"),
+        ]),
+      },
+    ],
+  };
+}
+
+function parserFragmentSequenceAppendFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentSequenceAppend",
+    parameters: [
+      { name: "sequence", type: "u32" },
+      { name: "part", type: "u32" },
+    ],
+    locals: [
+      { name: "values", type: "u32" },
+      { name: "length", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("values", call("parserFragmentValue", [local("sequence")])),
+      setLocal("length", call("runtimeVectorLength", [local("values")])),
+      setLocal(
+        "discard",
+        call("runtimeVectorAppend", [
+          local("values"),
+          call("parserFragmentValue", [local("part")]),
+        ]),
+      ),
+      {
+        kind: "if",
+        condition: eq(local("length"), u32(0)),
+        consequent: [
+          storeScratch(
+            add(
+              local("sequence"),
+              u32(RUNTIME_PARSER_FRAGMENT_SPAN_START_WORD_OFFSET),
+            ),
+            call("parserFragmentSpanStart", [local("part")]),
+          ),
+          storeScratch(
+            add(
+              local("sequence"),
+              u32(RUNTIME_PARSER_FRAGMENT_SPAN_END_WORD_OFFSET),
+            ),
+            call("parserFragmentSpanEnd", [local("part")]),
+          ),
+          storeScratch(
+            add(
+              local("sequence"),
+              u32(RUNTIME_PARSER_FRAGMENT_TOKEN_START_WORD_OFFSET),
+            ),
+            call("parserFragmentTokenStart", [local("part")]),
+          ),
+          storeScratch(
+            add(
+              local("sequence"),
+              u32(RUNTIME_PARSER_FRAGMENT_TOKEN_END_WORD_OFFSET),
+            ),
+            call("parserFragmentTokenEnd", [local("part")]),
+          ),
+        ],
+      },
+      setLocal(
+        "discard",
+        call("parserFragmentMergeFrom", [local("sequence"), local("part")]),
+      ),
+      { kind: "return", expression: local("sequence") },
+    ],
+  };
+}
+
+function parserFragmentWrapValueVectorFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentWrapValueVector",
+    parameters: [
+      { name: "fragment", type: "u32" },
+    ],
+    locals: [
+      { name: "oldValue", type: "u32" },
+      { name: "values", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("oldValue", call("parserFragmentValue", [local("fragment")])),
+      setLocal("values", call("runtimeVectorNew", [u32(1)])),
+      setLocal(
+        "discard",
+        call("runtimeVectorAppend", [local("values"), local("oldValue")]),
+      ),
+      setLocal(
+        "discard",
+        call("parserFragmentSetValue", [local("fragment"), local("values")]),
+      ),
+      { kind: "return", expression: local("fragment") },
+    ],
+  };
+}
+
+function parserFragmentAppendValueFunction(): RuntimeLanguageFunction {
+  return parserFragmentAppendValueFunctionNamed("parserFragmentAppendValue");
+}
+
+function parserFragmentAppendValueFunctionNamed(
+  name: string,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "list", type: "u32" },
+      { name: "item", type: "u32" },
+    ],
+    locals: [
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "discard",
+        call("runtimeVectorAppend", [
+          call("parserFragmentValue", [local("list")]),
+          call("parserFragmentValue", [local("item")]),
+        ]),
+      ),
+      setLocal(
+        "discard",
+        call("parserFragmentMergeFrom", [local("list"), local("item")]),
+      ),
+      { kind: "return", expression: local("list") },
+    ],
+  };
+}
+
+function parserFragmentAppendSeparatedValueFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentAppendSeparatedValue",
+    parameters: [
+      { name: "list", type: "u32" },
+      { name: "separator", type: "u32" },
+      { name: "item", type: "u32" },
+    ],
+    locals: [
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "discard",
+        call("runtimeVectorAppend", [
+          call("parserFragmentValue", [local("list")]),
+          call("parserFragmentValue", [local("item")]),
+        ]),
+      ),
+      setLocal(
+        "discard",
+        call("parserFragmentMergeFrom", [local("list"), local("separator")]),
+      ),
+      setLocal(
+        "discard",
+        call("parserFragmentMergeFrom", [local("list"), local("item")]),
+      ),
+      { kind: "return", expression: local("list") },
     ],
   };
 }

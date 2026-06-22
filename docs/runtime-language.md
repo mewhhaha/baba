@@ -117,6 +117,9 @@ functions with statement bodies. The current conformance subset supports:
 - arena-backed parser fragment, field-capture, rule-node, token, and diagnostic
   layout helpers for the first host-visible CST/token/diagnostic object
   substrate;
+- arena-backed parser fragment assembly helpers for empty fragments, sequence
+  fragments, first-array wrapping, list append, separated-list append, child and
+  field vector copying, and span/token-range merging;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - bitwise AND;
@@ -185,6 +188,9 @@ execute both outputs and compare returned values or traps.
 - Parser fragment, field-capture, rule-node, token, and diagnostic helpers trap
   for wrong object kind and delegate vector bounds checks to the arena-backed
   vector helpers.
+- Parser fragment assembly helpers represent reducer list values as arena
+  vectors and preserve child/field vectors plus span/token-range extents across
+  sequence, append, and separated-append operations.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset

@@ -695,6 +695,21 @@ function runtimeVectorAppend(handle: number, value: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function runtimeVectorAppendAll(target: number, source: number): number {
+  let length = 0;
+  let index = 0;
+  let value = 0;
+  length = (runtimeVectorLength(source) >>> 0) >>> 0;
+  index = (0) >>> 0;
+  while (((((index) >>> 0) < ((length) >>> 0) ? 1 : 0)) !== 0) {
+    value = (runtimeVectorLoad(source, index) >>> 0) >>> 0;
+    value = (runtimeVectorAppend(target, value) >>> 0) >>> 0;
+    index = (((index) + (1)) >>> 0) >>> 0;
+  }
+  return (target) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTraceSetTerminal(index: number, terminal: number): number {
   let capacity = 0;
   index = (((8) + (index)) >>> 0) >>> 0;

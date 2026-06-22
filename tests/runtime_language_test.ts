@@ -2018,6 +2018,322 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserFragmentAssemblyProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_fragment_assembly",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "tokenA", type: "u32" },
+          { name: "tokenB", type: "u32" },
+          { name: "tokenC", type: "u32" },
+          { name: "separatorToken", type: "u32" },
+          { name: "partA", type: "u32" },
+          { name: "partB", type: "u32" },
+          { name: "partC", type: "u32" },
+          { name: "separator", type: "u32" },
+          { name: "sequence", type: "u32" },
+          { name: "empty", type: "u32" },
+          { name: "capture", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal(
+            "tokenA",
+            call("parserTokenNew", [u32(1), u32(10), u32(20), u32(3), u32(4)]),
+          ),
+          setLocal(
+            "tokenB",
+            call("parserTokenNew", [u32(1), u32(11), u32(21), u32(5), u32(7)]),
+          ),
+          setLocal(
+            "partA",
+            call("parserFragmentFromToken", [local("tokenA"), u32(1)]),
+          ),
+          setLocal(
+            "partB",
+            call("parserFragmentFromToken", [local("tokenB"), u32(2)]),
+          ),
+          setLocal(
+            "capture",
+            call("parserFieldCaptureNew", [u32(4), local("tokenB")]),
+          ),
+          setLocal(
+            "discard",
+            call("parserFragmentAppendField", [
+              local("partB"),
+              local("capture"),
+            ]),
+          ),
+          setLocal(
+            "sequence",
+            call("parserFragmentSequenceNew", [u32(9), u32(6)]),
+          ),
+          setLocal(
+            "discard",
+            call("parserFragmentSequenceAppend", [
+              local("sequence"),
+              local("partA"),
+            ]),
+          ),
+          setLocal(
+            "discard",
+            call("parserFragmentSequenceAppend", [
+              local("sequence"),
+              local("partB"),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(
+              call("runtimeVectorLength", [
+                call("parserFragmentValue", [local("sequence")]),
+              ]),
+              u32(2),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(1) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("runtimeVectorLoad", [
+                call("parserFragmentValue", [local("sequence")]),
+                u32(0),
+              ]),
+              local("tokenA"),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(2) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("runtimeVectorLoad", [
+                call("parserFragmentValue", [local("sequence")]),
+                u32(1),
+              ]),
+              local("tokenB"),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(3) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentChildCount", [local("sequence")]),
+              u32(2),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(4) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentFieldCount", [local("sequence")]),
+              u32(1),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(5) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFieldCaptureFieldId", [
+                call("parserFragmentFieldAt", [local("sequence"), u32(0)]),
+              ]),
+              u32(4),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(6) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentSpanStart", [local("sequence")]),
+              u32(3),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(7) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentSpanEnd", [local("sequence")]),
+              u32(7),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(8) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentTokenStart", [local("sequence")]),
+              u32(1),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(9) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentTokenEnd", [local("sequence")]),
+              u32(3),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(10) }],
+          },
+          setLocal(
+            "empty",
+            call("parserFragmentEmpty", [u32(123), u32(10), u32(5)]),
+          ),
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentSpanStart", [local("empty")]),
+              u32(10),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(11) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentTokenEnd", [local("empty")]),
+              u32(5),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(12) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentChildCount", [local("empty")]),
+              u32(0),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(13) }],
+          },
+          setLocal(
+            "tokenC",
+            call("parserTokenNew", [u32(1), u32(12), u32(22), u32(8), u32(9)]),
+          ),
+          setLocal(
+            "separatorToken",
+            call("parserTokenNew", [u32(2), u32(13), u32(23), u32(9), u32(10)]),
+          ),
+          setLocal(
+            "tokenB",
+            call("parserTokenNew", [
+              u32(1),
+              u32(14),
+              u32(24),
+              u32(10),
+              u32(12),
+            ]),
+          ),
+          setLocal(
+            "partC",
+            call("parserFragmentFromToken", [local("tokenC"), u32(4)]),
+          ),
+          setLocal(
+            "separator",
+            call("parserFragmentFromToken", [local("separatorToken"), u32(5)]),
+          ),
+          setLocal(
+            "partB",
+            call("parserFragmentFromToken", [local("tokenB"), u32(6)]),
+          ),
+          setLocal(
+            "discard",
+            call("parserFragmentWrapValueVector", [local("partC")]),
+          ),
+          setLocal(
+            "discard",
+            call("parserFragmentAppendSeparatedValue", [
+              local("partC"),
+              local("separator"),
+              local("partB"),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(
+              call("runtimeVectorLength", [
+                call("parserFragmentValue", [local("partC")]),
+              ]),
+              u32(2),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(14) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("runtimeVectorLoad", [
+                call("parserFragmentValue", [local("partC")]),
+                u32(1),
+              ]),
+              local("tokenB"),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(15) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentChildCount", [local("partC")]),
+              u32(3),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(16) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentSpanStart", [local("partC")]),
+              u32(8),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(17) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentSpanEnd", [local("partC")]),
+              u32(12),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(18) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentTokenStart", [local("partC")]),
+              u32(4),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(19) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentTokenEnd", [local("partC")]),
+              u32(7),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(20) }],
+          },
+          { kind: "return", expression: u32(1) },
+        ],
+      },
+    ],
+  };
   const arenaStaleHandleProgram: RuntimeLanguageProgram = {
     ...RUNTIME_ARENA_PROGRAM,
     name: "arena_stale_handle",
@@ -2324,6 +2640,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "runtime parser field append traps on wrong capture kind",
       program: parserObjectWrongFieldProgram,
       expected: { kind: "trap" },
+    },
+    {
+      name: "runtime parser fragment assembly stores reduction-shaped data",
+      program: parserFragmentAssemblyProgram,
+      expected: { kind: "value", value: 1 },
     },
     {
       name: "runtime object helpers trap on stale handles after reset",
@@ -2730,12 +3051,16 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     assertEquals(
       JSON.stringify(typescript),
       JSON.stringify(testCase.expected),
-      `${testCase.name} TypeScript result`,
+      `${testCase.name} TypeScript result: expected ${
+        JSON.stringify(testCase.expected)
+      }, got ${JSON.stringify(typescript)}`,
     );
     assertEquals(
       JSON.stringify(wasm),
       JSON.stringify(testCase.expected),
-      `${testCase.name} Wasm result`,
+      `${testCase.name} Wasm result: expected ${
+        JSON.stringify(testCase.expected)
+      }, got ${JSON.stringify(wasm)}`,
     );
   }
 });
