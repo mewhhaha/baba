@@ -63,9 +63,10 @@ runtime language:
   parameters, locals, assignments, structured branches, and loops across both
   TypeScript and Wasm backends.
 - Added runtime-language unsigned less-than and a resettable scratch-memory
-  arena with arena-backed `u32` array helpers, including allocation overflow,
-  reset/reuse, zero initialization, and bounds-trap conformance across both
-  TypeScript and Wasm backends. This starts specifying allocation lifetime
+  arena with tagged arena-backed `u32` array and fixed-record helpers, including
+  allocation overflow, reset/reuse, zero initialization, wrong-kind traps, stale
+  handle traps, and bounds-trap conformance across both TypeScript and Wasm
+  backends. This starts specifying allocation lifetime and record layout
   semantics before parser CST/field allocation is lowered into the runtime
   language.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
@@ -236,12 +237,13 @@ Still unresolved:
   allocation/assembly of fragments, field objects/arrays, CST nodes, and
   generated token/diagnostic object emission is still not mechanically emitted
   from one runtime-language implementation. The runtime language now has a
-  checked resettable arena and arena-backed `u32` arrays, but it still lacks
-  records, typed handle provenance, host-visible CST/token/diagnostic layouts,
-  and parser-runtime lowering that would use those allocation helpers. The
-  compiler now has a shared lowered control-flow/value IR and checked helper
-  artifact hashes, but it still needs broader parser-runtime lowering before the
-  release can fully satisfy "one runtime implementation, two execution targets."
+  checked resettable arena plus tagged arena-backed `u32` arrays and fixed
+  records, but it still lacks opaque typed handle provenance, host-visible
+  CST/token/diagnostic layouts, and parser-runtime lowering that would use those
+  allocation helpers. The compiler now has a shared lowered control-flow/value
+  IR and checked helper artifact hashes, but it still needs broader
+  parser-runtime lowering before the release can fully satisfy "one runtime
+  implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

@@ -110,8 +110,8 @@ functions with statement bodies. The current conformance subset supports:
 - calls between `u32` functions;
 - checked read-only table loads by constant or local index;
 - checked scratch-memory growth, loads, and stores by computed `u32` index;
-- arena-backed `u32` arrays represented as scratch-memory handles with
-  resettable allocation lifetime;
+- tagged arena-backed `u32` arrays and fixed records represented as
+  scratch-memory handles with resettable allocation lifetime;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - bitwise AND;
@@ -157,19 +157,21 @@ execute both outputs and compare returned values or traps.
 - `runtimeArenaAlloc(words)` returns the previous cursor, advances by `words`,
   traps on `u32` overflow, and grows scratch memory before publishing the new
   cursor.
-- Arena-backed arrays use a one-word length header followed by `u32` element
-  words. New array elements are initialized to zero.
-- Arena-backed array length, load, and store helpers trap for handle `0`, stale
-  or out-of-range handles, out-of-bounds indexes, and offset overflow. Handles
-  are currently raw arena offsets, not typed capabilities with provenance.
+- Arena-backed heap objects start with a kind word. Array objects store a length
+  word followed by `u32` element words. Record objects store a tag word, field
+  count word, and fixed `u32` field words. New array elements and record fields
+  are initialized to zero.
+- Arena-backed array and record helpers trap for handle `0`, stale or
+  out-of-range handles, wrong object kind, out-of-bounds indexes, and offset
+  overflow. Handles are currently raw arena offsets with checked object-kind
+  tags, not opaque capabilities with full provenance.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
 
 These rules must be specified before the parser runtime can be fully lowered:
 
-- records and record layout;
-- growable vectors, ownership, and typed handle provenance;
+- growable vectors, ownership, and opaque typed handle provenance;
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
 - host-visible memory layout.

@@ -1322,6 +1322,59 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const arenaRecordProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_record_conformance",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeRecordNew", [u32(42), u32(2)])),
+          setLocal(
+            "discard",
+            call("runtimeRecordStore", [local("handle"), u32(0), u32(7)]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeRecordStore", [local("handle"), u32(1), u32(11)]),
+          ),
+          {
+            kind: "return",
+            expression: add(
+              mul(call("runtimeArenaUsed", []), u32(1_000_000)),
+              add(
+                mul(call("runtimeObjectKind", [local("handle")]), u32(100_000)),
+                add(
+                  mul(call("runtimeRecordTag", [local("handle")]), u32(1_000)),
+                  add(
+                    mul(
+                      call("runtimeRecordFieldCount", [local("handle")]),
+                      u32(100),
+                    ),
+                    add(
+                      mul(
+                        call("runtimeRecordLoad", [local("handle"), u32(0)]),
+                        u32(10),
+                      ),
+                      call("runtimeRecordLoad", [local("handle"), u32(1)]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          },
+        ],
+      },
+    ],
+  };
   const arenaResetProgram: RuntimeLanguageProgram = {
     ...RUNTIME_ARENA_PROGRAM,
     name: "arena_reset_conformance",
@@ -1374,6 +1427,79 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           {
             kind: "return",
             expression: call("runtimeArrayLoad", [local("handle"), u32(1)]),
+          },
+        ],
+      },
+    ],
+  };
+  const arenaRecordBoundsProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_record_bounds",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeRecordNew", [u32(7), u32(1)])),
+          {
+            kind: "return",
+            expression: call("runtimeRecordLoad", [local("handle"), u32(1)]),
+          },
+        ],
+      },
+    ],
+  };
+  const arenaWrongKindProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_wrong_kind",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeArrayNew", [u32(1)])),
+          {
+            kind: "return",
+            expression: call("runtimeRecordTag", [local("handle")]),
+          },
+        ],
+      },
+    ],
+  };
+  const arenaStaleHandleProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_stale_handle",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeArrayNew", [u32(1)])),
+          setLocal("discard", call("runtimeArenaReset", [])),
+          {
+            kind: "return",
+            expression: call("runtimeArrayLength", [local("handle")]),
           },
         ],
       },
@@ -1589,16 +1715,36 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "runtime arena allocates and reads u32 arrays",
       program: arenaArrayProgram,
-      expected: { kind: "value", value: 5381 },
+      expected: { kind: "value", value: 6381 },
+    },
+    {
+      name: "runtime arena allocates tagged records",
+      program: arenaRecordProgram,
+      expected: { kind: "value", value: 6_242_281 },
     },
     {
       name: "runtime arena reset reuses allocation lifetime",
       program: arenaResetProgram,
-      expected: { kind: "value", value: 30 },
+      expected: { kind: "value", value: 40 },
     },
     {
       name: "runtime array access traps out of bounds",
       program: arenaArrayBoundsProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime record access traps out of bounds",
+      program: arenaRecordBoundsProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime object helpers trap on wrong handle kind",
+      program: arenaWrongKindProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime object helpers trap on stale handles after reset",
+      program: arenaStaleHandleProgram,
       expected: { kind: "trap" },
     },
     {

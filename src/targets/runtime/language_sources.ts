@@ -133,7 +133,13 @@ const LEXER_SCAN_BEST_END = 3;
 const LEXER_SCAN_DONE = 4;
 const RUNTIME_ARENA_NEXT_WORD = 0;
 const RUNTIME_ARENA_FIRST_WORD = 1;
-const RUNTIME_ARRAY_LENGTH_WORDS = 1;
+const RUNTIME_OBJECT_ARRAY = 1;
+const RUNTIME_OBJECT_RECORD = 2;
+const RUNTIME_ARRAY_LENGTH_WORD_OFFSET = 1;
+const RUNTIME_ARRAY_DATA_WORD_OFFSET = 2;
+const RUNTIME_RECORD_TAG_WORD_OFFSET = 1;
+const RUNTIME_RECORD_FIELD_COUNT_WORD_OFFSET = 2;
+const RUNTIME_RECORD_DATA_WORD_OFFSET = 3;
 
 export type LexerRuntimeTransition = readonly [
   start: number,
@@ -592,11 +598,18 @@ function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
     runtimeArenaResetFunction(),
     runtimeArenaUsedFunction(),
     runtimeArenaAllocFunction(),
+    runtimeObjectKindFunction(),
     runtimeArrayNewFunction(),
     runtimeArrayLengthFunction(),
     runtimeArrayElementOffsetFunction(),
     runtimeArrayLoadFunction(),
     runtimeArrayStoreFunction(),
+    runtimeRecordNewFunction(),
+    runtimeRecordTagFunction(),
+    runtimeRecordFieldCountFunction(),
+    runtimeRecordFieldOffsetFunction(),
+    runtimeRecordLoadFunction(),
+    runtimeRecordStoreFunction(),
   ];
 }
 
@@ -663,52 +676,9 @@ function runtimeArenaAllocFunction(): RuntimeLanguageFunction {
   };
 }
 
-function runtimeArrayNewFunction(): RuntimeLanguageFunction {
+function runtimeObjectKindFunction(): RuntimeLanguageFunction {
   return {
-    name: "runtimeArrayNew",
-    parameters: [
-      { name: "length", type: "u32" },
-    ],
-    locals: [
-      { name: "handle", type: "u32" },
-      { name: "total", type: "u32" },
-      { name: "index", type: "u32" },
-      { name: "offset", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      setLocal("total", add(local("length"), u32(RUNTIME_ARRAY_LENGTH_WORDS))),
-      {
-        kind: "if",
-        condition: ltu(local("total"), local("length")),
-        consequent: [{ kind: "trap" }],
-      },
-      setLocal("handle", call("runtimeArenaAlloc", [local("total")])),
-      storeScratch(local("handle"), local("length")),
-      setLocal("index", u32(0)),
-      {
-        kind: "while",
-        condition: ltu(local("index"), local("length")),
-        body: [
-          setLocal(
-            "offset",
-            add(
-              add(local("handle"), u32(RUNTIME_ARRAY_LENGTH_WORDS)),
-              local("index"),
-            ),
-          ),
-          storeScratch(local("offset"), u32(0)),
-          setLocal("index", add(local("index"), u32(1))),
-        ],
-      },
-      { kind: "return", expression: local("handle") },
-    ],
-  };
-}
-
-function runtimeArrayLengthFunction(): RuntimeLanguageFunction {
-  return {
-    name: "runtimeArrayLength",
+    name: "runtimeObjectKind",
     parameters: [
       { name: "handle", type: "u32" },
     ],
@@ -730,6 +700,84 @@ function runtimeArrayLengthFunction(): RuntimeLanguageFunction {
         alternate: [{ kind: "trap" }],
       },
       { kind: "return", expression: loadScratch(local("handle")) },
+    ],
+  };
+}
+
+function runtimeArrayNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArrayNew",
+    parameters: [
+      { name: "length", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+      { name: "total", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "offset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "total",
+        add(local("length"), u32(RUNTIME_ARRAY_DATA_WORD_OFFSET)),
+      ),
+      {
+        kind: "if",
+        condition: ltu(local("total"), local("length")),
+        consequent: [{ kind: "trap" }],
+      },
+      setLocal("handle", call("runtimeArenaAlloc", [local("total")])),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_ARRAY)),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_ARRAY_LENGTH_WORD_OFFSET)),
+        local("length"),
+      ),
+      setLocal("index", u32(0)),
+      {
+        kind: "while",
+        condition: ltu(local("index"), local("length")),
+        body: [
+          setLocal(
+            "offset",
+            add(
+              add(local("handle"), u32(RUNTIME_ARRAY_DATA_WORD_OFFSET)),
+              local("index"),
+            ),
+          ),
+          storeScratch(local("offset"), u32(0)),
+          setLocal("index", add(local("index"), u32(1))),
+        ],
+      },
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function runtimeArrayLengthFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArrayLength",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "kind", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
+      {
+        kind: "if",
+        condition: eq(local("kind"), u32(RUNTIME_OBJECT_ARRAY)),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      {
+        kind: "return",
+        expression: loadScratch(
+          add(local("handle"), u32(RUNTIME_ARRAY_LENGTH_WORD_OFFSET)),
+        ),
+      },
     ],
   };
 }
@@ -758,7 +806,7 @@ function runtimeArrayElementOffsetFunction(): RuntimeLanguageFunction {
       setLocal(
         "offset",
         add(
-          add(local("handle"), u32(RUNTIME_ARRAY_LENGTH_WORDS)),
+          add(local("handle"), u32(RUNTIME_ARRAY_DATA_WORD_OFFSET)),
           local("index"),
         ),
       ),
@@ -826,6 +874,220 @@ function runtimeArrayStoreFunction(): RuntimeLanguageFunction {
         call("runtimeArrayElementOffset", [
           local("handle"),
           local("index"),
+        ]),
+      ),
+      storeScratch(local("offset"), local("value")),
+      { kind: "return", expression: local("value") },
+    ],
+  };
+}
+
+function runtimeRecordNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeRecordNew",
+    parameters: [
+      { name: "tag", type: "u32" },
+      { name: "fieldCount", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+      { name: "total", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "offset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "total",
+        add(local("fieldCount"), u32(RUNTIME_RECORD_DATA_WORD_OFFSET)),
+      ),
+      {
+        kind: "if",
+        condition: ltu(local("total"), local("fieldCount")),
+        consequent: [{ kind: "trap" }],
+      },
+      setLocal("handle", call("runtimeArenaAlloc", [local("total")])),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_RECORD)),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_RECORD_TAG_WORD_OFFSET)),
+        local("tag"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_RECORD_FIELD_COUNT_WORD_OFFSET)),
+        local("fieldCount"),
+      ),
+      setLocal("index", u32(0)),
+      {
+        kind: "while",
+        condition: ltu(local("index"), local("fieldCount")),
+        body: [
+          setLocal(
+            "offset",
+            add(
+              add(local("handle"), u32(RUNTIME_RECORD_DATA_WORD_OFFSET)),
+              local("index"),
+            ),
+          ),
+          storeScratch(local("offset"), u32(0)),
+          setLocal("index", add(local("index"), u32(1))),
+        ],
+      },
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function runtimeRecordTagFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeRecordTag",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "kind", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
+      {
+        kind: "if",
+        condition: eq(local("kind"), u32(RUNTIME_OBJECT_RECORD)),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      {
+        kind: "return",
+        expression: loadScratch(
+          add(local("handle"), u32(RUNTIME_RECORD_TAG_WORD_OFFSET)),
+        ),
+      },
+    ],
+  };
+}
+
+function runtimeRecordFieldCountFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeRecordFieldCount",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "kind", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
+      {
+        kind: "if",
+        condition: eq(local("kind"), u32(RUNTIME_OBJECT_RECORD)),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      {
+        kind: "return",
+        expression: loadScratch(
+          add(local("handle"), u32(RUNTIME_RECORD_FIELD_COUNT_WORD_OFFSET)),
+        ),
+      },
+    ],
+  };
+}
+
+function runtimeRecordFieldOffsetFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeRecordFieldOffset",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "field", type: "u32" },
+    ],
+    locals: [
+      { name: "fieldCount", type: "u32" },
+      { name: "offset", type: "u32" },
+      { name: "next", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "fieldCount",
+        call("runtimeRecordFieldCount", [local("handle")]),
+      ),
+      {
+        kind: "if",
+        condition: ltu(local("field"), local("fieldCount")),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      setLocal(
+        "offset",
+        add(
+          add(local("handle"), u32(RUNTIME_RECORD_DATA_WORD_OFFSET)),
+          local("field"),
+        ),
+      ),
+      {
+        kind: "if",
+        condition: ltu(local("offset"), local("handle")),
+        consequent: [{ kind: "trap" }],
+      },
+      setLocal("next", add(local("offset"), u32(1))),
+      {
+        kind: "if",
+        condition: ltu(local("next"), local("offset")),
+        consequent: [{ kind: "trap" }],
+      },
+      {
+        kind: "if",
+        condition: ltu(
+          loadScratch(u32(RUNTIME_ARENA_NEXT_WORD)),
+          local("next"),
+        ),
+        consequent: [{ kind: "trap" }],
+      },
+      { kind: "return", expression: local("offset") },
+    ],
+  };
+}
+
+function runtimeRecordLoadFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeRecordLoad",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "field", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: loadScratch(
+          call("runtimeRecordFieldOffset", [
+            local("handle"),
+            local("field"),
+          ]),
+        ),
+      },
+    ],
+  };
+}
+
+function runtimeRecordStoreFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeRecordStore",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "field", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    locals: [
+      { name: "offset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "offset",
+        call("runtimeRecordFieldOffset", [
+          local("handle"),
+          local("field"),
         ]),
       ),
       storeScratch(local("offset"), local("value")),
