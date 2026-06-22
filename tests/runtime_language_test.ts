@@ -89,6 +89,9 @@ import {
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_UNKNOWN,
+  RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
+  RUNTIME_TRACE_STATUS_INTERNAL,
+  RUNTIME_TRACE_STATUS_UNEXPECTED,
   UTF16_CODE_POINT_WIDTH_PROGRAM,
 } from "../src/targets/runtime/language_sources.ts";
 import { assertEquals } from "./helpers.ts";
@@ -807,6 +810,37 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
               setLocal("result", add(local("result"), u32(10000))),
             ],
           },
+          setLocal(
+            "result",
+            add(
+              local("result"),
+              call("parserTraceStatusKind", [
+                u32(RUNTIME_TRACE_STATUS_UNEXPECTED),
+              ]),
+            ),
+          ),
+          setLocal(
+            "result",
+            add(
+              local("result"),
+              mul(
+                call("parserTraceStatusKind", [
+                  u32(RUNTIME_TRACE_STATUS_BRANCH_LIMIT),
+                ]),
+                u32(10),
+              ),
+            ),
+          ),
+          setLocal(
+            "result",
+            add(
+              local("result"),
+              mul(
+                call("parserTraceStatusKind", [u32(99)]),
+                u32(100),
+              ),
+            ),
+          ),
           { kind: "return", expression: local("result") },
         ],
       },
@@ -929,6 +963,37 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
               setLocal("result", add(local("result"), u32(100000))),
             ],
           },
+          setLocal(
+            "result",
+            add(
+              local("result"),
+              call("parserTraceStatusKind", [
+                u32(RUNTIME_TRACE_STATUS_UNEXPECTED),
+              ]),
+            ),
+          ),
+          setLocal(
+            "result",
+            add(
+              local("result"),
+              mul(
+                call("parserTraceStatusKind", [
+                  u32(RUNTIME_TRACE_STATUS_BRANCH_LIMIT),
+                ]),
+                u32(10),
+              ),
+            ),
+          ),
+          setLocal(
+            "result",
+            add(
+              local("result"),
+              mul(
+                call("parserTraceStatusKind", [u32(99)]),
+                u32(100),
+              ),
+            ),
+          ),
           { kind: "return", expression: local("result") },
         ],
       },
@@ -1502,12 +1567,22 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "parser trace runtime emits deterministic action traces",
       program: parserTraceRuntimeProgram,
-      expected: { kind: "value", value: 11114 },
+      expected: {
+        kind: "value",
+        value: 11114 + RUNTIME_TRACE_STATUS_UNEXPECTED +
+          RUNTIME_TRACE_STATUS_BRANCH_LIMIT * 10 +
+          RUNTIME_TRACE_STATUS_INTERNAL * 100,
+      },
     },
     {
       name: "parser conflict trace runtime restores saved branches",
       program: parserConflictTraceRuntimeProgram,
-      expected: { kind: "value", value: 111115 },
+      expected: {
+        kind: "value",
+        value: 111115 + RUNTIME_TRACE_STATUS_UNEXPECTED +
+          RUNTIME_TRACE_STATUS_BRANCH_LIMIT * 10 +
+          RUNTIME_TRACE_STATUS_INTERNAL * 100,
+      },
     },
     {
       name: "early return skips later traps",

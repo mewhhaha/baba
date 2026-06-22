@@ -179,6 +179,10 @@ runtime language:
 - Moved the trailing-input diagnostic decision onto runtime-language
   `parserExpectedHasEof` state flags, replacing a generated scan of expected
   display strings.
+- Moved parser trace status classification onto runtime-language
+  `parserTraceStatusKind`, so generated TypeScript parsers and Wasm adapters no
+  longer interpret trace status numbers directly before choosing unexpected,
+  branch-limit, or internal diagnostic paths.
 
 Still unresolved:
 
@@ -206,13 +210,14 @@ Still unresolved:
   compatibility now go through runtime-language lexer spec helpers. Parser
   replay span and token-range merge arithmetic is runtime-language-backed,
   trailing-input diagnostic code selection uses runtime-language expected-state
-  flags, and reducer result-shape classification is runtime-language-backed, but
-  the actual allocation/assembly of fragments, field objects/arrays, CST nodes,
-  and generated token/diagnostic object emission is still not mechanically
-  emitted from one runtime-language implementation. The compiler now has a
-  shared lowered control-flow/value IR and checked helper artifact hashes, but
-  it still needs broader parser-runtime lowering before the release can fully
-  satisfy "one runtime implementation, two execution targets."
+  flags, reducer result-shape classification is runtime-language-backed, and
+  parser trace status classification now uses a runtime-language helper, but the
+  actual allocation/assembly of fragments, field objects/arrays, CST nodes, and
+  generated token/diagnostic object emission is still not mechanically emitted
+  from one runtime-language implementation. The compiler now has a shared
+  lowered control-flow/value IR and checked helper artifact hashes, but it still
+  needs broader parser-runtime lowering before the release can fully satisfy
+  "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

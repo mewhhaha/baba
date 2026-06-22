@@ -31,6 +31,10 @@ export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
 export const RUNTIME_ACTION_ACCEPT = 0x03_00_00_00;
 export const RUNTIME_ACTION_KIND_MASK = 0xff_00_00_00;
 export const RUNTIME_ACTION_PAYLOAD_MASK = 0x00_ff_ff_ff;
+export const RUNTIME_TRACE_STATUS_OK = 0;
+export const RUNTIME_TRACE_STATUS_UNEXPECTED = 1;
+export const RUNTIME_TRACE_STATUS_INTERNAL = 2;
+export const RUNTIME_TRACE_STATUS_BRANCH_LIMIT = 3;
 export const RUNTIME_NO_GOTO = 0xffff_ffff;
 export const RUNTIME_NO_PRODUCTION = 0xffff_ffff;
 export const RUNTIME_REDUCER_UNKNOWN = 0;
@@ -103,10 +107,10 @@ const TRACE_ERROR_INDEX = 2;
 const TRACE_COUNT = 3;
 const TRACE_BASE = 4;
 const TRACE_TERMINALS_BASE = 8;
-const TRACE_STATUS_OK = 0;
-const TRACE_STATUS_UNEXPECTED = 1;
-const TRACE_STATUS_INTERNAL = 2;
-const TRACE_STATUS_BRANCH_LIMIT = 3;
+const TRACE_STATUS_OK = RUNTIME_TRACE_STATUS_OK;
+const TRACE_STATUS_UNEXPECTED = RUNTIME_TRACE_STATUS_UNEXPECTED;
+const TRACE_STATUS_INTERNAL = RUNTIME_TRACE_STATUS_INTERNAL;
+const TRACE_STATUS_BRANCH_LIMIT = RUNTIME_TRACE_STATUS_BRANCH_LIMIT;
 const TRACE_BRANCH_LIMIT = 100_000;
 
 const LEXER_SCAN_STATE = 0;
@@ -361,6 +365,7 @@ export function createParserTraceRuntimeProgram(
       parserTraceErrorIndexFunction(),
       parserTraceCountFunction(),
       parserTraceActionFunction(),
+      parserTraceStatusKindFunction(),
     ],
   };
 }
@@ -434,6 +439,7 @@ export function createParserConflictTraceRuntimeProgram(
       parserTraceErrorIndexFunction(),
       parserTraceCountFunction(),
       parserTraceActionFunction(),
+      parserTraceStatusKindFunction(),
     ],
   };
 }
@@ -1988,6 +1994,34 @@ function parserTraceSetTerminalFunction(): RuntimeLanguageFunction {
       setLocal("capacity", ensureScratch(add(local("index"), u32(1)))),
       storeScratch(local("index"), local("terminal")),
       { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserTraceStatusKindFunction(): RuntimeLanguageFunction {
+  const statusIs = (status: number): RuntimeStatement => ({
+    kind: "if",
+    condition: eq(local("status"), u32(status)),
+    consequent: [{
+      kind: "return",
+      expression: u32(status),
+    }],
+  });
+  return {
+    name: "parserTraceStatusKind",
+    parameters: [
+      { name: "status", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      statusIs(TRACE_STATUS_OK),
+      statusIs(TRACE_STATUS_UNEXPECTED),
+      statusIs(TRACE_STATUS_INTERNAL),
+      statusIs(TRACE_STATUS_BRANCH_LIMIT),
+      {
+        kind: "return",
+        expression: u32(TRACE_STATUS_INTERNAL),
+      },
     ],
   };
 }

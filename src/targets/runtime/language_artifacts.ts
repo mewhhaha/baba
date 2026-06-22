@@ -292,9 +292,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_conflict_trace_runtime",
       entry: "parserTrace",
-      sourceHash: "fnv1a64:5dbf53c4bcf930db",
-      typescriptHash: "fnv1a64:4f1fde74817d0b59",
-      wasmHash: "fnv1a64:bcf35071ff0b8c12",
+      sourceHash: "fnv1a64:ed3ed1ef2238264f",
+      typescriptHash: "fnv1a64:ae53ce15ef47a66f",
+      wasmHash: "fnv1a64:121ff6ca5453d8aa",
     },
     {
       name: "parser_goto_runtime",
@@ -341,14 +341,14 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_trace_runtime",
       entry: "parserTrace",
-      sourceHash: "fnv1a64:29fb59c7deb7469c",
-      typescriptHash: "fnv1a64:6bd4200a59cb8fd6",
-      wasmHash: "fnv1a64:67658079e9fae288",
+      sourceHash: "fnv1a64:18e3ad68c38bcf30",
+      typescriptHash: "fnv1a64:3b60a2a438060998",
+      wasmHash: "fnv1a64:d473476bfbc1ac8e",
     },
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:131e96162185bd29" as const;
+  "fnv1a64:9765d5abff5597e7" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

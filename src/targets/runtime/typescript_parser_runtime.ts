@@ -89,6 +89,9 @@ import {
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_START,
   RUNTIME_REDUCER_TERMINAL,
+  RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
+  RUNTIME_TRACE_STATUS_OK,
+  RUNTIME_TRACE_STATUS_UNEXPECTED,
 } from "./language_sources.ts";
 
 export type ParserEmitMode = "typescript" | "wasm";
@@ -336,6 +339,9 @@ function parserTableRuntime(program: RuntimeLanguageProgram): string {
 const ACTION_SHIFT = ${RUNTIME_ACTION_SHIFT};
 const ACTION_REDUCE = ${RUNTIME_ACTION_REDUCE};
 const ACTION_ACCEPT = ${RUNTIME_ACTION_ACCEPT};
+const TRACE_STATUS_OK = ${RUNTIME_TRACE_STATUS_OK};
+const TRACE_STATUS_UNEXPECTED = ${RUNTIME_TRACE_STATUS_UNEXPECTED};
+const TRACE_STATUS_BRANCH_LIMIT = ${RUNTIME_TRACE_STATUS_BRANCH_LIMIT};
 const NO_GOTO = ${RUNTIME_NO_GOTO};
 const NO_SPAN = ${RUNTIME_NO_SPAN};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
@@ -499,10 +505,11 @@ function deterministicParseRuntime(): string {
     };
   }
 
-  if (status !== 0) {
+  const traceStatus = parserTraceStatusKind(status);
+  if (traceStatus !== TRACE_STATUS_OK) {
     const errorIndex = parserTraceErrorIndex();
     const token = stream.tokens[errorIndex] ?? eofToken(source.length);
-    if (status === 1) {
+    if (traceStatus === TRACE_STATUS_UNEXPECTED) {
       return {
         ok: false,
         root: null,
@@ -514,7 +521,7 @@ function deterministicParseRuntime(): string {
         )],
       };
     }
-    if (status === 3) {
+    if (traceStatus === TRACE_STATUS_BRANCH_LIMIT) {
       return {
         ok: false,
         root: null,

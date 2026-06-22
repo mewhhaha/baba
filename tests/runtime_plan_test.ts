@@ -114,8 +114,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "parserExpectedHasEof");
   assertIncludes(parserRuntimeSource, "parserMergeStart");
   assertIncludes(parserRuntimeSource, "parserMergeEnd");
+  assertIncludes(parserRuntimeSource, "parserTraceStatusKind");
   assertIncludes(parserRuntimeSource, "function replayTrace");
   assertNotIncludes(parserRuntimeSource, 'expected.includes("EOF")');
+  assertNotIncludes(parserRuntimeSource, "status === 1");
+  assertNotIncludes(parserRuntimeSource, "status === 3");
   assertNotIncludes(parserRuntimeSource, "NAMED_TERMINALS");
   assertNotIncludes(parserRuntimeSource, "LITERAL_TERMINALS");
   assertNotIncludes(parserRuntimeSource, "MAIN_TOKEN_KINDS");
@@ -163,6 +166,9 @@ Deno.test("Wasm target packages shared core runtime source", async () => {
   );
   assertIncludes(wasmAdapterSource, "parserTraceRuntimeBytes");
   assertIncludes(wasmAdapterSource, "parserTraceRuntime.parserTrace");
+  assertIncludes(wasmAdapterSource, "parserTraceStatusKind");
+  assertNotIncludes(wasmAdapterSource, "status !== 1 && status !== 3");
+  assertNotIncludes(wasmAdapterSource, "status === 3");
   assertNotIncludes(wasmAdapterSource, "wasm.parse_trace");
 });
 

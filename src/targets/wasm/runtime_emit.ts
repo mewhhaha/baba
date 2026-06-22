@@ -1,5 +1,10 @@
 import type { PortableParserPlanMetadata } from "../runtime/portable_plan.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
+import {
+  RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
+  RUNTIME_TRACE_STATUS_INTERNAL,
+  RUNTIME_TRACE_STATUS_OK,
+} from "../runtime/language_sources.ts";
 import type { WasmModuleImage } from "./module_emit.ts";
 
 export function emitWasmRuntime(
@@ -24,6 +29,9 @@ const UTF16_UNIT_BYTES = 2;
 const WASM_PAGE_BYTES = 65536;
 const MAX_WASM_BYTES = 0xffff_ffff;
 const MAX_WASM_PAGES = 65535;
+const TRACE_STATUS_OK = ${RUNTIME_TRACE_STATUS_OK};
+const TRACE_STATUS_INTERNAL = ${RUNTIME_TRACE_STATUS_INTERNAL};
+const TRACE_STATUS_BRANCH_LIMIT = ${RUNTIME_TRACE_STATUS_BRANCH_LIMIT};
 
 interface ParserWasmExports {
   memory: WebAssembly.Memory;
@@ -43,6 +51,7 @@ interface ParserTraceRuntimeExports {
   parserTraceErrorIndex(): number;
   parserTraceCount(): number;
   parserTraceAction(index: number): number;
+  parserTraceStatusKind(status: number): number;
 }
 
 const wasmModule = new WebAssembly.Module(wasmBytes);
@@ -192,13 +201,14 @@ export function parseTrace(
       parserTraceRuntime.parserTraceSetTerminal(index, input.terminals[index]);
     }
     const status = parserTraceRuntime.parserTrace(terminalCount);
-    if (status !== 0) {
+    const traceStatus = parserTraceRuntime.parserTraceStatusKind(status);
+    if (traceStatus !== TRACE_STATUS_OK) {
       return {
         ok: false,
         state: parserTraceRuntime.parserTraceErrorState(),
         index: parserTraceRuntime.parserTraceErrorIndex(),
-        internal: status !== 1 && status !== 3,
-        limit: status === 3,
+        internal: traceStatus === TRACE_STATUS_INTERNAL,
+        limit: traceStatus === TRACE_STATUS_BRANCH_LIMIT,
       };
     }
     const count = parserTraceRuntime.parserTraceCount();

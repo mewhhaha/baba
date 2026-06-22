@@ -50,6 +50,9 @@ const ACTION_NONE = 0;
 const ACTION_SHIFT = 16777216;
 const ACTION_REDUCE = 33554432;
 const ACTION_ACCEPT = 50331648;
+const TRACE_STATUS_OK = 0;
+const TRACE_STATUS_UNEXPECTED = 1;
+const TRACE_STATUS_BRANCH_LIMIT = 3;
 const NO_GOTO = 4294967295;
 const NO_SPAN = 4294967295;
 const NO_TERMINAL = 4294967295;
@@ -501,6 +504,23 @@ function parserTraceAction(index: number): number {
   let traceBase = 0;
   traceBase = (__baba_load_scratch(4) >>> 0) >>> 0;
   return (__baba_load_scratch(((traceBase) + (index)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTraceStatusKind(status: number): number {
+  if (((((status) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((status) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((status) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((status) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  return (2) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -1046,10 +1066,11 @@ function parseTokenList(
     };
   }
 
-  if (status !== 0) {
+  const traceStatus = parserTraceStatusKind(status);
+  if (traceStatus !== TRACE_STATUS_OK) {
     const errorIndex = parserTraceErrorIndex();
     const token = stream.tokens[errorIndex] ?? eofToken(source.length);
-    if (status === 1) {
+    if (traceStatus === TRACE_STATUS_UNEXPECTED) {
       return {
         ok: false,
         root: null,
@@ -1061,7 +1082,7 @@ function parseTokenList(
         )],
       };
     }
-    if (status === 3) {
+    if (traceStatus === TRACE_STATUS_BRANCH_LIMIT) {
       return {
         ok: false,
         root: null,

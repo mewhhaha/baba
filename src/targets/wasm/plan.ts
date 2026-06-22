@@ -155,6 +155,7 @@ function emitParserTraceWasm(bnf: BnfGrammar, lr: LrTable): Uint8Array {
       "parserTraceErrorIndex",
       "parserTraceCount",
       "parserTraceAction",
+      "parserTraceStatusKind",
     ],
   });
 }
