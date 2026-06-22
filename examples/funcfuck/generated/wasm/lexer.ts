@@ -21,168 +21,137 @@ const PUBLIC_TOKEN_TRIVIA = 3;
 const PUBLIC_TOKEN_ERROR = 4;
 const PUBLIC_TOKEN_EOF = 5;
 
-const SPECS: readonly (
-  | {
-    type: "named";
-    kind: NamedTokenKind;
-    channel: "main" | "trivia";
-    terminal: number;
-  }
-  | { type: "literal"; literal: string; terminal: number }
-)[] = [
+const NAMED_SPECS: readonly {
+  kind: NamedTokenKind;
+  channel: "main" | "trivia";
+  terminal: number;
+}[] = [
   {
-    "type": "named",
     "kind": "IDENT",
     "channel": "main",
     "terminal": 1
   },
   {
-    "type": "named",
     "kind": "INTEGER",
     "channel": "main",
     "terminal": 2
   },
   {
-    "type": "named",
     "kind": "WS",
     "channel": "trivia",
     "terminal": -1
-  },
+  }
+] as const;
+
+const LITERAL_SPECS: readonly {
+  literal: string;
+  terminal: number;
+}[] = [
   {
-    "type": "literal",
     "literal": "def",
     "terminal": 3
   },
   {
-    "type": "literal",
     "literal": "=",
     "terminal": 4
   },
   {
-    "type": "literal",
     "literal": ";",
     "terminal": 5
   },
   {
-    "type": "literal",
     "literal": "emit",
     "terminal": 6
   },
   {
-    "type": "literal",
     "literal": "=>",
     "terminal": 7
   },
   {
-    "type": "literal",
     "literal": ">>",
     "terminal": 8
   },
   {
-    "type": "literal",
     "literal": "(",
     "terminal": 9
   },
   {
-    "type": "literal",
     "literal": ")",
     "terminal": 10
   },
   {
-    "type": "literal",
     "literal": "[",
     "terminal": 11
   },
   {
-    "type": "literal",
     "literal": "]",
     "terminal": 12
   },
   {
-    "type": "literal",
     "literal": ",",
     "terminal": 13
   },
   {
-    "type": "literal",
     "literal": "repeat",
     "terminal": 14
   },
   {
-    "type": "literal",
     "literal": "id",
     "terminal": 15
   },
   {
-    "type": "literal",
     "literal": "inc",
     "terminal": 16
   },
   {
-    "type": "literal",
     "literal": "dec",
     "terminal": 17
   },
   {
-    "type": "literal",
     "literal": "double",
     "terminal": 18
   },
   {
-    "type": "literal",
     "literal": "square",
     "terminal": 19
   },
   {
-    "type": "literal",
     "literal": "neg",
     "terminal": 20
   },
   {
-    "type": "literal",
     "literal": "sum",
     "terminal": 21
   },
   {
-    "type": "literal",
     "literal": "product",
     "terminal": 22
   },
   {
-    "type": "literal",
     "literal": "first",
     "terminal": 23
   },
   {
-    "type": "literal",
     "literal": "last",
     "terminal": 24
   },
   {
-    "type": "literal",
     "literal": "add",
     "terminal": 25
   },
   {
-    "type": "literal",
     "literal": "mul",
     "terminal": 26
   },
   {
-    "type": "literal",
     "literal": "take",
     "terminal": 27
   },
   {
-    "type": "literal",
     "literal": "drop",
     "terminal": 28
   }
 ] as const;
-
-interface RuntimeTerminalToken {
-  __babaTerminal?: number;
-}
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -346,6 +315,68 @@ function parserTokenSpanEnd(handle: number): number {
   return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
+interface RuntimeTerminalToken {
+  __babaTerminal?: number;
+}
+
+function materializeToken(source: string, handle: number): Token {
+  const tokenClass = parserTokenClass(handle);
+  const payload = parserTokenPayload(handle);
+  const span = {
+    start: parserTokenSpanStart(handle),
+    end: parserTokenSpanEnd(handle),
+  };
+  const terminal = parserTokenTerminal(handle);
+  const runtimeTerminal: RuntimeTerminalToken = {
+    __babaTerminal: terminal === NO_TERMINAL ? -1 : terminal,
+  };
+
+  if (tokenClass === PUBLIC_TOKEN_LITERAL) {
+    const spec = LITERAL_SPECS[payload];
+    if (!spec) {
+      throw new Error("Wasm lexer" + " runtime emitted an invalid literal token.");
+    }
+    return {
+      type: "literal",
+      literal: spec.literal as never,
+      text: spec.literal as never,
+      span,
+      channel: "main",
+      ...runtimeTerminal,
+    } as Token & RuntimeTerminalToken;
+  }
+  if (tokenClass === PUBLIC_TOKEN_MAIN || tokenClass === PUBLIC_TOKEN_TRIVIA) {
+    const spec = NAMED_SPECS[payload];
+    if (!spec) {
+      throw new Error("Wasm lexer" + " runtime emitted an invalid named token.");
+    }
+    return {
+      type: "named",
+      kind: spec.kind as never,
+      text: source.slice(span.start, span.end),
+      span,
+      channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
+      ...runtimeTerminal,
+    } as Token & RuntimeTerminalToken;
+  }
+  if (tokenClass === PUBLIC_TOKEN_ERROR) {
+    return {
+      type: "error",
+      text: source.slice(span.start, span.end),
+      span,
+      channel: "error",
+    };
+  }
+  if (tokenClass === PUBLIC_TOKEN_EOF) {
+    return {
+      type: "eof",
+      text: "",
+      span,
+      channel: "main",
+    };
+  }
+  throw new Error("Wasm lexer" + " runtime emitted an unknown public token class.");
+}
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   return lexInternal(source, options, false);
@@ -399,18 +430,36 @@ function lexInternal(
     const start = records[index + 1];
     const end = records[index + 2];
     if (specIndex >= 0) {
-      const spec = SPECS[specIndex];
-      if (spec) {
-        const tokenClass = spec.type === "literal"
-          ? PUBLIC_TOKEN_LITERAL
-          : spec.channel === "trivia"
-          ? PUBLIC_TOKEN_TRIVIA
-          : PUBLIC_TOKEN_MAIN;
+      let tokenClass = PUBLIC_TOKEN_ERROR;
+      let payload = 0;
+      let terminal = NO_TERMINAL;
+      let foundSpec = false;
+      if (specIndex < NAMED_SPECS.length) {
+        const spec = NAMED_SPECS[specIndex];
+        if (spec) {
+          tokenClass = spec.channel === "trivia"
+            ? PUBLIC_TOKEN_TRIVIA
+            : PUBLIC_TOKEN_MAIN;
+          payload = specIndex;
+          terminal = spec.terminal;
+          foundSpec = true;
+        }
+      } else {
+        const literalIndex = specIndex - NAMED_SPECS.length;
+        const spec = LITERAL_SPECS[literalIndex];
+        if (spec) {
+          tokenClass = PUBLIC_TOKEN_LITERAL;
+          payload = literalIndex;
+          terminal = spec.terminal;
+          foundSpec = true;
+        }
+      }
+      if (foundSpec) {
         if (tokenClass !== PUBLIC_TOKEN_TRIVIA || preserveTrivia) {
           const handle = parserTokenNew(
             tokenClass,
-            specIndex,
-            spec.terminal < 0 ? NO_TERMINAL : spec.terminal,
+            payload,
+            terminal < 0 ? NO_TERMINAL : terminal,
             start,
             end,
           );
@@ -423,7 +472,7 @@ function lexInternal(
                 streamTokens[streamTokenCount] = token;
                 streamTokenCount++;
               }
-              parseTerminals![terminalCount] = spec.terminal;
+              parseTerminals![terminalCount] = terminal;
               terminalCount++;
             }
           }
@@ -486,63 +535,4 @@ function lexInternal(
     };
   }
   return { source, tokens, diagnostics };
-}
-
-function materializeToken(source: string, handle: number): Token {
-  const tokenClass = parserTokenClass(handle);
-  const payload = parserTokenPayload(handle);
-  const span = {
-    start: parserTokenSpanStart(handle),
-    end: parserTokenSpanEnd(handle),
-  };
-  const terminal = parserTokenTerminal(handle);
-  const runtimeTerminal: RuntimeTerminalToken = {
-    __babaTerminal: terminal === NO_TERMINAL ? -1 : terminal,
-  };
-
-  if (tokenClass === PUBLIC_TOKEN_LITERAL) {
-    const spec = SPECS[payload];
-    if (!spec || spec.type !== "literal") {
-      throw new Error("Wasm lexer runtime emitted an invalid literal token.");
-    }
-    return {
-      type: "literal",
-      literal: spec.literal as never,
-      text: spec.literal as never,
-      span,
-      channel: "main",
-      ...runtimeTerminal,
-    } as Token & RuntimeTerminalToken;
-  }
-  if (tokenClass === PUBLIC_TOKEN_MAIN || tokenClass === PUBLIC_TOKEN_TRIVIA) {
-    const spec = SPECS[payload];
-    if (!spec || spec.type !== "named") {
-      throw new Error("Wasm lexer runtime emitted an invalid named token.");
-    }
-    return {
-      type: "named",
-      kind: spec.kind as never,
-      text: source.slice(span.start, span.end),
-      span,
-      channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
-      ...runtimeTerminal,
-    } as Token & RuntimeTerminalToken;
-  }
-  if (tokenClass === PUBLIC_TOKEN_ERROR) {
-    return {
-      type: "error",
-      text: source.slice(span.start, span.end),
-      span,
-      channel: "error",
-    };
-  }
-  if (tokenClass === PUBLIC_TOKEN_EOF) {
-    return {
-      type: "eof",
-      text: "",
-      span,
-      channel: "main",
-    };
-  }
-  throw new Error("Wasm lexer runtime emitted an unknown public token class.");
 }

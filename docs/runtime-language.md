@@ -44,29 +44,30 @@ Standalone TypeScript lexers and generated Wasm JavaScript adapters allocate
 runtime-language token records for matched literals, named tokens, preserved
 trivia, lexical error tokens, and EOF tokens, then read class, payload,
 terminal, and span data back through `parserToken*` accessors before wrapping
-public API token objects. External token streams keep public token-kind/literal
-spelling at the API boundary, but generated parsers map those spellings to lexer
-spec indexes and use the same runtime-language helpers for channel and terminal
-classification. `lexerSpecPublicTokenStatus` decides whether a mapped public
-literal/main/trivia token is compatible with the spec row; TypeScript still
-validates object shape/text/spans and emits public diagnostics.
-`lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
-accepted, lexical error tokens, or not in the parser terminal set before
-TypeScript allocates the public diagnostic object. Deterministic parsers use
-`parserAction`/`parserGoto` for parser table lookup, and conflict parsers use
-generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
-multi-action fan-out and goto lookup. Generated parsers also use
-`parserExpectedStart`/ `parserExpectedEnd` helpers to map parser states to
-flattened expected-terminal display ranges for diagnostics, and
-`parserExpectedHasEof` flags choose trailing-input diagnostic codes without
-scanning display strings. Reduction replay uses
-`parserProductionLhs`/`parserProductionRhsLength` helpers for production
-metadata lookups while generated TypeScript still owns reducer descriptor
-execution and CST construction. Generated parser replay now gets reducer
-descriptor kind/payload metadata from `parserReducerKind`/`parserReducerPayload`
-helpers, reducer operation classes from `parserReducerOperation`, and required
-payload status from `parserReducerPayloadStatus`, plus child-role requirements
-from `parserReducerChildRole`; reducer result-shape classification comes from
+public API token objects through one shared runtime-target materializer helper.
+External token streams keep public token-kind/literal spelling at the API
+boundary, but generated parsers map those spellings to lexer spec indexes and
+use the same runtime-language helpers for channel and terminal classification.
+`lexerSpecPublicTokenStatus` decides whether a mapped public literal/main/trivia
+token is compatible with the spec row; TypeScript still validates object
+shape/text/spans and emits public diagnostics. `lexerTokenDiagnosticStatus`
+classifies external tokens as diagnostically accepted, lexical error tokens, or
+not in the parser terminal set before TypeScript allocates the public diagnostic
+object. Deterministic parsers use `parserAction`/`parserGoto` for parser table
+lookup, and conflict parsers use generated
+`parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
+fan-out and goto lookup. Generated parsers also use `parserExpectedStart`/
+`parserExpectedEnd` helpers to map parser states to flattened expected-terminal
+display ranges for diagnostics, and `parserExpectedHasEof` flags choose
+trailing-input diagnostic codes without scanning display strings. Reduction
+replay uses `parserProductionLhs`/`parserProductionRhsLength` helpers for
+production metadata lookups while generated TypeScript still owns reducer
+descriptor execution and CST construction. Generated parser replay now gets
+reducer descriptor kind/payload metadata from
+`parserReducerKind`/`parserReducerPayload` helpers, reducer operation classes
+from `parserReducerOperation`, and required payload status from
+`parserReducerPayloadStatus`, plus child-role requirements from
+`parserReducerChildRole`; reducer result-shape classification comes from
 `parserReducerResultKind`, all backed by numeric reducer tables. CST field
 assembly now reads field row/config metadata through
 `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
@@ -204,7 +205,8 @@ execute both outputs and compare returned values or traps.
   vector helpers.
 - Generated TypeScript lexers and Wasm JavaScript adapters allocate runtime
   token records for public tokens, including EOF, and read those records through
-  runtime token accessors before materializing public JavaScript token objects.
+  runtime token accessors before materializing public JavaScript token objects
+  through one shared runtime-target helper.
 - Generated parser fallback EOF tokens allocate runtime token records and read
   span data through runtime token accessors before materializing public
   JavaScript token objects.
@@ -243,7 +245,7 @@ These rules must be specified before the parser runtime can be fully lowered:
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
 - complete generated-parser lowering for final public CST field object
-  allocation and final public token object wrapping.
+  allocation.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from

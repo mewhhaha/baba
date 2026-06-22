@@ -147,6 +147,10 @@ runtime language:
 - Added a runtime public EOF token class and routed generated TypeScript lexer,
   Wasm JavaScript adapter, and parser fallback EOF token materialization through
   runtime-language token records before public object wrapping.
+- Centralized generated public token object wrapping in one runtime-target
+  helper shared by TypeScript lexers and Wasm JavaScript adapters. Both targets
+  now materialize runtime token records through the same named/literal payload
+  convention before returning public API token objects.
 - Moved generated deterministic TypeScript parser action/goto table lookup onto
   a runtime-language source program backed by read-only `u32` tables, replacing
   the previous generated `findAction()`/`findGoto()` table scans for unambiguous
@@ -310,10 +314,11 @@ Still unresolved:
   runtime-language diagnostic handles before public object materialization.
   Public CST rule-node object materialization is now centralized behind
   runtime-language rule-node handles, though final JavaScript object allocation
-  still happens at the API boundary. Public JavaScript field object allocation
-  and final public token object wrapping are still not mechanically emitted from
-  one runtime-language implementation. The runtime language now has a checked
-  resettable arena plus tagged arena-backed `u32` arrays, fixed records,
+  still happens at the API boundary. Public token object wrapping is now emitted
+  from one shared runtime-target helper for TypeScript and Wasm adapters, but
+  public JavaScript field object allocation is still not mechanically emitted
+  from one runtime-language implementation. The runtime language now has a
+  checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
   growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
   layouts plus reduction-shaped fragment assembly helpers that generated replay
   is beginning to use, but it still lacks opaque typed handle provenance and

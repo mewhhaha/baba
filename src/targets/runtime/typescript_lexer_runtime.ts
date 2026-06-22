@@ -14,6 +14,7 @@ import {
   RUNTIME_PUBLIC_TOKEN_MAIN,
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
 } from "./language_sources.ts";
+import { emitPublicTokenMaterializer } from "./public_token_materializer.ts";
 
 export interface TypeScriptLexerNamedSpec {
   readonly kind: string;
@@ -112,14 +113,11 @@ interface Candidate {
   end: number;
 }
 
-interface RuntimeTerminalToken {
-  __babaTerminal?: number;
-}
-
 ${
     emitRuntimeLanguageTypeScriptFunction(runtimeProgram)
       .trimEnd()
   }
+${emitPublicTokenMaterializer({ label: "Lexer" })}
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   runtimeArenaReset();
@@ -184,59 +182,6 @@ function publicTokenClass(tokenClass: number): number {
   if (tokenClass === TOKEN_LITERAL) return PUBLIC_TOKEN_LITERAL;
   if (tokenClass === TOKEN_TRIVIA) return PUBLIC_TOKEN_TRIVIA;
   return PUBLIC_TOKEN_MAIN;
-}
-
-function materializeToken(source: string, handle: number): Token {
-  const tokenClass = parserTokenClass(handle);
-  const payload = parserTokenPayload(handle);
-  const span = {
-    start: parserTokenSpanStart(handle),
-    end: parserTokenSpanEnd(handle),
-  };
-  const terminal = parserTokenTerminal(handle);
-  const runtimeTerminal: RuntimeTerminalToken = {
-    __babaTerminal: terminal === NO_TERMINAL ? -1 : terminal,
-  };
-
-  if (tokenClass === PUBLIC_TOKEN_LITERAL) {
-    const spec = LITERAL_SPECS[payload];
-    return {
-      type: "literal",
-      literal: spec.literal as never,
-      text: spec.literal as never,
-      span,
-      channel: "main",
-      ...runtimeTerminal,
-    } as Token & RuntimeTerminalToken;
-  }
-  if (tokenClass === PUBLIC_TOKEN_MAIN || tokenClass === PUBLIC_TOKEN_TRIVIA) {
-    const spec = NAMED_SPECS[payload];
-    return {
-      type: "named",
-      kind: spec.kind as never,
-      text: source.slice(span.start, span.end),
-      span,
-      channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
-      ...runtimeTerminal,
-    } as Token & RuntimeTerminalToken;
-  }
-  if (tokenClass === PUBLIC_TOKEN_ERROR) {
-    return {
-      type: "error",
-      text: source.slice(span.start, span.end),
-      span,
-      channel: "error",
-    };
-  }
-  if (tokenClass === PUBLIC_TOKEN_EOF) {
-    return {
-      type: "eof",
-      text: "",
-      span,
-      channel: "main",
-    };
-  }
-  throw new Error("Lexer runtime emitted an unknown public token class.");
 }
 
 function runtimeSpecPayload(specIndex: number): number {
