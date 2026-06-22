@@ -172,6 +172,17 @@ execute both outputs and compare returned values or traps.
 - Table loads trap on out-of-bounds indexes.
 - Table load indexes are currently restricted to constants and locals; assign
   computed indexes to locals before loading.
+- Runtime-language programs do not yet have first-class text values. Generated
+  standalone parser runtimes treat source text as an immutable UTF-16 code-unit
+  sequence at the host boundary, matching JavaScript `string` indexing.
+- Public token, CST, and diagnostic spans are half-open UTF-16 code-unit
+  offsets. CRLF is two code units, NUL is one code unit, U+2028 and U+2029 are
+  one code unit each, and astral code points occupy two code units when encoded
+  as surrogate pairs.
+- `utf16CodePointWidth(codePoint)` returns `1` for code point values below
+  `0x10000` and `2` otherwise. Isolated surrogate code units are treated as BMP
+  values and advance by one code unit, matching JavaScript `codePointAt()`
+  behavior on ill-formed UTF-16 strings.
 - Scratch-memory growth traps if the requested capacity exceeds the Wasm-backed
   implementation limit.
 - Scratch-memory loads and stores trap on indexes outside the current capacity.
@@ -247,7 +258,8 @@ execute both outputs and compare returned values or traps.
 These rules must be specified before the parser runtime can be fully lowered:
 
 - host-boundary ownership and handle capability lifetimes;
-- text representation and Unicode iteration;
+- first-class runtime-language text values, if source decoding moves fully into
+  the runtime language;
 - structured errors versus traps for each runtime boundary;
 - complete generated-parser lowering for final public CST field object
   allocation.

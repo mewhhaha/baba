@@ -133,6 +133,10 @@ runtime language:
 - Added direct TypeScript/Wasm runtime-language conformance coverage for the
   generated DFA transition helper, including ASCII fast-table hits/misses, range
   fallback, non-BMP code points, and range-only operation.
+- Specified the current parser-source text model as immutable UTF-16 code-unit
+  input at the host boundary, with half-open UTF-16 spans and explicit
+  `utf16CodePointWidth` behavior for NUL, Unicode line separators, isolated
+  surrogates, and astral code points.
 - Moved generated TypeScript lexer longest-match accept/candidate selection onto
   runtime-language `lexerScan*` helpers backed by generated DFA accept tables
   and scratch memory. Generated TypeScript still decodes JavaScript strings and
@@ -327,11 +331,12 @@ Still unresolved:
   layouts plus reduction-shaped fragment assembly helpers that generated replay
   is beginning to use. It now has a shared in-runtime object-kind provenance
   gate for arena handles, but it still lacks a complete host-boundary ownership
-  and handle capability contract plus complete generated parser-runtime
-  lowering. The compiler now has a shared lowered control-flow/value IR and
-  checked helper artifact hashes, but it still needs broader parser-runtime
-  lowering before the release can fully satisfy "one runtime implementation, two
-  execution targets."
+  and handle capability contract, first-class runtime-language text values if
+  source decoding moves fully into the runtime language, plus complete generated
+  parser-runtime lowering. The compiler now has a shared lowered
+  control-flow/value IR and checked helper artifact hashes, but it still needs
+  broader parser-runtime lowering before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

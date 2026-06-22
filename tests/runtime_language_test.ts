@@ -2773,6 +2773,24 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 1 },
     },
     {
+      name: "UTF-16 helper returns one code unit for NUL",
+      program: UTF16_CODE_POINT_WIDTH_PROGRAM,
+      args: [0],
+      expected: { kind: "value", value: 1 },
+    },
+    {
+      name: "UTF-16 helper returns one code unit for Unicode line separators",
+      program: UTF16_CODE_POINT_WIDTH_PROGRAM,
+      args: [0x2028],
+      expected: { kind: "value", value: 1 },
+    },
+    {
+      name: "UTF-16 helper returns one code unit for isolated surrogates",
+      program: UTF16_CODE_POINT_WIDTH_PROGRAM,
+      args: [0xd800],
+      expected: { kind: "value", value: 1 },
+    },
+    {
       name: "UTF-16 helper returns two code units for astral code points",
       program: UTF16_CODE_POINT_WIDTH_PROGRAM,
       args: [0x1f600],
