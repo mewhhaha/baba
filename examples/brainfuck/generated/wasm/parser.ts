@@ -2305,7 +2305,7 @@ function buildFields(
     return Object.create(null) as Record<string, unknown>;
   }
   const fields = Object.create(null) as Record<string, unknown>;
-  const counts = Object.create(null) as Record<number, number>;
+  const counts = runtimeArrayNew(end - start);
   for (let entry = start; entry < end; entry++) {
     const fieldId = parserFieldId(entry);
     const valueClass = parserFieldValueClass(entry);
@@ -2315,7 +2315,6 @@ function buildFields(
       : valueClass === FIELD_VALUE_NULLABLE
       ? null
       : undefined;
-    counts[fieldId] = 0;
   }
   const captures = parserRuleNodeFields(ruleNodeHandle);
   for (let index = 0; index < captureCount; index++) {
@@ -2327,10 +2326,12 @@ function buildFields(
       throw new Error(`Unknown field capture '${fieldName(fieldId)}'.`);
     }
     const name = fieldName(fieldId);
-    counts[fieldId] = (counts[fieldId] ?? 0) + 1;
+    const countIndex = entry - start;
+    const count = runtimeArrayLoad(counts, countIndex) + 1;
+    runtimeArrayStore(counts, countIndex, count);
     const status = parserFieldCaptureStatus(
       entry,
-      counts[fieldId] ?? 0,
+      count,
     );
     if (status === FIELD_CAPTURE_ARRAY) {
       const values = fields[name];
@@ -2349,7 +2350,7 @@ function buildFields(
   for (let entry = start; entry < end; entry++) {
     const fieldId = parserFieldId(entry);
     const name = fieldName(fieldId);
-    const count = counts[fieldId] ?? 0;
+    const count = runtimeArrayLoad(counts, entry - start);
     const valueClass = parserFieldValueClass(entry);
     if (valueClass === FIELD_VALUE_ARRAY) {
       if (!Array.isArray(fields[name])) {

@@ -91,6 +91,10 @@ runtime language:
   vector, reads each runtime field-capture record, and resolves the captured
   host value through the runtime fragment handle map before allocating the
   public field object shape.
+- Moved public CST field capture count tracking onto a runtime-language array.
+  Field assembly now indexes counts by field-schema entry through
+  `runtimeArrayLoad`/`runtimeArrayStore` instead of carrying a parallel
+  JavaScript count object.
 - Removed the parallel JavaScript fragment child list from generated replay.
   Public CST node children now come from the runtime-language rule-node child
   vector, with runtime token/rule-node handles resolved through a per-replay
@@ -292,16 +296,17 @@ Still unresolved:
   handles and calls runtime-language fragment assembly helpers during
   token/rule/sequence/empty/list/field reductions. Public field assembly now
   consumes runtime-language field-capture vectors instead of a parallel
-  JavaScript capture list, and public CST children now consume runtime-language
-  child vectors instead of a parallel JavaScript child list. Public parse
-  diagnostics now pass through runtime-language diagnostic handles before public
-  object materialization. Public CST rule-node object materialization is now
-  centralized behind runtime-language rule-node handles, though final JavaScript
-  object allocation still happens at the API boundary. Public JavaScript field
-  objects/arrays and final public token object wrapping are still not
-  mechanically emitted from one runtime-language implementation. The runtime
-  language now has a checked resettable arena plus tagged arena-backed `u32`
-  arrays, fixed records, growable vectors, and initial parser
+  JavaScript capture list, and field capture counts now use a runtime-language
+  array instead of a parallel JavaScript count object. Public CST children now
+  consume runtime-language child vectors instead of a parallel JavaScript child
+  list. Public parse diagnostics now pass through runtime-language diagnostic
+  handles before public object materialization. Public CST rule-node object
+  materialization is now centralized behind runtime-language rule-node handles,
+  though final JavaScript object allocation still happens at the API boundary.
+  Public JavaScript field objects/arrays and final public token object wrapping
+  are still not mechanically emitted from one runtime-language implementation.
+  The runtime language now has a checked resettable arena plus tagged
+  arena-backed `u32` arrays, fixed records, growable vectors, and initial parser
   fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
   fragment assembly helpers that generated replay is beginning to use, but it
   still lacks opaque typed handle provenance and complete generated
