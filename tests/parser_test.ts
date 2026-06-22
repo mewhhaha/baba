@@ -127,6 +127,7 @@ Deno.test("TypeScript parser diagnostics expose runtime payloads", async () => {
       mod.parserDiagnosticCodeParseTrailingInput,
     );
     assertEquals(Number.isInteger(parsed.diagnostics[0].runtimeDetail), true);
+    assertEquals(parsed.diagnostics[0].runtimeDetailKind, "parser-state");
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

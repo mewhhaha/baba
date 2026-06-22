@@ -282,6 +282,7 @@ function normalizeDiagnostic(diagnostic: RuntimeDiagnostic): unknown {
     span: diagnostic.span,
     runtimeCode: diagnostic.runtimeCode,
     runtimeDetail: diagnostic.runtimeDetail,
+    runtimeDetailKind: diagnostic.runtimeDetailKind,
     expected: diagnostic.expected,
     found: diagnostic.found,
   };
@@ -361,6 +362,7 @@ interface RuntimeDiagnostic {
   span: RuntimeSpan;
   runtimeCode: number;
   runtimeDetail: number;
+  runtimeDetailKind: "none" | "parser-state";
   expected?: string[];
   found?: string;
 }

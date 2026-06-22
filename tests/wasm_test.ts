@@ -313,6 +313,7 @@ Deno.test("Wasm parser reports trailing input through trace replay", async () =>
       Number.isInteger(parsed.diagnostics[0].runtimeDetail),
       true,
     );
+    assertEquals(parsed.diagnostics[0].runtimeDetailKind, "parser-state");
     assertEquals(parsed.diagnostics[0].found, JSON.stringify("a"));
   } finally {
     await Deno.remove(dir, { recursive: true });

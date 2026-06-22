@@ -43,7 +43,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/public_diagnostic_materializer.ts",
       role: "public-diagnostic-materializer",
-      hash: "fnv1a64:332054ca9e39e50f",
+      hash: "fnv1a64:80ebd48037778ba0",
     },
     {
       path: "src/targets/runtime/public_parse_result_materializer.ts",
@@ -97,7 +97,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:89091ae82f54f13e" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:35fd41a866773b57" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

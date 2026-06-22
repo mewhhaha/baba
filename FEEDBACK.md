@@ -35,6 +35,9 @@ runtime language:
 - Added descriptor-level parser diagnostic payload schemas to `wasm/abi.json`,
   mapping each numeric runtime diagnostic code to its public string code,
   `runtimeDetail` kind, and public payload fields.
+- Added public `ParseDiagnostic.runtimeDetailKind` so generated TypeScript and
+  Wasm adapter diagnostics identify whether `runtimeDetail` is currently a
+  parser state or an unused payload without requiring consumers to consult docs.
 - Added core Wasm ABI metadata exports for host ownership and result lifetime,
   plus a generated adapter handle capability model constant for the current
   epoch-checked JavaScript-owned `WasmSourceBuffer` and `ParseTraceInput`
@@ -405,10 +408,11 @@ Still unresolved:
   parser-runtime lowering for remaining host public object materialization
   outside the shared wrapper helpers, and richer executable host-neutral error
   payload variants beyond the current trace status metadata plus descriptor
-  schemas for parser diagnostic code/detail records. The compiler now has a
-  shared lowered control-flow/value IR and checked helper artifact hashes, but
-  it still needs broader parser-runtime lowering before the release can fully
-  satisfy "one runtime implementation, two execution targets."
+  schemas and public detail-kind fields for parser diagnostic code/detail
+  records. The compiler now has a shared lowered control-flow/value IR and
+  checked helper artifact hashes, but it still needs broader parser-runtime
+  lowering before the release can fully satisfy "one runtime implementation, two
+  execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

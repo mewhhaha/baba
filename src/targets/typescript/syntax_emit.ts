@@ -97,6 +97,7 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
     "  span: Span;",
     "  runtimeCode: number;",
     "  runtimeDetail: number;",
+    '  runtimeDetailKind: "none" | "parser-state";',
     "  expected?: readonly string[];",
     "  found?: string;",
     "}",

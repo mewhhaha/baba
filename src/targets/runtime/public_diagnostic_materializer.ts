@@ -30,6 +30,7 @@ function parseDiagnostic(
     span: diagnosticSpan(handle),
     runtimeCode: parserDiagnosticCode(handle),
     runtimeDetail: parserDiagnosticDetail(handle),
+    runtimeDetailKind: diagnosticDetailKind(expectedCode),
   };
 }
 
@@ -47,6 +48,18 @@ function diagnosticCodeId(code: ParseDiagnostic["code"]): number {
       return DIAGNOSTIC_PARSER_INTERNAL_ERROR;
     case "PARSER_BRANCH_LIMIT":
       return DIAGNOSTIC_PARSER_BRANCH_LIMIT;
+  }
+}
+
+function diagnosticDetailKind(
+  runtimeCode: number,
+): ParseDiagnostic["runtimeDetailKind"] {
+  switch (runtimeCode) {
+    case DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN:
+    case DIAGNOSTIC_PARSE_TRAILING_INPUT:
+      return "parser-state";
+    default:
+      return "none";
   }
 }
 

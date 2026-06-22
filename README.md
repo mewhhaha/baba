@@ -127,11 +127,12 @@ Both generated parser runtimes export the same main TypeScript API:
   `parserDiagnosticCodeParseLexicalError` and
   `parserDiagnosticCodeInternalError`, matching the runtime diagnostic record
   taxonomy while public diagnostics continue to use string `code` values.
-  `ParseDiagnostic` objects also expose `runtimeCode` and `runtimeDetail`;
-  `runtimeCode` matches the exported numeric ID, and `runtimeDetail` carries the
-  runtime payload such as parser state for unexpected/trailing tokens. The Wasm
-  target's `abi.json` includes `parserDiagnostics.schemas` describing the
-  `runtimeDetail` kind and public payload fields for each numeric code;
+  `ParseDiagnostic` objects also expose `runtimeCode`, `runtimeDetail`, and
+  `runtimeDetailKind`; `runtimeCode` matches the exported numeric ID, and
+  `runtimeDetail` carries the runtime payload such as parser state for
+  unexpected/trailing tokens. The Wasm target's `abi.json` includes
+  `parserDiagnostics.schemas` describing the `runtimeDetail` kind and public
+  payload fields for each numeric code;
 - `positionAt(source, offset)` and `createSourceMap(source)` for UTF-16
   offset-to-line/column diagnostics;
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia
