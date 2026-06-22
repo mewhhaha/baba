@@ -99,6 +99,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const parserRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_parser_runtime.ts",
   );
+  const publicDiagnosticMaterializerSource = await Deno.readTextFile(
+    "src/targets/runtime/public_diagnostic_materializer.ts",
+  );
   const publicFieldMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_field_materializer.ts",
   );
@@ -121,13 +124,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "parserReducerChildRole");
   assertIncludes(parserRuntimeSource, "catch (error)");
   assertIncludes(parserRuntimeSource, "internalParserDiagnostic(error");
-  assertIncludes(parserRuntimeSource, '"PARSER_INTERNAL_ERROR"');
   assertIncludes(parserRuntimeSource, "parserReducerResultKind");
   assertIncludes(parserRuntimeSource, "parserReplayReductionStatus");
   assertIncludes(parserRuntimeSource, "parserReplayActionStatus");
   assertIncludes(parserRuntimeSource, "lexerSpecTerminal");
   assertIncludes(parserRuntimeSource, "lexerSpecPublicTokenStatus");
-  assertIncludes(parserRuntimeSource, "lexerTokenDiagnosticStatus");
   assertIncludes(parserRuntimeSource, "parserFieldValueClass");
   assertIncludes(parserRuntimeSource, "parserFieldCaptureStatus");
   assertIncludes(parserRuntimeSource, "parserFieldFinalStatus");
@@ -145,7 +146,29 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(publicFieldMaterializerSource, "Object.create(null)");
   assertIncludes(publicFieldMaterializerSource, "fields[name] = value");
-  assertIncludes(parserRuntimeSource, "parserExpectedHasEof");
+  assertIncludes(parserRuntimeSource, "emitPublicDiagnosticMaterializer");
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "function parseDiagnostic",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "function unexpectedTokenDiagnostic",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "parserExpectedHasEof",
+  );
+  assertIncludes(publicDiagnosticMaterializerSource, "parserDiagnosticNew");
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "lexerTokenDiagnosticStatus",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "parserDiagnosticSpanStart",
+  );
+  assertIncludes(publicDiagnosticMaterializerSource, '"PARSER_INTERNAL_ERROR"');
   assertIncludes(parserRuntimeSource, "emitPublicRuleNodeMaterializer");
   assertIncludes(parserRuntimeSource, "hostRuleNodeRuntimeHandle");
   assertIncludes(parserRuntimeSource, "resetPublicSyntaxMaterialization");
@@ -161,8 +184,6 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(publicRuleNodeMaterializerSource, "parserRuleNodeChildren");
   assertIncludes(publicRuleNodeMaterializerSource, "RUNTIME_NODE_HANDLES");
   assertIncludes(publicRuleNodeMaterializerSource, "RUNTIME_SYNTAX_VALUES");
-  assertIncludes(parserRuntimeSource, "parserDiagnosticNew");
-  assertIncludes(parserRuntimeSource, "parserDiagnosticSpanStart");
   assertIncludes(parserRuntimeSource, "parserTraceStatusKind");
   assertIncludes(parserRuntimeSource, "function replayTrace");
   assertNotIncludes(parserRuntimeSource, 'expected.includes("EOF")');
@@ -210,6 +231,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "function buildChildren");
   assertNotIncludes(parserRuntimeSource, "RUNTIME_NODE_HANDLES");
   assertNotIncludes(parserRuntimeSource, "RUNTIME_SYNTAX_VALUES");
+  assertNotIncludes(parserRuntimeSource, "function parseDiagnostic");
+  assertNotIncludes(parserRuntimeSource, "function unexpectedTokenDiagnostic");
+  assertNotIncludes(parserRuntimeSource, "parserDiagnosticNew");
+  assertNotIncludes(parserRuntimeSource, "parserDiagnosticSpanStart");
   assertNotIncludes(parserRuntimeSource, "interface ParseBranch");
   assertNotIncludes(parserRuntimeSource, "function findActions");
 });
@@ -259,7 +284,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 9);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 10);
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {

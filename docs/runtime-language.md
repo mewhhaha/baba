@@ -258,9 +258,10 @@ execute both outputs and compare returned values or traps.
   The materializer reads rule id, span, token range, child vector, and field
   vector data through runtime accessors before allocating the public JavaScript
   CST node object.
-- Generated public parse diagnostics allocate runtime diagnostic records and
-  read span data back from those records before materializing public JavaScript
-  diagnostic objects.
+- Generated public parse diagnostics are emitted from one shared runtime-target
+  diagnostic materializer helper. The helper allocates runtime diagnostic
+  records and reads span data back from those records before materializing
+  public JavaScript diagnostic objects.
 - Boundary failures visible to Baba users are structured diagnostics: grammar
   validation and target planning return compiler diagnostics, lexing returns
   `LexDiagnostic`, parsing returns `ParseDiagnostic`, invalid external token
@@ -281,8 +282,8 @@ These rules must be specified before the parser runtime can be fully lowered:
   the runtime language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
 - complete generated-parser lowering for remaining host public object
-  materialization that still sits outside the shared token, field, and rule-node
-  public wrapper helpers.
+  materialization that still sits outside the shared token, diagnostic, field,
+  and rule-node public wrapper helpers.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from

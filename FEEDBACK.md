@@ -113,7 +113,8 @@ runtime language:
 - Wired generated parse diagnostics through runtime-language diagnostic records.
   Public parse diagnostics now allocate a runtime diagnostic handle, read the
   runtime span back through diagnostic accessors, and then materialize the
-  public JavaScript diagnostic object at the API boundary.
+  public JavaScript diagnostic object through one shared runtime-target
+  diagnostic materializer helper.
 - Centralized public CST rule-node materialization behind runtime-language
   rule-node handles. Rule reducers now return a public node by passing the
   runtime rule-node handle to one materializer, which reads rule id, span, token
@@ -330,14 +331,16 @@ Still unresolved:
   records/vectors before the final JavaScript field object materialization pass.
   Public CST children now consume runtime-language child vectors instead of a
   parallel JavaScript child list. Public parse diagnostics now pass through
-  runtime-language diagnostic handles before public object materialization.
-  Public CST rule-node object materialization is now centralized behind
-  runtime-language rule-node handles, and final JavaScript object allocation for
-  public rule nodes is now emitted from one shared runtime-target helper. Public
-  token object wrapping is now emitted from one shared runtime-target helper for
-  TypeScript and Wasm adapters, and public field object allocation is now
-  emitted from one shared runtime-target helper. The runtime language now has a
-  checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
+  runtime-language diagnostic handles before one shared runtime-target
+  diagnostic materializer wraps public diagnostic objects. Public CST rule-node
+  object materialization is now centralized behind runtime-language rule-node
+  handles, and final JavaScript object allocation for public rule nodes is now
+  emitted from one shared runtime-target helper. Public token object wrapping is
+  now emitted from one shared runtime-target helper for TypeScript and Wasm
+  adapters, public diagnostic object wrapping is now emitted from one shared
+  runtime-target helper, and public field object allocation is now emitted from
+  one shared runtime-target helper. The runtime language now has a checked
+  resettable arena plus tagged arena-backed `u32` arrays, fixed records,
   growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
   layouts plus reduction-shaped fragment assembly helpers that generated replay
   is beginning to use. It now has a shared in-runtime object-kind provenance
