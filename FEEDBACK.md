@@ -390,6 +390,10 @@ runtime language:
   runtime-language `parserReplayReductionStatus`, so generated TypeScript no
   longer directly combines unknown-production, missing reducer payload, and
   replay-stack underflow checks before emitting public diagnostics.
+- Moved generated parser replay RHS stack-slice start arithmetic onto
+  runtime-language `parserReplayRhsStart`, so generated TypeScript no longer
+  directly special-cases empty reductions or subtracts RHS length from the host
+  value stack before calling `splice`.
 
 Still unresolved:
 
@@ -430,52 +434,53 @@ Still unresolved:
   diagnostic code selection uses runtime-language
   `parserUnexpectedDiagnosticCode`, reducer result-shape classification is
   runtime-language-backed, and parser replay action dispatch, parser trace
-  status, plus replay reduction validity classification now use runtime-language
-  helpers. Generated replay also now carries runtime-language parser object
-  handles and calls runtime-language fragment assembly helpers during
-  token/rule/sequence/empty/list/field reductions. Public field assembly now
-  consumes runtime-language field-capture vectors instead of a parallel
-  JavaScript capture list, and field capture counts now use a runtime-language
-  array instead of a parallel JavaScript count object. Public field value
-  accumulation now stores captured fragment handles in tagged runtime
-  records/vectors before the final JavaScript field object materialization pass.
-  Public CST children now consume runtime-language child vectors instead of a
-  parallel JavaScript child list. Public parse diagnostics now pass through
-  runtime-language diagnostic handles before one shared runtime-target
-  diagnostic materializer wraps public diagnostic objects. Public CST rule-node
-  object materialization is now centralized behind runtime-language rule-node
-  handles, and final JavaScript object allocation for public rule nodes is now
-  emitted from one shared runtime-target helper. Public token object wrapping is
-  now emitted from one shared runtime-target helper for TypeScript and Wasm
-  adapters, public lex diagnostic object wrapping is now emitted from one shared
-  runtime-target helper, public lex result object wrapping is now emitted from
-  one shared runtime-target helper, public parse diagnostic object wrapping is
-  now emitted from one shared runtime-target helper, public field object
-  allocation is now emitted from one shared runtime-target helper, and public
-  parse result object allocation is now emitted from one shared runtime-target
-  helper. The runtime language now has a checked resettable arena plus tagged
-  arena-backed `u32` arrays, fixed records, growable vectors, and initial parser
-  fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
-  fragment assembly helpers that generated replay is beginning to use. It now
-  has a shared in-runtime object-kind provenance gate for arena handles, a
-  non-enumerable plan-local terminal hint for public tokens, adapter-owned
-  `WasmSourceBuffer` and `ParseTraceInput` provenance/epoch gates for the
-  current JavaScript-hosted Wasm adapter, and core Wasm metadata for host-owned
-  linear-memory buffers plus caller-owned result-buffer lifetimes and a
-  generated host-neutral ABI descriptor. Host source text access now routes
-  through one shared generated `SourceTextBoundary` handle helper, and
-  TypeScript lexer UTF-16 surrogate decoding now goes through runtime-language
-  `utf16CodePointFromUnits`, but it still lacks executable non-JS host helpers
-  and opaque host-neutral handle capabilities beyond that descriptor, host
-  source-text handles fully lowered into the runtime language, complete
-  generated parser-runtime lowering for remaining host public object
-  materialization outside the shared wrapper helpers, and richer executable
-  host-neutral error payload variants beyond the current trace status metadata
-  plus descriptor schemas and runtime-language-backed public detail-kind ID
-  fields for parser diagnostic code/detail records. The compiler now has a
-  shared lowered control-flow/value IR and checked helper artifact hashes, but
-  it still needs broader parser-runtime lowering before the release can fully
-  satisfy "one runtime implementation, two execution targets."
+  status, replay reduction validity classification, plus replay RHS stack-slice
+  start arithmetic now use runtime-language helpers. Generated replay also now
+  carries runtime-language parser object handles and calls runtime-language
+  fragment assembly helpers during token/rule/sequence/empty/list/field
+  reductions. Public field assembly now consumes runtime-language field-capture
+  vectors instead of a parallel JavaScript capture list, and field capture
+  counts now use a runtime-language array instead of a parallel JavaScript count
+  object. Public field value accumulation now stores captured fragment handles
+  in tagged runtime records/vectors before the final JavaScript field object
+  materialization pass. Public CST children now consume runtime-language child
+  vectors instead of a parallel JavaScript child list. Public parse diagnostics
+  now pass through runtime-language diagnostic handles before one shared
+  runtime-target diagnostic materializer wraps public diagnostic objects. Public
+  CST rule-node object materialization is now centralized behind
+  runtime-language rule-node handles, and final JavaScript object allocation for
+  public rule nodes is now emitted from one shared runtime-target helper. Public
+  token object wrapping is now emitted from one shared runtime-target helper for
+  TypeScript and Wasm adapters, public lex diagnostic object wrapping is now
+  emitted from one shared runtime-target helper, public lex result object
+  wrapping is now emitted from one shared runtime-target helper, public parse
+  diagnostic object wrapping is now emitted from one shared runtime-target
+  helper, public field object allocation is now emitted from one shared
+  runtime-target helper, and public parse result object allocation is now
+  emitted from one shared runtime-target helper. The runtime language now has a
+  checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
+  growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
+  layouts plus reduction-shaped fragment assembly helpers that generated replay
+  is beginning to use. It now has a shared in-runtime object-kind provenance
+  gate for arena handles, a non-enumerable plan-local terminal hint for public
+  tokens, adapter-owned `WasmSourceBuffer` and `ParseTraceInput`
+  provenance/epoch gates for the current JavaScript-hosted Wasm adapter, and
+  core Wasm metadata for host-owned linear-memory buffers plus caller-owned
+  result-buffer lifetimes and a generated host-neutral ABI descriptor. Host
+  source text access now routes through one shared generated
+  `SourceTextBoundary` handle helper, and TypeScript lexer UTF-16 surrogate
+  decoding now goes through runtime-language `utf16CodePointFromUnits`, but it
+  still lacks executable non-JS host helpers and opaque host-neutral handle
+  capabilities beyond that descriptor, host source-text handles fully lowered
+  into the runtime language, complete generated parser-runtime lowering for
+  remaining host public object materialization outside the shared wrapper
+  helpers, and richer executable host-neutral error payload variants beyond the
+  current trace status metadata plus descriptor schemas and
+  runtime-language-backed public detail-kind ID fields for parser diagnostic
+  code/detail records. The compiler now has a shared lowered control-flow/value
+  IR and checked helper artifact hashes, but it still needs broader
+  parser-runtime lowering before the release can fully satisfy "one runtime
+  implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

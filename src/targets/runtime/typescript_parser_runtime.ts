@@ -859,9 +859,8 @@ ${replayPrelude}  const values: unknown[] = [null];
         )],
       );
     }
-    const rhsValues = rhsLength === 0
-      ? []
-      : values.splice(values.length - rhsLength, rhsLength);
+    const rhsStart = parserReplayRhsStart(values.length, rhsLength);
+    const rhsValues = values.splice(rhsStart, rhsLength);
     let reduced: unknown;
     try {
       reduced = reduceProduction(

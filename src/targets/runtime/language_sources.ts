@@ -3754,6 +3754,7 @@ function parserReducerFunctions(
     parserReducerChildRoleFunction(),
     parserReducerResultKindFunction(),
     parserReplayReductionStatusFunction(),
+    parserReplayRhsStartFunction(),
   ];
 }
 
@@ -4564,6 +4565,23 @@ function parserFieldFinalStatusFunction(
       {
         kind: "return",
         expression: u32(RUNTIME_FIELD_FINAL_REQUIRED_MISSING),
+      },
+    ],
+  };
+}
+
+function parserReplayRhsStartFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserReplayRhsStart",
+    parameters: [
+      { name: "valueCount", type: "u32" },
+      { name: "rhsLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: sub(local("valueCount"), local("rhsLength")),
       },
     ],
   };

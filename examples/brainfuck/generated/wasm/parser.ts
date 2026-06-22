@@ -552,6 +552,11 @@ function parserReplayReductionStatus(rhsLength: number, operation: number, paylo
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserReplayRhsStart(valueCount: number, rhsLength: number): number {
+  return (((valueCount) - (rhsLength)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function lexerSpecFlags(specIndex: number): number {
   let offset = 0;
   if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
@@ -2290,9 +2295,8 @@ function replayTrace(
         )],
       );
     }
-    const rhsValues = rhsLength === 0
-      ? []
-      : values.splice(values.length - rhsLength, rhsLength);
+    const rhsStart = parserReplayRhsStart(values.length, rhsLength);
+    const rhsValues = values.splice(rhsStart, rhsLength);
     let reduced: unknown;
     try {
       reduced = reduceProduction(

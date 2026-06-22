@@ -969,6 +969,28 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserReplayRhsStartProgram: RuntimeLanguageProgram = {
+    ...parserReducerBaseProgram,
+    name: "parser_replay_rhs_start_conformance",
+    entry: "main",
+    functions: [
+      ...parserReducerBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserReplayRhsStart", [u32(5), u32(0)]), u32(100)),
+            add(
+              mul(call("parserReplayRhsStart", [u32(5), u32(2)]), u32(10)),
+              call("parserReplayRhsStart", [u32(1), u32(1)]),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserConflictTableRuntimeProgram =
     createParserConflictTableRuntimeProgram({
       actionRows: [
@@ -3622,6 +3644,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING * 10 +
           RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
       },
+    },
+    {
+      name: "parser replay RHS start helper computes reduction stack slice",
+      program: parserReplayRhsStartProgram,
+      expected: { kind: "value", value: 530 },
     },
     {
       name: "parser trace runtime emits deterministic action traces",

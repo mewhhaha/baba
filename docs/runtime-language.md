@@ -108,16 +108,16 @@ syntax handle map; empty/non-empty child-list classification comes from
 `parserFieldValueClass`/`parserFieldSchemaStatus`/
 `parserFieldArrayValueStatus`/`parserFieldScalarValueStatus`/
 `parserFieldCaptureStatus`/`parserFieldFinalStatus` helpers, replay reduction
-validity uses `parserReplayReductionStatus`, and span/token-range merge
-arithmetic uses `parserMergeStart`/`parserMergeEnd` helpers. Generated parser
-action decoding uses `parserActionKind`/`parserActionPayload` helpers, and
-`parserTrace` uses the same helpers to classify encoded actions.
-`parserReplayActionStatus` classifies shift/reduce/accept/unknown action kinds
-before generated TypeScript replay dispatches the accepted trace.
-`parserTraceStatusKind` classifies parser trace status values for generated
-TypeScript parsers and Wasm adapters before those hosts allocate public
-diagnostics. Public parse diagnostics now allocate runtime-language diagnostic
-records first, read span data back through
+validity and RHS stack slicing use `parserReplayReductionStatus` and
+`parserReplayRhsStart`, and span/token-range merge arithmetic uses
+`parserMergeStart`/`parserMergeEnd` helpers. Generated parser action decoding
+uses `parserActionKind`/`parserActionPayload` helpers, and `parserTrace` uses
+the same helpers to classify encoded actions. `parserReplayActionStatus`
+classifies shift/reduce/accept/unknown action kinds before generated TypeScript
+replay dispatches the accepted trace. `parserTraceStatusKind` classifies parser
+trace status values for generated TypeScript parsers and Wasm adapters before
+those hosts allocate public diagnostics. Public parse diagnostics now allocate
+runtime-language diagnostic records first, read span data back through
 `parserDiagnosticSpanStart`/`parserDiagnosticSpanEnd`, and then materialize the
 public JavaScript diagnostic object at the API boundary. Generated TypeScript
 parsers and generated Wasm adapters allocate parse success/failure results
