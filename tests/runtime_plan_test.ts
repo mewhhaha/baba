@@ -181,6 +181,13 @@ Deno.test("Wasm target packages shared core runtime source", async () => {
   assertIncludes(wasmRuntimeSource, "RUNTIME_ACTION_PAYLOAD_MASK");
   assertIncludes(wasmRuntimeSource, "function emitWasmModule");
 
+  const wasmLexerSource = await Deno.readTextFile(
+    "src/targets/wasm/lexer_emit.ts",
+  );
+  assertIncludes(wasmLexerSource, "createParserTokenRecordRuntimeProgram");
+  assertIncludes(wasmLexerSource, "function materializeToken");
+  assertIncludes(wasmLexerSource, "parserTokenSpanStart");
+
   const wasmAdapterSource = await Deno.readTextFile(
     "src/targets/wasm/runtime_emit.ts",
   );

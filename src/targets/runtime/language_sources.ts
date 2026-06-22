@@ -295,6 +295,15 @@ export function createParserObjectRuntimeProgram(
   };
 }
 
+export function createParserTokenRecordRuntimeProgram(): RuntimeLanguageProgram {
+  return {
+    name: "parser_token_record_runtime",
+    entry: "parserTokenNew",
+    scratchMemoryWords: RUNTIME_ARENA_FIRST_WORD,
+    functions: parserTokenRecordFunctions(),
+  };
+}
+
 export function createLexerRuntimeProgram(
   input: LexerRuntimeProgramInput,
 ): RuntimeLanguageProgram {

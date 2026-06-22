@@ -14,6 +14,11 @@ import {
 } from "./wasm.ts";
 
 const DEFAULT_PRESERVE_TRIVIA = true;
+const NO_TERMINAL = 4294967295;
+const PUBLIC_TOKEN_LITERAL = 1;
+const PUBLIC_TOKEN_MAIN = 2;
+const PUBLIC_TOKEN_TRIVIA = 3;
+const PUBLIC_TOKEN_ERROR = 4;
 
 const SPECS: readonly (
   | {
@@ -174,6 +179,173 @@ const SPECS: readonly (
   }
 ] as const;
 
+interface RuntimeTerminalToken {
+  __babaTerminal?: number;
+}
+
+class RuntimeLanguageTrap extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeLanguageTrap";
+  }
+}
+
+function divU32(left: number, right: number): number {
+  const divisor = right >>> 0;
+  if (divisor === 0) throw new RuntimeLanguageTrap("division by zero");
+  return Math.trunc((left >>> 0) / divisor) >>> 0;
+}
+
+
+
+let __baba_scratch = new Uint32Array(1);
+
+function __baba_ensure_scratch(words: number): number {
+  const normalized = words >>> 0;
+  if (normalized > 1073725440) {
+    throw new RuntimeLanguageTrap("scratch memory size out of bounds");
+  }
+  if (normalized <= __baba_scratch.length) return __baba_scratch.length >>> 0;
+  const next = new Uint32Array(normalized);
+  next.set(__baba_scratch);
+  __baba_scratch = next;
+  return __baba_scratch.length >>> 0;
+}
+
+function __baba_load_scratch(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_scratch.length) {
+    throw new RuntimeLanguageTrap("scratch memory index out of bounds");
+  }
+  return __baba_scratch[normalized] >>> 0;
+}
+
+function __baba_store_scratch(index: number, value: number): void {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_scratch.length) {
+    throw new RuntimeLanguageTrap("scratch memory index out of bounds");
+  }
+  __baba_scratch[normalized] = value >>> 0;
+}
+
+
+function runtimeArenaReset(): number {
+  return (runtimeArenaResetTo(1) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArenaResetTo(firstWord: number): number {
+  let capacity = 0;
+  if (((((firstWord) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  capacity = (__baba_ensure_scratch(firstWord) >>> 0) >>> 0;
+  __baba_store_scratch(0, firstWord);
+  return (firstWord) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeArenaAlloc(words: number): number {
+  let base = 0;
+  let next = 0;
+  let capacity = 0;
+  base = (__baba_load_scratch(0) >>> 0) >>> 0;
+  if (((((base) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    base = (1) >>> 0;
+    __baba_store_scratch(0, base);
+  }
+  next = (((base) + (words)) >>> 0) >>> 0;
+  if (((((next) >>> 0) < ((base) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  capacity = (__baba_ensure_scratch(next) >>> 0) >>> 0;
+  __baba_store_scratch(0, next);
+  return (base) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function runtimeObjectKind(handle: number): number {
+  let used = 0;
+  if (((((handle) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  used = (__baba_load_scratch(0) >>> 0) >>> 0;
+  if (((((handle) >>> 0) < ((used) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(handle) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenNew(tokenClass: number, payload: number, terminal: number, spanStart: number, spanEnd: number): number {
+  let handle = 0;
+  handle = (runtimeArenaAlloc(6) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 7);
+  __baba_store_scratch(((handle) + (1)) >>> 0, tokenClass);
+  __baba_store_scratch(((handle) + (2)) >>> 0, payload);
+  __baba_store_scratch(((handle) + (3)) >>> 0, terminal);
+  __baba_store_scratch(((handle) + (4)) >>> 0, spanStart);
+  __baba_store_scratch(((handle) + (5)) >>> 0, spanEnd);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenClass(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenPayload(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenTerminal(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenSpanStart(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (4)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTokenSpanEnd(handle: number): number {
+  let kind = 0;
+  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 export function lex(source: string, options: LexOptions = {}): LexResult {
   return lexInternal(source, options, false);
 }
@@ -199,6 +371,7 @@ function lexInternal(
   options: LexOptions,
   includeParseStream: boolean,
 ): LexResult & { parseStream?: WasmParseStream } {
+  runtimeArenaReset();
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
   const sourceBuffer = writeSource(source);
   const records = lexAll(sourceBuffer);
@@ -227,48 +400,23 @@ function lexInternal(
     if (specIndex >= 0) {
       const spec = SPECS[specIndex];
       if (spec) {
-        if (spec.type === "literal") {
-          const token: Token = {
-            type: "literal",
-            literal: spec.literal as never,
-            text: spec.literal as never,
-            span: { start, end },
-            channel: "main",
-          };
+        const tokenClass = spec.type === "literal"
+          ? PUBLIC_TOKEN_LITERAL
+          : spec.channel === "trivia"
+          ? PUBLIC_TOKEN_TRIVIA
+          : PUBLIC_TOKEN_MAIN;
+        if (tokenClass !== PUBLIC_TOKEN_TRIVIA || preserveTrivia) {
+          const handle = parserTokenNew(
+            tokenClass,
+            specIndex,
+            spec.terminal < 0 ? NO_TERMINAL : spec.terminal,
+            start,
+            end,
+          );
+          const token = materializeToken(source, handle);
           tokens[tokenCount] = token;
-          if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
-          tokenCount++;
-          if (includeParseStream) {
-            if (duplicateStreamTokens) {
-              streamTokens[streamTokenCount] = token;
-              streamTokenCount++;
-            }
-            parseTerminals![terminalCount] = spec.terminal;
-            terminalCount++;
-          }
-        } else {
-          if (spec.channel === "trivia") {
-            if (preserveTrivia) {
-              tokens[tokenCount] = {
-                type: "named",
-                kind: spec.kind as never,
-                text: source.slice(start, end),
-                span: { start, end },
-                channel: "trivia",
-              };
-              tokenCount++;
-            }
-          } else {
-            const token: Token = {
-              type: "named",
-              kind: spec.kind as never,
-              text: source.slice(start, end),
-              span: { start, end },
-              channel: "main",
-            };
-            tokens[tokenCount] = token;
+          if (tokenClass !== PUBLIC_TOKEN_TRIVIA) {
             if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
-            tokenCount++;
             if (includeParseStream) {
               if (duplicateStreamTokens) {
                 streamTokens[streamTokenCount] = token;
@@ -278,23 +426,26 @@ function lexInternal(
               terminalCount++;
             }
           }
+          tokenCount++;
         }
         continue;
       }
     }
 
-    const text = source.slice(start, end);
-    tokens[tokenCount] = {
-      type: "error",
-      text,
-      span: { start, end },
-      channel: "error",
-    };
+    const handle = parserTokenNew(
+      PUBLIC_TOKEN_ERROR,
+      0,
+      NO_TERMINAL,
+      start,
+      end,
+    );
+    const token = materializeToken(source, handle);
+    tokens[tokenCount] = token;
     tokenCount++;
     diagnostics.push({
       code: "LEX_UNEXPECTED_CHARACTER",
-      message: `Unexpected character ${JSON.stringify(text)}.`,
-      span: { start, end },
+      message: `Unexpected character ${JSON.stringify(token.text)}.`,
+      span: token.span,
     });
   }
 
@@ -332,4 +483,55 @@ function lexInternal(
     };
   }
   return { source, tokens, diagnostics };
+}
+
+function materializeToken(source: string, handle: number): Token {
+  const tokenClass = parserTokenClass(handle);
+  const payload = parserTokenPayload(handle);
+  const span = {
+    start: parserTokenSpanStart(handle),
+    end: parserTokenSpanEnd(handle),
+  };
+  const terminal = parserTokenTerminal(handle);
+  const runtimeTerminal: RuntimeTerminalToken = {
+    __babaTerminal: terminal === NO_TERMINAL ? -1 : terminal,
+  };
+
+  if (tokenClass === PUBLIC_TOKEN_LITERAL) {
+    const spec = SPECS[payload];
+    if (!spec || spec.type !== "literal") {
+      throw new Error("Wasm lexer runtime emitted an invalid literal token.");
+    }
+    return {
+      type: "literal",
+      literal: spec.literal as never,
+      text: spec.literal as never,
+      span,
+      channel: "main",
+      ...runtimeTerminal,
+    } as Token & RuntimeTerminalToken;
+  }
+  if (tokenClass === PUBLIC_TOKEN_MAIN || tokenClass === PUBLIC_TOKEN_TRIVIA) {
+    const spec = SPECS[payload];
+    if (!spec || spec.type !== "named") {
+      throw new Error("Wasm lexer runtime emitted an invalid named token.");
+    }
+    return {
+      type: "named",
+      kind: spec.kind as never,
+      text: source.slice(span.start, span.end),
+      span,
+      channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
+      ...runtimeTerminal,
+    } as Token & RuntimeTerminalToken;
+  }
+  if (tokenClass === PUBLIC_TOKEN_ERROR) {
+    return {
+      type: "error",
+      text: source.slice(span.start, span.end),
+      span,
+      channel: "error",
+    };
+  }
+  throw new Error("Wasm lexer runtime emitted an unknown public token class.");
 }

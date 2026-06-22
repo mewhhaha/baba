@@ -40,20 +40,21 @@ generated DFA accept tables. `lexerSpecTokenClass`/`lexerSpecPayload`/
 `lexerSpecTerminal` map accepted lexer spec indexes to token object
 classification data and parser terminal ids for generated TypeScript
 `parse(source)`, while `lexerSpecFlags` remains the lower-level table helper.
-Standalone TypeScript lexers allocate runtime-language token records for matched
-literals, named tokens, preserved trivia, and lexical error tokens, then read
-class, payload, terminal, and span data back through `parserToken*` accessors
-before wrapping public API token objects. External token streams keep public
-token-kind/literal spelling at the API boundary, but generated parsers map those
-spellings to lexer spec indexes and use the same runtime-language helpers for
-channel and terminal classification. `lexerSpecPublicTokenStatus` decides
-whether a mapped public literal/main/trivia token is compatible with the spec
-row; TypeScript still validates object shape/text/spans and emits public
-diagnostics. `lexerTokenDiagnosticStatus` classifies external tokens as
-diagnostically accepted, lexical error tokens, or not in the parser terminal set
-before TypeScript allocates the public diagnostic object. Deterministic parsers
-use `parserAction`/`parserGoto` for parser table lookup, and conflict parsers
-use generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
+Standalone TypeScript lexers and generated Wasm JavaScript adapters allocate
+runtime-language token records for matched literals, named tokens, preserved
+trivia, and lexical error tokens, then read class, payload, terminal, and span
+data back through `parserToken*` accessors before wrapping public API token
+objects. External token streams keep public token-kind/literal spelling at the
+API boundary, but generated parsers map those spellings to lexer spec indexes
+and use the same runtime-language helpers for channel and terminal
+classification. `lexerSpecPublicTokenStatus` decides whether a mapped public
+literal/main/trivia token is compatible with the spec row; TypeScript still
+validates object shape/text/spans and emits public diagnostics.
+`lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
+accepted, lexical error tokens, or not in the parser terminal set before
+TypeScript allocates the public diagnostic object. Deterministic parsers use
+`parserAction`/`parserGoto` for parser table lookup, and conflict parsers use
+generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
 multi-action fan-out and goto lookup. Generated parsers also use
 `parserExpectedStart`/ `parserExpectedEnd` helpers to map parser states to
 flattened expected-terminal display ranges for diagnostics, and
@@ -201,9 +202,9 @@ execute both outputs and compare returned values or traps.
 - Parser fragment, field-capture, rule-node, token, and diagnostic helpers trap
   for wrong object kind and delegate vector bounds checks to the arena-backed
   vector helpers.
-- Generated TypeScript lexers allocate runtime token records for public non-EOF
-  tokens and read those records through runtime token accessors before
-  materializing public JavaScript token objects.
+- Generated TypeScript lexers and Wasm JavaScript adapters allocate runtime
+  token records for public non-EOF tokens and read those records through runtime
+  token accessors before materializing public JavaScript token objects.
 - Parser fragment assembly helpers represent reducer list values as arena
   vectors and preserve child/field vectors plus span/token-range extents across
   sequence, append, and separated-append operations.
@@ -230,7 +231,7 @@ These rules must be specified before the parser runtime can be fully lowered:
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
 - complete generated-parser lowering for public CST field objects/arrays plus
-  Wasm adapter token materialization and final public token object wrapping.
+  final public token object wrapping.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from
