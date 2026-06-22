@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.2
+
+### Changed
+
+- Moved more generated parser replay, token-stream validation, and field
+  assembly decisions into shared runtime-language helpers so TypeScript, Wasm,
+  and parser-kit consumers continue converging on the same runtime semantics.
+- Refreshed generated examples and runtime manifests for the updated
+  runtime-language artifacts.
+
 ## 1.5.1
 
 ### Changed
