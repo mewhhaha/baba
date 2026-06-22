@@ -2608,11 +2608,11 @@ function buildFields(
     return Object.create(null) as Record<string, unknown>;
   }
   const counts = runtimeArrayNew(end - start);
-  const fieldValues = runtimeArrayNew(end - start);
+  const fieldValues = runtimeRecordNew(ruleId, end - start);
   for (let entry = start; entry < end; entry++) {
     const valueClass = parserFieldValueClass(entry);
     if (valueClass === FIELD_VALUE_ARRAY) {
-      runtimeArrayStore(fieldValues, entry - start, runtimeVectorNew(0));
+      runtimeRecordStore(fieldValues, entry - start, runtimeVectorNew(0));
     }
   }
   const captures = parserRuleNodeFields(ruleNodeHandle);
@@ -2633,13 +2633,13 @@ function buildFields(
       count,
     );
     if (status === FIELD_CAPTURE_ARRAY) {
-      const values = runtimeArrayLoad(fieldValues, countIndex);
+      const values = runtimeRecordLoad(fieldValues, countIndex);
       if (values === 0) {
         throw new Error(`Array field '${name}' was not initialized as a runtime vector.`);
       }
       runtimeVectorAppend(values, value);
     } else if (status === FIELD_CAPTURE_SCALAR) {
-      runtimeArrayStore(fieldValues, countIndex, value);
+      runtimeRecordStore(fieldValues, countIndex, value);
     } else if (status === FIELD_CAPTURE_TOO_MANY) {
       throw new Error(`Scalar field '${name}' was captured more than once.`);
     } else {
@@ -2656,7 +2656,7 @@ function buildFields(
     if (valueClass === FIELD_VALUE_ARRAY) {
       fields[name] = materializeFieldArray(
         name,
-        runtimeArrayLoad(fieldValues, valueIndex),
+        runtimeRecordLoad(fieldValues, valueIndex),
       );
       continue;
     }
@@ -2669,7 +2669,7 @@ function buildFields(
     }
     fields[name] = count === 0
       ? null
-      : hostFragmentValue(runtimeArrayLoad(fieldValues, valueIndex));
+      : hostFragmentValue(runtimeRecordLoad(fieldValues, valueIndex));
   }
   return fields;
 }

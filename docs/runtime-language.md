@@ -220,9 +220,9 @@ execute both outputs and compare returned values or traps.
   longer carries an independent JavaScript field-capture list.
 - Generated public field assembly tracks capture counts in a runtime arena array
   indexed by field-schema entry instead of a JavaScript count object.
-- Generated public field assembly stores captured field value handles in runtime
-  arrays and vectors, then materializes public JavaScript scalar and array field
-  values from those runtime handles in a final pass.
+- Generated public field assembly stores captured field value handles in tagged
+  runtime records and vectors, then materializes public JavaScript scalar and
+  array field values from those runtime handles in a final pass.
 - Generated public child assembly consumes runtime rule-node child vectors and
   resolves runtime token/rule-node handles through a per-replay syntax handle
   map; it no longer carries an independent JavaScript fragment child list.

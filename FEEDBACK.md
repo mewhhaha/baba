@@ -95,10 +95,11 @@ runtime language:
   Field assembly now indexes counts by field-schema entry through
   `runtimeArrayLoad`/`runtimeArrayStore` instead of carrying a parallel
   JavaScript count object.
-- Moved public CST field value accumulation onto runtime-language arrays and
-  vectors. Field assembly now stores scalar captured fragment handles in a
-  runtime array and array-field captured fragment handles in runtime vectors,
-  then materializes the public JavaScript field object in a final pass.
+- Moved public CST field value accumulation onto tagged runtime-language records
+  and vectors. Field assembly now stores scalar captured fragment handles in a
+  runtime record tagged by rule id, stores array-field captured fragment handles
+  in runtime vectors referenced by that record, then materializes the public
+  JavaScript field object in a final pass.
 - Removed the parallel JavaScript fragment child list from generated replay.
   Public CST node children now come from the runtime-language rule-node child
   vector, with runtime token/rule-node handles resolved through a per-replay
@@ -302,10 +303,10 @@ Still unresolved:
   consumes runtime-language field-capture vectors instead of a parallel
   JavaScript capture list, and field capture counts now use a runtime-language
   array instead of a parallel JavaScript count object. Public field value
-  accumulation now stores captured fragment handles in runtime arrays/vectors
-  before the final JavaScript field object materialization pass. Public CST
-  children now consume runtime-language child vectors instead of a parallel
-  JavaScript child list. Public parse diagnostics now pass through
+  accumulation now stores captured fragment handles in tagged runtime
+  records/vectors before the final JavaScript field object materialization pass.
+  Public CST children now consume runtime-language child vectors instead of a
+  parallel JavaScript child list. Public parse diagnostics now pass through
   runtime-language diagnostic handles before public object materialization.
   Public CST rule-node object materialization is now centralized behind
   runtime-language rule-node handles, though final JavaScript object allocation
