@@ -32,6 +32,9 @@ const MAX_WASM_BYTES = 0xffff_ffff;
 const MAX_WASM_PAGES = 65535;
 const WASM_SOURCE_ENCODING_UTF16 = 1;
 const WASM_SPAN_UNIT_UTF16 = 1;
+const WASM_HOST_OWNERSHIP_CALLER_MANAGED = 1;
+const WASM_RESULT_LIFETIME_CALLER_BUFFER = 1;
+const WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH = 1;
 const LEX_RESULT_I32_COUNT = 2;
 const TOKEN_RECORD_I32_COUNT = 3;
 const TRACE_STATUS_OK = ${RUNTIME_TRACE_STATUS_OK};
@@ -54,6 +57,8 @@ interface ParserWasmExports {
   span_unit(): number;
   lex_result_i32_count(): number;
   token_record_i32_count(): number;
+  host_ownership_model(): number;
+  result_lifetime_model(): number;
 }
 
 interface ParserTraceRuntimeExports {
@@ -87,6 +92,9 @@ export const wasmSourceEncoding = wasm.source_encoding();
 export const wasmSpanUnit = wasm.span_unit();
 export const wasmLexResultI32Count = wasm.lex_result_i32_count();
 export const wasmTokenRecordI32Count = wasm.token_record_i32_count();
+export const wasmHostOwnershipModel = wasm.host_ownership_model();
+export const wasmResultLifetimeModel = wasm.result_lifetime_model();
+export const wasmAdapterHandleCapabilityModel = WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH;
 export const wasmTraceStatusOk = TRACE_STATUS_OK;
 export const wasmTraceStatusUnexpected = TRACE_STATUS_UNEXPECTED;
 export const wasmTraceStatusInternal = TRACE_STATUS_INTERNAL;
@@ -343,6 +351,12 @@ function validateWasmAbi(): void {
   }
   if (wasmTokenRecordI32Count !== TOKEN_RECORD_I32_COUNT) {
     throw new Error("Wasm token record width does not match generated adapter.");
+  }
+  if (wasmHostOwnershipModel !== WASM_HOST_OWNERSHIP_CALLER_MANAGED) {
+    throw new Error("Wasm host ownership model does not match generated adapter.");
+  }
+  if (wasmResultLifetimeModel !== WASM_RESULT_LIFETIME_CALLER_BUFFER) {
+    throw new Error("Wasm result lifetime model does not match generated adapter.");
   }
 }
 

@@ -136,26 +136,32 @@ host-neutral parser ABI. The embedded core module exports
 `abi_version() -> i32`, `plan_version() -> i32`, `reset() -> void`,
 `input_base() -> i32`, `max_pages() -> i32`, `source_encoding() -> i32`,
 `span_unit() -> i32`, `lex_result_i32_count() -> i32`, and
-`token_record_i32_count() -> i32`; the JavaScript adapter exposes their current
+`token_record_i32_count() -> i32`, `host_ownership_model() -> i32`, and
+`result_lifetime_model() -> i32`; the JavaScript adapter exposes their current
 values as constants and validates that they match its generated table layout
-before use. Source encoding and span unit value `1` means UTF-16 code units. The
-adapter also exports trace status constants, and `parseTrace()` failure results
-include both `statusKind` and `failureKind` while retaining the older
-`internal`/`limit` booleans. The generated JavaScript adapter copies source text
+before use. Source encoding and span unit value `1` means UTF-16 code units.
+Host ownership model value `1` means the host owns UTF-16 input and result
+buffers in linear memory; result lifetime model value `1` means low-level core
+results are valid in caller-provided buffers until the host overwrites those
+buffers or grows memory. The generated JavaScript adapter copies source text
 into Wasm memory as UTF-16 code units, so all public spans are UTF-16 offsets
-matching the TypeScript target. Parse and lex results remain ordinary JavaScript
-objects. Low-level typed-array views returned by `wasm.ts` helpers are tied to
-the current `WebAssembly.Memory` buffer. `WasmSourceBuffer` values returned by
-`writeSource()` and `ParseTraceInput` values returned by
-`createParseTraceInput()` are adapter-owned capabilities: they are not forgeable
-or serializable. `WasmSourceBuffer` values become stale after `reset()` or after
-`writeSource()` installs a different source; `ParseTraceInput` values become
-stale after `reset()`. Call `writeSource()` or `createParseTraceInput()` again
-to obtain a current handle before using `lexOne()`, `lexAll()`, or
-`parseTrace()`. Repeated parses reuse memory up to the previous high-water mark,
-and adapter-side offset arithmetic is checked against the 32-bit Wasm address
-space. The core module declares a maximum of 65,535 Wasm pages; the adapter
-checks the same page limit before calling `memory.grow()`.
+matching the TypeScript target. The adapter also exports trace status constants,
+and `parseTrace()` failure results include both `statusKind` and `failureKind`
+while retaining the older `internal`/`limit` booleans. Parse and lex results
+remain ordinary JavaScript objects. Low-level typed-array views returned by
+`wasm.ts` helpers are tied to the current `WebAssembly.Memory` buffer.
+`WasmSourceBuffer` values returned by `writeSource()` and `ParseTraceInput`
+values returned by `createParseTraceInput()` are adapter-owned capabilities:
+they are not forgeable or serializable. The adapter handle capability model
+value `1` means those JavaScript capabilities are epoch-checked.
+`WasmSourceBuffer` values become stale after `reset()` or after `writeSource()`
+installs a different source; `ParseTraceInput` values become stale after
+`reset()`. Call `writeSource()` or `createParseTraceInput()` again to obtain a
+current handle before using `lexOne()`, `lexAll()`, or `parseTrace()`. Repeated
+parses reuse memory up to the previous high-water mark, and adapter-side offset
+arithmetic is checked against the 32-bit Wasm address space. The core module
+declares a maximum of 65,535 Wasm pages; the adapter checks the same page limit
+before calling `memory.grow()`.
 
 Internally, standalone parser targets lower the analyzed grammar once into a
 versioned portable parser plan:

@@ -193,8 +193,12 @@ execute both outputs and compare returned values or traps.
   `writeSource()` installs a different source into the shared Wasm input area.
 - Core Wasm modules export ABI metadata for non-JS hosts to discover the current
   input base, maximum page count, source encoding, span unit, lex-result record
-  width, and token-record width. The generated JavaScript adapter validates
-  those core exports against its generated constants before using the module.
+  width, token-record width, host ownership model, and result lifetime model.
+  Host ownership model value `1` means the host owns UTF-16 input and result
+  buffers in linear memory. Result lifetime model value `1` means low-level core
+  results are valid in caller-provided buffers until the host overwrites those
+  buffers or grows memory. The generated JavaScript adapter validates those core
+  exports against its generated constants before using the module.
 - Generated JavaScript-hosted Wasm adapters export trace status constants and
   include both numeric `statusKind` and string `failureKind` fields on
   `parseTrace()` failures before public parser diagnostics are materialized.
@@ -202,6 +206,8 @@ execute both outputs and compare returned values or traps.
   returned by `createParseTraceInput()` as adapter-owned parser-trace
   capabilities. The adapter rejects forged plain objects and invalidates
   previous trace inputs when `reset()` reinstantiates the parser trace runtime.
+  The adapter handle capability model value `1` means these JavaScript-side
+  capabilities are epoch-checked and are not serializable core Wasm handles.
 - Public token, CST, and diagnostic spans are half-open UTF-16 code-unit
   offsets. CRLF is two code units, NUL is one code unit, U+2028 and U+2029 are
   one code unit each, and astral code points occupy two code units when encoded
@@ -304,8 +310,8 @@ execute both outputs and compare returned values or traps.
 These rules must be specified before the parser runtime can be fully lowered:
 
 - host-boundary ownership and handle capability lifetimes for future non-JS Wasm
-  hosts beyond the current JavaScript-hosted `WasmSourceBuffer` and
-  `ParseTraceInput` provenance gates;
+  hosts beyond the current linear-memory ownership metadata and
+  JavaScript-hosted `WasmSourceBuffer`/`ParseTraceInput` provenance gates;
 - first-class runtime-language text values, if source decoding moves fully into
   the runtime language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;

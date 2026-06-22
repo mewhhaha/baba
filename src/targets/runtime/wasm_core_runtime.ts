@@ -31,6 +31,8 @@ const MAX_WASM_PAGES = 65_535;
 const WASM_ABI_VERSION = 1;
 const WASM_SOURCE_ENCODING_UTF16 = 1;
 const WASM_SPAN_UNIT_UTF16 = 1;
+const WASM_HOST_OWNERSHIP_CALLER_MANAGED = 1;
+const WASM_RESULT_LIFETIME_CALLER_BUFFER = 1;
 const LEX_RESULT_I32_COUNT = 2;
 const TOKEN_RECORD_I32_COUNT = 3;
 const I32 = 0x7f;
@@ -246,6 +248,8 @@ function functionSection(): number[] {
     u32(2),
     u32(2),
     u32(2),
+    u32(2),
+    u32(2),
   ]);
 }
 
@@ -269,6 +273,8 @@ function exportSection(): number[] {
     exportEntry("span_unit", 0x00, 11),
     exportEntry("lex_result_i32_count", 0x00, 12),
     exportEntry("token_record_i32_count", 0x00, 13),
+    exportEntry("host_ownership_model", 0x00, 14),
+    exportEntry("result_lifetime_model", 0x00, 15),
   ]);
 }
 
@@ -309,6 +315,8 @@ function codeSection(
     functionBody(0, versionFunction(WASM_SPAN_UNIT_UTF16)),
     functionBody(0, versionFunction(LEX_RESULT_I32_COUNT)),
     functionBody(0, versionFunction(TOKEN_RECORD_I32_COUNT)),
+    functionBody(0, versionFunction(WASM_HOST_OWNERSHIP_CALLER_MANAGED)),
+    functionBody(0, versionFunction(WASM_RESULT_LIFETIME_CALLER_BUFFER)),
   ]);
 }
 

@@ -45,6 +45,8 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertIncludes(wasmSource, "validateWasmAbi();");
     assertIncludes(wasmSource, "wasm.input_base()");
     assertIncludes(wasmSource, "wasm.source_encoding()");
+    assertIncludes(wasmSource, "wasm.host_ownership_model()");
+    assertIncludes(wasmSource, "wasm.result_lifetime_model()");
     assertNotIncludes(wasmSource, "wasm.parse_trace");
     assertIncludes(wasmSource, "const MAX_WASM_PAGES = 65535");
     assertIncludes(wasmSource, "memory.grow(requiredPages - currentPages)");
@@ -62,6 +64,8 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
       span_unit(): number;
       lex_result_i32_count(): number;
       token_record_i32_count(): number;
+      host_ownership_model(): number;
+      result_lifetime_model(): number;
     };
     assertEquals(wasmExports.parse_trace, undefined);
     assertEquals(wasmExports.abi_version(), 1);
@@ -72,6 +76,8 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertEquals(wasmExports.span_unit(), 1);
     assertEquals(wasmExports.lex_result_i32_count(), 2);
     assertEquals(wasmExports.token_record_i32_count(), 3);
+    assertEquals(wasmExports.host_ownership_model(), 1);
+    assertEquals(wasmExports.result_lifetime_model(), 1);
     wasmExports.reset();
     assertEquals(mod.wasmTargetKind, "javascript-hosted-core-wasm");
     assertEquals(mod.wasmAbiVersion, 1);
@@ -81,6 +87,9 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertEquals(mod.wasmSpanUnit, 1);
     assertEquals(mod.wasmLexResultI32Count, 2);
     assertEquals(mod.wasmTokenRecordI32Count, 3);
+    assertEquals(mod.wasmHostOwnershipModel, 1);
+    assertEquals(mod.wasmResultLifetimeModel, 1);
+    assertEquals(mod.wasmAdapterHandleCapabilityModel, 1);
     assertEquals(mod.wasmTraceStatusOk, 0);
     assertEquals(mod.wasmTraceStatusUnexpected, 1);
     assertEquals(mod.wasmTraceStatusInternal, 2);

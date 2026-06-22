@@ -27,6 +27,10 @@ runtime language:
 - Added generated Wasm adapter trace status constants and structured
   `parseTrace()` failure metadata (`statusKind` and `failureKind`) while keeping
   the older compatibility booleans.
+- Added core Wasm ABI metadata exports for host ownership and result lifetime,
+  plus a generated adapter handle capability model constant for the current
+  epoch-checked JavaScript-owned `WasmSourceBuffer` and `ParseTraceInput`
+  handles.
 - Added JavaScript-hosted Wasm adapter source-buffer provenance checks:
   `WasmSourceBuffer` values are now adapter-owned capabilities, forged buffers
   are rejected, and previous buffers become stale after `reset()` or after
@@ -372,16 +376,16 @@ Still unresolved:
   layouts plus reduction-shaped fragment assembly helpers that generated replay
   is beginning to use. It now has a shared in-runtime object-kind provenance
   gate for arena handles, a non-enumerable plan-local terminal hint for public
-  tokens, plus adapter-owned `WasmSourceBuffer` and `ParseTraceInput`
-  provenance/epoch gates for the current JavaScript-hosted Wasm adapter, but it
-  still lacks a complete host-boundary ownership and handle capability contract
-  for future non-JS Wasm hosts beyond the current discoverable core metadata and
-  JavaScript-hosted capability gates, first-class runtime-language text values
-  if source decoding moves fully into the runtime language, plus complete
-  generated parser-runtime lowering for remaining host public object
-  materialization outside the shared wrapper helpers and a richer structured
-  error taxonomy beyond the current trace status metadata for a future
-  host-neutral Wasm ABI. The compiler now has a shared lowered
+  tokens, adapter-owned `WasmSourceBuffer` and `ParseTraceInput`
+  provenance/epoch gates for the current JavaScript-hosted Wasm adapter, and
+  core Wasm metadata for host-owned linear-memory buffers plus caller-owned
+  result-buffer lifetimes, but it still lacks future non-JS host helpers and
+  opaque host-neutral handle capabilities beyond that metadata, first-class
+  runtime-language text values if source decoding moves fully into the runtime
+  language, plus complete generated parser-runtime lowering for remaining host
+  public object materialization outside the shared wrapper helpers and a richer
+  structured error taxonomy beyond the current trace status metadata for a
+  future host-neutral Wasm ABI. The compiler now has a shared lowered
   control-flow/value IR and checked helper artifact hashes, but it still needs
   broader parser-runtime lowering before the release can fully satisfy "one
   runtime implementation, two execution targets."
