@@ -103,6 +103,7 @@ import {
   RUNTIME_TRACE_STATUS_OK,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
 } from "./language_sources.ts";
+import { emitPublicFieldMaterializer } from "./public_field_materializer.ts";
 
 export type ParserEmitMode = "typescript" | "wasm";
 
@@ -265,6 +266,7 @@ ${
   }
 
 ${parserTableRuntime(runtimeWithFields)}
+${emitPublicFieldMaterializer()}
 
 ${parseEntryPoints(mode)}
 
@@ -1273,7 +1275,7 @@ function buildFields(
     if (captureCount > 0) {
       throw new Error("Rule has field captures but no field schema.");
     }
-    return Object.create(null) as Record<string, unknown>;
+    return createPublicFieldObject();
   }
   const counts = runtimeArrayNew(end - start);
   const fieldValues = runtimeRecordNew(ruleId, end - start);
@@ -1314,7 +1316,7 @@ function buildFields(
       throw new Error(\`Unknown field capture '\${fieldName(fieldId)}'.\`);
     }
   }
-  const fields = Object.create(null) as Record<string, unknown>;
+  const fields = createPublicFieldObject();
   for (let entry = start; entry < end; entry++) {
     const fieldId = parserFieldId(entry);
     const name = fieldName(fieldId);
@@ -1322,10 +1324,10 @@ function buildFields(
     const count = runtimeArrayLoad(counts, valueIndex);
     const valueClass = parserFieldValueClass(entry);
     if (valueClass === FIELD_VALUE_ARRAY) {
-      fields[name] = materializeFieldArray(
+      storePublicField(fields, name, materializeFieldArray(
         name,
         runtimeRecordLoad(fieldValues, valueIndex),
-      );
+      ));
       continue;
     }
     const status = parserFieldFinalStatus(entry, count);
@@ -1335,23 +1337,16 @@ function buildFields(
     if (status === FIELD_FINAL_TOO_MANY) {
       throw new Error(\`Nullable field '\${name}' was captured more than once.\`);
     }
-    fields[name] = count === 0
-      ? null
-      : hostFragmentValue(runtimeRecordLoad(fieldValues, valueIndex));
+    storePublicField(
+      fields,
+      name,
+      materializeFieldScalar(
+        count,
+        runtimeRecordLoad(fieldValues, valueIndex),
+      ),
+    );
   }
   return fields;
-}
-
-function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
-  if (vectorHandle === 0) {
-    throw new Error(\`Array field '\${name}' was not initialized as a runtime vector.\`);
-  }
-  const length = runtimeVectorLength(vectorHandle);
-  const values: unknown[] = [];
-  for (let index = 0; index < length; index++) {
-    values.push(hostFragmentValue(runtimeVectorLoad(vectorHandle, index)));
-  }
-  return values;
 }
 
 function buildChildren(ruleNodeHandle: number): SyntaxElement[] {

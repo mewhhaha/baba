@@ -248,7 +248,8 @@ execute both outputs and compare returned values or traps.
   indexed by field-schema entry instead of a JavaScript count object.
 - Generated public field assembly stores captured field value handles in tagged
   runtime records and vectors, then materializes public JavaScript scalar and
-  array field values from those runtime handles in a final pass.
+  array field values from those runtime handles in a final pass through one
+  shared runtime-target field materializer helper.
 - Generated public child assembly consumes runtime rule-node child vectors and
   resolves runtime token/rule-node handles through a per-replay syntax handle
   map; it no longer carries an independent JavaScript fragment child list.
@@ -278,8 +279,9 @@ These rules must be specified before the parser runtime can be fully lowered:
 - first-class runtime-language text values, if source decoding moves fully into
   the runtime language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
-- complete generated-parser lowering for final public CST field object
-  allocation.
+- complete generated-parser lowering for remaining host public object
+  materialization, if public JavaScript CST objects become runtime-language
+  emitted values instead of API-boundary wrappers.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from
