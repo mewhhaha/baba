@@ -21,6 +21,11 @@ runtime language:
 - Documented and exported Wasm ABI/plan versions, `reset()`, UTF-16 span units,
   repeated-parse memory reuse behavior, a core module maximum page count, and
   adapter-side page/overflow checks before memory growth.
+- Documented the current structured-error boundary: public compiler/lexer/parser
+  APIs return diagnostics, invalid external token streams return
+  `TS_PARSER_INVALID_TOKEN_STREAM`, caught generated runtime/replay traps become
+  `PARSER_INTERNAL_ERROR`, and direct private runtime-language helper execution
+  remains trap-based conformance behavior.
 - Added deterministic generated Wasm output coverage. Local independent-engine
   validation remains unavailable because `wasm-tools`, `wasm-validate`, and
   `wasmtime` are not installed in this environment.
@@ -333,7 +338,8 @@ Still unresolved:
   gate for arena handles, but it still lacks a complete host-boundary ownership
   and handle capability contract, first-class runtime-language text values if
   source decoding moves fully into the runtime language, plus complete generated
-  parser-runtime lowering. The compiler now has a shared lowered
+  parser-runtime lowering and a richer structured-error taxonomy for a future
+  host-neutral Wasm ABI. The compiler now has a shared lowered
   control-flow/value IR and checked helper artifact hashes, but it still needs
   broader parser-runtime lowering before the release can fully satisfy "one
   runtime implementation, two execution targets."

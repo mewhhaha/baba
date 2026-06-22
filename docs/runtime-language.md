@@ -251,6 +251,14 @@ execute both outputs and compare returned values or traps.
 - Generated public parse diagnostics allocate runtime diagnostic records and
   read span data back from those records before materializing public JavaScript
   diagnostic objects.
+- Boundary failures visible to Baba users are structured diagnostics: grammar
+  validation and target planning return compiler diagnostics, lexing returns
+  `LexDiagnostic`, parsing returns `ParseDiagnostic`, invalid external token
+  streams return `TS_PARSER_INVALID_TOKEN_STREAM`, and generated parser
+  runtime/replay traps caught at the public parse boundary become
+  `PARSER_INTERNAL_ERROR` diagnostics. Direct execution of private
+  runtime-language helpers still traps; those traps are conformance-test
+  behavior, not public parser API results.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
@@ -260,7 +268,7 @@ These rules must be specified before the parser runtime can be fully lowered:
 - host-boundary ownership and handle capability lifetimes;
 - first-class runtime-language text values, if source decoding moves fully into
   the runtime language;
-- structured errors versus traps for each runtime boundary;
+- a richer structured-error taxonomy for a future host-neutral Wasm ABI;
 - complete generated-parser lowering for final public CST field object
   allocation.
 
