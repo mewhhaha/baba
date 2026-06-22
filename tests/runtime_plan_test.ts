@@ -332,7 +332,12 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 13);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 15);
+  const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
+    source.role
+  );
+  assert(roles.includes("parser-diagnostic-codes"));
+  assert(roles.includes("wasm-abi-constants"));
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {

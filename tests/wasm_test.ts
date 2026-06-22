@@ -27,7 +27,7 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
   assert(result.bundle);
   assertEquals(
     result.bundle.files.map((file) => file.path).join(","),
-    "wasm/lexer.ts,wasm/mod.ts,wasm/parser.ts,wasm/syntax.ts,wasm/wasm.ts",
+    "wasm/abi.json,wasm/lexer.ts,wasm/mod.ts,wasm/parser.ts,wasm/syntax.ts,wasm/wasm.ts",
   );
 
   const dir = await Deno.makeTempDir();
@@ -50,6 +50,7 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertNotIncludes(wasmSource, "wasm.parse_trace");
     assertIncludes(wasmSource, "const MAX_WASM_PAGES = 65535");
     assertIncludes(wasmSource, "memory.grow(requiredPages - currentPages)");
+    const abi = JSON.parse(await Deno.readTextFile(`${dir}/wasm/abi.json`));
     const mod = await import(`file://${dir}/wasm/mod.ts`);
     const wasmModule = new WebAssembly.Module(mod.wasmBytes);
     const wasmInstance = new WebAssembly.Instance(wasmModule, {});
@@ -100,6 +101,83 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertEquals(mod.parserDiagnosticCodeParseInvalidTokenStream, 4);
     assertEquals(mod.parserDiagnosticCodeInternalError, 5);
     assertEquals(mod.parserDiagnosticCodeBranchLimit, 6);
+    assertEquals(abi.format, "baba-wasm-abi");
+    assertEquals(abi.version, 1);
+    assertEquals(abi.targetKind, mod.wasmTargetKind);
+    assertEquals(abi.parserPlan.format, mod.parserPlanFormat);
+    assertEquals(abi.parserPlan.version, mod.parserPlanVersion);
+    assertEquals(abi.parserPlan.semantics, mod.parserPlanSemantics);
+    assertEquals(abi.parserPlan.hash, mod.parserPlanHash);
+    assertEquals(
+      abi.runtimeImplementation.format,
+      mod.runtimeImplementationFormat,
+    );
+    assertEquals(
+      abi.runtimeImplementation.version,
+      mod.runtimeImplementationVersion,
+    );
+    assertEquals(
+      abi.runtimeImplementation.semantics,
+      mod.runtimeImplementationSemantics,
+    );
+    assertEquals(
+      abi.runtimeImplementation.hash,
+      mod.runtimeImplementationHash,
+    );
+    assertEquals(abi.core.abiVersion, mod.wasmAbiVersion);
+    assertEquals(abi.core.memory.export, "memory");
+    assertEquals(abi.core.memory.maxPages, mod.wasmMaxPages);
+    assertEquals(abi.core.memory.inputBase, mod.wasmInputBase);
+    assertEquals(abi.core.sourceEncoding.value, mod.wasmSourceEncoding);
+    assertEquals(abi.core.sourceEncoding.kind, "utf16");
+    assertEquals(abi.core.sourceEncoding.unitBytes, 2);
+    assertEquals(abi.core.spanUnit.value, mod.wasmSpanUnit);
+    assertEquals(abi.core.ownership.value, mod.wasmHostOwnershipModel);
+    assertEquals(abi.core.resultLifetime.value, mod.wasmResultLifetimeModel);
+    assertEquals(
+      abi.core.layouts.lexResult.i32Count,
+      mod.wasmLexResultI32Count,
+    );
+    assertEquals(
+      abi.core.layouts.tokenRecord.i32Count,
+      mod.wasmTokenRecordI32Count,
+    );
+    assertEquals(
+      abi.core.exports.map((entry: { name: string }) => entry.name).join(","),
+      "memory,lex_one,parser_action,parser_goto,lex_all,abi_version,plan_version,reset,input_base,max_pages,source_encoding,span_unit,lex_result_i32_count,token_record_i32_count,host_ownership_model,result_lifetime_model",
+    );
+    assertEquals(
+      abi.adapter.handleCapability.value,
+      mod.wasmAdapterHandleCapabilityModel,
+    );
+    assertEquals(abi.traceStatuses.ok, mod.wasmTraceStatusOk);
+    assertEquals(abi.traceStatuses.unexpected, mod.wasmTraceStatusUnexpected);
+    assertEquals(abi.traceStatuses.internal, mod.wasmTraceStatusInternal);
+    assertEquals(abi.traceStatuses.branchLimit, mod.wasmTraceStatusBranchLimit);
+    assertEquals(
+      abi.parserDiagnosticCodes.parseLexicalError,
+      mod.parserDiagnosticCodeParseLexicalError,
+    );
+    assertEquals(
+      abi.parserDiagnosticCodes.parseUnexpectedToken,
+      mod.parserDiagnosticCodeParseUnexpectedToken,
+    );
+    assertEquals(
+      abi.parserDiagnosticCodes.parseTrailingInput,
+      mod.parserDiagnosticCodeParseTrailingInput,
+    );
+    assertEquals(
+      abi.parserDiagnosticCodes.parseInvalidTokenStream,
+      mod.parserDiagnosticCodeParseInvalidTokenStream,
+    );
+    assertEquals(
+      abi.parserDiagnosticCodes.internalError,
+      mod.parserDiagnosticCodeInternalError,
+    );
+    assertEquals(
+      abi.parserDiagnosticCodes.branchLimit,
+      mod.parserDiagnosticCodeBranchLimit,
+    );
     assertEquals(mod.parserPlanFormat, "baba-parser-plan");
     assertEquals(mod.parserPlanVersion, 1);
     assertEquals(mod.parserPlanSemantics, "baba-portable-v1");
@@ -342,7 +420,14 @@ Deno.test("Wasm target generates deterministic runtime bytes", () => {
   const secondWasmSource = second.bundle.files.find((file) =>
     file.path === "wasm/wasm.ts"
   )?.content;
+  const firstAbiSource = first.bundle.files.find((file) =>
+    file.path === "wasm/abi.json"
+  )?.content;
+  const secondAbiSource = second.bundle.files.find((file) =>
+    file.path === "wasm/abi.json"
+  )?.content;
   assertEquals(firstWasmSource, secondWasmSource);
+  assertEquals(firstAbiSource, secondAbiSource);
 });
 
 Deno.test("Wasm lexer preserves UTF-16 offsets for non-BMP literals", async () => {
@@ -418,6 +503,7 @@ Deno.test("CLI generates Wasm target with custom directory", async () => {
     });
     assertIncludes(logs.join("\n"), "runtime/mod.ts");
     assertIncludes(logs.join("\n"), "runtime/wasm.ts");
+    assertIncludes(logs.join("\n"), "runtime/abi.json");
 
     const outDir = `${dir}/out`;
     await captureConsoleError(() =>

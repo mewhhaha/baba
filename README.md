@@ -135,6 +135,12 @@ Both generated parser runtimes export the same main TypeScript API:
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia
   channels.
 
+The Wasm target also writes `wasm/abi.json`, a host-neutral descriptor for the
+core Wasm ABI, parser-plan identity, runtime implementation identity, memory
+layout, UTF-16 source/span conventions, trace statuses, adapter handle model,
+and numeric parser diagnostic IDs. Non-JS hosts should read that JSON rather
+than scraping the generated TypeScript adapter.
+
 The Wasm target also exports `wasmTargetKind`, `wasmBytes`, `wasmAbiVersion`,
 core ABI metadata constants, `memory`, and `reset()` from `wasm/mod.ts`.
 `wasmTargetKind` is currently `"javascript-hosted-core-wasm"`; Baba does not yet

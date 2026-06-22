@@ -208,6 +208,12 @@ execute both outputs and compare returned values or traps.
   results are valid in caller-provided buffers until the host overwrites those
   buffers or grows memory. The generated JavaScript adapter validates those core
   exports against its generated constants before using the module.
+- Generated Wasm targets also write `wasm/abi.json`, a deterministic
+  host-neutral descriptor for that core ABI, parser-plan identity, runtime
+  implementation identity, memory layout, UTF-16 source/span conventions, trace
+  statuses, adapter handle model, and numeric parser diagnostic IDs. Non-JS host
+  tooling should consume the descriptor instead of scraping generated
+  TypeScript.
 - Generated JavaScript-hosted Wasm adapters export trace status constants and
   include both numeric `statusKind` and string `failureKind` fields on
   `parseTrace()` failures before public parser diagnostics are materialized.
@@ -329,9 +335,10 @@ execute both outputs and compare returned values or traps.
 
 These rules must be specified before the parser runtime can be fully lowered:
 
-- host-boundary ownership and handle capability lifetimes for future non-JS Wasm
-  hosts beyond the current linear-memory ownership metadata and
-  JavaScript-hosted `WasmSourceBuffer`/`ParseTraceInput` provenance gates;
+- executable host-boundary ownership helpers and opaque handle capability
+  lifetimes for future non-JS Wasm hosts beyond the current ABI descriptor,
+  linear-memory ownership metadata, and JavaScript-hosted
+  `WasmSourceBuffer`/`ParseTraceInput` provenance gates;
 - host source-text handles and source decoding fully lowered into the runtime
   language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;

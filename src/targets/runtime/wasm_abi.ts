@@ -1,0 +1,14 @@
+export const WASM_TARGET_KIND = "javascript-hosted-core-wasm";
+export const WASM_ABI_VERSION = 1;
+export const WASM_PAGE_BYTES = 65_536;
+export const WASM_MAX_BYTES = 0xffff_ffff;
+export const WASM_MAX_PAGES = 65_535;
+export const WASM_SOURCE_ENCODING_UTF16 = 1;
+export const WASM_SPAN_UNIT_UTF16 = 1;
+export const WASM_HOST_OWNERSHIP_CALLER_MANAGED = 1;
+export const WASM_RESULT_LIFETIME_CALLER_BUFFER = 1;
+export const WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH = 1;
+export const WASM_I32_BYTES = 4;
+export const WASM_UTF16_UNIT_BYTES = 2;
+export const WASM_LEX_RESULT_I32_COUNT = 2;
+export const WASM_TOKEN_RECORD_I32_COUNT = 3;

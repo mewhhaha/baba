@@ -5324,7 +5324,7 @@ const LEX_RESULT_BYTES = 8;
 const TOKEN_RECORD_BYTES = 12;
 const UTF16_UNIT_BYTES = 2;
 const WASM_PAGE_BYTES = 65536;
-const MAX_WASM_BYTES = 0xffff_ffff;
+const MAX_WASM_BYTES = 4294967295;
 const MAX_WASM_PAGES = 65535;
 const WASM_SOURCE_ENCODING_UTF16 = 1;
 const WASM_SPAN_UNIT_UTF16 = 1;
@@ -5402,7 +5402,7 @@ export const parserPlanHash = "fnv1a64:9ee9cdb16cfded8d" as const;
 export const runtimeImplementationFormat = "baba-runtime-implementation" as const;
 export const runtimeImplementationVersion = 1;
 export const runtimeImplementationSemantics = "baba-runtime-portable-v1" as const;
-export const runtimeImplementationHash = "fnv1a64:9661ea13b0ef7215" as const;
+export const runtimeImplementationHash = "fnv1a64:bd8d31e3392ca9a0" as const;
 
 validateWasmAbi();
 

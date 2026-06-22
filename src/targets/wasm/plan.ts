@@ -10,6 +10,8 @@ import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
 import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
 import { compileRuntimeLanguageWasm } from "../runtime/language.ts";
+import { PARSER_DIAGNOSTIC_CODES } from "../runtime/diagnostic_codes.ts";
+import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
 import {
   createParserConflictTraceRuntimeProgram,
   createParserTraceRuntimeProgram,
@@ -17,11 +19,30 @@ import {
   RUNTIME_ACTION_PAYLOAD_MASK,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
+  RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
+  RUNTIME_TRACE_STATUS_INTERNAL,
+  RUNTIME_TRACE_STATUS_OK,
+  RUNTIME_TRACE_STATUS_UNEXPECTED,
 } from "../runtime/language_sources.ts";
 import type {
   PortableParserPlanMetadata,
   PortableParserPlanV1,
 } from "../runtime/portable_plan.ts";
+import {
+  WASM_ABI_VERSION,
+  WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
+  WASM_HOST_OWNERSHIP_CALLER_MANAGED,
+  WASM_I32_BYTES,
+  WASM_LEX_RESULT_I32_COUNT,
+  WASM_MAX_PAGES,
+  WASM_PAGE_BYTES,
+  WASM_RESULT_LIFETIME_CALLER_BUFFER,
+  WASM_SOURCE_ENCODING_UTF16,
+  WASM_SPAN_UNIT_UTF16,
+  WASM_TARGET_KIND,
+  WASM_TOKEN_RECORD_I32_COUNT,
+  WASM_UTF16_UNIT_BYTES,
+} from "../runtime/wasm_abi.ts";
 import { emitSyntax } from "../typescript/syntax_emit.ts";
 import {
   planRuntimeParserTarget,
@@ -110,6 +131,11 @@ export function emitWasmTarget(
       kind: "source",
     },
     {
+      path: `${dir}/abi.json`,
+      content: wasmAbiDescriptorSource(plan),
+      kind: "config",
+    },
+    {
       path: `${dir}/lexer.ts`,
       content: emitWasmLexer(plan.analyzed, plan.bnf, plan.preserveTrivia),
       kind: "source",
@@ -125,6 +151,171 @@ export function emitWasmTarget(
       kind: "source",
     },
   ];
+}
+
+function wasmAbiDescriptorSource(plan: WasmPlan): string {
+  return `${JSON.stringify(wasmAbiDescriptor(plan), null, 2)}\n`;
+}
+
+function wasmAbiDescriptor(plan: WasmPlan): unknown {
+  return {
+    format: "baba-wasm-abi",
+    version: 1,
+    targetKind: WASM_TARGET_KIND,
+    parserPlan: {
+      format: plan.portableMetadata.format,
+      version: plan.portableMetadata.version,
+      semantics: plan.portableMetadata.semantics,
+      hash: plan.portableMetadata.hash,
+    },
+    runtimeImplementation: {
+      format: RUNTIME_IMPLEMENTATION_METADATA.format,
+      version: RUNTIME_IMPLEMENTATION_METADATA.version,
+      semantics: RUNTIME_IMPLEMENTATION_METADATA.semantics,
+      hash: RUNTIME_IMPLEMENTATION_METADATA.hash,
+    },
+    core: {
+      abiVersion: WASM_ABI_VERSION,
+      memory: {
+        export: "memory",
+        pageBytes: WASM_PAGE_BYTES,
+        maxPages: WASM_MAX_PAGES,
+        inputBase: plan.wasm.inputBase,
+      },
+      sourceEncoding: {
+        kind: "utf16",
+        value: WASM_SOURCE_ENCODING_UTF16,
+        unitBytes: WASM_UTF16_UNIT_BYTES,
+      },
+      spanUnit: {
+        kind: "utf16-code-units",
+        value: WASM_SPAN_UNIT_UTF16,
+      },
+      ownership: {
+        kind: "caller-managed-linear-memory",
+        value: WASM_HOST_OWNERSHIP_CALLER_MANAGED,
+      },
+      resultLifetime: {
+        kind: "caller-owned-result-buffer",
+        value: WASM_RESULT_LIFETIME_CALLER_BUFFER,
+      },
+      layouts: {
+        lexResult: {
+          i32Count: WASM_LEX_RESULT_I32_COUNT,
+          bytes: WASM_LEX_RESULT_I32_COUNT * WASM_I32_BYTES,
+          fields: ["specIndex", "end"],
+        },
+        tokenRecord: {
+          i32Count: WASM_TOKEN_RECORD_I32_COUNT,
+          bytes: WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES,
+          fields: ["specIndex", "start", "end"],
+        },
+      },
+      exports: [
+        {
+          name: "memory",
+          kind: "memory",
+        },
+        {
+          name: "lex_one",
+          params: ["sourcePtr", "sourceLength", "offset", "resultPtr"],
+          result: "matchedFlag",
+        },
+        {
+          name: "parser_action",
+          params: ["state", "terminal"],
+          result: "encodedAction",
+        },
+        {
+          name: "parser_goto",
+          params: ["state", "nonterminal"],
+          result: "stateOrMinusOne",
+        },
+        {
+          name: "lex_all",
+          params: ["sourcePtr", "sourceLength", "resultPtr", "tokenPtr"],
+          result: "tokenRecordCount",
+        },
+        {
+          name: "abi_version",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "plan_version",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "reset",
+          params: [],
+          result: "void",
+        },
+        {
+          name: "input_base",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "max_pages",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "source_encoding",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "span_unit",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "lex_result_i32_count",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "token_record_i32_count",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "host_ownership_model",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "result_lifetime_model",
+          params: [],
+          result: "i32",
+        },
+      ],
+    },
+    adapter: {
+      language: "typescript",
+      handleCapability: {
+        kind: "javascript-epoch-checked-object",
+        value: WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
+      },
+      sourceBuffer: {
+        type: "WasmSourceBuffer",
+        staleAfter: ["reset", "writeSource(different source)"],
+      },
+      parseTraceInput: {
+        type: "ParseTraceInput",
+        staleAfter: ["reset"],
+      },
+    },
+    traceStatuses: {
+      ok: RUNTIME_TRACE_STATUS_OK,
+      unexpected: RUNTIME_TRACE_STATUS_UNEXPECTED,
+      internal: RUNTIME_TRACE_STATUS_INTERNAL,
+      branchLimit: RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
+    },
+    parserDiagnosticCodes: PARSER_DIAGNOSTIC_CODES,
+  };
 }
 
 function emitParserTraceWasm(bnf: BnfGrammar, lr: LrTable): Uint8Array {
