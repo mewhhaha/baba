@@ -242,18 +242,44 @@ function parserTokenSpanEnd(handle: number): number {
   return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
-function sourceTextSlice(source: string, span: Span): string {
-  return source.slice(span.start, span.end);
+interface SourceTextBoundary {
+  readonly source: string;
+  readonly length: number;
 }
 
-function sourceTextMatches(source: string, span: Span, text: string): boolean {
-  return text === sourceTextSlice(source, span);
+function createSourceTextBoundary(source: string): SourceTextBoundary {
+  return {
+    source,
+    length: source.length,
+  };
+}
+
+function sourceTextSlice(sourceText: SourceTextBoundary, span: Span): string {
+  return sourceText.source.slice(span.start, span.end);
+}
+
+function sourceTextMatches(
+  sourceText: SourceTextBoundary,
+  span: Span,
+  text: string,
+): boolean {
+  return text === sourceTextSlice(sourceText, span);
+}
+
+function sourceTextCodePointAt(
+  sourceText: SourceTextBoundary,
+  offset: number,
+): number | undefined {
+  return sourceText.source.codePointAt(offset);
 }
 interface RuntimeTerminalToken {
   __babaTerminal?: number;
 }
 
-function materializeToken(source: string, handle: number): Token {
+function materializeToken(
+  sourceText: SourceTextBoundary,
+  handle: number,
+): Token {
   const tokenClass = parserTokenClass(handle);
   const payload = parserTokenPayload(handle);
   const span = {
@@ -283,7 +309,7 @@ function materializeToken(source: string, handle: number): Token {
     return attachRuntimeTerminal({
       type: "named",
       kind: spec.kind as never,
-      text: sourceTextSlice(source, span),
+      text: sourceTextSlice(sourceText, span),
       span,
       channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
     } as Token, terminal);
@@ -291,7 +317,7 @@ function materializeToken(source: string, handle: number): Token {
   if (tokenClass === PUBLIC_TOKEN_ERROR) {
     return {
       type: "error",
-      text: sourceTextSlice(source, span),
+      text: sourceTextSlice(sourceText, span),
       span,
       channel: "error",
     };
@@ -358,8 +384,9 @@ function lexInternal(
   includeParseStream: boolean,
 ): LexResult & { parseStream?: WasmParseStream } {
   runtimeArenaReset();
+  const sourceText = createSourceTextBoundary(source);
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
-  const sourceBuffer = writeSource(source);
+  const sourceBuffer = writeSource(sourceText.source);
   const records = lexAll(sourceBuffer);
   const tokens: Token[] = new Array(records.length / 3 + 1);
   let tokenCount = 0;
@@ -417,7 +444,7 @@ function lexInternal(
             start,
             end,
           );
-          const token = materializeToken(source, handle);
+          const token = materializeToken(sourceText, handle);
           tokens[tokenCount] = token;
           if (tokenClass !== PUBLIC_TOKEN_TRIVIA) {
             if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
@@ -443,7 +470,7 @@ function lexInternal(
       start,
       end,
     );
-    const token = materializeToken(source, handle);
+    const token = materializeToken(sourceText, handle);
     tokens[tokenCount] = token;
     tokenCount++;
     diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
@@ -453,10 +480,10 @@ function lexInternal(
     PUBLIC_TOKEN_EOF,
     0,
     NO_TERMINAL,
-    source.length,
-    source.length,
+    sourceText.length,
+    sourceText.length,
   );
-  const eofToken = materializeToken(source, eofHandle);
+  const eofToken = materializeToken(sourceText, eofHandle);
   tokens[tokenCount] = eofToken;
   if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
   tokenCount++;
@@ -473,7 +500,7 @@ function lexInternal(
     const parseInput = createParseTraceInput(terminalCount);
     parseInput.terminals.set(parseTerminals!.subarray(0, terminalCount));
     return {
-      source,
+      source: sourceText.source,
       tokens,
       diagnostics,
       parseStream: {
@@ -484,5 +511,5 @@ function lexInternal(
       },
     };
   }
-  return lexResult(source, tokens, diagnostics);
+  return lexResult(sourceText.source, tokens, diagnostics);
 }

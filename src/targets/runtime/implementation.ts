@@ -23,12 +23,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/typescript_lexer_runtime.ts",
       role: "typescript-lexer-runtime",
-      hash: "fnv1a64:7d2e7fd4a6ad7dbc",
+      hash: "fnv1a64:e8859eef153aadef",
     },
     {
       path: "src/targets/runtime/public_source_text.ts",
       role: "public-source-text-boundary",
-      hash: "fnv1a64:5f3dd4155c09e37b",
+      hash: "fnv1a64:7d974cd62da3f7e0",
     },
     {
       path: "src/targets/runtime/public_lex_diagnostic_materializer.ts",
@@ -43,7 +43,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/public_token_materializer.ts",
       role: "public-token-materializer",
-      hash: "fnv1a64:acca9f262f4c356a",
+      hash: "fnv1a64:d330acf141d38ce7",
     },
     {
       path: "src/targets/runtime/public_diagnostic_materializer.ts",
@@ -88,7 +88,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/typescript_parser_runtime.ts",
       role: "typescript-parser-runtime",
-      hash: "fnv1a64:72eddec684044ec4",
+      hash: "fnv1a64:f647bc0d5f5e1a95",
     },
     {
       path: "src/targets/runtime/wasm_abi.ts",
@@ -102,7 +102,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:e121509a154da4ad" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:9a4342dfb46753b1" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

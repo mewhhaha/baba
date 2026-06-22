@@ -101,6 +101,20 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(lexerRuntimeSource, "emitPublicLexResultMaterializer");
   assertIncludes(lexerRuntimeSource, "emitPublicSourceTextBoundary");
   assertIncludes(
+    lexerRuntimeSource,
+    "const sourceText = createSourceTextBoundary(source)",
+  );
+  assertIncludes(lexerRuntimeSource, "sourceTextCodePointAt(sourceText");
+  assertIncludes(lexerRuntimeSource, "materializeToken(sourceText, handle)");
+  assertIncludes(
+    publicSourceTextBoundarySource,
+    "interface SourceTextBoundary",
+  );
+  assertIncludes(
+    publicSourceTextBoundarySource,
+    "function createSourceTextBoundary",
+  );
+  assertIncludes(
     publicSourceTextBoundarySource,
     "function sourceTextSlice",
   );
@@ -108,12 +122,24 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     publicSourceTextBoundarySource,
     "function sourceTextMatches",
   );
+  assertIncludes(
+    publicSourceTextBoundarySource,
+    "function sourceTextCodePointAt",
+  );
   assertIncludes(publicSourceTextBoundarySource, "source.slice");
   assertIncludes(publicTokenMaterializerSource, "function materializeToken");
   assertIncludes(publicTokenMaterializerSource, "function materializeEofToken");
+  assertIncludes(
+    publicTokenMaterializerSource,
+    "function materializeSourceEofToken",
+  );
+  assertIncludes(
+    publicTokenMaterializerSource,
+    "sourceText: SourceTextBoundary",
+  );
   assertIncludes(publicTokenMaterializerSource, "parserTokenSpanStart");
   assertIncludes(publicTokenMaterializerSource, "PUBLIC_TOKEN_EOF");
-  assertIncludes(publicTokenMaterializerSource, "sourceTextSlice");
+  assertIncludes(publicTokenMaterializerSource, "sourceTextSlice(sourceText");
   assertNotIncludes(publicTokenMaterializerSource, "source.slice");
   assertIncludes(publicTokenMaterializerSource, "Object.defineProperty");
   assertIncludes(
@@ -196,9 +222,20 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "emitPublicParseResultMaterializer");
   assertIncludes(parserRuntimeSource, "emitPublicEofTokenMaterializer");
   assertIncludes(parserRuntimeSource, "emitPublicSourceTextBoundary");
+  assertIncludes(
+    parserRuntimeSource,
+    "const sourceText = createSourceTextBoundary(source)",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "validateTokenStream(sourceText, tokens)",
+  );
   assertIncludes(parserRuntimeSource, "sourceTextMatches");
   assertNotIncludes(parserRuntimeSource, "source.slice");
-  assertIncludes(parserRuntimeSource, "materializeEofToken(source.length)");
+  assertIncludes(
+    parserRuntimeSource,
+    "materializeSourceEofToken(sourceText)",
+  );
   assertIncludes(
     publicDiagnosticMaterializerSource,
     "function parseDiagnostic",

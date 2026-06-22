@@ -1,9 +1,32 @@
 export function emitPublicSourceTextBoundary(): string {
-  return `function sourceTextSlice(source: string, span: Span): string {
-  return source.slice(span.start, span.end);
+  return `interface SourceTextBoundary {
+  readonly source: string;
+  readonly length: number;
 }
 
-function sourceTextMatches(source: string, span: Span, text: string): boolean {
-  return text === sourceTextSlice(source, span);
+function createSourceTextBoundary(source: string): SourceTextBoundary {
+  return {
+    source,
+    length: source.length,
+  };
+}
+
+function sourceTextSlice(sourceText: SourceTextBoundary, span: Span): string {
+  return sourceText.source.slice(span.start, span.end);
+}
+
+function sourceTextMatches(
+  sourceText: SourceTextBoundary,
+  span: Span,
+  text: string,
+): boolean {
+  return text === sourceTextSlice(sourceText, span);
+}
+
+function sourceTextCodePointAt(
+  sourceText: SourceTextBoundary,
+  offset: number,
+): number | undefined {
+  return sourceText.source.codePointAt(offset);
 }`;
 }

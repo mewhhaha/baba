@@ -464,18 +464,44 @@ function parserTokenSpanEnd(handle: number): number {
   return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
-function sourceTextSlice(source: string, span: Span): string {
-  return source.slice(span.start, span.end);
+interface SourceTextBoundary {
+  readonly source: string;
+  readonly length: number;
 }
 
-function sourceTextMatches(source: string, span: Span, text: string): boolean {
-  return text === sourceTextSlice(source, span);
+function createSourceTextBoundary(source: string): SourceTextBoundary {
+  return {
+    source,
+    length: source.length,
+  };
+}
+
+function sourceTextSlice(sourceText: SourceTextBoundary, span: Span): string {
+  return sourceText.source.slice(span.start, span.end);
+}
+
+function sourceTextMatches(
+  sourceText: SourceTextBoundary,
+  span: Span,
+  text: string,
+): boolean {
+  return text === sourceTextSlice(sourceText, span);
+}
+
+function sourceTextCodePointAt(
+  sourceText: SourceTextBoundary,
+  offset: number,
+): number | undefined {
+  return sourceText.source.codePointAt(offset);
 }
 interface RuntimeTerminalToken {
   __babaTerminal?: number;
 }
 
-function materializeToken(source: string, handle: number): Token {
+function materializeToken(
+  sourceText: SourceTextBoundary,
+  handle: number,
+): Token {
   const tokenClass = parserTokenClass(handle);
   const payload = parserTokenPayload(handle);
   const span = {
@@ -505,7 +531,7 @@ function materializeToken(source: string, handle: number): Token {
     return attachRuntimeTerminal({
       type: "named",
       kind: spec.kind as never,
-      text: sourceTextSlice(source, span),
+      text: sourceTextSlice(sourceText, span),
       span,
       channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
     } as Token, terminal);
@@ -513,7 +539,7 @@ function materializeToken(source: string, handle: number): Token {
   if (tokenClass === PUBLIC_TOKEN_ERROR) {
     return {
       type: "error",
-      text: sourceTextSlice(source, span),
+      text: sourceTextSlice(sourceText, span),
       span,
       channel: "error",
     };
@@ -556,13 +582,14 @@ function lexResult(
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   runtimeArenaReset();
+  const sourceText = createSourceTextBoundary(source);
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
   const tokens: Token[] = [];
   const diagnostics: LexDiagnostic[] = [];
   let offset = 0;
 
-  while (offset < source.length) {
-    const candidate = bestCandidate(source, offset);
+  while (offset < sourceText.length) {
+    const candidate = bestCandidate(sourceText, offset);
     if (candidate) {
       const start = offset;
       const end = candidate.end;
@@ -577,14 +604,14 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
           start,
           end,
         );
-        tokens.push(materializeToken(source, handle));
+        tokens.push(materializeToken(sourceText, handle));
       }
       offset = end;
       continue;
     }
 
     const start = offset;
-    const codePoint = source.codePointAt(offset);
+    const codePoint = sourceTextCodePointAt(sourceText, offset);
     offset += codePoint === undefined ? 1 : utf16CodePointWidth(codePoint);
     const handle = parserTokenNew(
       PUBLIC_TOKEN_ERROR,
@@ -593,7 +620,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
       start,
       offset,
     );
-    const token = materializeToken(source, handle);
+    const token = materializeToken(sourceText, handle);
     tokens.push(token);
     diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
   }
@@ -602,11 +629,11 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     PUBLIC_TOKEN_EOF,
     0,
     NO_TERMINAL,
-    source.length,
-    source.length,
+    sourceText.length,
+    sourceText.length,
   );
-  tokens.push(materializeToken(source, eofHandle));
-  return lexResult(source, tokens, diagnostics);
+  tokens.push(materializeToken(sourceText, eofHandle));
+  return lexResult(sourceText.source, tokens, diagnostics);
 }
 
 function publicTokenClass(tokenClass: number): number {
@@ -628,12 +655,15 @@ function runtimeTerminal(specIndex: number): number {
   return terminal === NO_TERMINAL ? -1 : terminal;
 }
 
-function bestCandidate(source: string, offset: number): Candidate | null {
+function bestCandidate(
+  sourceText: SourceTextBoundary,
+  offset: number,
+): Candidate | null {
   let index = offset;
   lexerScanReset();
 
-  while (index < source.length) {
-    const codePoint = source.codePointAt(index);
+  while (index < sourceText.length) {
+    const codePoint = sourceTextCodePointAt(sourceText, index);
     if (codePoint === undefined) break;
     if (lexerScanAdvance(codePoint) === 0) break;
     index += utf16CodePointWidth(codePoint);

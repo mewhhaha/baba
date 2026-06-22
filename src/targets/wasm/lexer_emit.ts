@@ -115,8 +115,9 @@ function lexInternal(
   includeParseStream: boolean,
 ): LexResult & { parseStream?: WasmParseStream } {
   runtimeArenaReset();
+  const sourceText = createSourceTextBoundary(source);
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
-  const sourceBuffer = writeSource(source);
+  const sourceBuffer = writeSource(sourceText.source);
   const records = lexAll(sourceBuffer);
   const tokens: Token[] = new Array(records.length / 3 + 1);
   let tokenCount = 0;
@@ -174,7 +175,7 @@ function lexInternal(
             start,
             end,
           );
-          const token = materializeToken(source, handle);
+          const token = materializeToken(sourceText, handle);
           tokens[tokenCount] = token;
           if (tokenClass !== PUBLIC_TOKEN_TRIVIA) {
             if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
@@ -200,7 +201,7 @@ function lexInternal(
       start,
       end,
     );
-    const token = materializeToken(source, handle);
+    const token = materializeToken(sourceText, handle);
     tokens[tokenCount] = token;
     tokenCount++;
     diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
@@ -210,10 +211,10 @@ function lexInternal(
     PUBLIC_TOKEN_EOF,
     0,
     NO_TERMINAL,
-    source.length,
-    source.length,
+    sourceText.length,
+    sourceText.length,
   );
-  const eofToken = materializeToken(source, eofHandle);
+  const eofToken = materializeToken(sourceText, eofHandle);
   tokens[tokenCount] = eofToken;
   if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
   tokenCount++;
@@ -230,7 +231,7 @@ function lexInternal(
     const parseInput = createParseTraceInput(terminalCount);
     parseInput.terminals.set(parseTerminals!.subarray(0, terminalCount));
     return {
-      source,
+      source: sourceText.source,
       tokens,
       diagnostics,
       parseStream: {
@@ -241,7 +242,7 @@ function lexInternal(
       },
     };
   }
-  return lexResult(source, tokens, diagnostics);
+  return lexResult(sourceText.source, tokens, diagnostics);
 }
 `;
 }

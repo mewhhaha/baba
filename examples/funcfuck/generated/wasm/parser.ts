@@ -1505,12 +1505,35 @@ function parserRuleNodeFieldCount(handle: number): number {
   return (runtimeVectorLength(parserRuleNodeFields(handle) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
-function sourceTextSlice(source: string, span: Span): string {
-  return source.slice(span.start, span.end);
+interface SourceTextBoundary {
+  readonly source: string;
+  readonly length: number;
 }
 
-function sourceTextMatches(source: string, span: Span, text: string): boolean {
-  return text === sourceTextSlice(source, span);
+function createSourceTextBoundary(source: string): SourceTextBoundary {
+  return {
+    source,
+    length: source.length,
+  };
+}
+
+function sourceTextSlice(sourceText: SourceTextBoundary, span: Span): string {
+  return sourceText.source.slice(span.start, span.end);
+}
+
+function sourceTextMatches(
+  sourceText: SourceTextBoundary,
+  span: Span,
+  text: string,
+): boolean {
+  return text === sourceTextSlice(sourceText, span);
+}
+
+function sourceTextCodePointAt(
+  sourceText: SourceTextBoundary,
+  offset: number,
+): number | undefined {
+  return sourceText.source.codePointAt(offset);
 }
 
 function materializeEofToken(offset: number): Token {
@@ -1530,6 +1553,10 @@ function materializeEofToken(offset: number): Token {
     },
     channel: "main",
   };
+}
+
+function materializeSourceEofToken(sourceText: SourceTextBoundary): Token {
+  return materializeEofToken(sourceText.length);
 }
 function combineDiagnostics(
   left: readonly ParseDiagnostic[],
@@ -1852,9 +1879,10 @@ export function parse(
   options: ParseOptions = {},
 ): ParseResult<RootNode> {
   runtimeArenaReset();
+  const sourceText = createSourceTextBoundary(source);
   const lexed = lexForParse(source, options);
   return parseTokenList(
-    source,
+    sourceText,
     lexed.tokens,
     lexicalDiagnostics(lexed.diagnostics),
     lexed.parseStream,
@@ -1867,10 +1895,11 @@ export function parseTokens(
   tokens: readonly Token[],
 ): ParseResult<RootNode> {
   runtimeArenaReset();
-  const streamDiagnostics = validateTokenStream(source, tokens);
+  const sourceText = createSourceTextBoundary(source);
+  const streamDiagnostics = validateTokenStream(sourceText, tokens);
   const tokenDiagnostics = lexicalTokenDiagnostics(tokens);
   return parseTokenList(
-    source,
+    sourceText,
     tokens,
     combineDiagnostics(streamDiagnostics, tokenDiagnostics),
     undefined,
@@ -1883,8 +1912,9 @@ export function parseTokensUnchecked(
   tokens: readonly Token[],
 ): ParseResult<RootNode> {
   runtimeArenaReset();
+  const sourceText = createSourceTextBoundary(source);
   return parseTokenList(
-    source,
+    sourceText,
     tokens,
     lexicalTokenDiagnostics(tokens),
     undefined,
@@ -1893,31 +1923,31 @@ export function parseTokensUnchecked(
 }
 
 function parseTokenList(
-  source: string,
+  sourceText: SourceTextBoundary,
   tokens: readonly Token[],
   lexicalDiagnostics: readonly ParseDiagnostic[],
   parseStream?: WasmParseStream,
   trustRuntimeTerminals = false,
 ): ParseResult<RootNode> {
   if (lexicalDiagnostics.length > 0) {
-    return failedParseResult(source, tokens, lexicalDiagnostics);
+    return failedParseResult(sourceText.source, tokens, lexicalDiagnostics);
   }
 
   const stream = parseStream ??
-    compactTokenStream(source, tokens, trustRuntimeTerminals);
+    compactTokenStream(sourceText, tokens, trustRuntimeTerminals);
   const traced = parseTrace(stream.input, stream.terminalCount);
   if (!traced.ok) {
-    const token = stream.tokens[traced.index] ?? materializeEofToken(source.length);
+    const token = stream.tokens[traced.index] ?? materializeSourceEofToken(sourceText);
     if (traced.limit) {
       return failedParseResult(
-        source,
+        sourceText.source,
         tokens,
-        [branchLimitDiagnostic(source.length)],
+        [branchLimitDiagnostic(sourceText.length)],
       );
     }
     if (traced.internal) {
       return failedParseResult(
-        source,
+        sourceText.source,
         tokens,
         [parserInternalMessageDiagnostic(
           "Wasm parser trace failed.",
@@ -1926,14 +1956,14 @@ function parseTokenList(
       );
     }
     return failedParseResult(
-      source,
+      sourceText.source,
       tokens,
       [unexpectedTokenDiagnostic(token, traced.state)],
     );
   }
 
   return replayTrace(
-    source,
+    sourceText,
     tokens,
     stream.tokens,
     stream.tokenIndices,
@@ -1949,7 +1979,7 @@ interface CompactTokenStream {
 }
 
 function compactTokenStream(
-  source: string,
+  sourceText: SourceTextBoundary,
   tokens: readonly Token[],
   trustRuntimeTerminals: boolean,
 ): CompactTokenStream {
@@ -1961,7 +1991,7 @@ function compactTokenStream(
   let index = 0;
   while (true) {
     index = skipTrivia(tokens, index);
-    const token = tokens[index] ?? materializeEofToken(source.length);
+    const token = tokens[index] ?? materializeSourceEofToken(sourceText);
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
@@ -1978,7 +2008,7 @@ function compactTokenStream(
 }
 
 function replayTrace(
-  source: string,
+  sourceText: SourceTextBoundary,
   tokens: readonly Token[],
   streamTokens: readonly Token[],
   streamTokenIndices: readonly number[],
@@ -1998,7 +2028,7 @@ function replayTrace(
 
     if (actionStatus === REPLAY_ACTION_SHIFT) {
       values.push(shiftedToken(
-        streamTokens[index] ?? materializeEofToken(source.length),
+        streamTokens[index] ?? materializeSourceEofToken(sourceText),
         streamTokenIndices[index] ?? tokens.length,
       ));
       index++;
@@ -2006,13 +2036,13 @@ function replayTrace(
     }
 
     if (actionStatus === REPLAY_ACTION_ACCEPT) {
-      return acceptedParseResult(source, tokens, values[values.length - 1]);
+      return acceptedParseResult(sourceText, tokens, values[values.length - 1]);
     }
 
-    const token = streamTokens[index] ?? materializeEofToken(source.length);
+    const token = streamTokens[index] ?? materializeSourceEofToken(sourceText);
     if (actionStatus !== REPLAY_ACTION_REDUCE) {
       return failedParseResult(
-        source,
+        sourceText.source,
         tokens,
         [parserInternalMessageDiagnostic(
           "Wasm parser trace contained an unknown action kind.",
@@ -2033,7 +2063,7 @@ function replayTrace(
     );
     if (replayReductionStatus === REPLAY_REDUCTION_UNKNOWN_PRODUCTION) {
       return failedParseResult(
-        source,
+        sourceText.source,
         tokens,
         [parserInternalMessageDiagnostic(
           "Wasm parser trace referenced an unknown production.",
@@ -2046,7 +2076,7 @@ function replayTrace(
       replayReductionStatus === REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING
     ) {
       return failedParseResult(
-        source,
+        sourceText.source,
         tokens,
         [parserInternalMessageDiagnostic(
           replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING
@@ -2058,7 +2088,7 @@ function replayTrace(
     }
     if (replayReductionStatus === REPLAY_REDUCTION_STACK_UNDERFLOW) {
       return failedParseResult(
-        source,
+        sourceText.source,
         tokens,
         [parserInternalMessageDiagnostic(
           "Wasm parser trace underflowed the replay stack.",
@@ -2068,7 +2098,7 @@ function replayTrace(
     }
     if (replayReductionStatus !== REPLAY_REDUCTION_OK) {
       return failedParseResult(
-        source,
+        sourceText.source,
         tokens,
         [parserInternalMessageDiagnostic(
           "Wasm parser trace reduction validation failed.",
@@ -2090,7 +2120,7 @@ function replayTrace(
       );
     } catch (error) {
       return failedParseResult(
-        source,
+        sourceText.source,
         tokens,
         [internalParserDiagnostic(error, token.span)],
       );
@@ -2099,11 +2129,11 @@ function replayTrace(
   }
 
   return failedParseResult(
-    source,
+    sourceText.source,
     tokens,
     [parserInternalMessageDiagnostic(
       "Wasm parser trace ended without accepting.",
-      { start: source.length, end: source.length },
+      { start: sourceText.length, end: sourceText.length },
     )],
   );
 }
@@ -2463,7 +2493,7 @@ function fieldName(fieldId: number): string {
 }
 
 function acceptedParseResult(
-  source: string,
+  sourceText: SourceTextBoundary,
   tokens: readonly Token[],
   accepted: unknown,
 ): ParseResult<RootNode> {
@@ -2473,14 +2503,14 @@ function acceptedParseResult(
     ? accepted.value as RootNode
     : null;
   if (root) {
-    return successfulParseResult(source, tokens, root);
+    return successfulParseResult(sourceText.source, tokens, root);
   }
   return failedParseResult(
-    source,
+    sourceText.source,
     tokens,
     [parserInternalMessageDiagnostic(
       "Parser accepted without producing a root node.",
-      { start: source.length, end: source.length },
+      { start: sourceText.length, end: sourceText.length },
     )],
   );
 }
@@ -2566,11 +2596,11 @@ function isMainSyntaxToken(
 }
 
 function validateTokenStream(
-  source: string,
+  sourceText: SourceTextBoundary,
   tokens: readonly Token[],
 ): ParseDiagnostic[] {
   const diagnostics: ParseDiagnostic[] = [];
-  const canonical = lex(source, { preserveTrivia: true });
+  const canonical = lex(sourceText.source, { preserveTrivia: true });
   const canonicalTokens = canonical.tokens;
   let canonicalIndex = 0;
   let previousEnd = 0;
@@ -2584,11 +2614,11 @@ function validateTokenStream(
       !Number.isInteger(span.end) ||
       span.start < 0 ||
       span.end < span.start ||
-      span.end > source.length
+      span.end > sourceText.length
     ) {
       diagnostics.push(invalidTokenStream(
         `Token at index ${index} has an invalid span.`,
-        clampSpan(span, source.length),
+        clampSpan(span, sourceText.length),
       ));
       continue;
     }
@@ -2635,7 +2665,7 @@ function validateTokenStream(
         token.text !== "" ||
         token.channel !== "main" ||
         span.start !== span.end ||
-        span.start !== source.length
+        span.start !== sourceText.length
       ) {
         diagnostics.push(invalidTokenStream(
           "EOF token must have empty text, main channel, and an empty span at the end of the source.",
@@ -2659,7 +2689,7 @@ function validateTokenStream(
       ));
     }
 
-    if (!sourceTextMatches(source, span, token.text)) {
+    if (!sourceTextMatches(sourceText, span, token.text)) {
       diagnostics.push(invalidTokenStream(
         `Token at index ${index} text does not match the source slice.`,
         span,
@@ -2761,14 +2791,17 @@ function validateTokenStream(
   if (eofIndex !== -1 && eofIndex !== tokens.length - 1) {
     diagnostics.push(invalidTokenStream(
       "EOF must be the final token in the stream.",
-      tokens[eofIndex]?.span ?? { start: source.length, end: source.length },
+      tokens[eofIndex]?.span ?? {
+        start: sourceText.length,
+        end: sourceText.length,
+      },
     ));
   }
-  if (previousEnd < source.length && eofIndex === -1) {
+  if (previousEnd < sourceText.length && eofIndex === -1) {
     const gapDiagnostic = validateSourceGap(
       canonicalTokens,
       previousEnd,
-      source.length,
+      sourceText.length,
     );
     if (gapDiagnostic) diagnostics.push(gapDiagnostic);
   }

@@ -10,7 +10,10 @@ export function emitPublicTokenMaterializer(
   __babaTerminal?: number;
 }
 
-function materializeToken(source: string, handle: number): Token {
+function materializeToken(
+  sourceText: SourceTextBoundary,
+  handle: number,
+): Token {
   const tokenClass = parserTokenClass(handle);
   const payload = parserTokenPayload(handle);
   const span = {
@@ -40,7 +43,7 @@ function materializeToken(source: string, handle: number): Token {
     return attachRuntimeTerminal({
       type: "named",
       kind: spec.kind as never,
-      text: sourceTextSlice(source, span),
+      text: sourceTextSlice(sourceText, span),
       span,
       channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
     } as Token, terminal);
@@ -48,7 +51,7 @@ function materializeToken(source: string, handle: number): Token {
   if (tokenClass === PUBLIC_TOKEN_ERROR) {
     return {
       type: "error",
-      text: sourceTextSlice(source, span),
+      text: sourceTextSlice(sourceText, span),
       span,
       channel: "error",
     };
@@ -92,5 +95,9 @@ function materializeEofToken(offset: number): Token {
     },
     channel: "main",
   };
+}
+
+function materializeSourceEofToken(sourceText: SourceTextBoundary): Token {
+  return materializeEofToken(sourceText.length);
 }`;
 }
