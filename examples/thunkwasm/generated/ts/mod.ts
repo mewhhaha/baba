@@ -6,7 +6,7 @@ export const parserPlanHash = "fnv1a64:0795ccc8cd6699cd" as const;
 export const runtimeImplementationFormat = "baba-runtime-implementation" as const;
 export const runtimeImplementationVersion = 1;
 export const runtimeImplementationSemantics = "baba-runtime-portable-v1" as const;
-export const runtimeImplementationHash = "fnv1a64:170507b2cfca2c82" as const;
+export const runtimeImplementationHash = "fnv1a64:e0fa029249ee392e" as const;
 export * from "./syntax.ts";
 export { lex } from "./lexer.ts";
 export { parse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState, parseTokens, parseTokensUnchecked } from "./parser.ts";

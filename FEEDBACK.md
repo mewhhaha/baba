@@ -339,6 +339,9 @@ runtime language:
   `parserFieldStorageStatus`, so public field assembly no longer directly
   compares field value classes in TypeScript to decide which fields need runtime
   vectors or array materialization.
+- Routed generated array-field backing-vector validation through
+  `parserFieldArrayValueStatus`, so public field assembly no longer directly
+  checks for the missing-vector handle before appending captures.
 - Moved public scalar field value classification onto runtime-language
   `parserFieldScalarValueStatus`, so the shared field materializer no longer
   directly decides that a missing scalar capture means public `null`.
@@ -444,11 +447,11 @@ Still unresolved:
   helpers, and generated field assembly now gets value-class and
   count-validation/no-schema/array-value/scalar-value decisions from
   runtime-language helpers, generated field-object build classification is
-  runtime-language-backed, generated field storage classification is
-  runtime-language-backed, and public rule-node materialization gets child-list
-  classification from runtime-language helpers. Generated TypeScript lexing,
-  Wasm JavaScript adapter token wrapping, and parser fallback EOF creation now
-  read token class, payload, terminal, and span metadata through
+  runtime-language-backed, generated field storage and backing-vector validation
+  are runtime-language-backed, and public rule-node materialization gets
+  child-list classification from runtime-language helpers. Generated TypeScript
+  lexing, Wasm JavaScript adapter token wrapping, and parser fallback EOF
+  creation now read token class, payload, terminal, and span metadata through
   runtime-language token records before wrapping public token objects. External
   `parseTokens()` mapping still accepts public strings/literals at the API
   boundary, but terminal/channel classification, public token class

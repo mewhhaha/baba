@@ -88,7 +88,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/typescript_parser_runtime.ts",
       role: "typescript-parser-runtime",
-      hash: "fnv1a64:82d711169d10ff06",
+      hash: "fnv1a64:67a24954221053d5",
     },
     {
       path: "src/targets/runtime/wasm_abi.ts",
@@ -102,7 +102,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:170507b2cfca2c82" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:e0fa029249ee392e" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

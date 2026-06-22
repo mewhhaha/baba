@@ -3074,7 +3074,7 @@ function buildFields(
     );
     if (status === FIELD_CAPTURE_ARRAY) {
       const values = runtimeRecordLoad(fieldValues, countIndex);
-      if (values === 0) {
+      if (parserFieldArrayValueStatus(values) === FIELD_ARRAY_VALUE_MISSING) {
         throw new Error(`Array field '${name}' was not initialized as a runtime vector.`);
       }
       runtimeVectorAppend(values, value);
