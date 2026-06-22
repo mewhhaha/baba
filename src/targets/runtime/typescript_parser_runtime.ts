@@ -118,6 +118,9 @@ import {
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_OK,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
+  RUNTIME_TRACE_TOKEN_STREAM_EMIT,
+  RUNTIME_TRACE_TOKEN_STREAM_SKIP,
+  RUNTIME_TRACE_TOKEN_STREAM_STOP,
 } from "./language_sources.ts";
 import { emitPublicDiagnosticMaterializer } from "./public_diagnostic_materializer.ts";
 import { emitPublicFieldMaterializer } from "./public_field_materializer.ts";
@@ -440,6 +443,9 @@ const TOKEN_STREAM_GAP = ${RUNTIME_TOKEN_STREAM_STATUS_GAP};
 const TOKEN_STREAM_OVERLAP = ${RUNTIME_TOKEN_STREAM_STATUS_OVERLAP};
 const TOKEN_STREAM_ZERO_WIDTH = ${RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH};
 const TOKEN_STREAM_INVALID_EOF = ${RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF};
+const TRACE_TOKEN_STREAM_EMIT = ${RUNTIME_TRACE_TOKEN_STREAM_EMIT};
+const TRACE_TOKEN_STREAM_SKIP = ${RUNTIME_TRACE_TOKEN_STREAM_SKIP};
+const TRACE_TOKEN_STREAM_STOP = ${RUNTIME_TRACE_TOKEN_STREAM_STOP};
 const DIAGNOSTIC_PARSE_LEXICAL_ERROR = ${PARSER_DIAGNOSTIC_CODE_PARSE_LEXICAL_ERROR};
 const DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN = ${PARSER_DIAGNOSTIC_CODE_PARSE_UNEXPECTED_TOKEN};
 const DIAGNOSTIC_PARSE_TRAILING_INPUT = ${PARSER_DIAGNOSTIC_CODE_PARSE_TRAILING_INPUT};
@@ -634,14 +640,15 @@ function compactTraceTokenStream(
   let terminalCount = 0;
   let index = 0;
   while (true) {
-    index = skipTrivia(tokens, index);
+    index = skipTraceTrivia(tokens, index);
     const token = tokens[index] ?? materializeSourceEofToken(sourceText);
+    const traceTokenStatus = traceTokenStreamStatus(token);
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
     terminals[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
     terminalCount++;
-    if (token.type === "eof" || index >= tokens.length) break;
+    if (traceTokenStatus === TRACE_TOKEN_STREAM_STOP || index >= tokens.length) break;
     index++;
   }
   streamTokens.length = streamTokenCount;
@@ -721,14 +728,15 @@ function compactTokenStream(
   let terminalCount = 0;
   let index = 0;
   while (true) {
-    index = skipTrivia(tokens, index);
+    index = skipTraceTrivia(tokens, index);
     const token = tokens[index] ?? materializeSourceEofToken(sourceText);
+    const traceTokenStatus = traceTokenStreamStatus(token);
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
     terminalIds[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
     terminalCount++;
-    if (token.type === "eof" || index >= tokens.length) break;
+    if (traceTokenStatus === TRACE_TOKEN_STREAM_STOP || index >= tokens.length) break;
     index++;
   }
   streamTokens.length = streamTokenCount;
@@ -1275,6 +1283,7 @@ function tokenSpecIndex(token: Token): number {
 }
 
 function publicTokenClass(token: Token): number {
+  if (token.type === "eof") return PUBLIC_TOKEN_EOF;
   if (token.type === "error") return PUBLIC_TOKEN_ERROR;
   if (token.type === "literal") return PUBLIC_TOKEN_LITERAL;
   if (token.type === "named" && token.channel === "trivia") {
@@ -1291,8 +1300,12 @@ function runtimeTokenTerminal(token: Token): number {
     : -1;
 }
 
-function isTriviaToken(token: Token): boolean {
-  return token.type === "named" && token.channel === "trivia";
+function traceTokenStreamStatus(token: Token): number {
+  return parserTraceTokenStreamStatus(publicTokenClass(token));
+}
+
+function isTraceTriviaToken(token: Token): boolean {
+  return traceTokenStreamStatus(token) === TRACE_TOKEN_STREAM_SKIP;
 }
 
 function shiftedToken(token: Token, tokenIndex: number): ShiftedToken {
@@ -1600,7 +1613,7 @@ function matchCanonicalToken(
 ): number {
   for (let index = startIndex; index < canonicalTokens.length; index++) {
     const canonical = canonicalTokens[index];
-    if (canonical.type !== "eof" && isTriviaToken(canonical)) {
+    if (isTraceTriviaToken(canonical)) {
       if (sameToken(canonical, token)) return index;
       if (canonical.span.end <= token.span.start) continue;
     }
@@ -1634,9 +1647,12 @@ function clampSpan(span: Span, sourceLength: number): Span {
   return { start, end };
 }
 
-function skipTrivia(tokens: readonly Token[], start: number): number {
+function skipTraceTrivia(tokens: readonly Token[], start: number): number {
   let index = start;
-  while (tokens[index]?.type === "named" && tokens[index].channel === "trivia") {
+  while (
+    index < tokens.length &&
+    traceTokenStreamStatus(tokens[index]) === TRACE_TOKEN_STREAM_SKIP
+  ) {
     index++;
   }
   return index;

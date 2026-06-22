@@ -112,6 +112,9 @@ const TOKEN_STREAM_GAP = 2;
 const TOKEN_STREAM_OVERLAP = 3;
 const TOKEN_STREAM_ZERO_WIDTH = 4;
 const TOKEN_STREAM_INVALID_EOF = 5;
+const TRACE_TOKEN_STREAM_EMIT = 0;
+const TRACE_TOKEN_STREAM_SKIP = 1;
+const TRACE_TOKEN_STREAM_STOP = 2;
 const DIAGNOSTIC_PARSE_LEXICAL_ERROR = 1;
 const DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN = 2;
 const DIAGNOSTIC_PARSE_TRAILING_INPUT = 3;
@@ -632,6 +635,9 @@ function lexerTokenDiagnosticStatus(publicClass: number, terminal: number): numb
     return (1) >>> 0;
   }
   if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
     return (0) >>> 0;
   }
   if (((((publicClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
@@ -1527,6 +1533,17 @@ function parserTokenStreamGapTokenStatus(tokenClass: number, tokenStart: number,
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTraceTokenStreamStatus(publicClass: number): number {
+  if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserRuleNodeFromFragment(ruleId: number, fragment: number): number {
   let handle = 0;
   handle = (runtimeArenaAlloc(8) >>> 0) >>> 0;
@@ -2090,14 +2107,15 @@ function compactTokenStream(
   let terminalCount = 0;
   let index = 0;
   while (true) {
-    index = skipTrivia(tokens, index);
+    index = skipTraceTrivia(tokens, index);
     const token = tokens[index] ?? materializeSourceEofToken(sourceText);
+    const traceTokenStatus = traceTokenStreamStatus(token);
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
     terminalIds[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
     terminalCount++;
-    if (token.type === "eof" || index >= tokens.length) break;
+    if (traceTokenStatus === TRACE_TOKEN_STREAM_STOP || index >= tokens.length) break;
     index++;
   }
   streamTokens.length = streamTokenCount;
@@ -2638,6 +2656,7 @@ function tokenSpecIndex(token: Token): number {
 }
 
 function publicTokenClass(token: Token): number {
+  if (token.type === "eof") return PUBLIC_TOKEN_EOF;
   if (token.type === "error") return PUBLIC_TOKEN_ERROR;
   if (token.type === "literal") return PUBLIC_TOKEN_LITERAL;
   if (token.type === "named" && token.channel === "trivia") {
@@ -2654,8 +2673,12 @@ function runtimeTokenTerminal(token: Token): number {
     : -1;
 }
 
-function isTriviaToken(token: Token): boolean {
-  return token.type === "named" && token.channel === "trivia";
+function traceTokenStreamStatus(token: Token): number {
+  return parserTraceTokenStreamStatus(publicTokenClass(token));
+}
+
+function isTraceTriviaToken(token: Token): boolean {
+  return traceTokenStreamStatus(token) === TRACE_TOKEN_STREAM_SKIP;
 }
 
 function shiftedToken(token: Token, tokenIndex: number): ShiftedToken {
@@ -2963,7 +2986,7 @@ function matchCanonicalToken(
 ): number {
   for (let index = startIndex; index < canonicalTokens.length; index++) {
     const canonical = canonicalTokens[index];
-    if (canonical.type !== "eof" && isTriviaToken(canonical)) {
+    if (isTraceTriviaToken(canonical)) {
       if (sameToken(canonical, token)) return index;
       if (canonical.span.end <= token.span.start) continue;
     }
@@ -2997,9 +3020,12 @@ function clampSpan(span: Span, sourceLength: number): Span {
   return { start, end };
 }
 
-function skipTrivia(tokens: readonly Token[], start: number): number {
+function skipTraceTrivia(tokens: readonly Token[], start: number): number {
   let index = start;
-  while (tokens[index]?.type === "named" && tokens[index].channel === "trivia") {
+  while (
+    index < tokens.length &&
+    traceTokenStreamStatus(tokens[index]) === TRACE_TOKEN_STREAM_SKIP
+  ) {
     index++;
   }
   return index;

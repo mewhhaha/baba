@@ -43,6 +43,9 @@ export const RUNTIME_TOKEN_STREAM_STATUS_OVERLAP = 3;
 export const RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH = 4;
 export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF = 5;
 export const RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP = 6;
+export const RUNTIME_TRACE_TOKEN_STREAM_EMIT = 0;
+export const RUNTIME_TRACE_TOKEN_STREAM_SKIP = 1;
+export const RUNTIME_TRACE_TOKEN_STREAM_STOP = 2;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -1707,6 +1710,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamWidthStatusFunction(),
     parserTokenStreamEofStatusFunction(),
     parserTokenStreamGapTokenStatusFunction(),
+    parserTraceTokenStreamStatusFunction(),
     parserRuleNodeFromFragmentFunction(),
     parserRuleNodeRuleIdFunction(),
     parserRuleNodeSpanStartFunction(),
@@ -2834,6 +2838,44 @@ function parserTokenStreamGapTokenStatusFunction(): RuntimeLanguageFunction {
   };
 }
 
+function parserTraceTokenStreamStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceTokenStreamStatus",
+    parameters: [
+      { name: "publicClass", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TRACE_TOKEN_STREAM_SKIP),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_EOF),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TRACE_TOKEN_STREAM_STOP),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TRACE_TOKEN_STREAM_EMIT),
+      },
+    ],
+  };
+}
+
 function parserRuleNodeRuleIdFunction(): RuntimeLanguageFunction {
   return parserObjectLoadFunction(
     "parserRuleNodeRuleId",
@@ -3406,6 +3448,17 @@ function lexerTokenDiagnosticStatusFunction(): RuntimeLanguageFunction {
         condition: eq(
           local("publicClass"),
           u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_EOF),
         ),
         consequent: [{
           kind: "return",

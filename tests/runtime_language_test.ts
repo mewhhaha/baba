@@ -64,6 +64,7 @@ import {
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_TERMINAL,
   RUNTIME_NO_TRANSITION,
+  RUNTIME_PUBLIC_TOKEN_EOF,
   RUNTIME_PUBLIC_TOKEN_ERROR,
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
@@ -114,6 +115,9 @@ import {
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_INTERNAL,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
+  RUNTIME_TRACE_TOKEN_STREAM_EMIT,
+  RUNTIME_TRACE_TOKEN_STREAM_SKIP,
+  RUNTIME_TRACE_TOKEN_STREAM_STOP,
   UTF16_CODE_POINT_WIDTH_PROGRAM,
 } from "../src/targets/runtime/language_sources.ts";
 import { assertEquals } from "./helpers.ts";
@@ -244,7 +248,7 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                 u32(RUNTIME_PUBLIC_TOKEN_ERROR),
                 u32(RUNTIME_NO_TERMINAL),
               ]),
-              u32(10_000),
+              u32(100_000),
             ),
             add(
               mul(
@@ -255,31 +259,43 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                   ]),
                   u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
                 ),
-                u32(1_000),
+                u32(10_000),
               ),
               add(
                 mul(
                   eq(
                     call("lexerTokenDiagnosticStatus", [
-                      u32(RUNTIME_PUBLIC_TOKEN_MAIN),
-                      u32(4),
+                      u32(RUNTIME_PUBLIC_TOKEN_EOF),
+                      u32(RUNTIME_NO_TERMINAL),
                     ]),
                     u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
                   ),
-                  u32(100),
+                  u32(1_000),
                 ),
                 add(
                   mul(
-                    call("lexerTokenDiagnosticStatus", [
-                      u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
-                      u32(RUNTIME_NO_TERMINAL),
-                    ]),
-                    u32(10),
+                    eq(
+                      call("lexerTokenDiagnosticStatus", [
+                        u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                        u32(4),
+                      ]),
+                      u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
+                    ),
+                    u32(100),
                   ),
-                  call("lexerTokenDiagnosticStatus", [
-                    u32(99),
-                    u32(4),
-                  ]),
+                  add(
+                    mul(
+                      call("lexerTokenDiagnosticStatus", [
+                        u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+                        u32(RUNTIME_NO_TERMINAL),
+                      ]),
+                      u32(10),
+                    ),
+                    call("lexerTokenDiagnosticStatus", [
+                      u32(99),
+                      u32(4),
+                    ]),
+                  ),
                 ),
               ),
             ),
@@ -2050,6 +2066,56 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserTraceTokenStreamStatusProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_trace_token_stream_status",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserTraceTokenStreamStatus", [
+                u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+              ]),
+              u32(10_000),
+            ),
+            add(
+              mul(
+                call("parserTraceTokenStreamStatus", [
+                  u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+                ]),
+                u32(1_000),
+              ),
+              add(
+                mul(
+                  call("parserTraceTokenStreamStatus", [
+                    u32(RUNTIME_PUBLIC_TOKEN_ERROR),
+                  ]),
+                  u32(100),
+                ),
+                add(
+                  mul(
+                    call("parserTraceTokenStreamStatus", [
+                      u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                    ]),
+                    u32(10),
+                  ),
+                  call("parserTraceTokenStreamStatus", [
+                    u32(RUNTIME_PUBLIC_TOKEN_EOF),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserObjectWrongKindProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_object_wrong_kind",
@@ -2782,6 +2848,18 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     },
     {
+      name: "runtime trace token-stream helper classifies parser input tokens",
+      program: parserTraceTokenStreamStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_TRACE_TOKEN_STREAM_EMIT * 10_000 +
+          RUNTIME_TRACE_TOKEN_STREAM_EMIT * 1_000 +
+          RUNTIME_TRACE_TOKEN_STREAM_EMIT * 100 +
+          RUNTIME_TRACE_TOKEN_STREAM_SKIP * 10 +
+          RUNTIME_TRACE_TOKEN_STREAM_STOP,
+      },
+    },
+    {
       name: "runtime parser object access traps on wrong handle kind",
       program: parserObjectWrongKindProgram,
       expected: { kind: "trap" },
@@ -3117,8 +3195,8 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       program: lexerTokenDiagnosticRuntimeProgram,
       expected: {
         kind: "value",
-        value: RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN * 10_000 +
-          1_000 + 100 +
+        value: RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN * 100_000 +
+          10_000 + 1_000 + 100 +
           RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL * 10 +
           RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL,
       },

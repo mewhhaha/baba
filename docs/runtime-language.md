@@ -67,10 +67,13 @@ EOF-shape errors before TypeScript allocates public diagnostics.
 omitted source gaps as safely omitted trivia or invalid nontrivia source.
 `lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
 accepted, lexical error tokens, or not in the parser terminal set before
-TypeScript allocates the public diagnostic object. Deterministic parsers use
-`parserAction`/`parserGoto` for parser table lookup, and conflict parsers use
-generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
-multi-action fan-out and goto lookup. Generated parsers also use the
+TypeScript allocates the public diagnostic object.
+`parserTraceTokenStreamStatus` classifies public token records as parser-trace
+input, skippable trivia, or EOF stop tokens before generated TypeScript parsers
+and Wasm adapters compact public tokens into terminal streams. Deterministic
+parsers use `parserAction`/`parserGoto` for parser table lookup, and conflict
+parsers use generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers
+for multi-action fan-out and goto lookup. Generated parsers also use the
 `parserExpectedStart` and `parserExpectedEnd` helpers to map parser states to
 flattened expected-terminal display ranges for diagnostics, and
 `parserUnexpectedDiagnosticCode` uses runtime EOF flags to choose

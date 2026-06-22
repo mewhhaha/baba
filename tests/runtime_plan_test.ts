@@ -271,6 +271,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "parserTokenStreamGapTokenStatus",
   );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTraceTokenStreamStatus",
+  );
   assertIncludes(parserRuntimeSource, "sourceTextMatches");
   assertNotIncludes(parserRuntimeSource, "source.slice");
   assertIncludes(
@@ -410,6 +414,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "function eofToken");
   assertNotIncludes(parserRuntimeSource, "interface ParseBranch");
   assertNotIncludes(parserRuntimeSource, "function findActions");
+  assertNotIncludes(parserRuntimeSource, "function skipTrivia");
 });
 
 Deno.test("Wasm target packages shared core runtime source", async () => {
