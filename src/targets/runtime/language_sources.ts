@@ -13,6 +13,10 @@ export const RUNTIME_NO_TERMINAL = 0xffff_ffff;
 export const RUNTIME_NO_SPAN = 0xffff_ffff;
 export const RUNTIME_LEXER_SPEC_LITERAL = 1;
 export const RUNTIME_LEXER_SPEC_TRIVIA = 2;
+export const RUNTIME_LEXER_TOKEN_UNKNOWN = 0;
+export const RUNTIME_LEXER_TOKEN_LITERAL = 1;
+export const RUNTIME_LEXER_TOKEN_TRIVIA = 2;
+export const RUNTIME_LEXER_TOKEN_MAIN = 3;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -681,6 +685,7 @@ function lexerSpecFunctions(
 ): RuntimeLanguageFunction[] {
   return [
     lexerSpecLoadFunction("lexerSpecFlags", specCount, 0, 0),
+    lexerSpecTokenClassFunction(specCount),
     lexerSpecLoadFunction(
       "lexerSpecPayload",
       specCount,
@@ -707,6 +712,57 @@ function lexerSpecTable(
       payload < 0 ? RUNTIME_NO_LEXER_SPEC : payload,
       terminal < 0 ? RUNTIME_NO_TERMINAL : terminal,
     ]),
+  };
+}
+
+function lexerSpecTokenClassFunction(
+  specCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "lexerSpecTokenClass",
+    parameters: [
+      { name: "specIndex", type: "u32" },
+    ],
+    locals: [
+      { name: "flags", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("specIndex"), u32(specCount)),
+        consequent: [
+          setLocal("flags", call("lexerSpecFlags", [local("specIndex")])),
+          {
+            kind: "if",
+            condition: eq(
+              and(local("flags"), u32(RUNTIME_LEXER_SPEC_LITERAL)),
+              u32(0),
+            ),
+            consequent: [{
+              kind: "if",
+              condition: eq(
+                and(local("flags"), u32(RUNTIME_LEXER_SPEC_TRIVIA)),
+                u32(0),
+              ),
+              consequent: [{
+                kind: "return",
+                expression: u32(RUNTIME_LEXER_TOKEN_MAIN),
+              }],
+              alternate: [{
+                kind: "return",
+                expression: u32(RUNTIME_LEXER_TOKEN_TRIVIA),
+              }],
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(RUNTIME_LEXER_TOKEN_LITERAL),
+            }],
+          },
+        ],
+      },
+      { kind: "return", expression: u32(RUNTIME_LEXER_TOKEN_UNKNOWN) },
+    ],
   };
 }
 

@@ -36,14 +36,15 @@ The first runtime-language-backed parser helpers are used by generated
 TypeScript lexers and parsers: `utf16CodePointWidth` advances over UTF-16 code
 points, `dfaTransition` performs DFA transition lookup from generated read-only
 tables, and `lexerScan*` helpers track longest-match accepting candidates from
-generated DFA accept tables. `lexerSpecFlags`/`lexerSpecPayload`/
+generated DFA accept tables. `lexerSpecTokenClass`/`lexerSpecPayload`/
 `lexerSpecTerminal` map accepted lexer spec indexes to token object
 classification data and parser terminal ids for generated TypeScript
-`parse(source)`. External token streams keep public token-kind/literal spelling
-at the API boundary, but generated parsers map those spellings to lexer spec
-indexes and use the same runtime-language helpers for channel and terminal
-classification. Deterministic parsers use `parserAction`/`parserGoto` for parser
-table lookup, and conflict parsers use generated
+`parse(source)`, while `lexerSpecFlags` remains the lower-level table helper.
+External token streams keep public token-kind/literal spelling at the API
+boundary, but generated parsers map those spellings to lexer spec indexes and
+use the same runtime-language helpers for channel and terminal classification.
+Deterministic parsers use `parserAction`/`parserGoto` for parser table lookup,
+and conflict parsers use generated
 `parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
 fan-out and goto lookup. Generated parsers also use `parserExpectedStart`/
 `parserExpectedEnd` helpers to map parser states to flattened expected-terminal

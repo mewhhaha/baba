@@ -75,7 +75,7 @@ const NO_REDUCER_PAYLOAD = 4294967295;
 const NO_FIELD = 4294967295;
 const FIELD_ARRAY = 1;
 const FIELD_NULLABLE = 2;
-const SPEC_TRIVIA = 2;
+const TOKEN_TRIVIA = 2;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -236,6 +236,24 @@ function lexerSpecFlags(specIndex: number): number {
   if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
     offset = (((Math.imul((specIndex) >>> 0, (3) >>> 0) >>> 0) + (0)) >>> 0) >>> 0;
     return (__baba_load_lexerSpecs(offset) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerSpecTokenClass(specIndex: number): number {
+  let flags = 0;
+  if (((((specIndex) | 0) < ((13) | 0) ? 1 : 0)) !== 0) {
+    flags = (lexerSpecFlags(specIndex) >>> 0) >>> 0;
+    if (((((((flags) & (1)) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      if (((((((flags) & (2)) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+        return (3) >>> 0;
+      } else {
+        return (2) >>> 0;
+      }
+    } else {
+      return (1) >>> 0;
+    }
   }
   return (0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -1171,14 +1189,14 @@ function validateTokenStream(
             span,
           ));
         } else {
-          const flags = lexerSpecFlags(specIndex);
-          if (token.channel === "main" && (flags & SPEC_TRIVIA) !== 0) {
+          const tokenClass = lexerSpecTokenClass(specIndex);
+          if (token.channel === "main" && tokenClass === TOKEN_TRIVIA) {
             diagnostics.push(invalidTokenStream(
               `Named token kind '${token.kind}' is not a main token kind.`,
               span,
             ));
           }
-          if (token.channel === "trivia" && (flags & SPEC_TRIVIA) === 0) {
+          if (token.channel === "trivia" && tokenClass !== TOKEN_TRIVIA) {
             diagnostics.push(invalidTokenStream(
               `Named token kind '${token.kind}' is not a trivia token kind.`,
               span,

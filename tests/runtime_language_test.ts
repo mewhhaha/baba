@@ -35,6 +35,9 @@ import {
   RUNTIME_FIELD_NULLABLE,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_TRIVIA,
+  RUNTIME_LEXER_TOKEN_LITERAL,
+  RUNTIME_LEXER_TOKEN_MAIN,
+  RUNTIME_LEXER_TOKEN_TRIVIA,
   RUNTIME_NO_FIELD,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
@@ -107,16 +110,19 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         body: [{
           kind: "return",
           expression: add(
-            mul(call("lexerSpecTerminal", [u32(0)]), u32(10000)),
+            mul(call("lexerSpecTerminal", [u32(0)]), u32(100000)),
             add(
-              mul(call("lexerSpecFlags", [u32(1)]), u32(1000)),
+              mul(call("lexerSpecTokenClass", [u32(0)]), u32(10000)),
               add(
-                mul(call("lexerSpecPayload", [u32(2)]), u32(100)),
+                mul(call("lexerSpecTokenClass", [u32(1)]), u32(1000)),
                 add(
-                  mul(call("lexerSpecTerminal", [u32(2)]), u32(10)),
-                  eq(
-                    call("lexerSpecTerminal", [u32(1)]),
-                    u32(RUNTIME_NO_TERMINAL),
+                  mul(call("lexerSpecPayload", [u32(2)]), u32(100)),
+                  add(
+                    mul(call("lexerSpecTokenClass", [u32(2)]), u32(10)),
+                    eq(
+                      call("lexerSpecTerminal", [u32(1)]),
+                      u32(RUNTIME_NO_TERMINAL),
+                    ),
                   ),
                 ),
               ),
@@ -1071,7 +1077,12 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "lexer spec helper maps accepted spec metadata",
       program: lexerSpecRuntimeProgram,
-      expected: { kind: "value", value: 42281 },
+      expected: {
+        kind: "value",
+        value: 4 * 100000 + RUNTIME_LEXER_TOKEN_MAIN * 10000 +
+          RUNTIME_LEXER_TOKEN_TRIVIA * 1000 + 2 * 100 +
+          RUNTIME_LEXER_TOKEN_LITERAL * 10 + 1,
+      },
     },
     {
       name: "parser table lookup finds shift actions",

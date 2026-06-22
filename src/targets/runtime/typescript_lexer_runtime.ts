@@ -3,6 +3,8 @@ import {
   createLexerRuntimeProgram,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_TRIVIA,
+  RUNTIME_LEXER_TOKEN_LITERAL,
+  RUNTIME_LEXER_TOKEN_TRIVIA,
   RUNTIME_NO_ACCEPT,
   RUNTIME_NO_LEXER_SPEC,
   RUNTIME_NO_TERMINAL,
@@ -91,8 +93,8 @@ const LITERAL_SPECS: readonly {
 const NO_ACCEPT = ${RUNTIME_NO_ACCEPT};
 const NO_LEXER_SPEC = ${RUNTIME_NO_LEXER_SPEC};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
-const SPEC_LITERAL = ${RUNTIME_LEXER_SPEC_LITERAL};
-const SPEC_TRIVIA = ${RUNTIME_LEXER_SPEC_TRIVIA};
+const TOKEN_LITERAL = ${RUNTIME_LEXER_TOKEN_LITERAL};
+const TOKEN_TRIVIA = ${RUNTIME_LEXER_TOKEN_TRIVIA};
 
 interface Candidate {
   specIndex: number;
@@ -119,10 +121,10 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     if (candidate) {
       const start = offset;
       const end = candidate.end;
-      const specFlags = lexerSpecFlags(candidate.specIndex);
+      const tokenClass = lexerSpecTokenClass(candidate.specIndex);
       const specPayload = runtimeSpecPayload(candidate.specIndex);
       const terminal = runtimeTerminal(candidate.specIndex);
-      if ((specFlags & SPEC_LITERAL) !== 0) {
+      if (tokenClass === TOKEN_LITERAL) {
         const spec = LITERAL_SPECS[specPayload];
         tokens.push({
           type: "literal",
@@ -134,7 +136,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
         } as Token & RuntimeTerminalToken);
       } else {
         const spec = NAMED_SPECS[specPayload];
-        if ((specFlags & SPEC_TRIVIA) !== 0) {
+        if (tokenClass === TOKEN_TRIVIA) {
           if (preserveTrivia) {
             tokens.push({
               type: "named",

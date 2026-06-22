@@ -25,6 +25,7 @@ import {
   RUNTIME_FIELD_NULLABLE,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_TRIVIA,
+  RUNTIME_LEXER_TOKEN_TRIVIA,
   RUNTIME_NO_FIELD,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
@@ -318,7 +319,7 @@ const NO_REDUCER_PAYLOAD = ${RUNTIME_NO_REDUCER_PAYLOAD};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
 const FIELD_ARRAY = ${RUNTIME_FIELD_ARRAY};
 const FIELD_NULLABLE = ${RUNTIME_FIELD_NULLABLE};
-const SPEC_TRIVIA = ${RUNTIME_LEXER_SPEC_TRIVIA};
+const TOKEN_TRIVIA = ${RUNTIME_LEXER_TOKEN_TRIVIA};
 
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
 }
@@ -1313,14 +1314,14 @@ function validateTokenStream(
             span,
           ));
         } else {
-          const flags = lexerSpecFlags(specIndex);
-          if (token.channel === "main" && (flags & SPEC_TRIVIA) !== 0) {
+          const tokenClass = lexerSpecTokenClass(specIndex);
+          if (token.channel === "main" && tokenClass === TOKEN_TRIVIA) {
             diagnostics.push(invalidTokenStream(
               \`Named token kind '\${token.kind}' is not a main token kind.\`,
               span,
             ));
           }
-          if (token.channel === "trivia" && (flags & SPEC_TRIVIA) === 0) {
+          if (token.channel === "trivia" && tokenClass !== TOKEN_TRIVIA) {
             diagnostics.push(invalidTokenStream(
               \`Named token kind '\${token.kind}' is not a trivia token kind.\`,
               span,

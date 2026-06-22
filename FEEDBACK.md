@@ -146,7 +146,7 @@ runtime language:
   `parserFieldIndex` helpers backed by numeric field rows, replacing generated
   `RULE_FIELD_SCHEMAS` object tables during CST field assembly.
 - Moved generated TypeScript lexer spec classification and terminal mapping onto
-  runtime-language `lexerSpecFlags`/`lexerSpecPayload`/`lexerSpecTerminal`
+  runtime-language `lexerSpecTokenClass`/`lexerSpecPayload`/`lexerSpecTerminal`
   helpers backed by numeric lexer spec tables. Generated lexed tokens carry an
   internal trusted terminal id into parser tracing. External `parseTokens()`
   input now maps public token strings/literals to lexer spec indexes and uses
@@ -172,19 +172,19 @@ Still unresolved:
   runtime-language-backed, and generated Wasm adapters now call a
   runtime-language Wasm parser trace module instead of a core `parse_trace`
   export. Reducer descriptor lookup and field schema lookup are now
-  runtime-language-backed, and generated TypeScript lexing now reads token spec
-  kind/payload/terminal metadata from runtime-language helpers before emitting
-  public token objects. External `parseTokens()` mapping still accepts public
-  strings/literals at the API boundary, but terminal/channel classification now
-  goes through runtime-language lexer spec helpers. Parser replay span and
-  token-range merge arithmetic is runtime-language-backed, and trailing-input
-  diagnostic code selection uses runtime-language expected-state flags, but the
-  reducer operations that allocate/assemble fragments, fields, and CST nodes
-  plus generated token/diagnostic object emission are still not mechanically
-  emitted from one runtime-language implementation. The compiler now has a
-  shared lowered control-flow/value IR and checked helper artifact hashes, but
-  it still needs broader parser-runtime lowering before the release can fully
-  satisfy "one runtime implementation, two execution targets."
+  runtime-language-backed, and generated TypeScript lexing now reads token
+  class, payload, and terminal metadata from runtime-language helpers before
+  emitting public token objects. External `parseTokens()` mapping still accepts
+  public strings/literals at the API boundary, but terminal/channel
+  classification now goes through runtime-language lexer spec helpers. Parser
+  replay span and token-range merge arithmetic is runtime-language-backed, and
+  trailing-input diagnostic code selection uses runtime-language expected-state
+  flags, but the reducer operations that allocate/assemble fragments, fields,
+  and CST nodes plus generated token/diagnostic object emission are still not
+  mechanically emitted from one runtime-language implementation. The compiler
+  now has a shared lowered control-flow/value IR and checked helper artifact
+  hashes, but it still needs broader parser-runtime lowering before the release
+  can fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

@@ -104,6 +104,8 @@
 - Generated TypeScript lexers now read token spec classification, payload, and
   terminal metadata through runtime-language `lexerSpec*` helpers instead of a
   generated JavaScript spec-discriminant table.
+- Generated TypeScript lexers and parser token-stream validation now use
+  runtime-language `lexerSpecTokenClass` for literal/main/trivia classification.
 - Generated parsers now map external `parseTokens()` token strings to lexer spec
   indexes and use runtime-language `lexerSpec*` helpers for channel and terminal
   metadata instead of generated terminal/channel lookup tables.

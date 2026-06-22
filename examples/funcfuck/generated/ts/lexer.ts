@@ -210,8 +210,8 @@ const LITERAL_SPECS: readonly {
 const NO_ACCEPT = 4294967295;
 const NO_LEXER_SPEC = 4294967295;
 const NO_TERMINAL = 4294967295;
-const SPEC_LITERAL = 1;
-const SPEC_TRIVIA = 2;
+const TOKEN_LITERAL = 1;
+const TOKEN_TRIVIA = 2;
 
 interface Candidate {
   specIndex: number;
@@ -415,6 +415,24 @@ function lexerSpecFlags(specIndex: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function lexerSpecTokenClass(specIndex: number): number {
+  let flags = 0;
+  if (((((specIndex) | 0) < ((29) | 0) ? 1 : 0)) !== 0) {
+    flags = (lexerSpecFlags(specIndex) >>> 0) >>> 0;
+    if (((((((flags) & (1)) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      if (((((((flags) & (2)) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+        return (3) >>> 0;
+      } else {
+        return (2) >>> 0;
+      }
+    } else {
+      return (1) >>> 0;
+    }
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function lexerSpecPayload(specIndex: number): number {
   let offset = 0;
   if (((((specIndex) | 0) < ((29) | 0) ? 1 : 0)) !== 0) {
@@ -446,10 +464,10 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     if (candidate) {
       const start = offset;
       const end = candidate.end;
-      const specFlags = lexerSpecFlags(candidate.specIndex);
+      const tokenClass = lexerSpecTokenClass(candidate.specIndex);
       const specPayload = runtimeSpecPayload(candidate.specIndex);
       const terminal = runtimeTerminal(candidate.specIndex);
-      if ((specFlags & SPEC_LITERAL) !== 0) {
+      if (tokenClass === TOKEN_LITERAL) {
         const spec = LITERAL_SPECS[specPayload];
         tokens.push({
           type: "literal",
@@ -461,7 +479,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
         } as Token & RuntimeTerminalToken);
       } else {
         const spec = NAMED_SPECS[specPayload];
-        if ((specFlags & SPEC_TRIVIA) !== 0) {
+        if (tokenClass === TOKEN_TRIVIA) {
           if (preserveTrivia) {
             tokens.push({
               type: "named",
