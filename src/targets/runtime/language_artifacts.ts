@@ -15,6 +15,7 @@ import {
   createParserFieldRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserProductionRuntimeProgram,
+  createParserRangeRuntimeProgram,
   createParserReducerRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
@@ -191,6 +192,10 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
       }),
     },
     {
+      name: "parser_range_runtime",
+      program: createParserRangeRuntimeProgram(),
+    },
+    {
       name: "parser_field_runtime",
       program: createParserFieldRuntimeProgram({
         fieldRows: [
@@ -305,6 +310,13 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
       wasmHash: "fnv1a64:d0e99b8fb067ed2d",
     },
     {
+      name: "parser_range_runtime",
+      entry: "parserMergeStart",
+      sourceHash: "fnv1a64:a402cac99d019a05",
+      typescriptHash: "fnv1a64:4553ca1ea00e245b",
+      wasmHash: "fnv1a64:3bd543ac19af6f40",
+    },
+    {
       name: "parser_field_runtime",
       entry: "parserFieldStart",
       sourceHash: "fnv1a64:8d4857149d457e94",
@@ -335,7 +347,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:4fa2d2e666e23ad4" as const;
+  "fnv1a64:577d95716c09f85c" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

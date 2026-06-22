@@ -107,6 +107,8 @@
 - Generated parsers now map external `parseTokens()` token strings to lexer spec
   indexes and use runtime-language `lexerSpec*` helpers for channel and terminal
   metadata instead of generated terminal/channel lookup tables.
+- Generated parser replay now uses runtime-language `parserMergeStart`/
+  `parserMergeEnd` helpers for CST span and token-range merging.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical

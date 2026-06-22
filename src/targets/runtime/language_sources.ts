@@ -10,6 +10,7 @@ export const RUNTIME_NO_TRANSITION = 0xffff_ffff;
 export const RUNTIME_NO_ACCEPT = RUNTIME_NO_TRANSITION;
 export const RUNTIME_NO_LEXER_SPEC = 0xffff_ffff;
 export const RUNTIME_NO_TERMINAL = 0xffff_ffff;
+export const RUNTIME_NO_SPAN = 0xffff_ffff;
 export const RUNTIME_LEXER_SPEC_LITERAL = 1;
 export const RUNTIME_LEXER_SPEC_TRIVIA = 2;
 export const RUNTIME_ACTION_NONE = 0;
@@ -474,6 +475,17 @@ export function createParserExpectedRuntimeProgram(
     functions: [
       parserExpectedStartFunction(input.rowLengths.length),
       parserExpectedEndFunction(input.rowLengths.length),
+    ],
+  };
+}
+
+export function createParserRangeRuntimeProgram(): RuntimeLanguageProgram {
+  return {
+    name: "parser_range_runtime",
+    entry: "parserMergeStart",
+    functions: [
+      parserMergeStartFunction(),
+      parserMergeEndFunction(),
     ],
   };
 }
@@ -1854,6 +1866,80 @@ function parserExpectedEndFunction(
         ],
       },
       { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserMergeStartFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserMergeStart",
+    parameters: [
+      { name: "leftStart", type: "u32" },
+      { name: "leftEnd", type: "u32" },
+      { name: "rightStart", type: "u32" },
+      { name: "rightEnd", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("leftStart"), u32(RUNTIME_NO_SPAN)),
+        consequent: [
+          { kind: "return", expression: local("rightStart") },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(local("rightStart"), u32(RUNTIME_NO_SPAN)),
+        consequent: [
+          { kind: "return", expression: local("leftStart") },
+        ],
+      },
+      {
+        kind: "if",
+        condition: lt(local("leftStart"), local("rightStart")),
+        consequent: [
+          { kind: "return", expression: local("leftStart") },
+        ],
+      },
+      { kind: "return", expression: local("rightStart") },
+    ],
+  };
+}
+
+function parserMergeEndFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserMergeEnd",
+    parameters: [
+      { name: "leftStart", type: "u32" },
+      { name: "leftEnd", type: "u32" },
+      { name: "rightStart", type: "u32" },
+      { name: "rightEnd", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("leftStart"), u32(RUNTIME_NO_SPAN)),
+        consequent: [
+          { kind: "return", expression: local("rightEnd") },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(local("rightStart"), u32(RUNTIME_NO_SPAN)),
+        consequent: [
+          { kind: "return", expression: local("leftEnd") },
+        ],
+      },
+      {
+        kind: "if",
+        condition: lt(local("leftEnd"), local("rightEnd")),
+        consequent: [
+          { kind: "return", expression: local("rightEnd") },
+        ],
+      },
+      { kind: "return", expression: local("leftEnd") },
     ],
   };
 }

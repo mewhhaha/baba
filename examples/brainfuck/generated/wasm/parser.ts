@@ -52,6 +52,7 @@ const ACTION_SHIFT = 16777216;
 const ACTION_REDUCE = 33554432;
 const ACTION_ACCEPT = 50331648;
 const NO_GOTO = 4294967295;
+const NO_SPAN = 4294967295;
 const NO_TERMINAL = 4294967295;
 const NO_PRODUCTION = 4294967295;
 const REDUCER_UNKNOWN = 0;
@@ -240,6 +241,34 @@ function lexerSpecTerminal(specIndex: number): number {
     return (__baba_load_lexerSpecs(offset) >>> 0) >>> 0;
   }
   return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserMergeStart(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number): number {
+  if (((((leftStart) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+    return (rightStart) >>> 0;
+  }
+  if (((((rightStart) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+    return (leftStart) >>> 0;
+  }
+  if (((((leftStart) | 0) < ((rightStart) | 0) ? 1 : 0)) !== 0) {
+    return (leftStart) >>> 0;
+  }
+  return (rightStart) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserMergeEnd(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number): number {
+  if (((((leftStart) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+    return (rightEnd) >>> 0;
+  }
+  if (((((rightStart) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+    return (leftEnd) >>> 0;
+  }
+  if (((((leftEnd) | 0) < ((rightEnd) | 0) ? 1 : 0)) !== 0) {
+    return (rightEnd) >>> 0;
+  }
+  return (leftEnd) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -1319,11 +1348,15 @@ function tokenRangeFromChildren(
 }
 
 function combineSpans(left: Span | null, right: Span | null): Span | null {
-  if (!left) return right;
-  if (!right) return left;
+  const leftStart = left?.start ?? NO_SPAN;
+  const leftEnd = left?.end ?? NO_SPAN;
+  const rightStart = right?.start ?? NO_SPAN;
+  const rightEnd = right?.end ?? NO_SPAN;
+  const start = parserMergeStart(leftStart, leftEnd, rightStart, rightEnd);
+  if (start === NO_SPAN) return null;
   return {
-    start: Math.min(left.start, right.start),
-    end: Math.max(left.end, right.end),
+    start,
+    end: parserMergeEnd(leftStart, leftEnd, rightStart, rightEnd),
   };
 }
 
@@ -1331,10 +1364,14 @@ function combineTokenRanges(
   left: TokenRange | null,
   right: TokenRange | null,
 ): TokenRange | null {
-  if (!left) return right;
-  if (!right) return left;
+  const leftStart = left?.start ?? NO_SPAN;
+  const leftEnd = left?.end ?? NO_SPAN;
+  const rightStart = right?.start ?? NO_SPAN;
+  const rightEnd = right?.end ?? NO_SPAN;
+  const start = parserMergeStart(leftStart, leftEnd, rightStart, rightEnd);
+  if (start === NO_SPAN) return null;
   return {
-    start: Math.min(left.start, right.start),
-    end: Math.max(left.end, right.end),
+    start,
+    end: parserMergeEnd(leftStart, leftEnd, rightStart, rightEnd),
   };
 }

@@ -13,6 +13,7 @@ import {
   createParserExpectedRuntimeProgram,
   createParserFieldRuntimeProgram,
   createParserProductionRuntimeProgram,
+  createParserRangeRuntimeProgram,
   createParserReducerRuntimeProgram,
   createParserTraceRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
@@ -28,6 +29,7 @@ import {
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
+  RUNTIME_NO_SPAN,
   RUNTIME_NO_TERMINAL,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_IDENTITY,
@@ -124,6 +126,7 @@ export function emitParser(
     );
   }
   const fieldRuntimeProgram = createParserFieldRuntimeProgram({ fieldRows });
+  const rangeRuntimeProgram = createParserRangeRuntimeProgram();
   const expectedRows = expectedTerminalRows(bnf, lr);
   const expectedRuntimeProgram = createParserExpectedRuntimeProgram({
     rowLengths: expectedRows.map((row) => row.length),
@@ -181,7 +184,10 @@ export function emitParser(
     reducerRuntimeProgram,
   );
   const runtimeWithFields = mergeRuntimePrograms(
-    mergeRuntimePrograms(runtimeProgram, lexerSpecRuntimeProgram),
+    mergeRuntimePrograms(
+      mergeRuntimePrograms(runtimeProgram, lexerSpecRuntimeProgram),
+      rangeRuntimeProgram,
+    ),
     fieldRuntimeProgram,
   );
 
@@ -288,6 +294,7 @@ const ACTION_SHIFT = ${RUNTIME_ACTION_SHIFT};
 const ACTION_REDUCE = ${RUNTIME_ACTION_REDUCE};
 const ACTION_ACCEPT = ${RUNTIME_ACTION_ACCEPT};
 const NO_GOTO = ${RUNTIME_NO_GOTO};
+const NO_SPAN = ${RUNTIME_NO_SPAN};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
 const NO_PRODUCTION = ${RUNTIME_NO_PRODUCTION};
 const REDUCER_UNKNOWN = ${RUNTIME_REDUCER_UNKNOWN};
@@ -1499,11 +1506,15 @@ function tokenRangeFromChildren(
 }
 
 function combineSpans(left: Span | null, right: Span | null): Span | null {
-  if (!left) return right;
-  if (!right) return left;
+  const leftStart = left?.start ?? NO_SPAN;
+  const leftEnd = left?.end ?? NO_SPAN;
+  const rightStart = right?.start ?? NO_SPAN;
+  const rightEnd = right?.end ?? NO_SPAN;
+  const start = parserMergeStart(leftStart, leftEnd, rightStart, rightEnd);
+  if (start === NO_SPAN) return null;
   return {
-    start: Math.min(left.start, right.start),
-    end: Math.max(left.end, right.end),
+    start,
+    end: parserMergeEnd(leftStart, leftEnd, rightStart, rightEnd),
   };
 }
 
@@ -1511,11 +1522,15 @@ function combineTokenRanges(
   left: TokenRange | null,
   right: TokenRange | null,
 ): TokenRange | null {
-  if (!left) return right;
-  if (!right) return left;
+  const leftStart = left?.start ?? NO_SPAN;
+  const leftEnd = left?.end ?? NO_SPAN;
+  const rightStart = right?.start ?? NO_SPAN;
+  const rightEnd = right?.end ?? NO_SPAN;
+  const start = parserMergeStart(leftStart, leftEnd, rightStart, rightEnd);
+  if (start === NO_SPAN) return null;
   return {
-    start: Math.min(left.start, right.start),
-    end: Math.max(left.end, right.end),
+    start,
+    end: parserMergeEnd(leftStart, leftEnd, rightStart, rightEnd),
   };
 }`;
 }

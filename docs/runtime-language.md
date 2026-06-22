@@ -55,11 +55,12 @@ metadata from `parserReducerKind`/`parserReducerPayload` helpers backed by
 numeric reducer tables, and CST field assembly now reads field row/config
 metadata through `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
 `parserFieldFlags`/`parserFieldIndex` helpers. JavaScript still executes reducer
-fragment assembly and builds public CST objects. Generated parser action
-decoding uses `parserActionKind`/`parserActionPayload` helpers, and
-`parserTrace` uses the same helpers to classify encoded actions. Deterministic
-TypeScript parsers use a runtime-language `parserTrace` helper backed by
-growable scratch memory for LR shift/reduce/accept control flow.
+fragment assembly and builds public CST objects, but span/token-range merge
+arithmetic now uses `parserMergeStart`/`parserMergeEnd` helpers. Generated
+parser action decoding uses `parserActionKind`/`parserActionPayload` helpers,
+and `parserTrace` uses the same helpers to classify encoded actions.
+Deterministic TypeScript parsers use a runtime-language `parserTrace` helper
+backed by growable scratch memory for LR shift/reduce/accept control flow.
 Declared-conflict TypeScript parsers use a runtime-language conflict
 `parserTrace` helper that stores and restores branch frames as scratch-memory
 `u32` data before TypeScript replays the accepted action trace to build the CST.
