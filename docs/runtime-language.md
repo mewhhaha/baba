@@ -45,33 +45,35 @@ runtime-language token records for matched literals, named tokens, preserved
 trivia, lexical error tokens, and EOF tokens, then read class, payload,
 terminal, and span data back through `parserToken*` accessors before wrapping
 public API token objects through one shared runtime-target materializer helper.
-The generated materializer stores the parser-terminal hint as a non-enumerable
-`__babaTerminal` property on main and literal public tokens. That hint is
-plan-local provenance for generated parser fast paths, not a public token API,
-and consumers should not serialize, mutate, or reuse it across parser plans.
-External token streams keep public token-kind/literal spelling at the API
-boundary, but generated parsers map those spellings to lexer spec indexes and
-use the same runtime-language helpers for channel and terminal classification.
-`lexerSpecPublicTokenStatus` decides whether a mapped public literal/main/trivia
-token is compatible with the spec row; TypeScript still validates object
-shape/text/spans and emits public diagnostics. `lexerTokenDiagnosticStatus`
-classifies external tokens as diagnostically accepted, lexical error tokens, or
-not in the parser terminal set before TypeScript allocates the public diagnostic
-object. Deterministic parsers use `parserAction`/`parserGoto` for parser table
-lookup, and conflict parsers use generated
-`parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
-fan-out and goto lookup. Generated parsers also use `parserExpectedStart`/
-`parserExpectedEnd` helpers to map parser states to flattened expected-terminal
-display ranges for diagnostics, and `parserExpectedHasEof` flags choose
-trailing-input diagnostic codes without scanning display strings. Reduction
-replay uses `parserProductionLhs`/`parserProductionRhsLength` helpers for
-production metadata lookups while generated TypeScript still owns reducer
-descriptor execution and CST construction. Generated parser replay now gets
-reducer descriptor kind/payload metadata from
-`parserReducerKind`/`parserReducerPayload` helpers, reducer operation classes
-from `parserReducerOperation`, and required payload status from
-`parserReducerPayloadStatus`, plus child-role requirements from
-`parserReducerChildRole`; reducer result-shape classification comes from
+Lexical unexpected-character diagnostics are allocated through one shared
+runtime-target lex diagnostic materializer in both generated TypeScript lexers
+and generated Wasm JavaScript adapters. The generated materializer stores the
+parser-terminal hint as a non-enumerable `__babaTerminal` property on main and
+literal public tokens. That hint is plan-local provenance for generated parser
+fast paths, not a public token API, and consumers should not serialize, mutate,
+or reuse it across parser plans. External token streams keep public
+token-kind/literal spelling at the API boundary, but generated parsers map those
+spellings to lexer spec indexes and use the same runtime-language helpers for
+channel and terminal classification. `lexerSpecPublicTokenStatus` decides
+whether a mapped public literal/main/trivia token is compatible with the spec
+row; TypeScript still validates object shape/text/spans and emits public
+diagnostics. `lexerTokenDiagnosticStatus` classifies external tokens as
+diagnostically accepted, lexical error tokens, or not in the parser terminal set
+before TypeScript allocates the public diagnostic object. Deterministic parsers
+use `parserAction`/`parserGoto` for parser table lookup, and conflict parsers
+use generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
+multi-action fan-out and goto lookup. Generated parsers also use the
+`parserExpectedStart` and `parserExpectedEnd` helpers to map parser states to
+flattened expected-terminal display ranges for diagnostics, and
+`parserExpectedHasEof` flags choose trailing-input diagnostic codes without
+scanning display strings. Reduction replay uses
+`parserProductionLhs`/`parserProductionRhsLength` helpers for production
+metadata lookups while generated TypeScript still owns reducer descriptor
+execution and CST construction. Generated parser replay now gets reducer
+descriptor kind/payload metadata from `parserReducerKind`/`parserReducerPayload`
+helpers, reducer operation classes from `parserReducerOperation`, and required
+payload status from `parserReducerPayloadStatus`, plus child-role requirements
+from `parserReducerChildRole`; reducer result-shape classification comes from
 `parserReducerResultKind`, all backed by numeric reducer tables. CST field
 assembly now reads field row/config metadata through
 `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
@@ -239,6 +241,8 @@ execute both outputs and compare returned values or traps.
   paths allocate runtime token records for public tokens, including EOF, and
   read those records through runtime token accessors before materializing public
   JavaScript token objects through one shared runtime-target helper.
+- Generated TypeScript lexers and Wasm JavaScript adapters allocate lexical
+  unexpected-character diagnostics through one shared runtime-target helper.
 - Generated main/literal public tokens carry their plan-local terminal hint as a
   non-enumerable `__babaTerminal` property. Parser APIs may read it when the
   token came from the same generated runtime, but it is not enumerable,
@@ -295,8 +299,8 @@ These rules must be specified before the parser runtime can be fully lowered:
   the runtime language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
 - complete generated-parser lowering for remaining host public object
-  materialization that still sits outside the shared token, diagnostic,
-  parse-result, field, and rule-node public wrapper helpers.
+  materialization that still sits outside the shared token, lex diagnostic,
+  parse diagnostic, parse-result, field, and rule-node public wrapper helpers.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from

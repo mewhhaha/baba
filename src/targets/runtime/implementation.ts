@@ -23,7 +23,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/typescript_lexer_runtime.ts",
       role: "typescript-lexer-runtime",
-      hash: "fnv1a64:3ad8b63f72f92959",
+      hash: "fnv1a64:a8cf979654dbca55",
+    },
+    {
+      path: "src/targets/runtime/public_lex_diagnostic_materializer.ts",
+      role: "public-lex-diagnostic-materializer",
+      hash: "fnv1a64:00da88a24f229bfe",
     },
     {
       path: "src/targets/runtime/public_token_materializer.ts",
@@ -77,7 +82,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:690c21f35b801116" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:f3c709ab128a19a3" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

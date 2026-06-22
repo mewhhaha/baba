@@ -528,6 +528,16 @@ function attachRuntimeTerminal(token: Token, terminal: number): Token & RuntimeT
   });
   return token as Token & RuntimeTerminalToken;
 }
+function lexUnexpectedCharacterDiagnostic(token: Token): LexDiagnostic {
+  if (token.type !== "error") {
+    throw new Error("Expected lexical error token.");
+  }
+  return {
+    code: "LEX_UNEXPECTED_CHARACTER",
+    message: `Unexpected character ${JSON.stringify(token.text)}.`,
+    span: token.span,
+  };
+}
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   runtimeArenaReset();
@@ -570,11 +580,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     );
     const token = materializeToken(source, handle);
     tokens.push(token);
-    diagnostics.push({
-      code: "LEX_UNEXPECTED_CHARACTER",
-      message: `Unexpected character ${JSON.stringify(token.text)}.`,
-      span: token.span,
-    });
+    diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
   }
 
   const eofHandle = parserTokenNew(

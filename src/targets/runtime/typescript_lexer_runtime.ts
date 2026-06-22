@@ -14,6 +14,7 @@ import {
   RUNTIME_PUBLIC_TOKEN_MAIN,
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
 } from "./language_sources.ts";
+import { emitPublicLexDiagnosticMaterializer } from "./public_lex_diagnostic_materializer.ts";
 import { emitPublicTokenMaterializer } from "./public_token_materializer.ts";
 
 export interface TypeScriptLexerNamedSpec {
@@ -118,6 +119,7 @@ ${
       .trimEnd()
   }
 ${emitPublicTokenMaterializer({ label: "Lexer" })}
+${emitPublicLexDiagnosticMaterializer()}
 
 export function lex(source: string, options: LexOptions = {}): LexResult {
   runtimeArenaReset();
@@ -160,11 +162,7 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     );
     const token = materializeToken(source, handle);
     tokens.push(token);
-    diagnostics.push({
-      code: "LEX_UNEXPECTED_CHARACTER",
-      message: \`Unexpected character \${JSON.stringify(token.text)}.\`,
-      span: token.span,
-    });
+    diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
   }
 
   const eofHandle = parserTokenNew(

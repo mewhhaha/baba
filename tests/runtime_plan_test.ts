@@ -76,6 +76,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const lexerRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_lexer_runtime.ts",
   );
+  const publicLexDiagnosticMaterializerSource = await Deno.readTextFile(
+    "src/targets/runtime/public_lex_diagnostic_materializer.ts",
+  );
   const publicTokenMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_token_materializer.ts",
   );
@@ -88,15 +91,25 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(lexerRuntimeSource, "emitRuntimeLanguageTypeScriptFunction");
   assertIncludes(lexerRuntimeSource, "parserTokenNew");
   assertIncludes(lexerRuntimeSource, "emitPublicTokenMaterializer");
+  assertIncludes(lexerRuntimeSource, "emitPublicLexDiagnosticMaterializer");
   assertIncludes(publicTokenMaterializerSource, "function materializeToken");
   assertIncludes(publicTokenMaterializerSource, "function materializeEofToken");
   assertIncludes(publicTokenMaterializerSource, "parserTokenSpanStart");
   assertIncludes(publicTokenMaterializerSource, "PUBLIC_TOKEN_EOF");
   assertIncludes(publicTokenMaterializerSource, "Object.defineProperty");
+  assertIncludes(
+    publicLexDiagnosticMaterializerSource,
+    "function lexUnexpectedCharacterDiagnostic",
+  );
+  assertIncludes(
+    publicLexDiagnosticMaterializerSource,
+    '"LEX_UNEXPECTED_CHARACTER"',
+  );
   assertNotIncludes(lexerRuntimeSource, "const DFA_ACCEPTS");
   assertNotIncludes(lexerRuntimeSource, "const SPECS");
   assertNotIncludes(lexerRuntimeSource, "function codePointLength");
   assertNotIncludes(lexerRuntimeSource, "function transition");
+  assertNotIncludes(lexerRuntimeSource, '"LEX_UNEXPECTED_CHARACTER"');
 
   const parserRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_parser_runtime.ts",
@@ -306,7 +319,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 11);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 12);
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {
