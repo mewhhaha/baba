@@ -12,7 +12,7 @@
     "format": "baba-runtime-implementation",
     "version": 1,
     "semantics": "baba-runtime-portable-v1",
-    "hash": "fnv1a64:83ae696be5d40358"
+    "hash": "fnv1a64:ad40d55ff12a36c9"
   },
   "core": {
     "abiVersion": 1,

@@ -24,6 +24,7 @@ function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
 }
 
 function materializeFieldScalar(count: number, valueHandle: number): unknown {
-  return count === 0 ? null : hostFragmentValue(valueHandle);
+  const status = parserFieldScalarValueStatus(count);
+  return status === FIELD_SCALAR_VALUE_NULL ? null : hostFragmentValue(valueHandle);
 }`;
 }

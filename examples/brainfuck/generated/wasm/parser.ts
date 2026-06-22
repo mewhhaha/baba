@@ -96,6 +96,7 @@ const FIELD_CAPTURE_ARRAY = 2;
 const FIELD_CAPTURE_SCALAR = 1;
 const FIELD_CAPTURE_TOO_MANY = 3;
 const FIELD_SCHEMA_CAPTURE_WITHOUT_SCHEMA = 1;
+const FIELD_SCALAR_VALUE_NULL = 0;
 const FIELD_FINAL_REQUIRED_MISSING = 1;
 const FIELD_FINAL_TOO_MANY = 2;
 const PUBLIC_TOKEN_LITERAL = 1;
@@ -744,6 +745,14 @@ function parserFieldSchemaStatus(start: number, end: number, captureCount: numbe
     return (0) >>> 0;
   }
   if (((((captureCount) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldScalarValueStatus(count: number): number {
+  if (((((count) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
     return (0) >>> 0;
   }
   return (1) >>> 0;
@@ -1927,7 +1936,8 @@ function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
 }
 
 function materializeFieldScalar(count: number, valueHandle: number): unknown {
-  return count === 0 ? null : hostFragmentValue(valueHandle);
+  const status = parserFieldScalarValueStatus(count);
+  return status === FIELD_SCALAR_VALUE_NULL ? null : hostFragmentValue(valueHandle);
 }
 let RUNTIME_NODE_HANDLES: WeakMap<object, number> = new WeakMap();
 const RUNTIME_SYNTAX_VALUES = new Map<number, SyntaxElement>();

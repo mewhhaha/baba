@@ -42,6 +42,8 @@ import {
   RUNTIME_FIELD_FINAL_REQUIRED_MISSING,
   RUNTIME_FIELD_FINAL_TOO_MANY,
   RUNTIME_FIELD_NULLABLE,
+  RUNTIME_FIELD_SCALAR_VALUE_FRAGMENT,
+  RUNTIME_FIELD_SCALAR_VALUE_NULL,
   RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA,
   RUNTIME_FIELD_SCHEMA_STATUS_OK,
   RUNTIME_FIELD_VALUE_ARRAY,
@@ -610,6 +612,25 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                 call("parserFieldSchemaStatus", [u32(3), u32(2), u32(1)]),
               ),
             ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserFieldScalarValueStatusProgram: RuntimeLanguageProgram = {
+    ...parserFieldBaseProgram,
+    name: "parser_field_scalar_value_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserFieldBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserFieldScalarValueStatus", [u32(0)]), u32(10)),
+            call("parserFieldScalarValueStatus", [u32(2)]),
           ),
         }],
       },
@@ -3485,6 +3506,15 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_FIELD_SCHEMA_STATUS_OK * 100 +
           RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA * 10 +
           RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA,
+      },
+    },
+    {
+      name: "parser field scalar value status classifies missing captures",
+      program: parserFieldScalarValueStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_FIELD_SCALAR_VALUE_NULL * 10 +
+          RUNTIME_FIELD_SCALAR_VALUE_FRAGMENT,
       },
     },
     {

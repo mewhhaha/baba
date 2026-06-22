@@ -131,6 +131,8 @@ export const RUNTIME_FIELD_CAPTURE_ARRAY = 2;
 export const RUNTIME_FIELD_CAPTURE_TOO_MANY = 3;
 export const RUNTIME_FIELD_SCHEMA_STATUS_OK = 0;
 export const RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA = 1;
+export const RUNTIME_FIELD_SCALAR_VALUE_NULL = 0;
+export const RUNTIME_FIELD_SCALAR_VALUE_FRAGMENT = 1;
 export const RUNTIME_FIELD_FINAL_OK = 0;
 export const RUNTIME_FIELD_FINAL_REQUIRED_MISSING = 1;
 export const RUNTIME_FIELD_FINAL_TOO_MANY = 2;
@@ -4179,6 +4181,7 @@ function parserFieldFunctions(
     parserFieldIndexFunction(ruleCount),
     parserFieldValueClassFunction(fieldEntryCount),
     parserFieldSchemaStatusFunction(),
+    parserFieldScalarValueStatusFunction(),
     parserFieldCaptureStatusFunction(fieldEntryCount),
     parserFieldFinalStatusFunction(fieldEntryCount),
   ];
@@ -4374,6 +4377,29 @@ function parserFieldSchemaStatusFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA),
+      },
+    ],
+  };
+}
+
+function parserFieldScalarValueStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldScalarValueStatus",
+    parameters: [
+      { name: "count", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("count"), u32(0)),
+        consequent: [
+          { kind: "return", expression: u32(RUNTIME_FIELD_SCALAR_VALUE_NULL) },
+        ],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_FIELD_SCALAR_VALUE_FRAGMENT),
       },
     ],
   };

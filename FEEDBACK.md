@@ -331,6 +331,9 @@ runtime language:
 - Moved generated no-field-schema capture validation onto runtime-language
   `parserFieldSchemaStatus`, so public field assembly no longer decides in
   TypeScript whether captures without a field schema are valid.
+- Moved public scalar field value classification onto runtime-language
+  `parserFieldScalarValueStatus`, so the shared field materializer no longer
+  directly decides that a missing scalar capture means public `null`.
 - Moved generated TypeScript lexer spec classification and terminal mapping onto
   runtime-language `lexerSpecTokenClass`/`lexerSpecPayload`/`lexerSpecTerminal`
   helpers backed by numeric lexer spec tables. Generated lexed tokens carry an
@@ -400,11 +403,11 @@ Still unresolved:
   classification, rule/field payload-presence validation, reducer child-role
   requirements, and reducer result-shape classification from runtime-language
   helpers, and generated field assembly now gets value-class and
-  count-validation/no-schema capture decisions from runtime-language helpers.
-  Generated TypeScript lexing, Wasm JavaScript adapter token wrapping, and
-  parser fallback EOF creation now read token class, payload, terminal, and span
-  metadata through runtime-language token records before wrapping public token
-  objects. External `parseTokens()` mapping still accepts public
+  count-validation/no-schema/scalar-value decisions from runtime-language
+  helpers. Generated TypeScript lexing, Wasm JavaScript adapter token wrapping,
+  and parser fallback EOF creation now read token class, payload, terminal, and
+  span metadata through runtime-language token records before wrapping public
+  token objects. External `parseTokens()` mapping still accepts public
   strings/literals at the API boundary, but terminal/channel classification,
   public token class compatibility, span/EOF-shape status, omitted-gap
   classification, plus token-level lexical diagnostic classification now go
