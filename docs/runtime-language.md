@@ -191,6 +191,10 @@ execute both outputs and compare returned values or traps.
   tracks those buffers by object provenance and input epoch, rejects forged
   plain objects, and invalidates previous buffers when `reset()` runs or when
   `writeSource()` installs a different source into the shared Wasm input area.
+- Core Wasm modules export ABI metadata for non-JS hosts to discover the current
+  input base, maximum page count, source encoding, span unit, lex-result record
+  width, and token-record width. The generated JavaScript adapter validates
+  those core exports against its generated constants before using the module.
 - Generated JavaScript-hosted Wasm adapters treat `ParseTraceInput` values
   returned by `createParseTraceInput()` as adapter-owned parser-trace
   capabilities. The adapter rejects forged plain objects and invalidates

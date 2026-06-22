@@ -129,12 +129,16 @@ Both generated parser runtimes export the same main TypeScript API:
   channels.
 
 The Wasm target also exports `wasmTargetKind`, `wasmBytes`, `wasmAbiVersion`,
-`memory`, and `reset()` from `wasm/mod.ts`. `wasmTargetKind` is currently
-`"javascript-hosted-core-wasm"`; Baba does not yet emit a WASI library, Wasm
-Component/WIT package, browser-only package, or host-neutral parser ABI. The
-embedded core module exports `abi_version() -> i32`, `plan_version() -> i32`,
-and `reset() -> void`; the JavaScript adapter exposes their current values as
-constants and calls core `reset()` when adapter `reset()` is invoked. The
+core ABI metadata constants, `memory`, and `reset()` from `wasm/mod.ts`.
+`wasmTargetKind` is currently `"javascript-hosted-core-wasm"`; Baba does not yet
+emit a WASI library, Wasm Component/WIT package, browser-only package, or
+host-neutral parser ABI. The embedded core module exports
+`abi_version() -> i32`, `plan_version() -> i32`, `reset() -> void`,
+`input_base() -> i32`, `max_pages() -> i32`, `source_encoding() -> i32`,
+`span_unit() -> i32`, `lex_result_i32_count() -> i32`, and
+`token_record_i32_count() -> i32`; the JavaScript adapter exposes their current
+values as constants and validates that they match its generated table layout
+before use. Source encoding and span unit value `1` means UTF-16 code units. The
 generated JavaScript adapter copies source text into Wasm memory as UTF-16 code
 units, so all public spans are UTF-16 offsets matching the TypeScript target.
 Parse and lex results remain ordinary JavaScript objects. Low-level typed-array

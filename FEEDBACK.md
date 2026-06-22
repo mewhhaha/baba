@@ -21,6 +21,9 @@ runtime language:
 - Documented and exported Wasm ABI/plan versions, `reset()`, UTF-16 span units,
   repeated-parse memory reuse behavior, a core module maximum page count, and
   adapter-side page/overflow checks before memory growth.
+- Added discoverable core Wasm ABI metadata exports for input base, maximum page
+  count, source encoding, span unit, lex-result width, and token-record width,
+  with generated JavaScript adapter validation against its table constants.
 - Added JavaScript-hosted Wasm adapter source-buffer provenance checks:
   `WasmSourceBuffer` values are now adapter-owned capabilities, forged buffers
   are rejected, and previous buffers become stale after `reset()` or after
@@ -369,14 +372,15 @@ Still unresolved:
   tokens, plus adapter-owned `WasmSourceBuffer` and `ParseTraceInput`
   provenance/epoch gates for the current JavaScript-hosted Wasm adapter, but it
   still lacks a complete host-boundary ownership and handle capability contract
-  for future non-JS Wasm hosts, first-class runtime-language text values if
-  source decoding moves fully into the runtime language, plus complete generated
-  parser-runtime lowering for remaining host public object materialization
-  outside the shared wrapper helpers and a richer structured-error taxonomy for
-  a future host-neutral Wasm ABI. The compiler now has a shared lowered
-  control-flow/value IR and checked helper artifact hashes, but it still needs
-  broader parser-runtime lowering before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  for future non-JS Wasm hosts beyond the current discoverable core metadata and
+  JavaScript-hosted capability gates, first-class runtime-language text values
+  if source decoding moves fully into the runtime language, plus complete
+  generated parser-runtime lowering for remaining host public object
+  materialization outside the shared wrapper helpers and a richer
+  structured-error taxonomy for a future host-neutral Wasm ABI. The compiler now
+  has a shared lowered control-flow/value IR and checked helper artifact hashes,
+  but it still needs broader parser-runtime lowering before the release can
+  fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

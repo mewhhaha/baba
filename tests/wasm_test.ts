@@ -42,6 +42,9 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
       wasmSource,
       "parserTraceRuntime = instantiateParserTraceRuntime();",
     );
+    assertIncludes(wasmSource, "validateWasmAbi();");
+    assertIncludes(wasmSource, "wasm.input_base()");
+    assertIncludes(wasmSource, "wasm.source_encoding()");
     assertNotIncludes(wasmSource, "wasm.parse_trace");
     assertIncludes(wasmSource, "const MAX_WASM_PAGES = 65535");
     assertIncludes(wasmSource, "memory.grow(requiredPages - currentPages)");
@@ -53,13 +56,31 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
       abi_version(): number;
       plan_version(): number;
       reset(): void;
+      input_base(): number;
+      max_pages(): number;
+      source_encoding(): number;
+      span_unit(): number;
+      lex_result_i32_count(): number;
+      token_record_i32_count(): number;
     };
     assertEquals(wasmExports.parse_trace, undefined);
     assertEquals(wasmExports.abi_version(), 1);
     assertEquals(wasmExports.plan_version(), 1);
+    assert(wasmExports.input_base() > 0);
+    assertEquals(wasmExports.max_pages(), 65_535);
+    assertEquals(wasmExports.source_encoding(), 1);
+    assertEquals(wasmExports.span_unit(), 1);
+    assertEquals(wasmExports.lex_result_i32_count(), 2);
+    assertEquals(wasmExports.token_record_i32_count(), 3);
     wasmExports.reset();
     assertEquals(mod.wasmTargetKind, "javascript-hosted-core-wasm");
     assertEquals(mod.wasmAbiVersion, 1);
+    assertEquals(mod.wasmInputBase, wasmExports.input_base());
+    assertEquals(mod.wasmMaxPages, 65_535);
+    assertEquals(mod.wasmSourceEncoding, 1);
+    assertEquals(mod.wasmSpanUnit, 1);
+    assertEquals(mod.wasmLexResultI32Count, 2);
+    assertEquals(mod.wasmTokenRecordI32Count, 3);
     assertEquals(mod.parserPlanFormat, "baba-parser-plan");
     assertEquals(mod.parserPlanVersion, 1);
     assertEquals(mod.parserPlanSemantics, "baba-portable-v1");

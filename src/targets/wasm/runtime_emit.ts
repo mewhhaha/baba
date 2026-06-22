@@ -29,6 +29,10 @@ const UTF16_UNIT_BYTES = 2;
 const WASM_PAGE_BYTES = 65536;
 const MAX_WASM_BYTES = 0xffff_ffff;
 const MAX_WASM_PAGES = 65535;
+const WASM_SOURCE_ENCODING_UTF16 = 1;
+const WASM_SPAN_UNIT_UTF16 = 1;
+const LEX_RESULT_I32_COUNT = 2;
+const TOKEN_RECORD_I32_COUNT = 3;
 const TRACE_STATUS_OK = ${RUNTIME_TRACE_STATUS_OK};
 const TRACE_STATUS_INTERNAL = ${RUNTIME_TRACE_STATUS_INTERNAL};
 const TRACE_STATUS_BRANCH_LIMIT = ${RUNTIME_TRACE_STATUS_BRANCH_LIMIT};
@@ -42,6 +46,12 @@ interface ParserWasmExports {
   abi_version(): number;
   plan_version(): number;
   reset(): void;
+  input_base(): number;
+  max_pages(): number;
+  source_encoding(): number;
+  span_unit(): number;
+  lex_result_i32_count(): number;
+  token_record_i32_count(): number;
 }
 
 interface ParserTraceRuntimeExports {
@@ -69,6 +79,12 @@ export const memory = wasm.memory;
 export const parserAction = wasm.parser_action;
 export const parserGoto = wasm.parser_goto;
 export const wasmAbiVersion = wasm.abi_version();
+export const wasmInputBase = wasm.input_base();
+export const wasmMaxPages = wasm.max_pages();
+export const wasmSourceEncoding = wasm.source_encoding();
+export const wasmSpanUnit = wasm.span_unit();
+export const wasmLexResultI32Count = wasm.lex_result_i32_count();
+export const wasmTokenRecordI32Count = wasm.token_record_i32_count();
 export const parserPlanFormat = ${
     JSON.stringify(portableMetadata.format)
   } as const;
@@ -87,6 +103,8 @@ export const runtimeImplementationSemantics = ${
 export const runtimeImplementationHash = ${
     JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.hash)
   } as const;
+
+validateWasmAbi();
 
 export interface WasmSourceBuffer {
   sourcePtr: number;
@@ -282,6 +300,27 @@ function assertParseTraceInput(input: ParseTraceInput): void {
     throw new RangeError(
       "terminals length must cover parse input terminalCapacity.",
     );
+  }
+}
+
+function validateWasmAbi(): void {
+  if (wasmInputBase !== INPUT_BASE) {
+    throw new Error("Wasm input base does not match generated adapter.");
+  }
+  if (wasmMaxPages !== MAX_WASM_PAGES) {
+    throw new Error("Wasm max page count does not match generated adapter.");
+  }
+  if (wasmSourceEncoding !== WASM_SOURCE_ENCODING_UTF16) {
+    throw new Error("Wasm source encoding is not UTF-16.");
+  }
+  if (wasmSpanUnit !== WASM_SPAN_UNIT_UTF16) {
+    throw new Error("Wasm span unit is not UTF-16.");
+  }
+  if (wasmLexResultI32Count !== LEX_RESULT_I32_COUNT) {
+    throw new Error("Wasm lex result width does not match generated adapter.");
+  }
+  if (wasmTokenRecordI32Count !== TOKEN_RECORD_I32_COUNT) {
+    throw new Error("Wasm token record width does not match generated adapter.");
   }
 }
 

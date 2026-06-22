@@ -29,6 +29,10 @@ interface DataLayout {
 const PAGE_SIZE = 65_536;
 const MAX_WASM_PAGES = 65_535;
 const WASM_ABI_VERSION = 1;
+const WASM_SOURCE_ENCODING_UTF16 = 1;
+const WASM_SPAN_UNIT_UTF16 = 1;
+const LEX_RESULT_I32_COUNT = 2;
+const TOKEN_RECORD_I32_COUNT = 3;
 const I32 = 0x7f;
 const FUNC = 0x60;
 const EMPTY_BLOCK = 0x40;
@@ -236,6 +240,12 @@ function functionSection(): number[] {
     u32(2),
     u32(2),
     u32(3),
+    u32(2),
+    u32(2),
+    u32(2),
+    u32(2),
+    u32(2),
+    u32(2),
   ]);
 }
 
@@ -253,6 +263,12 @@ function exportSection(): number[] {
     exportEntry("abi_version", 0x00, 5),
     exportEntry("plan_version", 0x00, 6),
     exportEntry("reset", 0x00, 7),
+    exportEntry("input_base", 0x00, 8),
+    exportEntry("max_pages", 0x00, 9),
+    exportEntry("source_encoding", 0x00, 10),
+    exportEntry("span_unit", 0x00, 11),
+    exportEntry("lex_result_i32_count", 0x00, 12),
+    exportEntry("token_record_i32_count", 0x00, 13),
   ]);
 }
 
@@ -287,6 +303,12 @@ function codeSection(
     functionBody(0, versionFunction(WASM_ABI_VERSION)),
     functionBody(0, versionFunction(parserPlanVersion)),
     functionBody(0, resetFunction()),
+    functionBody(0, versionFunction(layout.inputBase)),
+    functionBody(0, versionFunction(MAX_WASM_PAGES)),
+    functionBody(0, versionFunction(WASM_SOURCE_ENCODING_UTF16)),
+    functionBody(0, versionFunction(WASM_SPAN_UNIT_UTF16)),
+    functionBody(0, versionFunction(LEX_RESULT_I32_COUNT)),
+    functionBody(0, versionFunction(TOKEN_RECORD_I32_COUNT)),
   ]);
 }
 
