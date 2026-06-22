@@ -119,6 +119,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "parserFieldFinalStatus");
   assertIncludes(parserRuntimeSource, "const counts = runtimeArrayNew");
   assertIncludes(parserRuntimeSource, "runtimeArrayStore(counts");
+  assertIncludes(parserRuntimeSource, "const fieldValues = runtimeArrayNew");
+  assertIncludes(parserRuntimeSource, "runtimeVectorAppend(values, value)");
+  assertIncludes(parserRuntimeSource, "function materializeFieldArray");
   assertIncludes(parserRuntimeSource, "parserExpectedHasEof");
   assertIncludes(parserRuntimeSource, "parserRuleNodeChildCount");
   assertIncludes(parserRuntimeSource, "parserRuleNodeChildren");
@@ -166,6 +169,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "RULE_FIELD_SCHEMAS");
   assertNotIncludes(parserRuntimeSource, "const counts = Object.create(null)");
   assertNotIncludes(parserRuntimeSource, "counts[fieldId]");
+  assertNotIncludes(parserRuntimeSource, "const values = fields[name]");
   assertNotIncludes(parserRuntimeSource, "interface ParseBranch");
   assertNotIncludes(parserRuntimeSource, "function findActions");
 });

@@ -95,6 +95,10 @@ runtime language:
   Field assembly now indexes counts by field-schema entry through
   `runtimeArrayLoad`/`runtimeArrayStore` instead of carrying a parallel
   JavaScript count object.
+- Moved public CST field value accumulation onto runtime-language arrays and
+  vectors. Field assembly now stores scalar captured fragment handles in a
+  runtime array and array-field captured fragment handles in runtime vectors,
+  then materializes the public JavaScript field object in a final pass.
 - Removed the parallel JavaScript fragment child list from generated replay.
   Public CST node children now come from the runtime-language rule-node child
   vector, with runtime token/rule-node handles resolved through a per-replay
@@ -297,23 +301,25 @@ Still unresolved:
   token/rule/sequence/empty/list/field reductions. Public field assembly now
   consumes runtime-language field-capture vectors instead of a parallel
   JavaScript capture list, and field capture counts now use a runtime-language
-  array instead of a parallel JavaScript count object. Public CST children now
-  consume runtime-language child vectors instead of a parallel JavaScript child
-  list. Public parse diagnostics now pass through runtime-language diagnostic
-  handles before public object materialization. Public CST rule-node object
-  materialization is now centralized behind runtime-language rule-node handles,
-  though final JavaScript object allocation still happens at the API boundary.
-  Public JavaScript field objects/arrays and final public token object wrapping
-  are still not mechanically emitted from one runtime-language implementation.
-  The runtime language now has a checked resettable arena plus tagged
-  arena-backed `u32` arrays, fixed records, growable vectors, and initial parser
-  fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
-  fragment assembly helpers that generated replay is beginning to use, but it
-  still lacks opaque typed handle provenance and complete generated
-  parser-runtime lowering. The compiler now has a shared lowered
-  control-flow/value IR and checked helper artifact hashes, but it still needs
-  broader parser-runtime lowering before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  array instead of a parallel JavaScript count object. Public field value
+  accumulation now stores captured fragment handles in runtime arrays/vectors
+  before the final JavaScript field object materialization pass. Public CST
+  children now consume runtime-language child vectors instead of a parallel
+  JavaScript child list. Public parse diagnostics now pass through
+  runtime-language diagnostic handles before public object materialization.
+  Public CST rule-node object materialization is now centralized behind
+  runtime-language rule-node handles, though final JavaScript object allocation
+  still happens at the API boundary. Public JavaScript field object allocation
+  and final public token object wrapping are still not mechanically emitted from
+  one runtime-language implementation. The runtime language now has a checked
+  resettable arena plus tagged arena-backed `u32` arrays, fixed records,
+  growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
+  layouts plus reduction-shaped fragment assembly helpers that generated replay
+  is beginning to use, but it still lacks opaque typed handle provenance and
+  complete generated parser-runtime lowering. The compiler now has a shared
+  lowered control-flow/value IR and checked helper artifact hashes, but it still
+  needs broader parser-runtime lowering before the release can fully satisfy
+  "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

@@ -1275,23 +1275,19 @@ function buildFields(
     }
     return Object.create(null) as Record<string, unknown>;
   }
-  const fields = Object.create(null) as Record<string, unknown>;
   const counts = runtimeArrayNew(end - start);
+  const fieldValues = runtimeArrayNew(end - start);
   for (let entry = start; entry < end; entry++) {
-    const fieldId = parserFieldId(entry);
     const valueClass = parserFieldValueClass(entry);
-    const name = fieldName(fieldId);
-    fields[name] = valueClass === FIELD_VALUE_ARRAY
-      ? []
-      : valueClass === FIELD_VALUE_NULLABLE
-      ? null
-      : undefined;
+    if (valueClass === FIELD_VALUE_ARRAY) {
+      runtimeArrayStore(fieldValues, entry - start, runtimeVectorNew(0));
+    }
   }
   const captures = parserRuleNodeFields(ruleNodeHandle);
   for (let index = 0; index < captureCount; index++) {
     const capture = runtimeVectorLoad(captures, index);
     const fieldId = parserFieldCaptureFieldId(capture);
-    const value = hostFragmentValue(parserFieldCaptureValue(capture));
+    const value = parserFieldCaptureValue(capture);
     const entry = parserFieldIndex(ruleId, fieldId);
     if (entry === NO_FIELD) {
       throw new Error(\`Unknown field capture '\${fieldName(fieldId)}'.\`);
@@ -1305,28 +1301,31 @@ function buildFields(
       count,
     );
     if (status === FIELD_CAPTURE_ARRAY) {
-      const values = fields[name];
-      if (!Array.isArray(values)) {
-        throw new Error(\`Array field '\${name}' was not initialized as an array.\`);
+      const values = runtimeArrayLoad(fieldValues, countIndex);
+      if (values === 0) {
+        throw new Error(\`Array field '\${name}' was not initialized as a runtime vector.\`);
       }
-      values.push(value);
+      runtimeVectorAppend(values, value);
     } else if (status === FIELD_CAPTURE_SCALAR) {
-      fields[name] = value;
+      runtimeArrayStore(fieldValues, countIndex, value);
     } else if (status === FIELD_CAPTURE_TOO_MANY) {
       throw new Error(\`Scalar field '\${name}' was captured more than once.\`);
     } else {
       throw new Error(\`Unknown field capture '\${fieldName(fieldId)}'.\`);
     }
   }
+  const fields = Object.create(null) as Record<string, unknown>;
   for (let entry = start; entry < end; entry++) {
     const fieldId = parserFieldId(entry);
     const name = fieldName(fieldId);
-    const count = runtimeArrayLoad(counts, entry - start);
+    const valueIndex = entry - start;
+    const count = runtimeArrayLoad(counts, valueIndex);
     const valueClass = parserFieldValueClass(entry);
     if (valueClass === FIELD_VALUE_ARRAY) {
-      if (!Array.isArray(fields[name])) {
-        throw new Error(\`Array field '\${name}' was not initialized as an array.\`);
-      }
+      fields[name] = materializeFieldArray(
+        name,
+        runtimeArrayLoad(fieldValues, valueIndex),
+      );
       continue;
     }
     const status = parserFieldFinalStatus(entry, count);
@@ -1336,8 +1335,23 @@ function buildFields(
     if (status === FIELD_FINAL_TOO_MANY) {
       throw new Error(\`Nullable field '\${name}' was captured more than once.\`);
     }
+    fields[name] = count === 0
+      ? null
+      : hostFragmentValue(runtimeArrayLoad(fieldValues, valueIndex));
   }
   return fields;
+}
+
+function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
+  if (vectorHandle === 0) {
+    throw new Error(\`Array field '\${name}' was not initialized as a runtime vector.\`);
+  }
+  const length = runtimeVectorLength(vectorHandle);
+  const values: unknown[] = [];
+  for (let index = 0; index < length; index++) {
+    values.push(hostFragmentValue(runtimeVectorLoad(vectorHandle, index)));
+  }
+  return values;
 }
 
 function buildChildren(ruleNodeHandle: number): SyntaxElement[] {

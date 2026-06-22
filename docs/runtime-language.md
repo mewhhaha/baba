@@ -220,6 +220,9 @@ execute both outputs and compare returned values or traps.
   longer carries an independent JavaScript field-capture list.
 - Generated public field assembly tracks capture counts in a runtime arena array
   indexed by field-schema entry instead of a JavaScript count object.
+- Generated public field assembly stores captured field value handles in runtime
+  arrays and vectors, then materializes public JavaScript scalar and array field
+  values from those runtime handles in a final pass.
 - Generated public child assembly consumes runtime rule-node child vectors and
   resolves runtime token/rule-node handles through a per-replay syntax handle
   map; it no longer carries an independent JavaScript fragment child list.
@@ -239,8 +242,8 @@ These rules must be specified before the parser runtime can be fully lowered:
 - ownership and opaque typed handle provenance;
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
-- complete generated-parser lowering for public CST field objects/arrays and
-  final public token object wrapping.
+- complete generated-parser lowering for final public CST field object
+  allocation and final public token object wrapping.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from
