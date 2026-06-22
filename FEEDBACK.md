@@ -141,6 +141,10 @@ runtime language:
   `parserReducerKind`/`parserReducerPayload` helpers backed by numeric reducer
   tables, replacing generated `PRODUCTION_REDUCERS` object tables during trace
   replay.
+- Moved generated parser reducer kind-to-operation classification onto
+  runtime-language `parserReducerOperation`, so replay no longer switches
+  directly on raw reducer descriptor kinds. Generated TypeScript still executes
+  the fragment/CST allocation for each operation.
 - Moved generated CST field schema metadata lookup onto runtime-language
   `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/`parserFieldFlags`/
   `parserFieldIndex` helpers backed by numeric field rows, replacing generated
@@ -179,12 +183,13 @@ Still unresolved:
   runtime-language-backed, and generated Wasm adapters now call a
   runtime-language Wasm parser trace module instead of a core `parse_trace`
   export. Reducer descriptor lookup and field schema lookup are now
-  runtime-language-backed, and generated field assembly now gets value-class and
-  count-validation decisions from runtime-language helpers. Generated TypeScript
-  lexing now reads token class, payload, and terminal metadata from
-  runtime-language helpers before emitting public token objects. External
-  `parseTokens()` mapping still accepts public strings/literals at the API
-  boundary, but terminal/channel classification and public token class
+  runtime-language-backed, generated replay now gets reducer operation
+  classification from runtime-language helpers, and generated field assembly now
+  gets value-class and count-validation decisions from runtime-language helpers.
+  Generated TypeScript lexing now reads token class, payload, and terminal
+  metadata from runtime-language helpers before emitting public token objects.
+  External `parseTokens()` mapping still accepts public strings/literals at the
+  API boundary, but terminal/channel classification and public token class
   compatibility now go through runtime-language lexer spec helpers. Parser
   replay span and token-range merge arithmetic is runtime-language-backed, and
   trailing-input diagnostic code selection uses runtime-language expected-state

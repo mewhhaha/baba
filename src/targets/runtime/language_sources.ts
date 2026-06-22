@@ -50,6 +50,19 @@ export const RUNTIME_REDUCER_SEPARATED_FIRST = 13;
 export const RUNTIME_REDUCER_SEPARATED_APPEND = 14;
 export const RUNTIME_REDUCER_FIELD = 15;
 export const RUNTIME_NO_REDUCER_PAYLOAD = 0xffff_ffff;
+export const RUNTIME_REDUCER_OPERATION_UNKNOWN = 0;
+export const RUNTIME_REDUCER_OPERATION_START = 1;
+export const RUNTIME_REDUCER_OPERATION_RULE = 2;
+export const RUNTIME_REDUCER_OPERATION_TERMINAL = 3;
+export const RUNTIME_REDUCER_OPERATION_RULE_REF = 4;
+export const RUNTIME_REDUCER_OPERATION_IDENTITY = 5;
+export const RUNTIME_REDUCER_OPERATION_SEQUENCE = 6;
+export const RUNTIME_REDUCER_OPERATION_EMPTY_NULL = 7;
+export const RUNTIME_REDUCER_OPERATION_EMPTY_ARRAY = 8;
+export const RUNTIME_REDUCER_OPERATION_APPEND = 9;
+export const RUNTIME_REDUCER_OPERATION_FIRST_ARRAY = 10;
+export const RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND = 11;
+export const RUNTIME_REDUCER_OPERATION_FIELD = 12;
 export const RUNTIME_NO_FIELD = 0xffff_ffff;
 export const RUNTIME_FIELD_ARRAY = 1;
 export const RUNTIME_FIELD_NULLABLE = 2;
@@ -1019,7 +1032,80 @@ function parserReducerFunctions(
       1,
       RUNTIME_NO_REDUCER_PAYLOAD,
     ),
+    parserReducerOperationFunction(reducerCount),
   ];
+}
+
+function parserReducerOperationFunction(
+  reducerCount: number,
+): RuntimeLanguageFunction {
+  const kindIs = (
+    kind: number,
+    operation: number,
+  ): RuntimeStatement => ({
+    kind: "if",
+    condition: eq(local("kindValue"), u32(kind)),
+    consequent: [{
+      kind: "return",
+      expression: u32(operation),
+    }],
+  });
+  return {
+    name: "parserReducerOperation",
+    parameters: [
+      { name: "production", type: "u32" },
+    ],
+    locals: [
+      { name: "kindValue", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("production"), u32(reducerCount)),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_REDUCER_OPERATION_UNKNOWN),
+        }],
+      },
+      setLocal("kindValue", call("parserReducerKind", [local("production")])),
+      kindIs(RUNTIME_REDUCER_START, RUNTIME_REDUCER_OPERATION_START),
+      kindIs(RUNTIME_REDUCER_RULE, RUNTIME_REDUCER_OPERATION_RULE),
+      kindIs(RUNTIME_REDUCER_TERMINAL, RUNTIME_REDUCER_OPERATION_TERMINAL),
+      kindIs(RUNTIME_REDUCER_RULE_REF, RUNTIME_REDUCER_OPERATION_RULE_REF),
+      kindIs(RUNTIME_REDUCER_IDENTITY, RUNTIME_REDUCER_OPERATION_IDENTITY),
+      kindIs(RUNTIME_REDUCER_OPTIONAL_SOME, RUNTIME_REDUCER_OPERATION_IDENTITY),
+      kindIs(RUNTIME_REDUCER_SEQUENCE, RUNTIME_REDUCER_OPERATION_SEQUENCE),
+      kindIs(
+        RUNTIME_REDUCER_OPTIONAL_EMPTY,
+        RUNTIME_REDUCER_OPERATION_EMPTY_NULL,
+      ),
+      kindIs(
+        RUNTIME_REDUCER_REPEAT_EMPTY,
+        RUNTIME_REDUCER_OPERATION_EMPTY_ARRAY,
+      ),
+      kindIs(RUNTIME_REDUCER_REPEAT_APPEND, RUNTIME_REDUCER_OPERATION_APPEND),
+      kindIs(RUNTIME_REDUCER_REPEAT1_APPEND, RUNTIME_REDUCER_OPERATION_APPEND),
+      kindIs(
+        RUNTIME_REDUCER_REPEAT1_FIRST,
+        RUNTIME_REDUCER_OPERATION_FIRST_ARRAY,
+      ),
+      kindIs(
+        RUNTIME_REDUCER_SEPARATED_FIRST,
+        RUNTIME_REDUCER_OPERATION_FIRST_ARRAY,
+      ),
+      kindIs(
+        RUNTIME_REDUCER_SEPARATED_APPEND,
+        RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
+      ),
+      kindIs(RUNTIME_REDUCER_FIELD, RUNTIME_REDUCER_OPERATION_FIELD),
+      {
+        kind: "return",
+        expression: u32(RUNTIME_REDUCER_OPERATION_UNKNOWN),
+      },
+    ],
+  };
 }
 
 function parserReducerLoadFunction(

@@ -63,6 +63,10 @@ import {
   RUNTIME_PUBLIC_TOKEN_MAIN,
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
   RUNTIME_REDUCER_FIELD,
+  RUNTIME_REDUCER_OPERATION_FIELD,
+  RUNTIME_REDUCER_OPERATION_RULE,
+  RUNTIME_REDUCER_OPERATION_SEQUENCE,
+  RUNTIME_REDUCER_OPERATION_UNKNOWN,
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_UNKNOWN,
@@ -452,16 +456,40 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         body: [{
           kind: "return",
           expression: add(
-            mul(call("parserReducerKind", [u32(0)]), u32(1000)),
+            mul(call("parserReducerKind", [u32(0)]), u32(100_000_000)),
             add(
-              mul(call("parserReducerPayload", [u32(0)]), u32(100)),
+              mul(call("parserReducerPayload", [u32(0)]), u32(10_000_000)),
               add(
-                mul(call("parserReducerKind", [u32(1)]), u32(10)),
+                mul(
+                  call("parserReducerOperation", [u32(0)]),
+                  u32(1_000_000),
+                ),
                 add(
-                  call("parserReducerPayload", [u32(1)]),
-                  eq(
-                    call("parserReducerKind", [u32(99)]),
-                    u32(RUNTIME_REDUCER_UNKNOWN),
+                  mul(call("parserReducerKind", [u32(1)]), u32(100_000)),
+                  add(
+                    mul(call("parserReducerPayload", [u32(1)]), u32(10_000)),
+                    add(
+                      mul(
+                        call("parserReducerOperation", [u32(1)]),
+                        u32(1_000),
+                      ),
+                      add(
+                        mul(
+                          call("parserReducerOperation", [u32(2)]),
+                          u32(100),
+                        ),
+                        add(
+                          mul(
+                            eq(
+                              call("parserReducerKind", [u32(99)]),
+                              u32(RUNTIME_REDUCER_UNKNOWN),
+                            ),
+                            u32(10),
+                          ),
+                          call("parserReducerOperation", [u32(99)]),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -1283,7 +1311,15 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "parser reducer lookup returns kind and payload fields",
       program: parserReducerRuntimeProgram,
-      expected: { kind: "value", value: 2553 },
+      expected: {
+        kind: "value",
+        value: RUNTIME_REDUCER_RULE * 100_000_000 + 4 * 10_000_000 +
+          RUNTIME_REDUCER_OPERATION_RULE * 1_000_000 +
+          RUNTIME_REDUCER_FIELD * 100_000 + 2 * 10_000 +
+          RUNTIME_REDUCER_OPERATION_FIELD * 1_000 +
+          RUNTIME_REDUCER_OPERATION_SEQUENCE * 100 + 10 +
+          RUNTIME_REDUCER_OPERATION_UNKNOWN,
+      },
     },
     {
       name: "parser trace runtime emits deterministic action traces",

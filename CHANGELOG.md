@@ -98,6 +98,9 @@
 - Generated parsers now read reducer descriptor kind/payload metadata through
   runtime-language `parserReducerKind`/`parserReducerPayload` helpers instead of
   generated reducer-object tables.
+- Generated parser replay now classifies reducer operations through
+  runtime-language `parserReducerOperation` instead of switching directly on raw
+  reducer descriptor kinds.
 - Generated parsers now read CST field schema rows/config through
   runtime-language `parserField*` helpers instead of generated field-schema
   lookup object tables.

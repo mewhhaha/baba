@@ -47,6 +47,19 @@ import {
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_IDENTITY,
+  RUNTIME_REDUCER_OPERATION_APPEND,
+  RUNTIME_REDUCER_OPERATION_EMPTY_ARRAY,
+  RUNTIME_REDUCER_OPERATION_EMPTY_NULL,
+  RUNTIME_REDUCER_OPERATION_FIELD,
+  RUNTIME_REDUCER_OPERATION_FIRST_ARRAY,
+  RUNTIME_REDUCER_OPERATION_IDENTITY,
+  RUNTIME_REDUCER_OPERATION_RULE,
+  RUNTIME_REDUCER_OPERATION_RULE_REF,
+  RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
+  RUNTIME_REDUCER_OPERATION_SEQUENCE,
+  RUNTIME_REDUCER_OPERATION_START,
+  RUNTIME_REDUCER_OPERATION_TERMINAL,
+  RUNTIME_REDUCER_OPERATION_UNKNOWN,
   RUNTIME_REDUCER_OPTIONAL_EMPTY,
   RUNTIME_REDUCER_OPTIONAL_SOME,
   RUNTIME_REDUCER_REPEAT1_APPEND,
@@ -60,7 +73,6 @@ import {
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_START,
   RUNTIME_REDUCER_TERMINAL,
-  RUNTIME_REDUCER_UNKNOWN,
 } from "./language_sources.ts";
 
 export type ParserEmitMode = "typescript" | "wasm";
@@ -312,23 +324,20 @@ const NO_GOTO = ${RUNTIME_NO_GOTO};
 const NO_SPAN = ${RUNTIME_NO_SPAN};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
 const NO_PRODUCTION = ${RUNTIME_NO_PRODUCTION};
-const REDUCER_UNKNOWN = ${RUNTIME_REDUCER_UNKNOWN};
-const REDUCER_START = ${RUNTIME_REDUCER_START};
-const REDUCER_RULE = ${RUNTIME_REDUCER_RULE};
-const REDUCER_TERMINAL = ${RUNTIME_REDUCER_TERMINAL};
-const REDUCER_RULE_REF = ${RUNTIME_REDUCER_RULE_REF};
-const REDUCER_IDENTITY = ${RUNTIME_REDUCER_IDENTITY};
-const REDUCER_SEQUENCE = ${RUNTIME_REDUCER_SEQUENCE};
-const REDUCER_OPTIONAL_EMPTY = ${RUNTIME_REDUCER_OPTIONAL_EMPTY};
-const REDUCER_OPTIONAL_SOME = ${RUNTIME_REDUCER_OPTIONAL_SOME};
-const REDUCER_REPEAT_EMPTY = ${RUNTIME_REDUCER_REPEAT_EMPTY};
-const REDUCER_REPEAT_APPEND = ${RUNTIME_REDUCER_REPEAT_APPEND};
-const REDUCER_REPEAT1_FIRST = ${RUNTIME_REDUCER_REPEAT1_FIRST};
-const REDUCER_REPEAT1_APPEND = ${RUNTIME_REDUCER_REPEAT1_APPEND};
-const REDUCER_SEPARATED_FIRST = ${RUNTIME_REDUCER_SEPARATED_FIRST};
-const REDUCER_SEPARATED_APPEND = ${RUNTIME_REDUCER_SEPARATED_APPEND};
-const REDUCER_FIELD = ${RUNTIME_REDUCER_FIELD};
 const NO_REDUCER_PAYLOAD = ${RUNTIME_NO_REDUCER_PAYLOAD};
+const REDUCER_OPERATION_UNKNOWN = ${RUNTIME_REDUCER_OPERATION_UNKNOWN};
+const REDUCER_OPERATION_START = ${RUNTIME_REDUCER_OPERATION_START};
+const REDUCER_OPERATION_RULE = ${RUNTIME_REDUCER_OPERATION_RULE};
+const REDUCER_OPERATION_TERMINAL = ${RUNTIME_REDUCER_OPERATION_TERMINAL};
+const REDUCER_OPERATION_RULE_REF = ${RUNTIME_REDUCER_OPERATION_RULE_REF};
+const REDUCER_OPERATION_IDENTITY = ${RUNTIME_REDUCER_OPERATION_IDENTITY};
+const REDUCER_OPERATION_SEQUENCE = ${RUNTIME_REDUCER_OPERATION_SEQUENCE};
+const REDUCER_OPERATION_EMPTY_NULL = ${RUNTIME_REDUCER_OPERATION_EMPTY_NULL};
+const REDUCER_OPERATION_EMPTY_ARRAY = ${RUNTIME_REDUCER_OPERATION_EMPTY_ARRAY};
+const REDUCER_OPERATION_APPEND = ${RUNTIME_REDUCER_OPERATION_APPEND};
+const REDUCER_OPERATION_FIRST_ARRAY = ${RUNTIME_REDUCER_OPERATION_FIRST_ARRAY};
+const REDUCER_OPERATION_SEPARATED_APPEND = ${RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND};
+const REDUCER_OPERATION_FIELD = ${RUNTIME_REDUCER_OPERATION_FIELD};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
 const FIELD_VALUE_ARRAY = ${RUNTIME_FIELD_VALUE_ARRAY};
 const FIELD_VALUE_NULLABLE = ${RUNTIME_FIELD_VALUE_NULLABLE};
@@ -703,9 +712,12 @@ function replayTraceRuntime(label: string): string {
     }
 
     const rhsLength = parserProductionRhsLength(payload);
-    const reducerKind = parserReducerKind(payload);
+    const reducerOperation = parserReducerOperation(payload);
     const reducerPayload = parserReducerPayload(payload);
-    if (rhsLength === NO_PRODUCTION || reducerKind === REDUCER_UNKNOWN) {
+    if (
+      rhsLength === NO_PRODUCTION ||
+      reducerOperation === REDUCER_OPERATION_UNKNOWN
+    ) {
       return {
         ok: false,
         root: null,
@@ -737,7 +749,7 @@ function replayTraceRuntime(label: string): string {
     let reduced: unknown;
     try {
       reduced = reduceProduction(
-        reducerKind,
+        reducerOperation,
         reducerPayload,
         rhsValues,
         token.span.start,
@@ -771,16 +783,16 @@ function replayTraceRuntime(label: string): string {
 
 function reductionRuntime(): string {
   return `function reduceProduction(
-  reducerKind: number,
+  reducerOperation: number,
   reducerPayload: number,
   rhs: readonly unknown[],
   offset: number,
   tokenIndex: number,
 ): unknown {
-  switch (reducerKind) {
-    case REDUCER_START:
+  switch (reducerOperation) {
+    case REDUCER_OPERATION_START:
       return rhs[0];
-    case REDUCER_RULE: {
+    case REDUCER_OPERATION_RULE: {
       const fragment = toFragment(rhs[0]);
       if (reducerPayload === NO_REDUCER_PAYLOAD) {
         throw new Error("Rule reducer is missing its rule id payload.");
@@ -795,39 +807,32 @@ function reductionRuntime(): string {
       };
       return node as unknown as AnyRuleNode;
     }
-    case REDUCER_TERMINAL:
+    case REDUCER_OPERATION_TERMINAL:
       return tokenFragment(rhs[0] as ShiftedToken);
-    case REDUCER_RULE_REF:
+    case REDUCER_OPERATION_RULE_REF:
       return ruleFragment(rhs[0] as AnyRuleNode);
-    case REDUCER_IDENTITY:
-    case REDUCER_OPTIONAL_SOME:
+    case REDUCER_OPERATION_IDENTITY:
       return toFragment(rhs[0]);
-    case REDUCER_SEQUENCE:
+    case REDUCER_OPERATION_SEQUENCE:
       return sequenceFragment(rhs, offset, tokenIndex);
-    case REDUCER_OPTIONAL_EMPTY:
+    case REDUCER_OPERATION_EMPTY_NULL:
       return emptyFragment(null, offset, tokenIndex);
-    case REDUCER_REPEAT_EMPTY:
+    case REDUCER_OPERATION_EMPTY_ARRAY:
       return emptyFragment([], offset, tokenIndex);
-    case REDUCER_REPEAT_APPEND:
-    case REDUCER_REPEAT1_APPEND:
+    case REDUCER_OPERATION_APPEND:
       return appendFragment(toFragment(rhs[0]), toFragment(rhs[1]));
-    case REDUCER_REPEAT1_FIRST: {
+    case REDUCER_OPERATION_FIRST_ARRAY: {
       const item = toFragment(rhs[0]);
       item.value = [item.value];
       return item;
     }
-    case REDUCER_SEPARATED_FIRST: {
-      const item = toFragment(rhs[0]);
-      item.value = [item.value];
-      return item;
-    }
-    case REDUCER_SEPARATED_APPEND:
+    case REDUCER_OPERATION_SEPARATED_APPEND:
       return appendSeparatedFragment(
         toFragment(rhs[0]),
         toFragment(rhs[1]),
         toFragment(rhs[2]),
       );
-    case REDUCER_FIELD: {
+    case REDUCER_OPERATION_FIELD: {
       const fragment = toFragment(rhs[0]);
       if (reducerPayload === NO_REDUCER_PAYLOAD) {
         throw new Error("Field reducer is missing its field id payload.");

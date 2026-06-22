@@ -55,23 +55,20 @@ const NO_GOTO = 4294967295;
 const NO_SPAN = 4294967295;
 const NO_TERMINAL = 4294967295;
 const NO_PRODUCTION = 4294967295;
-const REDUCER_UNKNOWN = 0;
-const REDUCER_START = 1;
-const REDUCER_RULE = 2;
-const REDUCER_TERMINAL = 3;
-const REDUCER_RULE_REF = 4;
-const REDUCER_IDENTITY = 5;
-const REDUCER_SEQUENCE = 6;
-const REDUCER_OPTIONAL_EMPTY = 7;
-const REDUCER_OPTIONAL_SOME = 8;
-const REDUCER_REPEAT_EMPTY = 9;
-const REDUCER_REPEAT_APPEND = 10;
-const REDUCER_REPEAT1_FIRST = 11;
-const REDUCER_REPEAT1_APPEND = 12;
-const REDUCER_SEPARATED_FIRST = 13;
-const REDUCER_SEPARATED_APPEND = 14;
-const REDUCER_FIELD = 15;
 const NO_REDUCER_PAYLOAD = 4294967295;
+const REDUCER_OPERATION_UNKNOWN = 0;
+const REDUCER_OPERATION_START = 1;
+const REDUCER_OPERATION_RULE = 2;
+const REDUCER_OPERATION_TERMINAL = 3;
+const REDUCER_OPERATION_RULE_REF = 4;
+const REDUCER_OPERATION_IDENTITY = 5;
+const REDUCER_OPERATION_SEQUENCE = 6;
+const REDUCER_OPERATION_EMPTY_NULL = 7;
+const REDUCER_OPERATION_EMPTY_ARRAY = 8;
+const REDUCER_OPERATION_APPEND = 9;
+const REDUCER_OPERATION_FIRST_ARRAY = 10;
+const REDUCER_OPERATION_SEPARATED_APPEND = 11;
+const REDUCER_OPERATION_FIELD = 12;
 const NO_FIELD = 4294967295;
 const FIELD_VALUE_ARRAY = 3;
 const FIELD_VALUE_NULLABLE = 2;
@@ -239,6 +236,62 @@ function parserReducerPayload(production: number): number {
     return (__baba_load_parserReducers(offset) >>> 0) >>> 0;
   }
   return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReducerOperation(production: number): number {
+  let kindValue = 0;
+  if (((((production) | 0) < ((127) | 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (0) >>> 0;
+  }
+  kindValue = (parserReducerKind(production) >>> 0) >>> 0;
+  if (((((kindValue) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    return (4) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+    return (5) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((8) >>> 0) ? 1 : 0)) !== 0) {
+    return (5) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+    return (6) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+    return (7) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((9) >>> 0) ? 1 : 0)) !== 0) {
+    return (8) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((10) >>> 0) ? 1 : 0)) !== 0) {
+    return (9) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((12) >>> 0) ? 1 : 0)) !== 0) {
+    return (9) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((11) >>> 0) ? 1 : 0)) !== 0) {
+    return (10) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((13) >>> 0) ? 1 : 0)) !== 0) {
+    return (10) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((14) >>> 0) ? 1 : 0)) !== 0) {
+    return (11) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((15) >>> 0) ? 1 : 0)) !== 0) {
+    return (12) >>> 0;
+  }
+  return (0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -661,9 +714,12 @@ function replayTrace(
     }
 
     const rhsLength = parserProductionRhsLength(payload);
-    const reducerKind = parserReducerKind(payload);
+    const reducerOperation = parserReducerOperation(payload);
     const reducerPayload = parserReducerPayload(payload);
-    if (rhsLength === NO_PRODUCTION || reducerKind === REDUCER_UNKNOWN) {
+    if (
+      rhsLength === NO_PRODUCTION ||
+      reducerOperation === REDUCER_OPERATION_UNKNOWN
+    ) {
       return {
         ok: false,
         root: null,
@@ -695,7 +751,7 @@ function replayTrace(
     let reduced: unknown;
     try {
       reduced = reduceProduction(
-        reducerKind,
+        reducerOperation,
         reducerPayload,
         rhsValues,
         token.span.start,
@@ -727,16 +783,16 @@ function replayTrace(
 }
 
 function reduceProduction(
-  reducerKind: number,
+  reducerOperation: number,
   reducerPayload: number,
   rhs: readonly unknown[],
   offset: number,
   tokenIndex: number,
 ): unknown {
-  switch (reducerKind) {
-    case REDUCER_START:
+  switch (reducerOperation) {
+    case REDUCER_OPERATION_START:
       return rhs[0];
-    case REDUCER_RULE: {
+    case REDUCER_OPERATION_RULE: {
       const fragment = toFragment(rhs[0]);
       if (reducerPayload === NO_REDUCER_PAYLOAD) {
         throw new Error("Rule reducer is missing its rule id payload.");
@@ -751,39 +807,32 @@ function reduceProduction(
       };
       return node as unknown as AnyRuleNode;
     }
-    case REDUCER_TERMINAL:
+    case REDUCER_OPERATION_TERMINAL:
       return tokenFragment(rhs[0] as ShiftedToken);
-    case REDUCER_RULE_REF:
+    case REDUCER_OPERATION_RULE_REF:
       return ruleFragment(rhs[0] as AnyRuleNode);
-    case REDUCER_IDENTITY:
-    case REDUCER_OPTIONAL_SOME:
+    case REDUCER_OPERATION_IDENTITY:
       return toFragment(rhs[0]);
-    case REDUCER_SEQUENCE:
+    case REDUCER_OPERATION_SEQUENCE:
       return sequenceFragment(rhs, offset, tokenIndex);
-    case REDUCER_OPTIONAL_EMPTY:
+    case REDUCER_OPERATION_EMPTY_NULL:
       return emptyFragment(null, offset, tokenIndex);
-    case REDUCER_REPEAT_EMPTY:
+    case REDUCER_OPERATION_EMPTY_ARRAY:
       return emptyFragment([], offset, tokenIndex);
-    case REDUCER_REPEAT_APPEND:
-    case REDUCER_REPEAT1_APPEND:
+    case REDUCER_OPERATION_APPEND:
       return appendFragment(toFragment(rhs[0]), toFragment(rhs[1]));
-    case REDUCER_REPEAT1_FIRST: {
+    case REDUCER_OPERATION_FIRST_ARRAY: {
       const item = toFragment(rhs[0]);
       item.value = [item.value];
       return item;
     }
-    case REDUCER_SEPARATED_FIRST: {
-      const item = toFragment(rhs[0]);
-      item.value = [item.value];
-      return item;
-    }
-    case REDUCER_SEPARATED_APPEND:
+    case REDUCER_OPERATION_SEPARATED_APPEND:
       return appendSeparatedFragment(
         toFragment(rhs[0]),
         toFragment(rhs[1]),
         toFragment(rhs[2]),
       );
-    case REDUCER_FIELD: {
+    case REDUCER_OPERATION_FIELD: {
       const fragment = toFragment(rhs[0]);
       if (reducerPayload === NO_REDUCER_PAYLOAD) {
         throw new Error("Field reducer is missing its field id payload.");
