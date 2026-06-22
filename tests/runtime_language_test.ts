@@ -32,6 +32,7 @@ import {
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
+  RUNTIME_ARENA_PROGRAM,
   RUNTIME_FIELD_ARRAY,
   RUNTIME_FIELD_CAPTURE_ARRAY,
   RUNTIME_FIELD_CAPTURE_SCALAR,
@@ -1274,6 +1275,132 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       ],
     }],
   };
+  const arenaArrayProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_array_conformance",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeArrayNew", [u32(3)])),
+          setLocal(
+            "discard",
+            call("runtimeArrayStore", [local("handle"), u32(0), u32(7)]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeArrayStore", [local("handle"), u32(2), u32(11)]),
+          ),
+          {
+            kind: "return",
+            expression: add(
+              mul(call("runtimeArenaUsed", []), u32(1_000)),
+              add(
+                mul(
+                  call("runtimeArrayLength", [local("handle")]),
+                  u32(100),
+                ),
+                add(
+                  mul(
+                    call("runtimeArrayLoad", [local("handle"), u32(0)]),
+                    u32(10),
+                  ),
+                  call("runtimeArrayLoad", [local("handle"), u32(2)]),
+                ),
+              ),
+            ),
+          },
+        ],
+      },
+    ],
+  };
+  const arenaResetProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_reset_conformance",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeArrayNew", [u32(2)])),
+          setLocal(
+            "discard",
+            call("runtimeArrayStore", [local("handle"), u32(1), u32(99)]),
+          ),
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeArrayNew", [u32(1)])),
+          {
+            kind: "return",
+            expression: add(
+              mul(call("runtimeArenaUsed", []), u32(10)),
+              call("runtimeArrayLoad", [local("handle"), u32(0)]),
+            ),
+          },
+        ],
+      },
+    ],
+  };
+  const arenaArrayBoundsProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_array_bounds",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "handle", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("handle", call("runtimeArrayNew", [u32(1)])),
+          {
+            kind: "return",
+            expression: call("runtimeArrayLoad", [local("handle"), u32(1)]),
+          },
+        ],
+      },
+    ],
+  };
+  const arenaOverflowProgram: RuntimeLanguageProgram = {
+    ...RUNTIME_ARENA_PROGRAM,
+    name: "arena_overflow",
+    entry: "main",
+    functions: [
+      ...RUNTIME_ARENA_PROGRAM.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          {
+            kind: "return",
+            expression: call("runtimeArenaAlloc", [u32(0xffff_ffff)]),
+          },
+        ],
+      },
+    ],
+  };
   const cases: readonly RuntimeConformanceCase[] = [
     {
       name: "u32 addition wraps",
@@ -1301,6 +1428,27 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         right: u32(0),
       }),
       expected: { kind: "value", value: 1 },
+    },
+    {
+      name: "unsigned comparison uses u32 interpretation",
+      program: returning("unsigned_less_than", {
+        kind: "addU32",
+        left: {
+          kind: "mulU32",
+          left: {
+            kind: "ltU32",
+            left: u32(0),
+            right: u32(0xffff_ffff),
+          },
+          right: u32(10),
+        },
+        right: {
+          kind: "ltU32",
+          left: u32(0xffff_ffff),
+          right: u32(0),
+        },
+      }),
+      expected: { kind: "value", value: 10 },
     },
     {
       name: "bitwise and masks u32 bits",
@@ -1437,6 +1585,26 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "scratch memory grows before stack access",
       program: scratchGrowProgram,
       expected: { kind: "value", value: 59 },
+    },
+    {
+      name: "runtime arena allocates and reads u32 arrays",
+      program: arenaArrayProgram,
+      expected: { kind: "value", value: 5381 },
+    },
+    {
+      name: "runtime arena reset reuses allocation lifetime",
+      program: arenaResetProgram,
+      expected: { kind: "value", value: 30 },
+    },
+    {
+      name: "runtime array access traps out of bounds",
+      program: arenaArrayBoundsProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime arena allocation traps on u32 overflow",
+      program: arenaOverflowProgram,
+      expected: { kind: "trap" },
     },
     {
       name: "functions call other functions",

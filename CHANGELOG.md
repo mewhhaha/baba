@@ -22,6 +22,9 @@
   `bootstrap:check`.
 - Expanded the private runtime-language conformance subset with `u32`
   parameters, locals, assignments, branches, and loops.
+- Added runtime-language unsigned less-than plus an arena-backed `u32` array
+  helper substrate with reset, allocation overflow checks, and bounds-checked
+  load/store conformance across TypeScript and Wasm.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source with TypeScript/Wasm conformance coverage.
 - Added runtime-language function calls and multi-function TypeScript/Wasm

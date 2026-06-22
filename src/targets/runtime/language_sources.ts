@@ -131,6 +131,9 @@ const LEXER_SCAN_LENGTH = 1;
 const LEXER_SCAN_BEST_SPEC = 2;
 const LEXER_SCAN_BEST_END = 3;
 const LEXER_SCAN_DONE = 4;
+const RUNTIME_ARENA_NEXT_WORD = 0;
+const RUNTIME_ARENA_FIRST_WORD = 1;
+const RUNTIME_ARRAY_LENGTH_WORDS = 1;
 
 export type LexerRuntimeTransition = readonly [
   start: number,
@@ -219,6 +222,13 @@ export const UTF16_CODE_POINT_WIDTH_PROGRAM: RuntimeLanguageProgram = {
   name: "utf16_code_point_width",
   entry: "utf16CodePointWidth",
   functions: [UTF16_CODE_POINT_WIDTH_FUNCTION],
+};
+
+export const RUNTIME_ARENA_PROGRAM: RuntimeLanguageProgram = {
+  name: "runtime_arena",
+  entry: "runtimeArenaReset",
+  scratchMemoryWords: RUNTIME_ARENA_FIRST_WORD,
+  functions: runtimeArenaFunctions(),
 };
 
 export function createLexerRuntimeProgram(
@@ -573,6 +583,253 @@ export function createParserRangeRuntimeProgram(): RuntimeLanguageProgram {
     functions: [
       parserMergeStartFunction(),
       parserMergeEndFunction(),
+    ],
+  };
+}
+
+function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
+  return [
+    runtimeArenaResetFunction(),
+    runtimeArenaUsedFunction(),
+    runtimeArenaAllocFunction(),
+    runtimeArrayNewFunction(),
+    runtimeArrayLengthFunction(),
+    runtimeArrayElementOffsetFunction(),
+    runtimeArrayLoadFunction(),
+    runtimeArrayStoreFunction(),
+  ];
+}
+
+function runtimeArenaResetFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArenaReset",
+    locals: [
+      { name: "capacity", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("capacity", ensureScratch(u32(RUNTIME_ARENA_FIRST_WORD))),
+      storeScratch(
+        u32(RUNTIME_ARENA_NEXT_WORD),
+        u32(RUNTIME_ARENA_FIRST_WORD),
+      ),
+      { kind: "return", expression: u32(RUNTIME_ARENA_FIRST_WORD) },
+    ],
+  };
+}
+
+function runtimeArenaUsedFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArenaUsed",
+    result: "u32",
+    body: [
+      { kind: "return", expression: loadScratch(u32(RUNTIME_ARENA_NEXT_WORD)) },
+    ],
+  };
+}
+
+function runtimeArenaAllocFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArenaAlloc",
+    parameters: [
+      { name: "words", type: "u32" },
+    ],
+    locals: [
+      { name: "base", type: "u32" },
+      { name: "next", type: "u32" },
+      { name: "capacity", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("base", loadScratch(u32(RUNTIME_ARENA_NEXT_WORD))),
+      {
+        kind: "if",
+        condition: eq(local("base"), u32(0)),
+        consequent: [
+          setLocal("base", u32(RUNTIME_ARENA_FIRST_WORD)),
+          storeScratch(u32(RUNTIME_ARENA_NEXT_WORD), local("base")),
+        ],
+      },
+      setLocal("next", add(local("base"), local("words"))),
+      {
+        kind: "if",
+        condition: ltu(local("next"), local("base")),
+        consequent: [{ kind: "trap" }],
+      },
+      setLocal("capacity", ensureScratch(local("next"))),
+      storeScratch(u32(RUNTIME_ARENA_NEXT_WORD), local("next")),
+      { kind: "return", expression: local("base") },
+    ],
+  };
+}
+
+function runtimeArrayNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArrayNew",
+    parameters: [
+      { name: "length", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+      { name: "total", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "offset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("total", add(local("length"), u32(RUNTIME_ARRAY_LENGTH_WORDS))),
+      {
+        kind: "if",
+        condition: ltu(local("total"), local("length")),
+        consequent: [{ kind: "trap" }],
+      },
+      setLocal("handle", call("runtimeArenaAlloc", [local("total")])),
+      storeScratch(local("handle"), local("length")),
+      setLocal("index", u32(0)),
+      {
+        kind: "while",
+        condition: ltu(local("index"), local("length")),
+        body: [
+          setLocal(
+            "offset",
+            add(
+              add(local("handle"), u32(RUNTIME_ARRAY_LENGTH_WORDS)),
+              local("index"),
+            ),
+          ),
+          storeScratch(local("offset"), u32(0)),
+          setLocal("index", add(local("index"), u32(1))),
+        ],
+      },
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function runtimeArrayLengthFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArrayLength",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "used", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("handle"), u32(0)),
+        consequent: [{ kind: "trap" }],
+      },
+      setLocal("used", loadScratch(u32(RUNTIME_ARENA_NEXT_WORD))),
+      {
+        kind: "if",
+        condition: ltu(local("handle"), local("used")),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      { kind: "return", expression: loadScratch(local("handle")) },
+    ],
+  };
+}
+
+function runtimeArrayElementOffsetFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArrayElementOffset",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "index", type: "u32" },
+    ],
+    locals: [
+      { name: "length", type: "u32" },
+      { name: "offset", type: "u32" },
+      { name: "next", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("length", call("runtimeArrayLength", [local("handle")])),
+      {
+        kind: "if",
+        condition: ltu(local("index"), local("length")),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      setLocal(
+        "offset",
+        add(
+          add(local("handle"), u32(RUNTIME_ARRAY_LENGTH_WORDS)),
+          local("index"),
+        ),
+      ),
+      {
+        kind: "if",
+        condition: ltu(local("offset"), local("handle")),
+        consequent: [{ kind: "trap" }],
+      },
+      setLocal("next", add(local("offset"), u32(1))),
+      {
+        kind: "if",
+        condition: ltu(local("next"), local("offset")),
+        consequent: [{ kind: "trap" }],
+      },
+      {
+        kind: "if",
+        condition: ltu(
+          loadScratch(u32(RUNTIME_ARENA_NEXT_WORD)),
+          local("next"),
+        ),
+        consequent: [{ kind: "trap" }],
+      },
+      { kind: "return", expression: local("offset") },
+    ],
+  };
+}
+
+function runtimeArrayLoadFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArrayLoad",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "index", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "return",
+        expression: loadScratch(
+          call("runtimeArrayElementOffset", [
+            local("handle"),
+            local("index"),
+          ]),
+        ),
+      },
+    ],
+  };
+}
+
+function runtimeArrayStoreFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeArrayStore",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "value", type: "u32" },
+    ],
+    locals: [
+      { name: "offset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "offset",
+        call("runtimeArrayElementOffset", [
+          local("handle"),
+          local("index"),
+        ]),
+      ),
+      storeScratch(local("offset"), local("value")),
+      { kind: "return", expression: local("value") },
     ],
   };
 }
@@ -3225,6 +3482,13 @@ function lt(
   right: RuntimeExpression,
 ): RuntimeExpression {
   return { kind: "ltS32", left, right };
+}
+
+function ltu(
+  left: RuntimeExpression,
+  right: RuntimeExpression,
+): RuntimeExpression {
+  return { kind: "ltU32", left, right };
 }
 
 function eq(

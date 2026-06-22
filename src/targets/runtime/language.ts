@@ -61,6 +61,7 @@ export type RuntimeBinaryOperator =
   | "divU32"
   | "andU32"
   | "eqU32"
+  | "ltU32"
   | "ltS32"
   | "shlU32"
   | "shrU32";
@@ -1154,6 +1155,10 @@ function emitTypeScriptExpression(
       return `(((${emitTypeScriptExpression(expression.left)}) >>> 0) === ((${
         emitTypeScriptExpression(expression.right)
       }) >>> 0) ? 1 : 0)`;
+    case "ltU32":
+      return `(((${emitTypeScriptExpression(expression.left)}) >>> 0) < ((${
+        emitTypeScriptExpression(expression.right)
+      }) >>> 0) ? 1 : 0)`;
     case "ltS32":
       return `(((${emitTypeScriptExpression(expression.left)}) | 0) < ((${
         emitTypeScriptExpression(expression.right)
@@ -1354,6 +1359,13 @@ function emitWasmExpression(
         tableLoaderOffset,
         scratch,
         0x48,
+      );
+    case "ltU32":
+      return binaryExpression(
+        expression,
+        tableLoaderOffset,
+        scratch,
+        0x49,
       );
     case "shlU32":
       return binaryExpression(

@@ -22,6 +22,7 @@ import {
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
+  RUNTIME_ARENA_PROGRAM,
   RUNTIME_FIELD_ARRAY,
   RUNTIME_FIELD_NULLABLE,
   RUNTIME_LEXER_SPEC_LITERAL,
@@ -65,6 +66,10 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
     {
       name: "utf16_code_point_width",
       program: UTF16_CODE_POINT_WIDTH_PROGRAM,
+    },
+    {
+      name: "runtime_arena",
+      program: RUNTIME_ARENA_PROGRAM,
     },
     {
       name: "lexer_runtime",
@@ -262,6 +267,13 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
       wasmHash: "fnv1a64:7bcc39b7fe691598",
     },
     {
+      name: "runtime_arena",
+      entry: "runtimeArenaReset",
+      sourceHash: "fnv1a64:8f992f427f2c3ace",
+      typescriptHash: "fnv1a64:101582d8a1d0bbdb",
+      wasmHash: "fnv1a64:cad5dcc4bcd858d6",
+    },
+    {
       name: "lexer_runtime",
       entry: "dfaTransition",
       sourceHash: "fnv1a64:aa747159a847349f",
@@ -348,7 +360,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:cf8d9eb8790dcdb9" as const;
+  "fnv1a64:97fef89f434ae8fc" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

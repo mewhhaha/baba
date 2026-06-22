@@ -110,10 +110,13 @@ functions with statement bodies. The current conformance subset supports:
 - calls between `u32` functions;
 - checked read-only table loads by constant or local index;
 - checked scratch-memory growth, loads, and stores by computed `u32` index;
+- arena-backed `u32` arrays represented as scratch-memory handles with
+  resettable allocation lifetime;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - bitwise AND;
 - `u32` equality, producing `0` or `1`;
+- unsigned less-than over `u32` values, producing `0` or `1`;
 - signed less-than over the same 32-bit bits interpreted as `i32`;
 - left shift and unsigned right shift with counts masked to five bits;
 - structured `if`/`else` and `while`;
@@ -128,6 +131,7 @@ execute both outputs and compare returned values or traps.
 - Integer storage in the current subset is 32 bits.
 - `u32` arithmetic wraps modulo `2^32`.
 - Bitwise AND operates on the 32 stored bits and returns a `u32`.
+- Unsigned comparison interprets both operands as `u32`.
 - Signed comparison interprets the same 32-bit value as two's-complement `i32`.
 - Division by zero traps.
 - Shift counts are masked with `count & 31`.
@@ -148,6 +152,16 @@ execute both outputs and compare returned values or traps.
 - Scratch-memory growth traps if the requested capacity exceeds the Wasm-backed
   implementation limit.
 - Scratch-memory loads and stores trap on indexes outside the current capacity.
+- `runtimeArenaReset()` resets the arena cursor to word `1`; word `0` stores the
+  next free arena word.
+- `runtimeArenaAlloc(words)` returns the previous cursor, advances by `words`,
+  traps on `u32` overflow, and grows scratch memory before publishing the new
+  cursor.
+- Arena-backed arrays use a one-word length header followed by `u32` element
+  words. New array elements are initialized to zero.
+- Arena-backed array length, load, and store helpers trap for handle `0`, stale
+  or out-of-range handles, out-of-bounds indexes, and offset overflow. Handles
+  are currently raw arena offsets, not typed capabilities with provenance.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
@@ -155,9 +169,8 @@ execute both outputs and compare returned values or traps.
 These rules must be specified before the parser runtime can be fully lowered:
 
 - records and record layout;
-- growable arrays/vectors and ownership;
+- growable vectors, ownership, and typed handle provenance;
 - text representation and Unicode iteration;
-- allocation arenas and reset lifetime;
 - structured errors versus traps for each runtime boundary;
 - host-visible memory layout.
 

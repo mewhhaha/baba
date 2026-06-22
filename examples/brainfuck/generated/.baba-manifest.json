@@ -19,7 +19,7 @@
       "ownership": "generated"
     },
     "ts/mod.ts": {
-      "hash": "d697fc2779d3821cd2f7a6cd11b5f03b5f0c3f698a0156499f0f5050d5266b56",
+      "hash": "b608ff0ff19baf1c3568f04399857439028f96623d65e3f1735465f5199c712c",
       "ownership": "generated"
     },
     "ts/parser.ts": {
@@ -47,7 +47,7 @@
       "ownership": "generated"
     },
     "wasm/wasm.ts": {
-      "hash": "825adba763efdd8c367ce365ae10c7ce28335fa28b0c7822c54a14d8922ed910",
+      "hash": "bd77d46fdca0fd00891675f4e1ab780c4ba9731c7b7d2126f82726bea6b1e68e",
       "ownership": "generated"
     }
   }
