@@ -8,7 +8,16 @@ import type {
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
-import type { LrTable } from "../typescript/lr1.ts";
+import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
+import { compileRuntimeLanguageWasm } from "../runtime/language.ts";
+import {
+  createParserConflictTraceRuntimeProgram,
+  createParserTraceRuntimeProgram,
+  RUNTIME_ACTION_ACCEPT,
+  RUNTIME_ACTION_PAYLOAD_MASK,
+  RUNTIME_ACTION_REDUCE,
+  RUNTIME_ACTION_SHIFT,
+} from "../runtime/language_sources.ts";
 import type {
   PortableParserPlanMetadata,
   PortableParserPlanV1,
@@ -32,6 +41,7 @@ export interface WasmPlan {
   portable: PortableParserPlanV1;
   portableMetadata: PortableParserPlanMetadata;
   wasm: WasmModuleImage;
+  parserTraceWasm: Uint8Array;
   directory: string;
   preserveTrivia: boolean;
   diagnostics: readonly Diagnostic[];
@@ -61,6 +71,10 @@ export function planWasmTarget(
     runtimePlan.lr,
     runtimePlan.portable.version,
   );
+  const parserTraceWasm = emitParserTraceWasm(
+    runtimePlan.bnf,
+    runtimePlan.lr,
+  );
   return {
     analyzed,
     bnf: runtimePlan.bnf,
@@ -69,6 +83,7 @@ export function planWasmTarget(
     portable: runtimePlan.portable,
     portableMetadata: runtimePlan.portableMetadata,
     wasm,
+    parserTraceWasm,
     directory: options.directory ?? "wasm",
     preserveTrivia: options.preserveTrivia ?? true,
     diagnostics,
@@ -88,7 +103,11 @@ export function emitWasmTarget(
     },
     {
       path: `${dir}/wasm.ts`,
-      content: emitWasmRuntime(plan.wasm, plan.portableMetadata),
+      content: emitWasmRuntime(
+        plan.wasm,
+        plan.parserTraceWasm,
+        plan.portableMetadata,
+      ),
       kind: "source",
     },
     {
@@ -107,6 +126,121 @@ export function emitWasmTarget(
       kind: "source",
     },
   ];
+}
+
+function emitParserTraceWasm(bnf: BnfGrammar, lr: LrTable): Uint8Array {
+  const actionRows = parserRuntimeActionRows(bnfActionTableRows(lr.actions));
+  const gotoRows = bnfTableRows(lr.gotos, (nonterminal, target) => [
+    nonterminal,
+    target,
+  ]);
+  const productions = bnf.productions.map((production) =>
+    [production.lhs, production.rhs.length] as const
+  );
+  const program = hasMultiActionEntries(lr.actions)
+    ? createParserConflictTraceRuntimeProgram({
+      actionRows,
+      gotoRows,
+      productions,
+    })
+    : createParserTraceRuntimeProgram({
+      actionRows,
+      gotoRows,
+      productions,
+    });
+  return compileRuntimeLanguageWasm(program, {
+    exports: [
+      "parserTraceSetTerminal",
+      "parserTrace",
+      "parserTraceErrorState",
+      "parserTraceErrorIndex",
+      "parserTraceCount",
+      "parserTraceAction",
+    ],
+  });
+}
+
+type EncodedAction =
+  | readonly [terminal: number, kind: 1, state: number]
+  | readonly [terminal: number, kind: 2, production: number]
+  | readonly [terminal: number, kind: 3];
+
+type RuntimeLookupEntry = readonly [key: number, value: number];
+
+function bnfActionTableRows(
+  table: ReadonlyMap<number, ReadonlyMap<number, LrActionSet>>,
+): EncodedAction[][] {
+  const maxState = Math.max(-1, ...table.keys());
+  const rows: EncodedAction[][] = [];
+  for (let state = 0; state <= maxState; state++) {
+    const entries = [...(table.get(state)?.entries() ?? [])]
+      .sort(([left], [right]) => left - right)
+      .flatMap(([terminal, actions]) =>
+        actions.map((action) => actionEntry(terminal, action))
+      );
+    rows.push(entries);
+  }
+  return rows;
+}
+
+function actionEntry(terminal: number, action: LrAction): EncodedAction {
+  if (action.kind === "shift") return [terminal, 1, action.state];
+  if (action.kind === "reduce") return [terminal, 2, action.production];
+  return [terminal, 3];
+}
+
+function parserRuntimeActionRows(
+  rows: readonly (readonly EncodedAction[])[],
+): readonly (readonly RuntimeLookupEntry[])[] {
+  return rows.map((row) =>
+    row.map((entry) => [entry[0], encodeParserRuntimeAction(entry)] as const)
+  );
+}
+
+function encodeParserRuntimeAction(action: EncodedAction): number {
+  if (action[1] === 1) {
+    assertParserRuntimePayload(action[2]);
+    return RUNTIME_ACTION_SHIFT + action[2];
+  }
+  if (action[1] === 2) {
+    assertParserRuntimePayload(action[2]);
+    return RUNTIME_ACTION_REDUCE + action[2];
+  }
+  return RUNTIME_ACTION_ACCEPT;
+}
+
+function assertParserRuntimePayload(payload: number): void {
+  if (payload < 0 || payload > RUNTIME_ACTION_PAYLOAD_MASK) {
+    throw new Error(
+      `Parser runtime action payload ${payload} exceeds the encoded action limit.`,
+    );
+  }
+}
+
+function bnfTableRows<T>(
+  table: ReadonlyMap<number, ReadonlyMap<number, T>>,
+  encode: (key: number, value: T) => RuntimeLookupEntry,
+): RuntimeLookupEntry[][] {
+  const maxState = Math.max(-1, ...table.keys());
+  const rows: RuntimeLookupEntry[][] = [];
+  for (let state = 0; state <= maxState; state++) {
+    const entries = [...(table.get(state)?.entries() ?? [])]
+      .sort(([left], [right]) => left - right)
+      .map(([key, value]) => encode(key, value));
+    rows.push(entries);
+  }
+  return rows;
+}
+
+function hasMultiActionEntries(
+  table: ReadonlyMap<number, ReadonlyMap<number, LrActionSet>>,
+): boolean {
+  for (const row of table.values()) {
+    for (const actions of row.values()) {
+      if (actions.length > 1) return true;
+    }
+  }
+  return false;
 }
 
 function wasmModSource(): string {

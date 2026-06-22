@@ -498,6 +498,19 @@ function wasmParseRuntime(): string {
   const traced = parseTrace(stream.input, stream.terminalCount);
   if (!traced.ok) {
     const token = stream.tokens[traced.index] ?? eofToken(source.length);
+    if (traced.limit) {
+      return {
+        ok: false,
+        root: null,
+        source,
+        tokens,
+        diagnostics: [{
+          code: "PARSER_BRANCH_LIMIT",
+          message: "Parser exceeded the branch exploration limit.",
+          span: { start: source.length, end: source.length },
+        }],
+      };
+    }
     if (traced.internal) {
       return {
         ok: false,

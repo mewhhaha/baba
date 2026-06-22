@@ -27,12 +27,12 @@ export const RUNTIME_LANGUAGE_COMPILER_SOURCES:
     {
       path: "src/targets/runtime/language.ts",
       role: "stage0-runtime-language-compiler",
-      hash: "fnv1a64:d139448ef2dfcab1",
+      hash: "fnv1a64:8b46a9292dc6cc2d",
     },
   ] as const;
 
 export const RUNTIME_LANGUAGE_COMPILER_HASH =
-  "fnv1a64:f0707dcc13d17f17" as const;
+  "fnv1a64:d70a1dc541a4b524" as const;
 
 export const RUNTIME_LANGUAGE_COMPILER_METADATA:
   RuntimeLanguageCompilerMetadata = {

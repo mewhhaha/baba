@@ -65,6 +65,9 @@
   fan-out.
 - Moved generated TypeScript conflict-parser branch scheduling onto a
   runtime-language `parserTrace` helper with scratch-memory branch frames.
+- Added multi-export support to the private runtime-language Wasm compiler and
+  use it to package a runtime-language Wasm parser trace module for generated
+  Wasm adapters.
 
 ### Changed
 
@@ -86,6 +89,9 @@
 - The Wasm target now packages its core bytecode runtime emitter from
   `src/targets/runtime/` instead of carrying it directly under
   `src/targets/wasm/`.
+- Generated Wasm adapters now run LR parser trace control flow through a
+  runtime-language Wasm module and replay the returned trace in TypeScript to
+  build CST nodes and diagnostics.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical

@@ -1073,6 +1073,44 @@ Deno.test("runtime language can emit standalone TypeScript helper functions", ()
   assertEquals(source.includes("runtimeLanguageVersion"), false);
 });
 
+Deno.test("runtime language Wasm can export selected program functions", async () => {
+  const program: RuntimeLanguageProgram = {
+    name: "wasm_exports",
+    entry: "main",
+    functions: [
+      {
+        name: "double",
+        parameters: [{ name: "value", type: "u32" }],
+        result: "u32",
+        body: [{ kind: "return", expression: mul(local("value"), u32(2)) }],
+      },
+      {
+        name: "main",
+        parameters: [{ name: "value", type: "u32" }],
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(call("double", [local("value")]), u32(1)),
+        }],
+      },
+    ],
+  };
+  const bytes = compileRuntimeLanguageWasm(program, {
+    exports: ["main", "double"],
+  });
+  const instantiated = await WebAssembly.instantiate(bytes, {}) as
+    | WebAssembly.Instance
+    | WebAssembly.WebAssemblyInstantiatedSource;
+  const instance = "instance" in instantiated
+    ? instantiated.instance
+    : instantiated;
+  const main = instance.exports.main as (value: number) => number;
+  const double = instance.exports.double as (value: number) => number;
+
+  assertEquals(main(20), 41);
+  assertEquals(double(21), 42);
+});
+
 Deno.test("runtime language lowers to a resolved IR", () => {
   const program: RuntimeLanguageProgram = {
     name: "ir_fixture",

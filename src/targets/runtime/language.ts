@@ -211,6 +211,10 @@ export interface RuntimeLanguageTypeScriptFunctionOptions {
   readonly exported?: boolean;
 }
 
+export interface RuntimeLanguageWasmCompileOptions {
+  readonly exports?: readonly string[];
+}
+
 export function emitRuntimeLanguageTypeScript(
   program: RuntimeLanguageProgram,
 ): string {
@@ -655,6 +659,7 @@ ${fn.locals.map((local) => `  let ${identifier(local.name)} = 0;`).join("\n")}${
 
 export function compileRuntimeLanguageWasm(
   program: RuntimeLanguageProgram,
+  options: RuntimeLanguageWasmCompileOptions = {},
 ): Uint8Array {
   const ir = compileRuntimeLanguageIr(program);
   const tableLayout = buildRuntimeTableLayout(ir.tables);
@@ -691,7 +696,11 @@ export function compileRuntimeLanguageWasm(
       ensure: ir.functions.length + tableLoaders.length + 2,
     }
     : null;
-  const entryIndex = functionIndex(ir.entry, functionIndexes);
+  const exportNames = options.exports ?? [ir.entry];
+  const exportEntries = runtimeLanguageWasmExports(
+    exportNames,
+    functionIndexes,
+  );
   const bodies = allFunctions.map((item) => {
     const body = item.kind === "program"
       ? wasmProgramFunctionBody(
@@ -732,12 +741,7 @@ export function compileRuntimeLanguageWasm(
       ...allFunctions.map((_, index) => u32(index)).flat(),
     ]),
     ...(memoryBytes > 0 ? [section(5, memorySection(memoryBytes))] : []),
-    section(7, [
-      ...u32(1),
-      ...name(ir.entry),
-      0x00,
-      ...u32(entryIndex),
-    ]),
+    section(7, exportSection(exportEntries)),
     section(10, [
       ...u32(allFunctions.length),
       ...bodies.flat(),
@@ -1942,6 +1946,44 @@ function wasmScratchEnsureType(): number[] {
     0x7f,
     0x01,
     0x7f,
+  ];
+}
+
+function runtimeLanguageWasmExports(
+  exports: readonly string[],
+  functionIndexes: ReadonlyMap<string, number>,
+): readonly (readonly [name: string, index: number])[] {
+  const seen = new Set<string>();
+  const entries: Array<readonly [string, number]> = [];
+  for (const exportName of exports) {
+    identifier(exportName);
+    if (seen.has(exportName)) {
+      throw new Error(
+        `Runtime-language Wasm export '${exportName}' is duplicated.`,
+      );
+    }
+    seen.add(exportName);
+    const index = functionIndexes.get(exportName);
+    if (index === undefined) {
+      throw new Error(
+        `Runtime-language Wasm export '${exportName}' is not a program function.`,
+      );
+    }
+    entries.push([exportName, index]);
+  }
+  return entries;
+}
+
+function exportSection(
+  entries: readonly (readonly [name: string, index: number])[],
+): number[] {
+  return [
+    ...u32(entries.length),
+    ...entries.flatMap(([exportName, index]) => [
+      ...name(exportName),
+      0x00,
+      ...u32(index),
+    ]),
   ];
 }
 

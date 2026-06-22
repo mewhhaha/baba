@@ -115,6 +115,13 @@ Deno.test("Wasm target packages shared core runtime source", async () => {
   assertIncludes(wasmRuntimeSource, "RUNTIME_ACTION_KIND_MASK");
   assertIncludes(wasmRuntimeSource, "RUNTIME_ACTION_PAYLOAD_MASK");
   assertIncludes(wasmRuntimeSource, "function emitWasmModule");
+
+  const wasmAdapterSource = await Deno.readTextFile(
+    "src/targets/wasm/runtime_emit.ts",
+  );
+  assertIncludes(wasmAdapterSource, "parserTraceRuntimeBytes");
+  assertIncludes(wasmAdapterSource, "parserTraceRuntime.parserTrace");
+  assertNotIncludes(wasmAdapterSource, "wasm.parse_trace");
 });
 
 Deno.test("runtime implementation manifest identifies source artifacts", async () => {

@@ -3,6 +3,7 @@ import {
   assert,
   assertEquals,
   assertIncludes,
+  assertNotIncludes,
   assertThrowsIncludes,
   captureConsoleError,
   captureConsoleLog,
@@ -35,6 +36,13 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     await denoCheck(`${dir}/wasm/mod.ts`);
     const wasmSource = await Deno.readTextFile(`${dir}/wasm/wasm.ts`);
     assertIncludes(wasmSource, "lex_all");
+    assertIncludes(wasmSource, "parserTraceRuntimeBytes");
+    assertIncludes(wasmSource, "parserTraceRuntime.parserTrace");
+    assertIncludes(
+      wasmSource,
+      "parserTraceRuntime = instantiateParserTraceRuntime();",
+    );
+    assertNotIncludes(wasmSource, "wasm.parse_trace");
     assertIncludes(wasmSource, "const MAX_WASM_PAGES = 65535");
     assertIncludes(wasmSource, "memory.grow(requiredPages - currentPages)");
     const mod = await import(`file://${dir}/wasm/mod.ts`);
