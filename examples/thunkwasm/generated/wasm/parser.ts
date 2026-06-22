@@ -1499,6 +1499,25 @@ function parserRuleNodeFieldCount(handle: number): number {
   return (runtimeVectorLength(parserRuleNodeFields(handle) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
+
+function materializeEofToken(offset: number): Token {
+  const handle = parserTokenNew(
+    PUBLIC_TOKEN_EOF,
+    0,
+    EOF_TERMINAL,
+    offset,
+    offset,
+  );
+  return {
+    type: "eof",
+    text: "",
+    span: {
+      start: parserTokenSpanStart(handle),
+      end: parserTokenSpanEnd(handle),
+    },
+    channel: "main",
+  };
+}
 function combineDiagnostics(
   left: readonly ParseDiagnostic[],
   right: readonly ParseDiagnostic[],
@@ -1839,7 +1858,7 @@ function parseTokenList(
     compactTokenStream(source, tokens, trustRuntimeTerminals);
   const traced = parseTrace(stream.input, stream.terminalCount);
   if (!traced.ok) {
-    const token = stream.tokens[traced.index] ?? eofToken(source.length);
+    const token = stream.tokens[traced.index] ?? materializeEofToken(source.length);
     if (traced.limit) {
       return {
         ok: false,
@@ -1899,7 +1918,7 @@ function compactTokenStream(
   let index = 0;
   while (true) {
     index = skipTrivia(tokens, index);
-    const token = tokens[index] ?? eofToken(source.length);
+    const token = tokens[index] ?? materializeEofToken(source.length);
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
@@ -1936,7 +1955,7 @@ function replayTrace(
 
     if (actionStatus === REPLAY_ACTION_SHIFT) {
       values.push(shiftedToken(
-        streamTokens[index] ?? eofToken(source.length),
+        streamTokens[index] ?? materializeEofToken(source.length),
         streamTokenIndices[index] ?? tokens.length,
       ));
       index++;
@@ -1947,7 +1966,7 @@ function replayTrace(
       return acceptedParseResult(source, tokens, values[values.length - 1]);
     }
 
-    const token = streamTokens[index] ?? eofToken(source.length);
+    const token = streamTokens[index] ?? materializeEofToken(source.length);
     if (actionStatus !== REPLAY_ACTION_REDUCE) {
       return {
         ok: false,
@@ -2808,23 +2827,4 @@ function skipTrivia(tokens: readonly Token[], start: number): number {
     index++;
   }
   return index;
-}
-
-function eofToken(offset: number): Token {
-  const handle = parserTokenNew(
-    PUBLIC_TOKEN_EOF,
-    0,
-    EOF_TERMINAL,
-    offset,
-    offset,
-  );
-  return {
-    type: "eof",
-    text: "",
-    span: {
-      start: parserTokenSpanStart(handle),
-      end: parserTokenSpanEnd(handle),
-    },
-    channel: "main",
-  };
 }

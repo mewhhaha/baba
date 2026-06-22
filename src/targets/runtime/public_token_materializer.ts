@@ -72,3 +72,25 @@ function attachRuntimeTerminal(token: Token, terminal: number): Token & RuntimeT
   return token as Token & RuntimeTerminalToken;
 }`;
 }
+
+export function emitPublicEofTokenMaterializer(): string {
+  return `
+function materializeEofToken(offset: number): Token {
+  const handle = parserTokenNew(
+    PUBLIC_TOKEN_EOF,
+    0,
+    EOF_TERMINAL,
+    offset,
+    offset,
+  );
+  return {
+    type: "eof",
+    text: "",
+    span: {
+      start: parserTokenSpanStart(handle),
+      end: parserTokenSpanEnd(handle),
+    },
+    channel: "main",
+  };
+}`;
+}

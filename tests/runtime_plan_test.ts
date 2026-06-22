@@ -89,7 +89,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(lexerRuntimeSource, "parserTokenNew");
   assertIncludes(lexerRuntimeSource, "emitPublicTokenMaterializer");
   assertIncludes(publicTokenMaterializerSource, "function materializeToken");
+  assertIncludes(publicTokenMaterializerSource, "function materializeEofToken");
   assertIncludes(publicTokenMaterializerSource, "parserTokenSpanStart");
+  assertIncludes(publicTokenMaterializerSource, "PUBLIC_TOKEN_EOF");
   assertIncludes(publicTokenMaterializerSource, "Object.defineProperty");
   assertNotIncludes(lexerRuntimeSource, "const DFA_ACCEPTS");
   assertNotIncludes(lexerRuntimeSource, "const SPECS");
@@ -147,6 +149,8 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(publicFieldMaterializerSource, "Object.create(null)");
   assertIncludes(publicFieldMaterializerSource, "fields[name] = value");
   assertIncludes(parserRuntimeSource, "emitPublicDiagnosticMaterializer");
+  assertIncludes(parserRuntimeSource, "emitPublicEofTokenMaterializer");
+  assertIncludes(parserRuntimeSource, "materializeEofToken(source.length)");
   assertIncludes(
     publicDiagnosticMaterializerSource,
     "function parseDiagnostic",
@@ -235,6 +239,8 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "function unexpectedTokenDiagnostic");
   assertNotIncludes(parserRuntimeSource, "parserDiagnosticNew");
   assertNotIncludes(parserRuntimeSource, "parserDiagnosticSpanStart");
+  assertNotIncludes(parserRuntimeSource, "function materializeEofToken");
+  assertNotIncludes(parserRuntimeSource, "function eofToken");
   assertNotIncludes(parserRuntimeSource, "interface ParseBranch");
   assertNotIncludes(parserRuntimeSource, "function findActions");
 });

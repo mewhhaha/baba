@@ -223,10 +223,10 @@ execute both outputs and compare returned values or traps.
 - Parser fragment, field-capture, rule-node, token, and diagnostic helpers trap
   for wrong object kind and delegate vector bounds checks to the arena-backed
   vector helpers.
-- Generated TypeScript lexers and Wasm JavaScript adapters allocate runtime
-  token records for public tokens, including EOF, and read those records through
-  runtime token accessors before materializing public JavaScript token objects
-  through one shared runtime-target helper.
+- Generated TypeScript lexers, Wasm JavaScript adapters, and parser fallback EOF
+  paths allocate runtime token records for public tokens, including EOF, and
+  read those records through runtime token accessors before materializing public
+  JavaScript token objects through one shared runtime-target helper.
 - Generated main/literal public tokens carry their plan-local terminal hint as a
   non-enumerable `__babaTerminal` property. Parser APIs may read it when the
   token came from the same generated runtime, but it is not enumerable,

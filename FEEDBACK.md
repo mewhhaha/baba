@@ -164,9 +164,10 @@ runtime language:
   Wasm JavaScript adapter, and parser fallback EOF token materialization through
   runtime-language token records before public object wrapping.
 - Centralized generated public token object wrapping in one runtime-target
-  helper shared by TypeScript lexers and Wasm JavaScript adapters. Both targets
-  now materialize runtime token records through the same named/literal payload
-  convention before returning public API token objects.
+  helper shared by TypeScript lexers, Wasm JavaScript adapters, and parser
+  fallback EOF paths. All paths now materialize runtime token records through
+  the same named/literal/EOF payload convention before returning public API
+  token objects.
 - Hid the plan-local public-token terminal hint behind a non-enumerable
   `__babaTerminal` property. Generated parsers can still use it for same-plan
   fast paths, but it is no longer serialized or exposed through ordinary token
@@ -310,50 +311,51 @@ Still unresolved:
   requirements, and reducer result-shape classification from runtime-language
   helpers, and generated field assembly now gets value-class and
   count-validation decisions from runtime-language helpers. Generated TypeScript
-  lexing and Wasm JavaScript adapter token wrapping now read token class,
-  payload, terminal, and span metadata through runtime-language token records
-  before wrapping public token objects, including EOF. External `parseTokens()`
-  mapping still accepts public strings/literals at the API boundary, but
-  terminal/channel classification and public token class compatibility plus
-  token-level lexical diagnostic classification now go through runtime-language
-  lexer spec helpers. Parser replay span and token-range merge arithmetic is
-  runtime-language-backed, trailing-input diagnostic code selection uses
-  runtime-language expected-state flags, reducer result-shape classification is
-  runtime-language-backed, and parser replay action dispatch, parser trace
-  status, plus replay reduction validity classification now use runtime-language
-  helpers. Generated replay also now carries runtime-language parser object
-  handles and calls runtime-language fragment assembly helpers during
-  token/rule/sequence/empty/list/field reductions. Public field assembly now
-  consumes runtime-language field-capture vectors instead of a parallel
-  JavaScript capture list, and field capture counts now use a runtime-language
-  array instead of a parallel JavaScript count object. Public field value
-  accumulation now stores captured fragment handles in tagged runtime
-  records/vectors before the final JavaScript field object materialization pass.
-  Public CST children now consume runtime-language child vectors instead of a
-  parallel JavaScript child list. Public parse diagnostics now pass through
-  runtime-language diagnostic handles before one shared runtime-target
-  diagnostic materializer wraps public diagnostic objects. Public CST rule-node
-  object materialization is now centralized behind runtime-language rule-node
-  handles, and final JavaScript object allocation for public rule nodes is now
-  emitted from one shared runtime-target helper. Public token object wrapping is
-  now emitted from one shared runtime-target helper for TypeScript and Wasm
-  adapters, public diagnostic object wrapping is now emitted from one shared
-  runtime-target helper, and public field object allocation is now emitted from
-  one shared runtime-target helper. The runtime language now has a checked
-  resettable arena plus tagged arena-backed `u32` arrays, fixed records,
-  growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
-  layouts plus reduction-shaped fragment assembly helpers that generated replay
-  is beginning to use. It now has a shared in-runtime object-kind provenance
-  gate for arena handles and a non-enumerable plan-local terminal hint for
-  public tokens, but it still lacks a complete host-boundary ownership and
-  handle capability contract for future non-JS Wasm hosts, first-class
-  runtime-language text values if source decoding moves fully into the runtime
-  language, plus complete generated parser-runtime lowering for remaining host
-  public object materialization outside the shared wrapper helpers and a richer
-  structured-error taxonomy for a future host-neutral Wasm ABI. The compiler now
-  has a shared lowered control-flow/value IR and checked helper artifact hashes,
-  but it still needs broader parser-runtime lowering before the release can
-  fully satisfy "one runtime implementation, two execution targets."
+  lexing, Wasm JavaScript adapter token wrapping, and parser fallback EOF
+  creation now read token class, payload, terminal, and span metadata through
+  runtime-language token records before wrapping public token objects. External
+  `parseTokens()` mapping still accepts public strings/literals at the API
+  boundary, but terminal/channel classification and public token class
+  compatibility plus token-level lexical diagnostic classification now go
+  through runtime-language lexer spec helpers. Parser replay span and
+  token-range merge arithmetic is runtime-language-backed, trailing-input
+  diagnostic code selection uses runtime-language expected-state flags, reducer
+  result-shape classification is runtime-language-backed, and parser replay
+  action dispatch, parser trace status, plus replay reduction validity
+  classification now use runtime-language helpers. Generated replay also now
+  carries runtime-language parser object handles and calls runtime-language
+  fragment assembly helpers during token/rule/sequence/empty/list/field
+  reductions. Public field assembly now consumes runtime-language field-capture
+  vectors instead of a parallel JavaScript capture list, and field capture
+  counts now use a runtime-language array instead of a parallel JavaScript count
+  object. Public field value accumulation now stores captured fragment handles
+  in tagged runtime records/vectors before the final JavaScript field object
+  materialization pass. Public CST children now consume runtime-language child
+  vectors instead of a parallel JavaScript child list. Public parse diagnostics
+  now pass through runtime-language diagnostic handles before one shared
+  runtime-target diagnostic materializer wraps public diagnostic objects. Public
+  CST rule-node object materialization is now centralized behind
+  runtime-language rule-node handles, and final JavaScript object allocation for
+  public rule nodes is now emitted from one shared runtime-target helper. Public
+  token object wrapping is now emitted from one shared runtime-target helper for
+  TypeScript and Wasm adapters, public diagnostic object wrapping is now emitted
+  from one shared runtime-target helper, and public field object allocation is
+  now emitted from one shared runtime-target helper. The runtime language now
+  has a checked resettable arena plus tagged arena-backed `u32` arrays, fixed
+  records, growable vectors, and initial parser
+  fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
+  fragment assembly helpers that generated replay is beginning to use. It now
+  has a shared in-runtime object-kind provenance gate for arena handles and a
+  non-enumerable plan-local terminal hint for public tokens, but it still lacks
+  a complete host-boundary ownership and handle capability contract for future
+  non-JS Wasm hosts, first-class runtime-language text values if source decoding
+  moves fully into the runtime language, plus complete generated parser-runtime
+  lowering for remaining host public object materialization outside the shared
+  wrapper helpers and a richer structured-error taxonomy for a future
+  host-neutral Wasm ABI. The compiler now has a shared lowered
+  control-flow/value IR and checked helper artifact hashes, but it still needs
+  broader parser-runtime lowering before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

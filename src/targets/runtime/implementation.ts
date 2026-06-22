@@ -28,7 +28,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/public_token_materializer.ts",
       role: "public-token-materializer",
-      hash: "fnv1a64:ed79fe933e9764fa",
+      hash: "fnv1a64:9ebbcfcd59448ec2",
     },
     {
       path: "src/targets/runtime/public_diagnostic_materializer.ts",
@@ -63,7 +63,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/typescript_parser_runtime.ts",
       role: "typescript-parser-runtime",
-      hash: "fnv1a64:0b0627b3fe853be7",
+      hash: "fnv1a64:4b899d64a0b60d07",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime.ts",
@@ -72,7 +72,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:9c2c103b28a6e501" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:cf9c8b689e1539b1" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

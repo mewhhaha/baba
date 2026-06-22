@@ -106,6 +106,7 @@ import {
 import { emitPublicDiagnosticMaterializer } from "./public_diagnostic_materializer.ts";
 import { emitPublicFieldMaterializer } from "./public_field_materializer.ts";
 import { emitPublicRuleNodeMaterializer } from "./public_rule_node_materializer.ts";
+import { emitPublicEofTokenMaterializer } from "./public_token_materializer.ts";
 
 export type ParserEmitMode = "typescript" | "wasm";
 
@@ -268,6 +269,7 @@ ${
   }
 
 ${parserTableRuntime(runtimeWithFields)}
+${emitPublicEofTokenMaterializer()}
 ${emitPublicDiagnosticMaterializer()}
 ${emitPublicFieldMaterializer()}
 ${emitPublicRuleNodeMaterializer()}
@@ -539,7 +541,7 @@ function deterministicParseRuntime(): string {
   const traceStatus = parserTraceStatusKind(status);
   if (traceStatus !== TRACE_STATUS_OK) {
     const errorIndex = parserTraceErrorIndex();
-    const token = stream.tokens[errorIndex] ?? eofToken(source.length);
+    const token = stream.tokens[errorIndex] ?? materializeEofToken(source.length);
     if (traceStatus === TRACE_STATUS_UNEXPECTED) {
       return {
         ok: false,
@@ -608,7 +610,7 @@ function compactTraceTokenStream(
   let index = 0;
   while (true) {
     index = skipTrivia(tokens, index);
-    const token = tokens[index] ?? eofToken(source.length);
+    const token = tokens[index] ?? materializeEofToken(source.length);
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
@@ -647,7 +649,7 @@ function wasmParseRuntime(): string {
     compactTokenStream(source, tokens, trustRuntimeTerminals);
   const traced = parseTrace(stream.input, stream.terminalCount);
   if (!traced.ok) {
-    const token = stream.tokens[traced.index] ?? eofToken(source.length);
+    const token = stream.tokens[traced.index] ?? materializeEofToken(source.length);
     if (traced.limit) {
       return {
         ok: false,
@@ -707,7 +709,7 @@ function compactTokenStream(
   let index = 0;
   while (true) {
     index = skipTrivia(tokens, index);
-    const token = tokens[index] ?? eofToken(source.length);
+    const token = tokens[index] ?? materializeEofToken(source.length);
     streamTokens[streamTokenCount] = token;
     streamTokenIndices[streamTokenCount] = index < tokens.length ? index : tokens.length;
     streamTokenCount++;
@@ -748,7 +750,7 @@ ${replayPrelude}  const values: unknown[] = [null];
 
     if (actionStatus === REPLAY_ACTION_SHIFT) {
       values.push(shiftedToken(
-        streamTokens[index] ?? eofToken(source.length),
+        streamTokens[index] ?? materializeEofToken(source.length),
         streamTokenIndices[index] ?? tokens.length,
       ));
       index++;
@@ -759,7 +761,7 @@ ${replayPrelude}  const values: unknown[] = [null];
       return acceptedParseResult(source, tokens, values[values.length - 1]);
     }
 
-    const token = streamTokens[index] ?? eofToken(source.length);
+    const token = streamTokens[index] ?? materializeEofToken(source.length);
     if (actionStatus !== REPLAY_ACTION_REDUCE) {
       return {
         ok: false,
@@ -1622,25 +1624,6 @@ function skipTrivia(tokens: readonly Token[], start: number): number {
     index++;
   }
   return index;
-}
-
-function eofToken(offset: number): Token {
-  const handle = parserTokenNew(
-    PUBLIC_TOKEN_EOF,
-    0,
-    EOF_TERMINAL,
-    offset,
-    offset,
-  );
-  return {
-    type: "eof",
-    text: "",
-    span: {
-      start: parserTokenSpanStart(handle),
-      end: parserTokenSpanEnd(handle),
-    },
-    channel: "main",
-  };
 }`;
 }
 
