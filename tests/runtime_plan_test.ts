@@ -101,7 +101,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "createParserReducerRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createParserFieldRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createLexerSpecRuntimeProgram");
-  assertIncludes(parserRuntimeSource, "createParserRangeRuntimeProgram");
+  assertIncludes(parserRuntimeSource, "createParserObjectRuntimeProgram");
   assertIncludes(parserRuntimeSource, "parserReducerOperation");
   assertIncludes(parserRuntimeSource, "parserReducerPayloadStatus");
   assertIncludes(parserRuntimeSource, "parserReducerChildRole");
@@ -115,8 +115,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "parserFieldCaptureStatus");
   assertIncludes(parserRuntimeSource, "parserFieldFinalStatus");
   assertIncludes(parserRuntimeSource, "parserExpectedHasEof");
-  assertIncludes(parserRuntimeSource, "parserMergeStart");
-  assertIncludes(parserRuntimeSource, "parserMergeEnd");
+  assertIncludes(parserRuntimeSource, "parserRuleNodeChildCount");
+  assertIncludes(parserRuntimeSource, "parserRuleNodeChildren");
+  assertIncludes(parserRuntimeSource, "RUNTIME_SYNTAX_VALUES");
   assertIncludes(parserRuntimeSource, "parserTraceStatusKind");
   assertIncludes(parserRuntimeSource, "function replayTrace");
   assertNotIncludes(parserRuntimeSource, 'expected.includes("EOF")');

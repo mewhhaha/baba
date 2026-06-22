@@ -42,7 +42,7 @@ Deno.test("safe bundle apply writes nested files and refuses user edits", async 
     );
     assertIncludes(
       await Deno.readTextFile(`${dir}/queries/generated-highlights.scm`),
-      '"fn" @keyword',
+      '(module "fn" @keyword)',
     );
     await Deno.writeTextFile(
       `${dir}/grammar.js`,

@@ -16,10 +16,6 @@
 (mul) @function.builtin
 (take) @function.builtin
 (drop) @function.builtin
-"add" @keyword
-"drop" @keyword
-"mul" @keyword
-"take" @keyword
 "(" @punctuation.bracket
 ")" @punctuation.bracket
 "," @punctuation.delimiter
@@ -29,6 +25,13 @@
 ">>" @operator
 "[" @punctuation.bracket
 "]" @punctuation.bracket
+(add "add" @keyword)
+(definition "def" @keyword)
+(drop "drop" @keyword)
+(emit "emit" @keyword)
+(mul "mul" @keyword)
+(repeat "repeat" @keyword)
+(take "take" @keyword)
 (builtin) @function.builtin
 (integer_values) @number
 (integer_tail) @number

@@ -17,7 +17,6 @@ import type {
 interface Fragment {
   runtimeHandle: number;
   value: unknown;
-  children: SyntaxElement[];
   span: Span | null;
   tokenRange: TokenRange | null;
 }
@@ -52,7 +51,6 @@ const REPLAY_ACTION_SHIFT = 1;
 const REPLAY_ACTION_REDUCE = 2;
 const REPLAY_ACTION_ACCEPT = 3;
 const NO_GOTO = 4294967295;
-const NO_SPAN = 4294967295;
 const NO_TERMINAL = 4294967295;
 const NO_PRODUCTION = 4294967295;
 const REDUCER_OPERATION_UNKNOWN = 0;
@@ -1253,34 +1251,6 @@ function lexerTokenDiagnosticStatus(publicClass: number, terminal: number): numb
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
-function parserMergeStart(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number): number {
-  if (((((leftStart) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
-    return (rightStart) >>> 0;
-  }
-  if (((((rightStart) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
-    return (leftStart) >>> 0;
-  }
-  if (((((leftStart) | 0) < ((rightStart) | 0) ? 1 : 0)) !== 0) {
-    return (leftStart) >>> 0;
-  }
-  return (rightStart) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserMergeEnd(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number): number {
-  if (((((leftStart) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
-    return (rightEnd) >>> 0;
-  }
-  if (((((rightStart) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
-    return (leftEnd) >>> 0;
-  }
-  if (((((leftEnd) | 0) < ((rightEnd) | 0) ? 1 : 0)) !== 0) {
-    return (rightEnd) >>> 0;
-  }
-  return (leftEnd) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
 function parserFieldStart(ruleId: number): number {
   let index = 0;
   if (((((ruleId) | 0) < ((11) | 0) ? 1 : 0)) !== 0) {
@@ -2089,6 +2059,7 @@ function replayTrace(
   trace: Int32Array,
 ): ParseResult<RootNode> {
   RUNTIME_FRAGMENT_VALUES.clear();
+  RUNTIME_SYNTAX_VALUES.clear();
   const values: unknown[] = [null];
   let index = 0;
 
@@ -2232,6 +2203,7 @@ function replayTrace(
 
 const RUNTIME_NODE_HANDLES = new WeakMap<object, number>();
 const RUNTIME_FRAGMENT_VALUES = new Map<number, unknown>();
+const RUNTIME_SYNTAX_VALUES = new Map<number, SyntaxElement>();
 
 function reduceProduction(
   reducerOperation: number,
@@ -2255,10 +2227,11 @@ function reduceProduction(
         name: RULE_NAMES[reducerPayload],
         span: ruleNodeSpan(runtimeHandle),
         tokenRange: ruleNodeTokenRange(runtimeHandle),
-        children: fragment.children,
+        children: buildChildren(runtimeHandle),
         fields: buildFields(reducerPayload, runtimeHandle),
       };
       RUNTIME_NODE_HANDLES.set(node, runtimeHandle);
+      rememberSyntaxValue(runtimeHandle, node as unknown as SyntaxElement);
       return node as unknown as AnyRuleNode;
     }
     case REDUCER_RESULT_CHILD_FRAGMENT:
@@ -2308,21 +2281,22 @@ function tokenFragment(shifted: ShiftedToken): Fragment {
   if (!isMainSyntaxToken(token)) {
     throw new Error("Expected shifted main syntax token.");
   }
+  const tokenHandle = parserTokenNew(
+    publicTokenClass(token),
+    tokenSpecIndex(token),
+    tokenToTerminal(token),
+    token.span.start,
+    token.span.end,
+  );
+  rememberSyntaxValue(tokenHandle, token);
   const runtimeHandle = parserFragmentFromToken(
-    parserTokenNew(
-      publicTokenClass(token),
-      tokenSpecIndex(token),
-      tokenToTerminal(token),
-      token.span.start,
-      token.span.end,
-    ),
+    tokenHandle,
     shifted.tokenIndex,
   );
   rememberFragmentValue(runtimeHandle, token);
   return {
     runtimeHandle,
     value: token,
-    children: [token],
     span: token.span,
     tokenRange: { start: shifted.tokenIndex, end: shifted.tokenIndex + 1 },
   };
@@ -2334,7 +2308,6 @@ function ruleFragment(node: AnyRuleNode): Fragment {
   return {
     runtimeHandle,
     value: node,
-    children: [node],
     span: fragmentSpan(runtimeHandle),
     tokenRange: fragmentTokenRange(runtimeHandle),
   };
@@ -2403,18 +2376,15 @@ function sequenceFragment(
 ): Fragment {
   const runtimeHandle = parserFragmentSequenceNew(offset, tokenIndex);
   const fragmentValues: unknown[] = [];
-  const children: SyntaxElement[] = [];
   for (let index = 0; index < values.length; index++) {
     const part = reducerFragmentChild(reducerOperation, values, index);
     parserFragmentSequenceAppend(runtimeHandle, part.runtimeHandle);
     fragmentValues.push(part.value);
-    appendAll(children, part.children);
   }
   rememberFragmentValue(runtimeHandle, fragmentValues);
   return {
     runtimeHandle,
     value: fragmentValues,
-    children,
     span: fragmentSpan(runtimeHandle),
     tokenRange: fragmentTokenRange(runtimeHandle),
   };
@@ -2432,7 +2402,6 @@ function emptyFragment(
   return {
     runtimeHandle,
     value,
-    children: [],
     span: fragmentSpan(runtimeHandle),
     tokenRange: fragmentTokenRange(runtimeHandle),
   };
@@ -2442,12 +2411,10 @@ function appendFragment(list: Fragment, item: Fragment): Fragment {
   parserFragmentAppendValue(list.runtimeHandle, item.runtimeHandle);
   const values = asMutableArray(list.value);
   values.push(item.value);
-  appendAll(list.children, item.children);
   rememberFragmentValue(list.runtimeHandle, values);
   return {
     runtimeHandle: list.runtimeHandle,
     value: values,
-    children: list.children,
     span: fragmentSpan(list.runtimeHandle),
     tokenRange: fragmentTokenRange(list.runtimeHandle),
   };
@@ -2465,13 +2432,10 @@ function appendSeparatedFragment(
   );
   const values = asMutableArray(list.value);
   values.push(item.value);
-  appendAll(list.children, separator.children);
-  appendAll(list.children, item.children);
   rememberFragmentValue(list.runtimeHandle, values);
   return {
     runtimeHandle: list.runtimeHandle,
     value: values,
-    children: list.children,
     span: fragmentSpan(list.runtimeHandle),
     tokenRange: fragmentTokenRange(list.runtimeHandle),
   };
@@ -2489,11 +2453,6 @@ function asMutableArray(value: unknown): unknown[] {
   throw new Error("Expected parser reduction array.");
 }
 
-function appendAll<T>(target: T[], values: readonly T[]): T[] {
-  for (const value of values) target.push(value);
-  return target;
-}
-
 function rememberFragmentValue(handle: number, value: unknown): void {
   RUNTIME_FRAGMENT_VALUES.set(handle, value);
 }
@@ -2503,6 +2462,18 @@ function hostFragmentValue(handle: number): unknown {
     throw new Error("Runtime fragment is missing its host value.");
   }
   return RUNTIME_FRAGMENT_VALUES.get(handle);
+}
+
+function rememberSyntaxValue(handle: number, value: SyntaxElement): void {
+  RUNTIME_SYNTAX_VALUES.set(handle, value);
+}
+
+function hostSyntaxValue(handle: number): SyntaxElement {
+  const value = RUNTIME_SYNTAX_VALUES.get(handle);
+  if (value === undefined) {
+    throw new Error("Runtime syntax object is missing its host value.");
+  }
+  return value;
 }
 
 function fragmentSpan(handle: number): Span {
@@ -2649,6 +2620,17 @@ function buildFields(
   return fields;
 }
 
+function buildChildren(ruleNodeHandle: number): SyntaxElement[] {
+  const count = parserRuleNodeChildCount(ruleNodeHandle);
+  if (count === 0) return [];
+  const children = parserRuleNodeChildren(ruleNodeHandle);
+  const values: SyntaxElement[] = [];
+  for (let index = 0; index < count; index++) {
+    values.push(hostSyntaxValue(runtimeVectorLoad(children, index)));
+  }
+  return values;
+}
+
 function fieldName(fieldId: number): string {
   return FIELD_NAMES[fieldId] ?? `#${fieldId}`;
 }
@@ -2789,7 +2771,6 @@ function isFragment(value: unknown): value is Fragment {
     typeof value === "object" &&
     "runtimeHandle" in value &&
     "value" in value &&
-    "children" in value &&
     "tokenRange" in value;
 }
 
@@ -3132,51 +3113,4 @@ function eofToken(offset: number): Token {
 
 function currentSpan(token: Token): Span {
   return token.span;
-}
-
-function spanFromChildren(children: readonly SyntaxElement[]): Span | null {
-  return children.reduce<Span | null>(
-    (span, child) => combineSpans(span, child.span),
-    null,
-  );
-}
-
-function tokenRangeFromChildren(
-  children: readonly SyntaxElement[],
-): TokenRange | null {
-  return children.reduce<TokenRange | null>((range, child) => {
-    if (child.type === "rule") {
-      return combineTokenRanges(range, child.tokenRange);
-    }
-    return range;
-  }, null);
-}
-
-function combineSpans(left: Span | null, right: Span | null): Span | null {
-  const leftStart = left?.start ?? NO_SPAN;
-  const leftEnd = left?.end ?? NO_SPAN;
-  const rightStart = right?.start ?? NO_SPAN;
-  const rightEnd = right?.end ?? NO_SPAN;
-  const start = parserMergeStart(leftStart, leftEnd, rightStart, rightEnd);
-  if (start === NO_SPAN) return null;
-  return {
-    start,
-    end: parserMergeEnd(leftStart, leftEnd, rightStart, rightEnd),
-  };
-}
-
-function combineTokenRanges(
-  left: TokenRange | null,
-  right: TokenRange | null,
-): TokenRange | null {
-  const leftStart = left?.start ?? NO_SPAN;
-  const leftEnd = left?.end ?? NO_SPAN;
-  const rightStart = right?.start ?? NO_SPAN;
-  const rightEnd = right?.end ?? NO_SPAN;
-  const start = parserMergeStart(leftStart, leftEnd, rightStart, rightEnd);
-  if (start === NO_SPAN) return null;
-  return {
-    start,
-    end: parserMergeEnd(leftStart, leftEnd, rightStart, rightEnd),
-  };
 }

@@ -46,7 +46,7 @@ Deno.test("generates Tree-sitter grammar and query bundle only", () => {
       file.path === "queries/generated-highlights.scm"
     )
       ?.content ?? "",
-    '"fn" @keyword',
+    '(module "fn" @keyword)',
   );
   assertEquals(bundle.cleanupPaths, undefined);
 });

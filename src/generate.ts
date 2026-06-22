@@ -874,8 +874,12 @@ function defaultHighlightQueryEntries(
     entries.push(entry);
   };
 
-  pushMinimalDefaultHighlightEntries(plan, pushEntry);
-  if (options.mode === "rich") pushRichDefaultHighlightEntries(plan, pushEntry);
+  if (options.mode === "minimal") {
+    pushMinimalDefaultHighlightEntries(plan, pushEntry);
+  } else {
+    pushRichLiteralDefaultHighlightEntries(plan, pushEntry);
+    pushRichDefaultHighlightEntries(plan, pushEntry);
+  }
   return entries;
 }
 
@@ -898,29 +902,113 @@ function pushMinimalDefaultHighlightEntries(
 ): void {
   const terminals = [...plan.reachableLiterals].sort();
   const namedLiteralTerminals = collectNamedLiteralRuleTerminals(plan);
-  const pushLiteral = (literal: string, capture: string) => {
-    push({ literal, capture });
-  };
 
   for (const terminal of terminals) {
     if (namedLiteralTerminals.has(terminal)) continue;
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(terminal)) {
-      pushLiteral(terminal, "keyword");
-    }
+    const capture = defaultLiteralHighlightCapture(terminal);
+    if (capture) push({ literal: terminal, capture });
+  }
+}
+
+function pushRichLiteralDefaultHighlightEntries(
+  plan: TreeSitterPlan,
+  push: (entry: TreeSitterCaptureMetadata) => void,
+): void {
+  const namedLiteralTerminals = collectNamedLiteralRuleTerminals(plan);
+  for (const terminal of [...plan.reachableLiterals].sort()) {
+    if (namedLiteralTerminals.has(terminal)) continue;
+    const capture = defaultLiteralHighlightCapture(terminal);
+    if (!capture) continue;
+    if (isWordLikeLiteral(terminal)) continue;
+    push({ literal: terminal, capture });
   }
 
+  for (const entry of inferContextualLiteralHighlightEntries(plan)) {
+    if (namedLiteralTerminals.has(entry.literal ?? "")) continue;
+    push(entry);
+  }
+}
+
+function defaultLiteralHighlightCapture(literal: string): string | undefined {
+  if (isWordLikeLiteral(literal)) return "keyword";
   const bracketLiterals = new Set(["(", ")", "[", "]", "{", "}"]);
   const delimiterLiterals = new Set([",", ";", ":", "."]);
-  for (const terminal of terminals) {
-    if (namedLiteralTerminals.has(terminal)) continue;
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(terminal)) continue;
-    if (bracketLiterals.has(terminal)) {
-      pushLiteral(terminal, "punctuation.bracket");
-    } else if (delimiterLiterals.has(terminal)) {
-      pushLiteral(terminal, "punctuation.delimiter");
-    } else {
-      pushLiteral(terminal, "operator");
+  if (bracketLiterals.has(literal)) return "punctuation.bracket";
+  if (delimiterLiterals.has(literal)) return "punctuation.delimiter";
+  return "operator";
+}
+
+function isWordLikeLiteral(literal: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(literal);
+}
+
+function inferContextualLiteralHighlightEntries(
+  plan: TreeSitterPlan,
+): TreeSitterCaptureMetadata[] {
+  const entries: TreeSitterCaptureMetadata[] = [];
+  const seen = new Set<string>();
+  const push = (
+    parent: string,
+    field: string | undefined,
+    literal: string,
+    capture: string,
+  ) => {
+    const entry: TreeSitterCaptureMetadata = {
+      parent,
+      field,
+      literal,
+      capture,
+    };
+    const key = captureSelectorKey(entry);
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push(entry);
+  };
+
+  for (const rule of plan.rules) {
+    if (!plan.reachableRules.has(rule.name)) continue;
+    collectContextualLiteralHighlightEntries(
+      rule.expression,
+      rule.name,
+      undefined,
+      push,
+    );
+  }
+  return entries.sort((left, right) =>
+    captureSelectorKey(left).localeCompare(captureSelectorKey(right))
+  );
+}
+
+function collectContextualLiteralHighlightEntries(
+  expression: TreeSitterExpression,
+  parent: string,
+  field: string | undefined,
+  push: (
+    parent: string,
+    field: string | undefined,
+    literal: string,
+    capture: string,
+  ) => void,
+): void {
+  if (expression.kind === "field") {
+    collectContextualLiteralHighlightEntries(
+      expression.expression,
+      parent,
+      expression.name,
+      push,
+    );
+    return;
+  }
+  if (expression.kind === "literal") {
+    const capture = defaultLiteralHighlightCapture(expression.value);
+    if (capture && isWordLikeLiteral(expression.value)) {
+      push(parent, field, expression.value, capture);
     }
+    return;
+  }
+  if (expression.kind === "ref") return;
+  for (const child of expressionChildren(expression)) {
+    collectContextualLiteralHighlightEntries(child, parent, field, push);
   }
 }
 

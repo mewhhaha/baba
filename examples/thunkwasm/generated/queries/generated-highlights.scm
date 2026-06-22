@@ -27,6 +27,16 @@
 "->" @operator
 ";" @punctuation.delimiter
 "=" @operator
+(definition "fn" @keyword)
+(force_expr "force" @keyword)
+(fun_expr "fun" @keyword)
+(if_expr "else" @keyword)
+(if_expr "if" @keyword)
+(if_expr "then" @keyword)
+(lazy_expr "lazy" @keyword)
+(let_expr "in" @keyword)
+(let_expr "let" @keyword)
+(tick "tick" @keyword)
 (integer) @number
 (fun_expr param: (IDENT) @variable)
 (let_expr name: (IDENT) @variable)

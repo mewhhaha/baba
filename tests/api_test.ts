@@ -147,7 +147,7 @@ Deno.test("highlight defaults are rooted and infer contextual identifier semanti
     rootRule: "module",
   });
 
-  assertIncludes(highlights, '"fn" @keyword');
+  assertIncludes(highlights, '(function "fn" @keyword)');
   assertIncludes(highlights, "(function name: (ident) @function)");
   assertNotIncludes(highlights, "(ident) @variable");
   assertNotIncludes(highlights, '"unused" @keyword');
@@ -175,7 +175,7 @@ Deno.test("rich highlight defaults infer IDE-grade named and contextual captures
 
   const highlights = generateTreeSitterHighlightsQuery(source);
 
-  assertIncludes(highlights, '"fn" @keyword');
+  assertIncludes(highlights, '(function_decl "fn" @keyword)');
   assertIncludes(highlights, '"(" @punctuation.bracket');
   assertIncludes(highlights, '"." @punctuation.delimiter');
   assertIncludes(highlights, "(line_comment) @comment");
@@ -190,6 +190,24 @@ Deno.test("rich highlight defaults infer IDE-grade named and contextual captures
   assertIncludes(highlights, "(member field: (ident) @variable.other.member)");
   assertIncludes(highlights, "(variable name: (ident) @variable)");
   assert(!highlights.split("\n").includes("(ident) @variable"));
+  assert(!highlights.split("\n").includes('"fn" @keyword'));
+  assert(!highlights.split("\n").includes('"let" @keyword'));
+});
+
+Deno.test("rich highlight defaults avoid global word-fragment literals", () => {
+  const source = `
+    token ident = /[a-z_][a-z0-9_]*/ ;
+    module = item+ ;
+    item = const_decl | ident | "_" ;
+    const_decl = "const" name:ident ;
+  `;
+
+  const highlights = generateTreeSitterHighlightsQuery(source);
+
+  assertIncludes(highlights, '(const_decl "const" @keyword)');
+  assertIncludes(highlights, '(item "_" @keyword)');
+  assert(!highlights.split("\n").includes('"const" @keyword'));
+  assert(!highlights.split("\n").includes('"_" @keyword'));
 });
 
 Deno.test("minimal highlight defaults preserve literal-only inference", () => {
