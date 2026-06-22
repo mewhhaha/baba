@@ -65,6 +65,8 @@ shape/text and emits public diagnostics. `parserTokenStreamSpanBoundsStatus`,
 EOF-shape errors before TypeScript allocates public diagnostics.
 `parserTokenStreamGapTokenStatus` classifies canonical lexer tokens inside
 omitted source gaps as safely omitted trivia or invalid nontrivia source.
+`parserTokenStreamTokenMatchStatus` compares canonical and supplied token
+numeric identity, terminal, spec index, and span after host text/channel checks.
 `lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
 accepted, lexical error tokens, or not in the parser terminal set before
 TypeScript allocates the public diagnostic object.

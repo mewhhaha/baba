@@ -1856,6 +1856,31 @@ function parserTokenStreamGapTokenStatus(tokenClass: number, tokenStart: number,
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTokenStreamTokenMatchStatus(leftClass: number, rightClass: number, leftSpecIndex: number, rightSpecIndex: number, leftTerminal: number, rightTerminal: number, leftStart: number, leftEnd: number, rightStart: number, rightEnd: number): number {
+  if (((((leftClass) >>> 0) === ((rightClass) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (7) >>> 0;
+  }
+  if (((((leftSpecIndex) >>> 0) === ((rightSpecIndex) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (7) >>> 0;
+  }
+  if (((((leftTerminal) >>> 0) === ((rightTerminal) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (7) >>> 0;
+  }
+  if (((((leftStart) >>> 0) === ((rightStart) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (7) >>> 0;
+  }
+  if (((((leftEnd) >>> 0) === ((rightEnd) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (7) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTraceTokenStreamStatus(publicClass: number): number {
   if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
     return (1) >>> 0;
@@ -3374,21 +3399,23 @@ function matchCanonicalToken(
 
 function sameToken(left: Token, right: Token): boolean {
   if (
-    left.type !== right.type ||
     left.text !== right.text ||
-    left.channel !== right.channel ||
-    left.span.start !== right.span.start ||
-    left.span.end !== right.span.end
+    left.channel !== right.channel
   ) {
     return false;
   }
-  if (left.type === "named" && right.type === "named") {
-    return left.kind === right.kind;
-  }
-  if (left.type === "literal" && right.type === "literal") {
-    return left.literal === right.literal;
-  }
-  return true;
+  return parserTokenStreamTokenMatchStatus(
+    publicTokenClass(left),
+    publicTokenClass(right),
+    tokenSpecIndex(left),
+    tokenSpecIndex(right),
+    tokenToTerminal(left),
+    tokenToTerminal(right),
+    left.span.start,
+    left.span.end,
+    right.span.start,
+    right.span.end,
+  ) === TOKEN_STREAM_OK;
 }
 
 function clampSpan(span: Span, sourceLength: number): Span {

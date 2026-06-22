@@ -121,6 +121,7 @@ import {
   RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_OK,
   RUNTIME_TOKEN_STREAM_STATUS_OVERLAP,
+  RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH,
   RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_INTERNAL,
@@ -2211,6 +2212,118 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserTokenStreamTokenMatchProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_token_stream_token_match",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserTokenStreamTokenMatchStatus", [
+                u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                u32(1),
+                u32(1),
+                u32(3),
+                u32(3),
+                u32(2),
+                u32(4),
+                u32(2),
+                u32(4),
+              ]),
+              u32(100_000),
+            ),
+            add(
+              mul(
+                call("parserTokenStreamTokenMatchStatus", [
+                  u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                  u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                  u32(1),
+                  u32(1),
+                  u32(3),
+                  u32(3),
+                  u32(2),
+                  u32(4),
+                  u32(2),
+                  u32(4),
+                ]),
+                u32(10_000),
+              ),
+              add(
+                mul(
+                  call("parserTokenStreamTokenMatchStatus", [
+                    u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                    u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                    u32(1),
+                    u32(2),
+                    u32(3),
+                    u32(3),
+                    u32(2),
+                    u32(4),
+                    u32(2),
+                    u32(4),
+                  ]),
+                  u32(1_000),
+                ),
+                add(
+                  mul(
+                    call("parserTokenStreamTokenMatchStatus", [
+                      u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                      u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                      u32(1),
+                      u32(1),
+                      u32(3),
+                      u32(4),
+                      u32(2),
+                      u32(4),
+                      u32(2),
+                      u32(4),
+                    ]),
+                    u32(100),
+                  ),
+                  add(
+                    mul(
+                      call("parserTokenStreamTokenMatchStatus", [
+                        u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                        u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                        u32(1),
+                        u32(1),
+                        u32(3),
+                        u32(3),
+                        u32(2),
+                        u32(4),
+                        u32(3),
+                        u32(4),
+                      ]),
+                      u32(10),
+                    ),
+                    call("parserTokenStreamTokenMatchStatus", [
+                      u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                      u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                      u32(1),
+                      u32(1),
+                      u32(3),
+                      u32(3),
+                      u32(2),
+                      u32(4),
+                      u32(2),
+                      u32(5),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserTraceTokenStreamStatusProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_trace_token_stream_status",
@@ -3115,6 +3228,20 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
               RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF) * 100 +
           RUNTIME_TOKEN_STREAM_STATUS_OK * 10 +
           RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP,
+      },
+    },
+    {
+      name:
+        "runtime token-stream token match helper compares portable identity",
+      program: parserTokenStreamTokenMatchProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_TOKEN_STREAM_STATUS_OK * 100_000 +
+          RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH * 10_000 +
+          RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH * 1_000 +
+          RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH * 100 +
+          RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH * 10 +
+          RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH,
       },
     },
     {

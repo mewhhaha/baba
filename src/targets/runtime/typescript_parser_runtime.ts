@@ -1631,21 +1631,23 @@ function matchCanonicalToken(
 
 function sameToken(left: Token, right: Token): boolean {
   if (
-    left.type !== right.type ||
     left.text !== right.text ||
-    left.channel !== right.channel ||
-    left.span.start !== right.span.start ||
-    left.span.end !== right.span.end
+    left.channel !== right.channel
   ) {
     return false;
   }
-  if (left.type === "named" && right.type === "named") {
-    return left.kind === right.kind;
-  }
-  if (left.type === "literal" && right.type === "literal") {
-    return left.literal === right.literal;
-  }
-  return true;
+  return parserTokenStreamTokenMatchStatus(
+    publicTokenClass(left),
+    publicTokenClass(right),
+    tokenSpecIndex(left),
+    tokenSpecIndex(right),
+    tokenToTerminal(left),
+    tokenToTerminal(right),
+    left.span.start,
+    left.span.end,
+    right.span.start,
+    right.span.end,
+  ) === TOKEN_STREAM_OK;
 }
 
 function clampSpan(span: Span, sourceLength: number): Span {

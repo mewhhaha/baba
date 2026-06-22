@@ -43,6 +43,7 @@ export const RUNTIME_TOKEN_STREAM_STATUS_OVERLAP = 3;
 export const RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH = 4;
 export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF = 5;
 export const RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP = 6;
+export const RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH = 7;
 export const RUNTIME_TRACE_TOKEN_STREAM_EMIT = 0;
 export const RUNTIME_TRACE_TOKEN_STREAM_SKIP = 1;
 export const RUNTIME_TRACE_TOKEN_STREAM_STOP = 2;
@@ -1720,6 +1721,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamWidthStatusFunction(),
     parserTokenStreamEofStatusFunction(),
     parserTokenStreamGapTokenStatusFunction(),
+    parserTokenStreamTokenMatchStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
     parserTraceTerminalFunction(),
     parserShiftedTokenStatusFunction(),
@@ -2841,6 +2843,76 @@ function parserTokenStreamGapTokenStatusFunction(): RuntimeLanguageFunction {
         consequent: [{
           kind: "return",
           expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamTokenMatchStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamTokenMatchStatus",
+    parameters: [
+      { name: "leftClass", type: "u32" },
+      { name: "rightClass", type: "u32" },
+      { name: "leftSpecIndex", type: "u32" },
+      { name: "rightSpecIndex", type: "u32" },
+      { name: "leftTerminal", type: "u32" },
+      { name: "rightTerminal", type: "u32" },
+      { name: "leftStart", type: "u32" },
+      { name: "leftEnd", type: "u32" },
+      { name: "rightStart", type: "u32" },
+      { name: "rightEnd", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("leftClass"), local("rightClass")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("leftSpecIndex"), local("rightSpecIndex")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("leftTerminal"), local("rightTerminal")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("leftStart"), local("rightStart")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("leftEnd"), local("rightEnd")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
         }],
       },
       {

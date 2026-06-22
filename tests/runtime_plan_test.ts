@@ -289,6 +289,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(
     parserRuntimeSource,
+    "parserTokenStreamTokenMatchStatus",
+  );
+  assertIncludes(
+    parserRuntimeSource,
     "parserTraceTokenStreamStatus",
   );
   assertIncludes(
@@ -300,6 +304,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "parserShiftedTokenStatus",
   );
   assertIncludes(parserRuntimeSource, "sourceTextMatches");
+  assertNotIncludes(parserRuntimeSource, "left.type !== right.type");
+  assertNotIncludes(parserRuntimeSource, "left.kind === right.kind");
+  assertNotIncludes(parserRuntimeSource, "left.literal === right.literal");
   assertNotIncludes(parserRuntimeSource, "source.slice");
   assertIncludes(
     parserRuntimeSource,
