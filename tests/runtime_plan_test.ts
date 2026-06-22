@@ -107,6 +107,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const publicFieldMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_field_materializer.ts",
   );
+  const publicParseResultMaterializerSource = await Deno.readTextFile(
+    "src/targets/runtime/public_parse_result_materializer.ts",
+  );
   const publicRuleNodeMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_rule_node_materializer.ts",
   );
@@ -149,6 +152,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(publicFieldMaterializerSource, "Object.create(null)");
   assertIncludes(publicFieldMaterializerSource, "fields[name] = value");
   assertIncludes(parserRuntimeSource, "emitPublicDiagnosticMaterializer");
+  assertIncludes(parserRuntimeSource, "emitPublicParseResultMaterializer");
   assertIncludes(parserRuntimeSource, "emitPublicEofTokenMaterializer");
   assertIncludes(parserRuntimeSource, "materializeEofToken(source.length)");
   assertIncludes(
@@ -173,6 +177,16 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "parserDiagnosticSpanStart",
   );
   assertIncludes(publicDiagnosticMaterializerSource, '"PARSER_INTERNAL_ERROR"');
+  assertIncludes(
+    publicParseResultMaterializerSource,
+    "function successfulParseResult",
+  );
+  assertIncludes(
+    publicParseResultMaterializerSource,
+    "function failedParseResult",
+  );
+  assertIncludes(publicParseResultMaterializerSource, "ok: true");
+  assertIncludes(publicParseResultMaterializerSource, "ok: false");
   assertIncludes(parserRuntimeSource, "emitPublicRuleNodeMaterializer");
   assertIncludes(parserRuntimeSource, "hostRuleNodeRuntimeHandle");
   assertIncludes(parserRuntimeSource, "resetPublicSyntaxMaterialization");
@@ -236,6 +250,8 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "RUNTIME_NODE_HANDLES");
   assertNotIncludes(parserRuntimeSource, "RUNTIME_SYNTAX_VALUES");
   assertNotIncludes(parserRuntimeSource, "function parseDiagnostic");
+  assertNotIncludes(parserRuntimeSource, "ok: true");
+  assertNotIncludes(parserRuntimeSource, "ok: false");
   assertNotIncludes(parserRuntimeSource, "function unexpectedTokenDiagnostic");
   assertNotIncludes(parserRuntimeSource, "parserDiagnosticNew");
   assertNotIncludes(parserRuntimeSource, "parserDiagnosticSpanStart");
@@ -290,7 +306,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 10);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 11);
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {

@@ -97,7 +97,10 @@ status values for generated TypeScript parsers and Wasm adapters before those
 hosts allocate public diagnostics. Public parse diagnostics now allocate
 runtime-language diagnostic records first, read span data back through
 `parserDiagnosticSpanStart`/`parserDiagnosticSpanEnd`, and then materialize the
-public JavaScript diagnostic object at the API boundary. Deterministic
+public JavaScript diagnostic object at the API boundary. Generated TypeScript
+parsers and generated Wasm adapters allocate parse success/failure results
+through one shared runtime-target parse-result materializer, keeping the public
+discriminated union object shape centralized at the host boundary. Deterministic
 TypeScript parsers use a runtime-language `parserTrace` helper whose parser
 state stack and accepted-action trace are stored in arena-backed growable
 vectors for LR shift/reduce/accept control flow. Declared-conflict TypeScript
@@ -292,8 +295,8 @@ These rules must be specified before the parser runtime can be fully lowered:
   the runtime language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
 - complete generated-parser lowering for remaining host public object
-  materialization that still sits outside the shared token, diagnostic, field,
-  and rule-node public wrapper helpers.
+  materialization that still sits outside the shared token, diagnostic,
+  parse-result, field, and rule-node public wrapper helpers.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from

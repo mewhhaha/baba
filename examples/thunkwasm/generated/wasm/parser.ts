@@ -39,7 +39,7 @@ const NAMED_SPEC_INDICES = new Map<string, number>([["IDENT",0],["INTEGER",1],["
 const LITERAL_SPEC_INDICES = new Map<string, number>([["fn",3],["=",4],[";",5],["let",6],["in",7],["if",8],["then",9],["else",10],["likely",11],["unlikely",12],["fun",13],["->",14],["lazy",15],["force",16],["==",17],["!=",18],["<",19],["<=",20],[">",21],[">=",22],["+",23],["-",24],["*",25],["/",26],["(",27],[")",28],[",",29],["tick",30]]);
 const RULE_NAMES: readonly string[] = ["module","definition","expr","let_expr","if_expr","branch_hint","likely","unlikely","fun_expr","lazy_expr","force_expr","equality","equality_tail","equality_op","eq","ne","comparison","comparison_tail","comparison_op","lt","le","gt","ge","additive","additive_tail","additive_op","plus","minus","multiplicative","multiplicative_tail","multiplicative_op","star","slash","unary","negate","call","call_arguments","argument_values","argument_tail","primary","integer","variable","tick","group"];
 const FIELD_NAMES: readonly string[] = ["alternate","args","body","callee","condition","consequent","head","hint","left","name","op","param","params","rest","right","tail","value","values"];
-const EMPTY_PARSE_DIAGNOSTICS: readonly ParseDiagnostic[] = [];
+const EMPTY_PARSE_DIAGNOSTICS = [] as const;
 
 const ACTION_NONE = 0;
 const ACTION_SHIFT = 16777216;
@@ -1791,6 +1791,33 @@ function ruleNodeTokenRange(handle: number): TokenRange {
     end: parserRuleNodeTokenEnd(handle),
   };
 }
+function successfulParseResult(
+  source: string,
+  tokens: readonly Token[],
+  root: RootNode,
+): ParseResult<RootNode> {
+  return {
+    ok: true,
+    root,
+    source,
+    tokens,
+    diagnostics: EMPTY_PARSE_DIAGNOSTICS,
+  };
+}
+
+function failedParseResult(
+  source: string,
+  tokens: readonly Token[],
+  diagnostics: readonly ParseDiagnostic[],
+): ParseResult<RootNode> {
+  return {
+    ok: false,
+    root: null,
+    source,
+    tokens,
+    diagnostics,
+  };
+}
 
 export function parse(
   source: string,
@@ -1845,13 +1872,7 @@ function parseTokenList(
   trustRuntimeTerminals = false,
 ): ParseResult<RootNode> {
   if (lexicalDiagnostics.length > 0) {
-    return {
-      ok: false,
-      root: null,
-      source,
-      tokens,
-      diagnostics: lexicalDiagnostics,
-    };
+    return failedParseResult(source, tokens, lexicalDiagnostics);
   }
 
   const stream = parseStream ??
@@ -1860,33 +1881,27 @@ function parseTokenList(
   if (!traced.ok) {
     const token = stream.tokens[traced.index] ?? materializeEofToken(source.length);
     if (traced.limit) {
-      return {
-        ok: false,
-        root: null,
+      return failedParseResult(
         source,
         tokens,
-        diagnostics: [branchLimitDiagnostic(source.length)],
-      };
+        [branchLimitDiagnostic(source.length)],
+      );
     }
     if (traced.internal) {
-      return {
-        ok: false,
-        root: null,
+      return failedParseResult(
         source,
         tokens,
-        diagnostics: [parserInternalMessageDiagnostic(
+        [parserInternalMessageDiagnostic(
           "Wasm parser trace failed.",
           currentSpan(token),
         )],
-      };
+      );
     }
-    return {
-      ok: false,
-      root: null,
+    return failedParseResult(
       source,
       tokens,
-      diagnostics: [unexpectedTokenDiagnostic(token, traced.state)],
-    };
+      [unexpectedTokenDiagnostic(token, traced.state)],
+    );
   }
 
   return replayTrace(
@@ -1968,16 +1983,14 @@ function replayTrace(
 
     const token = streamTokens[index] ?? materializeEofToken(source.length);
     if (actionStatus !== REPLAY_ACTION_REDUCE) {
-      return {
-        ok: false,
-        root: null,
+      return failedParseResult(
         source,
         tokens,
-        diagnostics: [parserInternalMessageDiagnostic(
+        [parserInternalMessageDiagnostic(
           "Wasm parser trace contained an unknown action kind.",
           currentSpan(token),
         )],
-      };
+      );
     }
 
     const rhsLength = parserProductionRhsLength(payload);
@@ -1991,57 +2004,49 @@ function replayTrace(
       values.length - 1,
     );
     if (replayReductionStatus === REPLAY_REDUCTION_UNKNOWN_PRODUCTION) {
-      return {
-        ok: false,
-        root: null,
+      return failedParseResult(
         source,
         tokens,
-        diagnostics: [parserInternalMessageDiagnostic(
+        [parserInternalMessageDiagnostic(
           "Wasm parser trace referenced an unknown production.",
           currentSpan(token),
         )],
-      };
+      );
     }
     if (
       replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING ||
       replayReductionStatus === REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING
     ) {
-      return {
-        ok: false,
-        root: null,
+      return failedParseResult(
         source,
         tokens,
-        diagnostics: [parserInternalMessageDiagnostic(
+        [parserInternalMessageDiagnostic(
           replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING
             ? "Rule reducer is missing its rule id payload."
             : "Field reducer is missing its field id payload.",
           currentSpan(token),
         )],
-      };
+      );
     }
     if (replayReductionStatus === REPLAY_REDUCTION_STACK_UNDERFLOW) {
-      return {
-        ok: false,
-        root: null,
+      return failedParseResult(
         source,
         tokens,
-        diagnostics: [parserInternalMessageDiagnostic(
+        [parserInternalMessageDiagnostic(
           "Wasm parser trace underflowed the replay stack.",
           currentSpan(token),
         )],
-      };
+      );
     }
     if (replayReductionStatus !== REPLAY_REDUCTION_OK) {
-      return {
-        ok: false,
-        root: null,
+      return failedParseResult(
         source,
         tokens,
-        diagnostics: [parserInternalMessageDiagnostic(
+        [parserInternalMessageDiagnostic(
           "Wasm parser trace reduction validation failed.",
           currentSpan(token),
         )],
-      };
+      );
     }
     const rhsValues = rhsLength === 0
       ? []
@@ -2056,27 +2061,23 @@ function replayTrace(
         streamTokenIndices[index] ?? tokens.length,
       );
     } catch (error) {
-      return {
-        ok: false,
-        root: null,
+      return failedParseResult(
         source,
         tokens,
-        diagnostics: [internalParserDiagnostic(error, token.span)],
-      };
+        [internalParserDiagnostic(error, token.span)],
+      );
     }
     values.push(reduced);
   }
 
-  return {
-    ok: false,
-    root: null,
+  return failedParseResult(
     source,
     tokens,
-    diagnostics: [parserInternalMessageDiagnostic(
+    [parserInternalMessageDiagnostic(
       "Wasm parser trace ended without accepting.",
       { start: source.length, end: source.length },
     )],
-  };
+  );
 }
 
 const RUNTIME_FRAGMENT_VALUES = new Map<number, unknown>();
@@ -2444,24 +2445,16 @@ function acceptedParseResult(
     ? accepted.value as RootNode
     : null;
   if (root) {
-    return {
-      ok: true,
-      root,
-      source,
-      tokens,
-      diagnostics: [],
-    };
+    return successfulParseResult(source, tokens, root);
   }
-  return {
-    ok: false,
-    root: null,
+  return failedParseResult(
     source,
     tokens,
-    diagnostics: [parserInternalMessageDiagnostic(
+    [parserInternalMessageDiagnostic(
       "Parser accepted without producing a root node.",
       { start: source.length, end: source.length },
     )],
-  };
+  );
 }
 
 function tokenToTerminal(token: Token, trustRuntimeTerminal = false): number {

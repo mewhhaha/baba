@@ -128,6 +128,10 @@ runtime language:
   range, children, and fields back through runtime accessors before wrapping the
   public JavaScript object through one shared runtime-target rule-node
   materializer helper.
+- Centralized public parse result materialization behind one shared
+  runtime-target helper. Generated TypeScript parsers and generated Wasm
+  adapters now allocate successful and failed `ParseResult` objects through the
+  same discriminated-union wrapper.
 - Moved the generated TypeScript lexer UTF-16 code-point width helper onto a
   runtime-language source program, with the same source compiled through both
   TypeScript and Wasm conformance tests.
@@ -346,10 +350,11 @@ Still unresolved:
   public rule nodes is now emitted from one shared runtime-target helper. Public
   token object wrapping is now emitted from one shared runtime-target helper for
   TypeScript and Wasm adapters, public diagnostic object wrapping is now emitted
-  from one shared runtime-target helper, and public field object allocation is
-  now emitted from one shared runtime-target helper. The runtime language now
-  has a checked resettable arena plus tagged arena-backed `u32` arrays, fixed
-  records, growable vectors, and initial parser
+  from one shared runtime-target helper, public field object allocation is now
+  emitted from one shared runtime-target helper, and public parse result object
+  allocation is now emitted from one shared runtime-target helper. The runtime
+  language now has a checked resettable arena plus tagged arena-backed `u32`
+  arrays, fixed records, growable vectors, and initial parser
   fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
   fragment assembly helpers that generated replay is beginning to use. It now
   has a shared in-runtime object-kind provenance gate for arena handles, a
