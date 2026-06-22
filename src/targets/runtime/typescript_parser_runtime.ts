@@ -302,14 +302,8 @@ function commonTypes(): string {
   runtimeHandle: number;
   value: unknown;
   children: SyntaxElement[];
-  fields: FieldCapture[];
   span: Span | null;
   tokenRange: TokenRange | null;
-}
-
-interface FieldCapture {
-  fieldId: number;
-  value: unknown;
 }
 
 interface TokenRange {
@@ -731,7 +725,9 @@ ${replayTraceRuntime("Wasm")}`;
 }
 
 function replayTraceRuntime(label: string): string {
-  const replayPrelude = label === "Wasm" ? "  runtimeArenaReset();\n" : "";
+  const replayPrelude = label === "Wasm"
+    ? "  runtimeArenaReset();\n  RUNTIME_FRAGMENT_VALUES.clear();\n"
+    : "  RUNTIME_FRAGMENT_VALUES.clear();\n";
   return `function replayTrace(
   source: string,
   tokens: readonly Token[],
@@ -883,6 +879,7 @@ ${replayPrelude}  const values: unknown[] = [null];
 
 function reductionRuntime(): string {
   return `const RUNTIME_NODE_HANDLES = new WeakMap<object, number>();
+const RUNTIME_FRAGMENT_VALUES = new Map<number, unknown>();
 
 function reduceProduction(
   reducerOperation: number,
@@ -907,7 +904,7 @@ function reduceProduction(
         span: ruleNodeSpan(runtimeHandle),
         tokenRange: ruleNodeTokenRange(runtimeHandle),
         children: fragment.children,
-        fields: buildFields(reducerPayload, fragment.fields),
+        fields: buildFields(reducerPayload, runtimeHandle),
       };
       RUNTIME_NODE_HANDLES.set(node, runtimeHandle);
       return node as unknown as AnyRuleNode;
@@ -929,6 +926,7 @@ function reduceProduction(
       const item = reducerFragmentChild(reducerOperation, rhs, 0);
       parserFragmentWrapValueVector(item.runtimeHandle);
       item.value = [item.value];
+      rememberFragmentValue(item.runtimeHandle, item.value);
       item.span = fragmentSpan(item.runtimeHandle);
       item.tokenRange = fragmentTokenRange(item.runtimeHandle);
       return item;
@@ -946,7 +944,6 @@ function reduceProduction(
         fragment.runtimeHandle,
       );
       parserFragmentAppendField(fragment.runtimeHandle, captureHandle);
-      fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;
     }
     default:
@@ -959,20 +956,21 @@ function tokenFragment(shifted: ShiftedToken): Fragment {
   if (!isMainSyntaxToken(token)) {
     throw new Error("Expected shifted main syntax token.");
   }
-  return {
-    runtimeHandle: parserFragmentFromToken(
-      parserTokenNew(
-        publicTokenClass(token),
-        tokenSpecIndex(token),
-        tokenToTerminal(token),
-        token.span.start,
-        token.span.end,
-      ),
-      shifted.tokenIndex,
+  const runtimeHandle = parserFragmentFromToken(
+    parserTokenNew(
+      publicTokenClass(token),
+      tokenSpecIndex(token),
+      tokenToTerminal(token),
+      token.span.start,
+      token.span.end,
     ),
+    shifted.tokenIndex,
+  );
+  rememberFragmentValue(runtimeHandle, token);
+  return {
+    runtimeHandle,
     value: token,
     children: [token],
-    fields: [],
     span: token.span,
     tokenRange: { start: shifted.tokenIndex, end: shifted.tokenIndex + 1 },
   };
@@ -980,11 +978,11 @@ function tokenFragment(shifted: ShiftedToken): Fragment {
 
 function ruleFragment(node: AnyRuleNode): Fragment {
   const runtimeHandle = runtimeRuleNodeFragmentHandle(node);
+  rememberFragmentValue(runtimeHandle, node);
   return {
     runtimeHandle,
     value: node,
     children: [node],
-    fields: [],
     span: fragmentSpan(runtimeHandle),
     tokenRange: fragmentTokenRange(runtimeHandle),
   };
@@ -1054,19 +1052,17 @@ function sequenceFragment(
   const runtimeHandle = parserFragmentSequenceNew(offset, tokenIndex);
   const fragmentValues: unknown[] = [];
   const children: SyntaxElement[] = [];
-  const fields: FieldCapture[] = [];
   for (let index = 0; index < values.length; index++) {
     const part = reducerFragmentChild(reducerOperation, values, index);
     parserFragmentSequenceAppend(runtimeHandle, part.runtimeHandle);
     fragmentValues.push(part.value);
     appendAll(children, part.children);
-    appendAll(fields, part.fields);
   }
+  rememberFragmentValue(runtimeHandle, fragmentValues);
   return {
     runtimeHandle,
     value: fragmentValues,
     children,
-    fields,
     span: fragmentSpan(runtimeHandle),
     tokenRange: fragmentTokenRange(runtimeHandle),
   };
@@ -1080,11 +1076,11 @@ function emptyFragment(
   const runtimeHandle = Array.isArray(value)
     ? parserFragmentSequenceNew(offset, tokenIndex)
     : parserFragmentEmpty(0, offset, tokenIndex);
+  rememberFragmentValue(runtimeHandle, value);
   return {
     runtimeHandle,
     value,
     children: [],
-    fields: [],
     span: fragmentSpan(runtimeHandle),
     tokenRange: fragmentTokenRange(runtimeHandle),
   };
@@ -1095,12 +1091,11 @@ function appendFragment(list: Fragment, item: Fragment): Fragment {
   const values = asMutableArray(list.value);
   values.push(item.value);
   appendAll(list.children, item.children);
-  appendAll(list.fields, item.fields);
+  rememberFragmentValue(list.runtimeHandle, values);
   return {
     runtimeHandle: list.runtimeHandle,
     value: values,
     children: list.children,
-    fields: list.fields,
     span: fragmentSpan(list.runtimeHandle),
     tokenRange: fragmentTokenRange(list.runtimeHandle),
   };
@@ -1120,13 +1115,11 @@ function appendSeparatedFragment(
   values.push(item.value);
   appendAll(list.children, separator.children);
   appendAll(list.children, item.children);
-  appendAll(list.fields, separator.fields);
-  appendAll(list.fields, item.fields);
+  rememberFragmentValue(list.runtimeHandle, values);
   return {
     runtimeHandle: list.runtimeHandle,
     value: values,
     children: list.children,
-    fields: list.fields,
     span: fragmentSpan(list.runtimeHandle),
     tokenRange: fragmentTokenRange(list.runtimeHandle),
   };
@@ -1147,6 +1140,17 @@ function asMutableArray(value: unknown): unknown[] {
 function appendAll<T>(target: T[], values: readonly T[]): T[] {
   for (const value of values) target.push(value);
   return target;
+}
+
+function rememberFragmentValue(handle: number, value: unknown): void {
+  RUNTIME_FRAGMENT_VALUES.set(handle, value);
+}
+
+function hostFragmentValue(handle: number): unknown {
+  if (!RUNTIME_FRAGMENT_VALUES.has(handle)) {
+    throw new Error("Runtime fragment is missing its host value.");
+  }
+  return RUNTIME_FRAGMENT_VALUES.get(handle);
 }
 
 function fragmentSpan(handle: number): Span {
@@ -1218,12 +1222,13 @@ function lexicalTokenDiagnostics(
 
 function buildFields(
   ruleId: number,
-  captures: readonly FieldCapture[],
+  ruleNodeHandle: number,
 ): Record<string, unknown> {
   const start = parserFieldStart(ruleId);
   const end = parserFieldEnd(ruleId);
+  const captureCount = parserRuleNodeFieldCount(ruleNodeHandle);
   if (end <= start) {
-    if (captures.length > 0) {
+    if (captureCount > 0) {
       throw new Error("Rule has field captures but no field schema.");
     }
     return Object.create(null) as Record<string, unknown>;
@@ -1241,29 +1246,33 @@ function buildFields(
       : undefined;
     counts[fieldId] = 0;
   }
-  for (const capture of captures) {
-    const entry = parserFieldIndex(ruleId, capture.fieldId);
+  const captures = parserRuleNodeFields(ruleNodeHandle);
+  for (let index = 0; index < captureCount; index++) {
+    const capture = runtimeVectorLoad(captures, index);
+    const fieldId = parserFieldCaptureFieldId(capture);
+    const value = hostFragmentValue(parserFieldCaptureValue(capture));
+    const entry = parserFieldIndex(ruleId, fieldId);
     if (entry === NO_FIELD) {
-      throw new Error(\`Unknown field capture '\${fieldName(capture.fieldId)}'.\`);
+      throw new Error(\`Unknown field capture '\${fieldName(fieldId)}'.\`);
     }
-    const name = fieldName(capture.fieldId);
-    counts[capture.fieldId] = (counts[capture.fieldId] ?? 0) + 1;
+    const name = fieldName(fieldId);
+    counts[fieldId] = (counts[fieldId] ?? 0) + 1;
     const status = parserFieldCaptureStatus(
       entry,
-      counts[capture.fieldId] ?? 0,
+      counts[fieldId] ?? 0,
     );
     if (status === FIELD_CAPTURE_ARRAY) {
       const values = fields[name];
       if (!Array.isArray(values)) {
         throw new Error(\`Array field '\${name}' was not initialized as an array.\`);
       }
-      values.push(capture.value);
+      values.push(value);
     } else if (status === FIELD_CAPTURE_SCALAR) {
-      fields[name] = capture.value;
+      fields[name] = value;
     } else if (status === FIELD_CAPTURE_TOO_MANY) {
       throw new Error(\`Scalar field '\${name}' was captured more than once.\`);
     } else {
-      throw new Error(\`Unknown field capture '\${fieldName(capture.fieldId)}'.\`);
+      throw new Error(\`Unknown field capture '\${fieldName(fieldId)}'.\`);
     }
   }
   for (let entry = start; entry < end; entry++) {
@@ -1429,7 +1438,6 @@ function isFragment(value: unknown): value is Fragment {
     "runtimeHandle" in value &&
     "value" in value &&
     "children" in value &&
-    "fields" in value &&
     "tokenRange" in value;
 }
 

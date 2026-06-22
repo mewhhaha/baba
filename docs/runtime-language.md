@@ -70,33 +70,35 @@ assembly now reads field row/config metadata through
 public CST object shape, but replay now carries runtime-language parser object
 handles and calls runtime-language fragment helpers while reducing raw child,
 rule-node, token-fragment, sequence, empty, append, separated-append,
-first-array, and field-capture results. Field value-class/count validation now
-uses `parserFieldValueClass`/`parserFieldCaptureStatus`/`parserFieldFinalStatus`
-helpers, replay reduction validity uses `parserReplayReductionStatus`, and
-span/token-range merge arithmetic uses `parserMergeStart`/`parserMergeEnd`
-helpers. Generated parser action decoding uses
-`parserActionKind`/`parserActionPayload` helpers, and `parserTrace` uses the
-same helpers to classify encoded actions. `parserReplayActionStatus` classifies
-shift/reduce/accept/unknown action kinds before generated TypeScript replay
-dispatches the accepted trace. `parserTraceStatusKind` classifies parser trace
-status values for generated TypeScript parsers and Wasm adapters before those
-hosts allocate public diagnostics. Deterministic TypeScript parsers use a
-runtime-language `parserTrace` helper whose parser state stack and
-accepted-action trace are stored in arena-backed growable vectors for LR
-shift/reduce/accept control flow. Declared-conflict TypeScript parsers use a
-runtime-language conflict `parserTrace` helper whose active stack, accepted
-action trace, and saved branch snapshots are stored as arena-backed growable
-vectors before TypeScript replays the accepted action trace to build the CST.
-The core Wasm parser trace uses the same shared action kind/payload masks, and
-generated Wasm adapters now instantiate a runtime-language Wasm parser trace
-module for LR control flow, trace status classification, and trace action reads.
-The core Wasm module still owns lexing and low-level parser table lookup
-exports, but it no longer emits a separate `parse_trace` LR execution function.
-The same runtime-language source shapes are also compiled to Wasm in conformance
-tests. Because generated parser runtime code depends on runtime-language
-compiler output, the checked runtime implementation manifest includes both
-runtime language sources, the Stage-0 compiler, and the checked runtime-language
-artifact manifest.
+first-array, and field-capture results. Public field assembly iterates the
+runtime-language rule-node field vector, reads runtime field-capture records,
+and resolves captured host values through the runtime fragment handle map. Field
+value-class/count validation now uses `parserFieldValueClass`/
+`parserFieldCaptureStatus`/`parserFieldFinalStatus` helpers, replay reduction
+validity uses `parserReplayReductionStatus`, and span/token-range merge
+arithmetic uses `parserMergeStart`/`parserMergeEnd` helpers. Generated parser
+action decoding uses `parserActionKind`/`parserActionPayload` helpers, and
+`parserTrace` uses the same helpers to classify encoded actions.
+`parserReplayActionStatus` classifies shift/reduce/accept/unknown action kinds
+before generated TypeScript replay dispatches the accepted trace.
+`parserTraceStatusKind` classifies parser trace status values for generated
+TypeScript parsers and Wasm adapters before those hosts allocate public
+diagnostics. Deterministic TypeScript parsers use a runtime-language
+`parserTrace` helper whose parser state stack and accepted-action trace are
+stored in arena-backed growable vectors for LR shift/reduce/accept control flow.
+Declared-conflict TypeScript parsers use a runtime-language conflict
+`parserTrace` helper whose active stack, accepted action trace, and saved branch
+snapshots are stored as arena-backed growable vectors before TypeScript replays
+the accepted action trace to build the CST. The core Wasm parser trace uses the
+same shared action kind/payload masks, and generated Wasm adapters now
+instantiate a runtime-language Wasm parser trace module for LR control flow,
+trace status classification, and trace action reads. The core Wasm module still
+owns lexing and low-level parser table lookup exports, but it no longer emits a
+separate `parse_trace` LR execution function. The same runtime-language source
+shapes are also compiled to Wasm in conformance tests. Because generated parser
+runtime code depends on runtime-language compiler output, the checked runtime
+implementation manifest includes both runtime language sources, the Stage-0
+compiler, and the checked runtime-language artifact manifest.
 
 ## Current Executable Subset
 
@@ -197,6 +199,9 @@ execute both outputs and compare returned values or traps.
   runtime-language parser object handles during reduction, then read spans and
   token ranges back from those handles before constructing public JavaScript CST
   objects.
+- Generated public field assembly consumes runtime field-capture vectors and
+  resolves host values through a per-replay runtime fragment handle map; it no
+  longer carries an independent JavaScript field-capture list.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
