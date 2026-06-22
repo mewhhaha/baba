@@ -366,6 +366,11 @@ runtime language:
   onto runtime-language `parserTokenStreamFinalStatus`, so `parseTokens()` no
   longer directly decides in TypeScript whether EOF is the last supplied token
   or a no-EOF stream leaves unvalidated source text.
+- Moved generated external token-stream public literal/named/error shape
+  classification onto runtime-language `parserTokenStreamPublicTokenStatus`, so
+  `parseTokens()` no longer directly decides in TypeScript whether literal
+  channel/text, named channel, error channel, or unknown public token tags are
+  valid.
 - Moved generated token-level lexical diagnostic classification onto
   runtime-language `lexerTokenDiagnosticStatus`, so external `parseTokens()`
   lexical diagnostics no longer decide directly in TypeScript whether error,
@@ -434,21 +439,21 @@ Still unresolved:
   `parseTokens()` mapping still accepts public strings/literals at the API
   boundary, but terminal/channel classification, public token class
   compatibility, span/EOF-shape status, omitted-gap classification, canonical
-  token identity matching, final EOF/trailing-gap classification, plus
-  token-level lexical diagnostic classification now go through runtime-language
-  helpers. Parser trace input compaction now uses runtime-language
-  `parserTraceTokenStreamStatus` to classify emitted parser tokens, skippable
-  trivia, and EOF stop records, and parser trace terminal selection now uses
-  runtime-language `parserTraceTerminal` to choose EOF, trusted, spec, or
-  missing parser terminals. Shifted-token syntax classification now uses
-  runtime-language `parserShiftedTokenStatus` to distinguish literal/main CST
-  token fragments from trivia/error/EOF records. Parser replay span and
-  token-range merge arithmetic is runtime-language-backed, trailing-input
-  diagnostic code selection uses runtime-language
-  `parserUnexpectedDiagnosticCode`, reducer result-shape classification is
-  runtime-language-backed, and parser replay action dispatch, parser trace
-  status, replay reduction validity classification, replay sentinel stack-depth
-  arithmetic, plus replay RHS stack-slice start arithmetic now use
+  token identity matching, final EOF/trailing-gap classification, public token
+  shape classification, plus token-level lexical diagnostic classification now
+  go through runtime-language helpers. Parser trace input compaction now uses
+  runtime-language `parserTraceTokenStreamStatus` to classify emitted parser
+  tokens, skippable trivia, and EOF stop records, and parser trace terminal
+  selection now uses runtime-language `parserTraceTerminal` to choose EOF,
+  trusted, spec, or missing parser terminals. Shifted-token syntax
+  classification now uses runtime-language `parserShiftedTokenStatus` to
+  distinguish literal/main CST token fragments from trivia/error/EOF records.
+  Parser replay span and token-range merge arithmetic is
+  runtime-language-backed, trailing-input diagnostic code selection uses
+  runtime-language `parserUnexpectedDiagnosticCode`, reducer result-shape
+  classification is runtime-language-backed, and parser replay action dispatch,
+  parser trace status, replay reduction validity classification, replay sentinel
+  stack-depth arithmetic, plus replay RHS stack-slice start arithmetic now use
   runtime-language helpers. Generated replay also now carries runtime-language
   parser object handles and calls runtime-language fragment assembly helpers
   during token/rule/sequence/empty/list/field reductions. Public field assembly

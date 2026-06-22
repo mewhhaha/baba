@@ -69,6 +69,8 @@ omitted source gaps as safely omitted trivia or invalid nontrivia source.
 numeric identity, terminal, spec index, and span after host text/channel checks.
 `parserTokenStreamFinalStatus` classifies end-of-stream EOF placement and
 trailing source gaps before TypeScript allocates final token-stream diagnostics.
+`parserTokenStreamPublicTokenStatus` classifies public literal/named/error token
+shape after host type/channel/text spelling is mapped to numeric classes.
 `lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
 accepted, lexical error tokens, or not in the parser terminal set before
 TypeScript allocates the public diagnostic object.

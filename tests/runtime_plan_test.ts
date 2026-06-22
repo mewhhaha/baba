@@ -297,6 +297,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(
     parserRuntimeSource,
+    "parserTokenStreamPublicTokenStatus",
+  );
+  assertIncludes(
+    parserRuntimeSource,
     "parserTraceTokenStreamStatus",
   );
   assertIncludes(
@@ -319,6 +323,15 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "previousEnd < sourceText.length && eofIndex === -1",
   );
+  assertNotIncludes(
+    parserRuntimeSource,
+    'token.channel !== "main" || token.text !== token.literal',
+  );
+  assertNotIncludes(
+    parserRuntimeSource,
+    'token.channel !== "main" && token.channel !== "trivia"',
+  );
+  assertNotIncludes(parserRuntimeSource, 'token.channel !== "error"');
   assertNotIncludes(parserRuntimeSource, "source.slice");
   assertIncludes(
     parserRuntimeSource,

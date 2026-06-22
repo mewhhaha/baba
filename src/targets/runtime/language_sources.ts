@@ -28,6 +28,20 @@ export const RUNTIME_PUBLIC_TOKEN_MAIN = 2;
 export const RUNTIME_PUBLIC_TOKEN_TRIVIA = 3;
 export const RUNTIME_PUBLIC_TOKEN_ERROR = 4;
 export const RUNTIME_PUBLIC_TOKEN_EOF = 5;
+export const RUNTIME_PUBLIC_TOKEN_TYPE_UNKNOWN = 0;
+export const RUNTIME_PUBLIC_TOKEN_TYPE_LITERAL = 1;
+export const RUNTIME_PUBLIC_TOKEN_TYPE_NAMED = 2;
+export const RUNTIME_PUBLIC_TOKEN_TYPE_ERROR = 3;
+export const RUNTIME_PUBLIC_TOKEN_TYPE_EOF = 4;
+export const RUNTIME_PUBLIC_TOKEN_CHANNEL_UNKNOWN = 0;
+export const RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN = 1;
+export const RUNTIME_PUBLIC_TOKEN_CHANNEL_TRIVIA = 2;
+export const RUNTIME_PUBLIC_TOKEN_CHANNEL_ERROR = 3;
+export const RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK = 0;
+export const RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_LITERAL = 1;
+export const RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_NAMED = 2;
+export const RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_ERROR = 3;
+export const RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_UNKNOWN_TYPE = 4;
 export const RUNTIME_LEXER_SPEC_STATUS_OK = 0;
 export const RUNTIME_LEXER_SPEC_STATUS_UNKNOWN = 1;
 export const RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL = 2;
@@ -1723,6 +1737,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamGapTokenStatusFunction(),
     parserTokenStreamTokenMatchStatusFunction(),
     parserTokenStreamFinalStatusFunction(),
+    parserTokenStreamPublicTokenStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
     parserTraceTerminalFunction(),
     parserShiftedTokenStatusFunction(),
@@ -2965,6 +2980,135 @@ function parserTokenStreamFinalStatusFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamPublicTokenStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamPublicTokenStatus",
+    parameters: [
+      { name: "tokenType", type: "u32" },
+      { name: "channel", type: "u32" },
+      { name: "literalTextMatches", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenType"),
+          u32(RUNTIME_PUBLIC_TOKEN_TYPE_LITERAL),
+        ),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(
+              local("channel"),
+              u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN),
+            ),
+            consequent: [],
+            alternate: [{
+              kind: "return",
+              expression: u32(
+                RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_LITERAL,
+              ),
+            }],
+          },
+          {
+            kind: "if",
+            condition: eq(local("literalTextMatches"), u32(1)),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK),
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(
+                RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_LITERAL,
+              ),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenType"),
+          u32(RUNTIME_PUBLIC_TOKEN_TYPE_NAMED),
+        ),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(
+              local("channel"),
+              u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN),
+            ),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK),
+            }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              local("channel"),
+              u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_TRIVIA),
+            ),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK),
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(
+                RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_NAMED,
+              ),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenType"),
+          u32(RUNTIME_PUBLIC_TOKEN_TYPE_ERROR),
+        ),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(
+              local("channel"),
+              u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_ERROR),
+            ),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK),
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(
+                RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_ERROR,
+              ),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenType"),
+          u32(RUNTIME_PUBLIC_TOKEN_TYPE_EOF),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_UNKNOWN_TYPE),
       },
     ],
   };

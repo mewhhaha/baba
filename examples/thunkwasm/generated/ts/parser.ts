@@ -105,6 +105,20 @@ const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
 const PUBLIC_TOKEN_ERROR = 4;
 const PUBLIC_TOKEN_EOF = 5;
+const PUBLIC_TOKEN_TYPE_UNKNOWN = 0;
+const PUBLIC_TOKEN_TYPE_LITERAL = 1;
+const PUBLIC_TOKEN_TYPE_NAMED = 2;
+const PUBLIC_TOKEN_TYPE_ERROR = 3;
+const PUBLIC_TOKEN_TYPE_EOF = 4;
+const PUBLIC_TOKEN_CHANNEL_UNKNOWN = 0;
+const PUBLIC_TOKEN_CHANNEL_MAIN = 1;
+const PUBLIC_TOKEN_CHANNEL_TRIVIA = 2;
+const PUBLIC_TOKEN_CHANNEL_ERROR = 3;
+const PUBLIC_TOKEN_SHAPE_OK = 0;
+const PUBLIC_TOKEN_SHAPE_INVALID_LITERAL = 1;
+const PUBLIC_TOKEN_SHAPE_INVALID_NAMED = 2;
+const PUBLIC_TOKEN_SHAPE_INVALID_ERROR = 3;
+const PUBLIC_TOKEN_SHAPE_UNKNOWN_TYPE = 4;
 const SPEC_STATUS_OK = 0;
 const SPEC_STATUS_NOT_LITERAL = 2;
 const SPEC_STATUS_NOT_MAIN = 3;
@@ -1896,6 +1910,42 @@ function parserTokenStreamFinalStatus(hasEof: number, eofIndex: number, tokenCou
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTokenStreamPublicTokenStatus(tokenType: number, channel: number, literalTextMatches: number): number {
+  if (((((tokenType) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((channel) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    } else {
+      return (1) >>> 0;
+    }
+    if (((((literalTextMatches) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (1) >>> 0;
+    }
+  }
+  if (((((tokenType) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((channel) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    if (((((channel) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (2) >>> 0;
+    }
+  }
+  if (((((tokenType) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((channel) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (3) >>> 0;
+    }
+  }
+  if (((((tokenType) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  return (4) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTraceTokenStreamStatus(publicClass: number): number {
   if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
     return (1) >>> 0;
@@ -3094,6 +3144,21 @@ function publicTokenClass(token: Token): number {
   return PUBLIC_TOKEN_MAIN;
 }
 
+function publicTokenType(token: Token): number {
+  if (token.type === "eof") return PUBLIC_TOKEN_TYPE_EOF;
+  if (token.type === "error") return PUBLIC_TOKEN_TYPE_ERROR;
+  if (token.type === "literal") return PUBLIC_TOKEN_TYPE_LITERAL;
+  if (token.type === "named") return PUBLIC_TOKEN_TYPE_NAMED;
+  return PUBLIC_TOKEN_TYPE_UNKNOWN;
+}
+
+function publicTokenChannel(token: Token): number {
+  if (token.channel === "main") return PUBLIC_TOKEN_CHANNEL_MAIN;
+  if (token.channel === "trivia") return PUBLIC_TOKEN_CHANNEL_TRIVIA;
+  if (token.channel === "error") return PUBLIC_TOKEN_CHANNEL_ERROR;
+  return PUBLIC_TOKEN_CHANNEL_UNKNOWN;
+}
+
 function runtimeTokenTerminal(token: Token): number {
   const terminal = (token as { __babaTerminal?: unknown }).__babaTerminal;
   return typeof terminal === "number" && Number.isInteger(terminal) &&
@@ -3256,13 +3321,30 @@ function validateTokenStream(
         span,
       ));
     }
+    const publicStatus = parserTokenStreamPublicTokenStatus(
+      publicTokenType(token),
+      publicTokenChannel(token),
+      token.type === "literal" && token.text === token.literal ? 1 : 0,
+    );
+    if (publicStatus === PUBLIC_TOKEN_SHAPE_INVALID_LITERAL) {
+      diagnostics.push(invalidTokenStream(
+        "Literal tokens must use the main channel and text equal to the literal.",
+        span,
+      ));
+    } else if (publicStatus === PUBLIC_TOKEN_SHAPE_INVALID_NAMED) {
+      diagnostics.push(invalidTokenStream(
+        "Named tokens must use the main or trivia channel.",
+        span,
+      ));
+    } else if (publicStatus === PUBLIC_TOKEN_SHAPE_INVALID_ERROR) {
+      diagnostics.push(invalidTokenStream(
+        "Error tokens must use the error channel.",
+        span,
+      ));
+    } else if (publicStatus === PUBLIC_TOKEN_SHAPE_UNKNOWN_TYPE) {
+      diagnostics.push(invalidTokenStream("Token has an unknown type.", span));
+    }
     if (token.type === "literal") {
-      if (token.channel !== "main" || token.text !== token.literal) {
-        diagnostics.push(invalidTokenStream(
-          "Literal tokens must use the main channel and text equal to the literal.",
-          span,
-        ));
-      }
       const specIndex = tokenSpecIndex(token);
       if (specIndex < 0) {
         diagnostics.push(invalidTokenStream(
@@ -3287,12 +3369,7 @@ function validateTokenStream(
         }
       }
     } else if (token.type === "named") {
-      if (token.channel !== "main" && token.channel !== "trivia") {
-        diagnostics.push(invalidTokenStream(
-          "Named tokens must use the main or trivia channel.",
-          span,
-        ));
-      } else {
+      if (publicStatus === PUBLIC_TOKEN_SHAPE_OK) {
         const specIndex = tokenSpecIndex(token);
         if (specIndex < 0) {
           diagnostics.push(invalidTokenStream(
@@ -3324,15 +3401,6 @@ function validateTokenStream(
           }
         }
       }
-    } else if (token.type === "error") {
-      if (token.channel !== "error") {
-        diagnostics.push(invalidTokenStream(
-          "Error tokens must use the error channel.",
-          span,
-        ));
-      }
-    } else {
-      diagnostics.push(invalidTokenStream("Token has an unknown type.", span));
     }
     const matched = matchCanonicalToken(
       canonicalTokens,

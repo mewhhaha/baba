@@ -70,11 +70,24 @@ import {
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_TERMINAL,
   RUNTIME_NO_TRANSITION,
+  RUNTIME_PUBLIC_TOKEN_CHANNEL_ERROR,
+  RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN,
+  RUNTIME_PUBLIC_TOKEN_CHANNEL_TRIVIA,
+  RUNTIME_PUBLIC_TOKEN_CHANNEL_UNKNOWN,
   RUNTIME_PUBLIC_TOKEN_EOF,
   RUNTIME_PUBLIC_TOKEN_ERROR,
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_ERROR,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_LITERAL,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_NAMED,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_UNKNOWN_TYPE,
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
+  RUNTIME_PUBLIC_TOKEN_TYPE_ERROR,
+  RUNTIME_PUBLIC_TOKEN_TYPE_LITERAL,
+  RUNTIME_PUBLIC_TOKEN_TYPE_NAMED,
+  RUNTIME_PUBLIC_TOKEN_TYPE_UNKNOWN,
   RUNTIME_REDUCER_CHILD_FRAGMENT,
   RUNTIME_REDUCER_CHILD_RAW,
   RUNTIME_REDUCER_CHILD_RULE_NODE,
@@ -2370,6 +2383,76 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserTokenStreamPublicTokenStatusProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_token_stream_public_token_status",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserTokenStreamPublicTokenStatus", [
+                u32(RUNTIME_PUBLIC_TOKEN_TYPE_LITERAL),
+                u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN),
+                u32(1),
+              ]),
+              u32(100_000),
+            ),
+            add(
+              mul(
+                call("parserTokenStreamPublicTokenStatus", [
+                  u32(RUNTIME_PUBLIC_TOKEN_TYPE_LITERAL),
+                  u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN),
+                  u32(0),
+                ]),
+                u32(10_000),
+              ),
+              add(
+                mul(
+                  call("parserTokenStreamPublicTokenStatus", [
+                    u32(RUNTIME_PUBLIC_TOKEN_TYPE_NAMED),
+                    u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_UNKNOWN),
+                    u32(0),
+                  ]),
+                  u32(1_000),
+                ),
+                add(
+                  mul(
+                    call("parserTokenStreamPublicTokenStatus", [
+                      u32(RUNTIME_PUBLIC_TOKEN_TYPE_NAMED),
+                      u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_TRIVIA),
+                      u32(0),
+                    ]),
+                    u32(100),
+                  ),
+                  add(
+                    mul(
+                      call("parserTokenStreamPublicTokenStatus", [
+                        u32(RUNTIME_PUBLIC_TOKEN_TYPE_ERROR),
+                        u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN),
+                        u32(0),
+                      ]),
+                      u32(10),
+                    ),
+                    call("parserTokenStreamPublicTokenStatus", [
+                      u32(RUNTIME_PUBLIC_TOKEN_TYPE_UNKNOWN),
+                      u32(RUNTIME_PUBLIC_TOKEN_CHANNEL_UNKNOWN),
+                      u32(0),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserTraceTokenStreamStatusProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_trace_token_stream_status",
@@ -3298,6 +3381,19 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         value: RUNTIME_TOKEN_STREAM_STATUS_OK * 100 +
           RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF * 10 +
           RUNTIME_TOKEN_STREAM_STATUS_GAP,
+      },
+    },
+    {
+      name: "runtime token-stream public token status classifies API shape",
+      program: parserTokenStreamPublicTokenStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK * 100_000 +
+          RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_LITERAL * 10_000 +
+          RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_NAMED * 1_000 +
+          RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK * 100 +
+          RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_ERROR * 10 +
+          RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_UNKNOWN_TYPE,
       },
     },
     {

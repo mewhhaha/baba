@@ -55,11 +55,25 @@ import {
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_TERMINAL,
+  RUNTIME_PUBLIC_TOKEN_CHANNEL_ERROR,
+  RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN,
+  RUNTIME_PUBLIC_TOKEN_CHANNEL_TRIVIA,
+  RUNTIME_PUBLIC_TOKEN_CHANNEL_UNKNOWN,
   RUNTIME_PUBLIC_TOKEN_EOF,
   RUNTIME_PUBLIC_TOKEN_ERROR,
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_ERROR,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_LITERAL,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_NAMED,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK,
+  RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_UNKNOWN_TYPE,
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
+  RUNTIME_PUBLIC_TOKEN_TYPE_EOF,
+  RUNTIME_PUBLIC_TOKEN_TYPE_ERROR,
+  RUNTIME_PUBLIC_TOKEN_TYPE_LITERAL,
+  RUNTIME_PUBLIC_TOKEN_TYPE_NAMED,
+  RUNTIME_PUBLIC_TOKEN_TYPE_UNKNOWN,
   RUNTIME_REDUCER_CHILD_FRAGMENT,
   RUNTIME_REDUCER_CHILD_RAW,
   RUNTIME_REDUCER_CHILD_RULE_NODE,
@@ -442,6 +456,20 @@ const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
 const PUBLIC_TOKEN_ERROR = ${RUNTIME_PUBLIC_TOKEN_ERROR};
 const PUBLIC_TOKEN_EOF = ${RUNTIME_PUBLIC_TOKEN_EOF};
+const PUBLIC_TOKEN_TYPE_UNKNOWN = ${RUNTIME_PUBLIC_TOKEN_TYPE_UNKNOWN};
+const PUBLIC_TOKEN_TYPE_LITERAL = ${RUNTIME_PUBLIC_TOKEN_TYPE_LITERAL};
+const PUBLIC_TOKEN_TYPE_NAMED = ${RUNTIME_PUBLIC_TOKEN_TYPE_NAMED};
+const PUBLIC_TOKEN_TYPE_ERROR = ${RUNTIME_PUBLIC_TOKEN_TYPE_ERROR};
+const PUBLIC_TOKEN_TYPE_EOF = ${RUNTIME_PUBLIC_TOKEN_TYPE_EOF};
+const PUBLIC_TOKEN_CHANNEL_UNKNOWN = ${RUNTIME_PUBLIC_TOKEN_CHANNEL_UNKNOWN};
+const PUBLIC_TOKEN_CHANNEL_MAIN = ${RUNTIME_PUBLIC_TOKEN_CHANNEL_MAIN};
+const PUBLIC_TOKEN_CHANNEL_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_CHANNEL_TRIVIA};
+const PUBLIC_TOKEN_CHANNEL_ERROR = ${RUNTIME_PUBLIC_TOKEN_CHANNEL_ERROR};
+const PUBLIC_TOKEN_SHAPE_OK = ${RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_OK};
+const PUBLIC_TOKEN_SHAPE_INVALID_LITERAL = ${RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_LITERAL};
+const PUBLIC_TOKEN_SHAPE_INVALID_NAMED = ${RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_NAMED};
+const PUBLIC_TOKEN_SHAPE_INVALID_ERROR = ${RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_INVALID_ERROR};
+const PUBLIC_TOKEN_SHAPE_UNKNOWN_TYPE = ${RUNTIME_PUBLIC_TOKEN_SHAPE_STATUS_UNKNOWN_TYPE};
 const SPEC_STATUS_OK = ${RUNTIME_LEXER_SPEC_STATUS_OK};
 const SPEC_STATUS_NOT_LITERAL = ${RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL};
 const SPEC_STATUS_NOT_MAIN = ${RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN};
@@ -1311,6 +1339,21 @@ function publicTokenClass(token: Token): number {
   return PUBLIC_TOKEN_MAIN;
 }
 
+function publicTokenType(token: Token): number {
+  if (token.type === "eof") return PUBLIC_TOKEN_TYPE_EOF;
+  if (token.type === "error") return PUBLIC_TOKEN_TYPE_ERROR;
+  if (token.type === "literal") return PUBLIC_TOKEN_TYPE_LITERAL;
+  if (token.type === "named") return PUBLIC_TOKEN_TYPE_NAMED;
+  return PUBLIC_TOKEN_TYPE_UNKNOWN;
+}
+
+function publicTokenChannel(token: Token): number {
+  if (token.channel === "main") return PUBLIC_TOKEN_CHANNEL_MAIN;
+  if (token.channel === "trivia") return PUBLIC_TOKEN_CHANNEL_TRIVIA;
+  if (token.channel === "error") return PUBLIC_TOKEN_CHANNEL_ERROR;
+  return PUBLIC_TOKEN_CHANNEL_UNKNOWN;
+}
+
 function runtimeTokenTerminal(token: Token): number {
   const terminal = (token as { __babaTerminal?: unknown }).__babaTerminal;
   return typeof terminal === "number" && Number.isInteger(terminal) &&
@@ -1473,13 +1516,30 @@ function validateTokenStream(
         span,
       ));
     }
+    const publicStatus = parserTokenStreamPublicTokenStatus(
+      publicTokenType(token),
+      publicTokenChannel(token),
+      token.type === "literal" && token.text === token.literal ? 1 : 0,
+    );
+    if (publicStatus === PUBLIC_TOKEN_SHAPE_INVALID_LITERAL) {
+      diagnostics.push(invalidTokenStream(
+        "Literal tokens must use the main channel and text equal to the literal.",
+        span,
+      ));
+    } else if (publicStatus === PUBLIC_TOKEN_SHAPE_INVALID_NAMED) {
+      diagnostics.push(invalidTokenStream(
+        "Named tokens must use the main or trivia channel.",
+        span,
+      ));
+    } else if (publicStatus === PUBLIC_TOKEN_SHAPE_INVALID_ERROR) {
+      diagnostics.push(invalidTokenStream(
+        "Error tokens must use the error channel.",
+        span,
+      ));
+    } else if (publicStatus === PUBLIC_TOKEN_SHAPE_UNKNOWN_TYPE) {
+      diagnostics.push(invalidTokenStream("Token has an unknown type.", span));
+    }
     if (token.type === "literal") {
-      if (token.channel !== "main" || token.text !== token.literal) {
-        diagnostics.push(invalidTokenStream(
-          "Literal tokens must use the main channel and text equal to the literal.",
-          span,
-        ));
-      }
       const specIndex = tokenSpecIndex(token);
       if (specIndex < 0) {
         diagnostics.push(invalidTokenStream(
@@ -1504,12 +1564,7 @@ function validateTokenStream(
         }
       }
     } else if (token.type === "named") {
-      if (token.channel !== "main" && token.channel !== "trivia") {
-        diagnostics.push(invalidTokenStream(
-          "Named tokens must use the main or trivia channel.",
-          span,
-        ));
-      } else {
+      if (publicStatus === PUBLIC_TOKEN_SHAPE_OK) {
         const specIndex = tokenSpecIndex(token);
         if (specIndex < 0) {
           diagnostics.push(invalidTokenStream(
@@ -1541,15 +1596,6 @@ function validateTokenStream(
           }
         }
       }
-    } else if (token.type === "error") {
-      if (token.channel !== "error") {
-        diagnostics.push(invalidTokenStream(
-          "Error tokens must use the error channel.",
-          span,
-        ));
-      }
-    } else {
-      diagnostics.push(invalidTokenStream("Token has an unknown type.", span));
     }
     const matched = matchCanonicalToken(
       canonicalTokens,
