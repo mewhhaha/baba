@@ -39,9 +39,11 @@ tables, and `lexerScan*` helpers track longest-match accepting candidates from
 generated DFA accept tables. `lexerSpecFlags`/`lexerSpecPayload`/
 `lexerSpecTerminal` map accepted lexer spec indexes to token object
 classification data and parser terminal ids for generated TypeScript
-`parse(source)`, while external token streams keep the public token-kind/literal
-fallback. Deterministic parsers use `parserAction`/`parserGoto` for parser table
-lookup, and conflict parsers use generated
+`parse(source)`. External token streams keep public token-kind/literal spelling
+at the API boundary, but generated parsers map those spellings to lexer spec
+indexes and use the same runtime-language helpers for channel and terminal
+classification. Deterministic parsers use `parserAction`/`parserGoto` for parser
+table lookup, and conflict parsers use generated
 `parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
 fan-out and goto lookup. Generated parsers also use `parserExpectedStart`/
 `parserExpectedEnd` helpers to map parser states to flattened expected-terminal

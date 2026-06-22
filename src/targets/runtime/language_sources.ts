@@ -77,6 +77,10 @@ export interface LexerRuntimeProgramInput {
   readonly specs?: readonly LexerRuntimeSpecEntry[];
 }
 
+export interface LexerSpecRuntimeProgramInput {
+  readonly specs: readonly LexerRuntimeSpecEntry[];
+}
+
 export type ParserRuntimeLookupEntry = readonly [key: number, value: number];
 export type ParserRuntimeProductionEntry = readonly [
   lhs: number,
@@ -156,7 +160,7 @@ export function createLexerRuntimeProgram(
   }
   transitionRows.push(transitionValues.length / 3);
 
-  const tables = [
+  const tables: RuntimeLanguageTable[] = [
     {
       name: "dfaTransitionRows",
       type: "u32" as const,
@@ -191,15 +195,7 @@ export function createLexerRuntimeProgram(
   }
 
   if (input.specs) {
-    tables.push({
-      name: "lexerSpecs",
-      type: "u32" as const,
-      values: input.specs.flatMap(([flags, payload, terminal]) => [
-        flags,
-        payload < 0 ? RUNTIME_NO_LEXER_SPEC : payload,
-        terminal < 0 ? RUNTIME_NO_TERMINAL : terminal,
-      ]),
-    });
+    tables.push(lexerSpecTable(input.specs));
   }
 
   return {
@@ -220,6 +216,17 @@ export function createLexerRuntimeProgram(
         : []),
       ...(input.specs ? lexerSpecFunctions(input.specs.length) : []),
     ],
+  };
+}
+
+export function createLexerSpecRuntimeProgram(
+  input: LexerSpecRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  return {
+    name: "lexer_spec_runtime",
+    entry: "lexerSpecTerminal",
+    tables: [lexerSpecTable(input.specs)],
+    functions: lexerSpecFunctions(input.specs.length),
   };
 }
 
@@ -664,6 +671,20 @@ function lexerSpecFunctions(
       RUNTIME_NO_TERMINAL,
     ),
   ];
+}
+
+function lexerSpecTable(
+  specs: readonly LexerRuntimeSpecEntry[],
+): RuntimeLanguageTable {
+  return {
+    name: "lexerSpecs",
+    type: "u32" as const,
+    values: specs.flatMap(([flags, payload, terminal]) => [
+      flags,
+      payload < 0 ? RUNTIME_NO_LEXER_SPEC : payload,
+      terminal < 0 ? RUNTIME_NO_TERMINAL : terminal,
+    ]),
+  };
 }
 
 function lexerSpecLoadFunction(

@@ -7,6 +7,7 @@ import {
   type RuntimeLanguageProgram,
 } from "./language.ts";
 import {
+  createLexerSpecRuntimeProgram,
   createParserActionRuntimeProgram,
   createParserConflictTraceRuntimeProgram,
   createParserExpectedRuntimeProgram,
@@ -21,10 +22,13 @@ import {
   RUNTIME_ACTION_SHIFT,
   RUNTIME_FIELD_ARRAY,
   RUNTIME_FIELD_NULLABLE,
+  RUNTIME_LEXER_SPEC_LITERAL,
+  RUNTIME_LEXER_SPEC_TRIVIA,
   RUNTIME_NO_FIELD,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
+  RUNTIME_NO_TERMINAL,
   RUNTIME_REDUCER_FIELD,
   RUNTIME_REDUCER_IDENTITY,
   RUNTIME_REDUCER_OPTIONAL_EMPTY,
@@ -124,31 +128,49 @@ export function emitParser(
   const expectedRuntimeProgram = createParserExpectedRuntimeProgram({
     rowLengths: expectedRows.map((row) => row.length),
   });
-  const namedTerminals: Array<readonly [string, number]> = [];
-  const literalTerminals: Array<readonly [string, number]> = [];
+  const namedTerminalIds = new Map<number, number>();
+  const literalTerminalIds = new Map<number, number>();
   for (const terminal of bnf.terminals) {
     if (terminal.kind === "named") {
-      namedTerminals.push([
-        analyzed.tokens[terminal.tokenId!].name,
-        terminal.id,
-      ]);
+      namedTerminalIds.set(terminal.tokenId!, terminal.id);
     }
     if (terminal.kind === "literal") {
-      literalTerminals.push([
-        analyzed.literals[terminal.literalId!].value,
-        terminal.id,
-      ]);
+      literalTerminalIds.set(terminal.literalId!, terminal.id);
     }
   }
-  const ruleNames = analyzed.rules.map((rule) => rule.name);
-  const mainTokenKinds = analyzed.tokens
+  const namedTokens = analyzed.tokens
     .filter((token) =>
-      token.kind === "token" && analyzed.reachableTokens.has(token.id)
-    )
-    .map((token) => token.name);
-  const triviaTokenKinds = analyzed.tokens
-    .filter((token) => token.kind === "skip")
-    .map((token) => token.name);
+      token.kind === "skip" ||
+      (token.kind === "token" && analyzed.reachableTokens.has(token.id))
+    );
+  const literalSpecs = analyzed.literals
+    .filter((literal) => analyzed.reachableLiterals.has(literal.id));
+  const literalSpecOffset = namedTokens.length;
+  const namedSpecIndices = namedTokens.map((token, index) =>
+    [token.name, index] as const
+  );
+  const literalSpecIndices = literalSpecs.map((literal, index) =>
+    [literal.value, literalSpecOffset + index] as const
+  );
+  const lexerSpecRuntimeProgram = createLexerSpecRuntimeProgram({
+    specs: [
+      ...namedTokens.map((token, payload) =>
+        [
+          token.kind === "skip" ? RUNTIME_LEXER_SPEC_TRIVIA : 0,
+          payload,
+          token.kind === "skip" ? -1 : namedTerminalIds.get(token.id) ?? -1,
+        ] as const
+      ),
+      ...literalSpecs.map((literal, payload) =>
+        [
+          RUNTIME_LEXER_SPEC_LITERAL,
+          payload,
+          literalTerminalIds.get(literal.id) ?? -1,
+        ] as const
+      ),
+    ],
+  });
+  const ruleNames = analyzed.rules.map((rule) => rule.name);
   const runtimeProgram = mergeRuntimePrograms(
     tableRuntimeProgram
       ? mergeRuntimePrograms(tableRuntimeProgram, expectedRuntimeProgram)
@@ -159,7 +181,7 @@ export function emitParser(
     reducerRuntimeProgram,
   );
   const runtimeWithFields = mergeRuntimePrograms(
-    runtimeProgram,
+    mergeRuntimePrograms(runtimeProgram, lexerSpecRuntimeProgram),
     fieldRuntimeProgram,
   );
 
@@ -171,10 +193,8 @@ ${
     commonConstants({
       bnf,
       expectedRows,
-      namedTerminals,
-      literalTerminals,
-      mainTokenKinds,
-      triviaTokenKinds,
+      namedSpecIndices,
+      literalSpecIndices,
       ruleNames,
       fieldNames,
     })
@@ -241,10 +261,8 @@ interface ShiftedToken {
 function commonConstants(values: {
   bnf: BnfGrammar;
   expectedRows: readonly (readonly string[])[];
-  namedTerminals: Array<readonly [string, number]>;
-  literalTerminals: Array<readonly [string, number]>;
-  mainTokenKinds: string[];
-  triviaTokenKinds: string[];
+  namedSpecIndices: Array<readonly [string, number]>;
+  literalSpecIndices: Array<readonly [string, number]>;
   ruleNames: string[];
   fieldNames: string[];
 }): string {
@@ -253,17 +271,11 @@ function commonConstants(values: {
 const EXPECTED_TERMINALS: readonly string[] = ${
     JSON.stringify(expectedTerminals)
   };
-const NAMED_TERMINALS = new Map<string, number>(${
-    JSON.stringify(values.namedTerminals)
+const NAMED_SPEC_INDICES = new Map<string, number>(${
+    JSON.stringify(values.namedSpecIndices)
   });
-const LITERAL_TERMINALS = new Map<string, number>(${
-    JSON.stringify(values.literalTerminals)
-  });
-const MAIN_TOKEN_KINDS = new Set<string>(${
-    JSON.stringify(values.mainTokenKinds)
-  });
-const TRIVIA_TOKEN_KINDS = new Set<string>(${
-    JSON.stringify(values.triviaTokenKinds)
+const LITERAL_SPEC_INDICES = new Map<string, number>(${
+    JSON.stringify(values.literalSpecIndices)
   });
 const RULE_NAMES: readonly string[] = ${JSON.stringify(values.ruleNames)};
 const FIELD_NAMES: readonly string[] = ${JSON.stringify(values.fieldNames)};
@@ -276,6 +288,7 @@ const ACTION_SHIFT = ${RUNTIME_ACTION_SHIFT};
 const ACTION_REDUCE = ${RUNTIME_ACTION_REDUCE};
 const ACTION_ACCEPT = ${RUNTIME_ACTION_ACCEPT};
 const NO_GOTO = ${RUNTIME_NO_GOTO};
+const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
 const NO_PRODUCTION = ${RUNTIME_NO_PRODUCTION};
 const REDUCER_UNKNOWN = ${RUNTIME_REDUCER_UNKNOWN};
 const REDUCER_START = ${RUNTIME_REDUCER_START};
@@ -297,6 +310,7 @@ const NO_REDUCER_PAYLOAD = ${RUNTIME_NO_REDUCER_PAYLOAD};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
 const FIELD_ARRAY = ${RUNTIME_FIELD_ARRAY};
 const FIELD_NULLABLE = ${RUNTIME_FIELD_NULLABLE};
+const SPEC_TRIVIA = ${RUNTIME_LEXER_SPEC_TRIVIA};
 
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
 }
@@ -1080,11 +1094,18 @@ function tokenToTerminal(token: Token, trustRuntimeTerminal = false): number {
     const terminal = runtimeTokenTerminal(token);
     if (terminal >= 0) return terminal;
   }
-  if (token.type === "named" && token.channel === "main") {
-    return NAMED_TERMINALS.get(token.kind) ?? -1;
+  const specIndex = tokenSpecIndex(token);
+  if (specIndex < 0) return -1;
+  const terminal = lexerSpecTerminal(specIndex);
+  return terminal === NO_TERMINAL ? -1 : terminal;
+}
+
+function tokenSpecIndex(token: Token): number {
+  if (token.type === "named") {
+    return NAMED_SPEC_INDICES.get(token.kind) ?? -1;
   }
   if (token.type === "literal") {
-    return LITERAL_TERMINALS.get(token.literal) ?? -1;
+    return LITERAL_SPEC_INDICES.get(token.literal) ?? -1;
   }
   return -1;
 }
@@ -1264,24 +1285,40 @@ function validateTokenStream(
           span,
         ));
       }
+      if (tokenSpecIndex(token) < 0) {
+        diagnostics.push(invalidTokenStream(
+          \`Literal token \${JSON.stringify(token.literal)} is not part of this parser's terminal set.\`,
+          span,
+        ));
+      }
     } else if (token.type === "named") {
       if (token.channel !== "main" && token.channel !== "trivia") {
         diagnostics.push(invalidTokenStream(
           "Named tokens must use the main or trivia channel.",
           span,
         ));
-      } else if (token.channel === "main") {
-        if (!MAIN_TOKEN_KINDS.has(token.kind)) {
+      } else {
+        const specIndex = tokenSpecIndex(token);
+        if (specIndex < 0) {
           diagnostics.push(invalidTokenStream(
-            \`Named token kind '\${token.kind}' is not a main token kind.\`,
+            \`Named token kind '\${token.kind}' is not part of this parser's lexer spec set.\`,
             span,
           ));
+        } else {
+          const flags = lexerSpecFlags(specIndex);
+          if (token.channel === "main" && (flags & SPEC_TRIVIA) !== 0) {
+            diagnostics.push(invalidTokenStream(
+              \`Named token kind '\${token.kind}' is not a main token kind.\`,
+              span,
+            ));
+          }
+          if (token.channel === "trivia" && (flags & SPEC_TRIVIA) === 0) {
+            diagnostics.push(invalidTokenStream(
+              \`Named token kind '\${token.kind}' is not a trivia token kind.\`,
+              span,
+            ));
+          }
         }
-      } else if (!TRIVIA_TOKEN_KINDS.has(token.kind)) {
-        diagnostics.push(invalidTokenStream(
-          \`Named token kind '\${token.kind}' is not a trivia token kind.\`,
-          span,
-        ));
       }
     } else if (token.type === "error") {
       if (token.channel !== "error") {

@@ -104,6 +104,9 @@
 - Generated TypeScript lexers now read token spec classification, payload, and
   terminal metadata through runtime-language `lexerSpec*` helpers instead of a
   generated JavaScript spec-discriminant table.
+- Generated parsers now map external `parseTokens()` token strings to lexer spec
+  indexes and use runtime-language `lexerSpec*` helpers for channel and terminal
+  metadata instead of generated terminal/channel lookup tables.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical
