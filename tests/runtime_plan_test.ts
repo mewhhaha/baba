@@ -111,8 +111,8 @@ Deno.test("Wasm target packages shared core runtime source", async () => {
     "src/targets/runtime/wasm_core_runtime.ts",
   );
   assertIncludes(wasmRuntimeSource, "function lexOneFunction");
-  assertIncludes(wasmRuntimeSource, "function parseTraceFunction");
-  assertIncludes(wasmRuntimeSource, "RUNTIME_ACTION_KIND_MASK");
+  assertNotIncludes(wasmRuntimeSource, "function parseTraceFunction");
+  assertNotIncludes(wasmRuntimeSource, "parse_trace");
   assertIncludes(wasmRuntimeSource, "RUNTIME_ACTION_PAYLOAD_MASK");
   assertIncludes(wasmRuntimeSource, "function emitWasmModule");
 

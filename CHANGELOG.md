@@ -92,6 +92,9 @@
 - Generated Wasm adapters now run LR parser trace control flow through a
   runtime-language Wasm module and replay the returned trace in TypeScript to
   build CST nodes and diagnostics.
+- The core Wasm bytecode runtime no longer emits or exports the legacy
+  `parse_trace` LR execution function; generated adapters use the
+  runtime-language trace module instead.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical

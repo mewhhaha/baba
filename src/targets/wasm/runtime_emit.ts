@@ -19,9 +19,7 @@ ${byteLines(parserTraceBytes)}
 const INPUT_BASE = ${image.inputBase};
 const I32_BYTES = 4;
 const LEX_RESULT_BYTES = 8;
-const STATE_STACK_SLACK = 16;
 const TOKEN_RECORD_BYTES = 12;
-const TRACE_CAPACITY_FACTOR = 8;
 const UTF16_UNIT_BYTES = 2;
 const WASM_PAGE_BYTES = 65536;
 const MAX_WASM_BYTES = 0xffff_ffff;
@@ -169,52 +167,14 @@ export type ParseTraceResult =
 
 export interface ParseTraceInput {
   terminals: Int32Array;
-  terminalsPtr: number;
   terminalCapacity: number;
-  traceCapacity: number;
 }
 
 export function createParseTraceInput(terminalCapacity: number): ParseTraceInput {
   assertPositiveInteger("terminalCapacity", terminalCapacity);
-  const terminalsPtr = parseBase();
-  const traceCapacity = Math.max(
-    STATE_STACK_SLACK,
-    checkedAdd(
-      checkedMul(
-        terminalCapacity,
-        TRACE_CAPACITY_FACTOR,
-        "trace capacity",
-      ),
-      STATE_STACK_SLACK,
-      "trace capacity",
-    ),
-  );
-  const tracePtr = align4(checkedAdd(
-    terminalsPtr,
-    checkedMul(terminalCapacity, I32_BYTES, "terminal byte length"),
-    "trace offset",
-  ));
-  const stateStackPtr = align4(checkedAdd(
-    tracePtr,
-    checkedMul(traceCapacity, I32_BYTES, "trace byte length"),
-    "state stack offset",
-  ));
-  const stateCapacity = checkedAdd(
-    terminalCapacity,
-    STATE_STACK_SLACK,
-    "state stack capacity",
-  );
-  const errorPtr = align4(checkedAdd(
-    stateStackPtr,
-    checkedMul(stateCapacity, I32_BYTES, "state stack byte length"),
-    "error record offset",
-  ));
-  ensureCapacity(checkedAdd(errorPtr, 8, "error record end offset"));
   return {
-    terminals: new Int32Array(memory.buffer, terminalsPtr, terminalCapacity),
-    terminalsPtr,
+    terminals: new Int32Array(terminalCapacity),
     terminalCapacity,
-    traceCapacity,
   };
 }
 
@@ -284,25 +244,16 @@ function align4(value: number): number {
     : checkedAdd(value, I32_BYTES - remainder, "aligned byte offset");
 }
 
-function parseBase(): number {
-  if (!cachedBuffer) return INPUT_BASE;
-  return align4(
-    checkedAdd(
-      cachedBuffer.tokenPtr,
-      checkedMul(
-        cachedBuffer.tokenCapacity,
-        TOKEN_RECORD_BYTES,
-        "token table byte length",
-      ),
-      "parse base",
-    ),
-  );
-}
-
 function assertParseTraceInput(input: ParseTraceInput): void {
-  assertNonNegativeInteger("terminalsPtr", input.terminalsPtr);
   assertPositiveInteger("terminalCapacity", input.terminalCapacity);
-  assertPositiveInteger("traceCapacity", input.traceCapacity);
+  if (!(input.terminals instanceof Int32Array)) {
+    throw new TypeError("terminals must be an Int32Array.");
+  }
+  if (input.terminals.length < input.terminalCapacity) {
+    throw new RangeError(
+      "terminals length must cover parse input terminalCapacity.",
+    );
+  }
 }
 
 function assertPositiveInteger(name: string, value: number): void {

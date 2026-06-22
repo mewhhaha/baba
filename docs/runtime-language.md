@@ -54,9 +54,9 @@ frames as scratch-memory `u32` data before TypeScript replays the accepted
 action trace to build the CST. The core Wasm parser trace uses the same shared
 action kind/payload masks, and generated Wasm adapters now instantiate a
 runtime-language Wasm parser trace module for LR control flow, trace status, and
-trace action reads. The core Wasm module still owns lexing and keeps its legacy
-low-level parser table exports for compatibility while the rest of the parser
-runtime is lowered. The same runtime-language source shapes are also compiled to
+trace action reads. The core Wasm module still owns lexing and low-level parser
+table lookup exports, but it no longer emits a separate `parse_trace` LR
+execution function. The same runtime-language source shapes are also compiled to
 Wasm in conformance tests. Because generated parser runtime code depends on
 runtime-language compiler output, the checked runtime implementation manifest
 includes both runtime language sources, the Stage-0 compiler, and the checked

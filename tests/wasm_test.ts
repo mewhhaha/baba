@@ -49,10 +49,12 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     const wasmModule = new WebAssembly.Module(mod.wasmBytes);
     const wasmInstance = new WebAssembly.Instance(wasmModule, {});
     const wasmExports = wasmInstance.exports as unknown as {
+      parse_trace?: unknown;
       abi_version(): number;
       plan_version(): number;
       reset(): void;
     };
+    assertEquals(wasmExports.parse_trace, undefined);
     assertEquals(wasmExports.abi_version(), 1);
     assertEquals(wasmExports.plan_version(), 1);
     wasmExports.reset();
@@ -185,10 +187,6 @@ Deno.test("Wasm runtime validates parse trace input bounds", async () => {
       () => runtime.createParseTraceInput(0),
       "terminalCapacity must be a positive integer",
     );
-    assertThrowsIncludes(
-      () => runtime.createParseTraceInput(0x2000_0000),
-      "trace capacity exceeds the 32-bit Wasm address space",
-    );
     const input = runtime.createParseTraceInput(1);
     assertThrowsIncludes(
       () => runtime.parseTrace(input, 2),
@@ -197,6 +195,14 @@ Deno.test("Wasm runtime validates parse trace input bounds", async () => {
     assertThrowsIncludes(
       () => runtime.parseTrace(input, -1),
       "terminalCount must be a non-negative integer",
+    );
+    assertThrowsIncludes(
+      () =>
+        runtime.parseTrace({
+          terminals: new Int32Array(0),
+          terminalCapacity: 1,
+        }, 0),
+      "terminals length must cover parse input terminalCapacity",
     );
   } finally {
     await Deno.remove(dir, { recursive: true });

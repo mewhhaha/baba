@@ -133,6 +133,10 @@ runtime language:
 - Moved generated Wasm adapter parser trace control flow onto a runtime-language
   Wasm `parserTrace` module that exports trace input, status, error, count, and
   action accessors for adapter replay.
+- Removed the legacy core Wasm `parse_trace` export and in-core LR trace
+  bytecode emitter. Generated Wasm adapters now keep parse-trace terminal input
+  in a JavaScript `Int32Array` and use the runtime-language Wasm trace module
+  for parser control flow.
 
 Still unresolved:
 
@@ -146,14 +150,13 @@ Still unresolved:
   core Wasm trace decoding uses the same shared masks. Conflict branch fan-out
   counting and generated TypeScript conflict branch scheduling are now
   runtime-language-backed, and generated Wasm adapters now call a
-  runtime-language Wasm parser trace module instead of the core `parse_trace`
-  export. The core Wasm module still contains its legacy `parse_trace`
-  emitter/export for compatibility, and generated token object
-  emission/diagnostics plus reducer/CST algorithms are still not mechanically
-  emitted from one runtime-language implementation. The compiler now has a
-  shared lowered control-flow/value IR and checked helper artifact hashes, but
-  it still needs broader parser-runtime lowering before the release can fully
-  satisfy "one runtime implementation, two execution targets."
+  runtime-language Wasm parser trace module instead of a core `parse_trace`
+  export. Generated token object emission/diagnostics plus reducer/CST
+  algorithms are still not mechanically emitted from one runtime-language
+  implementation. The compiler now has a shared lowered control-flow/value IR
+  and checked helper artifact hashes, but it still needs broader parser-runtime
+  lowering before the release can fully satisfy "one runtime implementation, two
+  execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

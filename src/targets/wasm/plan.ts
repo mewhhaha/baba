@@ -67,7 +67,6 @@ export function planWasmTarget(
   }
   const wasm = emitWasmModule(
     runtimePlan.dfa,
-    runtimePlan.bnf,
     runtimePlan.lr,
     runtimePlan.portable.version,
   );

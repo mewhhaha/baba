@@ -1,10 +1,8 @@
 // Core Wasm parser runtime byte emitter shared by Wasm target packaging.
 import type { Dfa } from "../../compiler/regex/dfa.ts";
-import type { BnfGrammar } from "../typescript/bnf.ts";
 import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
 import {
   RUNTIME_ACTION_ACCEPT as ACTION_ACCEPT,
-  RUNTIME_ACTION_KIND_MASK,
   RUNTIME_ACTION_PAYLOAD_MASK,
   RUNTIME_ACTION_REDUCE as ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT as ACTION_SHIFT,
@@ -24,7 +22,6 @@ interface DataLayout {
   actionPairs: number;
   gotoRows: number;
   gotoPairs: number;
-  productions: number;
   inputBase: number;
   bytes: Uint8Array;
 }
@@ -38,11 +35,10 @@ const EMPTY_BLOCK = 0x40;
 
 export function emitWasmModule(
   dfa: Dfa,
-  bnf: BnfGrammar,
   lr: LrTable,
   parserPlanVersion = 1,
 ): WasmModuleImage {
-  const layout = buildDataLayout(dfa, bnf, lr);
+  const layout = buildDataLayout(dfa, lr);
   const initialPages = Math.max(1, Math.ceil(layout.inputBase / PAGE_SIZE));
   if (initialPages > MAX_WASM_PAGES) {
     throw new Error(
@@ -83,7 +79,6 @@ export function emitWasmModule(
 
 function buildDataLayout(
   dfa: Dfa,
-  bnf: BnfGrammar,
   lr: LrTable,
 ): DataLayout {
   const data: number[] = [];
@@ -143,13 +138,6 @@ function buildDataLayout(
   const gotoRowsOffset = appendI32s(gotoRows);
   const gotoPairsOffset = appendI32s(gotoPairs);
 
-  const productions = appendI32s(
-    bnf.productions.flatMap((production) => [
-      production.lhs,
-      production.rhs.length,
-    ]),
-  );
-
   return {
     accepts,
     asciiTransitions: asciiTransitionsOffset,
@@ -159,7 +147,6 @@ function buildDataLayout(
     actionPairs: actionPairsOffset,
     gotoRows: gotoRowsOffset,
     gotoPairs: gotoPairsOffset,
-    productions,
     inputBase: align(data.length, 8),
     bytes: Uint8Array.from(data),
   };
@@ -228,11 +215,6 @@ function typeSection(): number[] {
     ],
     [
       FUNC,
-      ...vec([I32, I32, I32, I32, I32, I32, I32, I32, I32]),
-      ...vec([I32]),
-    ],
-    [
-      FUNC,
       ...vec([]),
       ...vec([I32]),
     ],
@@ -252,9 +234,8 @@ function functionSection(): number[] {
     u32(0),
     u32(1),
     u32(2),
+    u32(2),
     u32(3),
-    u32(3),
-    u32(4),
   ]);
 }
 
@@ -269,10 +250,9 @@ function exportSection(): number[] {
     exportEntry("parser_action", 0x00, 2),
     exportEntry("parser_goto", 0x00, 3),
     exportEntry("lex_all", 0x00, 4),
-    exportEntry("parse_trace", 0x00, 5),
-    exportEntry("abi_version", 0x00, 6),
-    exportEntry("plan_version", 0x00, 7),
-    exportEntry("reset", 0x00, 8),
+    exportEntry("abi_version", 0x00, 5),
+    exportEntry("plan_version", 0x00, 6),
+    exportEntry("reset", 0x00, 7),
   ]);
 }
 
@@ -304,7 +284,6 @@ function codeSection(
       }),
     ),
     functionBody(15, lexAllFunction(layout)),
-    functionBody(23, parseTraceFunction(layout)),
     functionBody(0, versionFunction(WASM_ABI_VERSION)),
     functionBody(0, versionFunction(parserPlanVersion)),
     functionBody(0, resetFunction()),
@@ -905,612 +884,6 @@ function loadAsciiTransition(
   ];
 }
 
-function parseTraceFunction(layout: DataLayout): number[] {
-  const terminals = 0;
-  const terminalCount = 1;
-  const trace = 2;
-  const traceCapacity = 3;
-  const stack = 4;
-  const error = 5;
-  const branchBase = 6;
-  const branchCapacity = 7;
-  const stateCapacity = 8;
-  const depth = 9;
-  const streamIndex = 10;
-  const traceCount = 11;
-  const state = 12;
-  const terminal = 13;
-  const action = 14;
-  const kind = 15;
-  const payload = 16;
-  const rhsLength = 17;
-  const lhs = 18;
-  const gotoState = 19;
-  const branchStride = 20;
-  const branchCount = 21;
-  const actionIndex = 22;
-  const actionEnd = 23;
-  const actionBase = 24;
-  const matchedCount = 25;
-  const pendingAction = 26;
-  const frameBase = 27;
-  const copyIndex = 28;
-  const bestState = 29;
-  const bestIndex = 30;
-  const needRestore = 31;
-  return [
-    ...i32(1),
-    ...set(depth),
-    ...i32(0),
-    ...set(streamIndex),
-    ...i32(0),
-    ...set(traceCount),
-    ...i32(4),
-    ...get(stateCapacity),
-    0x6a,
-    ...get(traceCapacity),
-    0x6a,
-    ...set(branchStride),
-    ...i32(0),
-    ...set(branchCount),
-    ...i32(0),
-    ...set(bestState),
-    ...i32(-1),
-    ...set(bestIndex),
-    ...i32(0),
-    ...set(needRestore),
-    ...get(stack),
-    ...i32(0),
-    ...store32(),
-
-    0x02,
-    EMPTY_BLOCK,
-    0x03,
-    EMPTY_BLOCK,
-
-    ...get(needRestore),
-    ...i32(0),
-    0x47,
-    0x04,
-    EMPTY_BLOCK,
-    ...i32(0),
-    ...set(needRestore),
-    ...get(branchCount),
-    ...i32(0),
-    0x46,
-    0x04,
-    EMPTY_BLOCK,
-    ...storeError(error, bestState, bestIndex),
-    ...i32(-1),
-    0x0f,
-    0x0b,
-    ...get(branchCount),
-    ...i32(1),
-    0x6b,
-    ...set(branchCount),
-    ...restoreBranchFrame({
-      branchBase,
-      branchCount,
-      branchStride,
-      frameBase,
-      stateCapacity,
-      traceCapacity,
-      stack,
-      trace,
-      action,
-      depth,
-      streamIndex,
-      traceCount,
-      copyIndex,
-    }),
-    0x05,
-    ...get(streamIndex),
-    ...get(terminalCount),
-    0x4f,
-    0x04,
-    EMPTY_BLOCK,
-    ...loadStackValue(stack, depth, -1),
-    ...set(state),
-    ...updateBestFailure(bestIndex, bestState, streamIndex, state),
-    ...i32(1),
-    ...set(needRestore),
-    0x0c,
-    ...u32(2),
-    0x0b,
-
-    ...loadStackValue(stack, depth, -1),
-    ...set(state),
-    ...loadArrayValue(terminals, streamIndex),
-    ...set(terminal),
-    ...loadTableValue(layout.actionRows, state),
-    ...set(actionIndex),
-    ...loadTableValuePlusOne(layout.actionRows, state),
-    ...set(actionEnd),
-    ...i32(0),
-    ...set(matchedCount),
-    ...i32(0),
-    ...set(action),
-
-    0x02,
-    EMPTY_BLOCK,
-    0x03,
-    EMPTY_BLOCK,
-    ...get(actionIndex),
-    ...get(actionEnd),
-    0x4f,
-    0x0d,
-    ...u32(1),
-
-    ...i32(layout.actionPairs),
-    ...get(actionIndex),
-    ...i32(8),
-    0x6c,
-    0x6a,
-    ...set(actionBase),
-    ...get(actionBase),
-    ...load32(),
-    ...get(terminal),
-    0x46,
-    0x04,
-    EMPTY_BLOCK,
-    ...get(actionBase),
-    ...i32(4),
-    0x6a,
-    ...load32(),
-    ...set(pendingAction),
-    ...get(matchedCount),
-    ...i32(0),
-    0x46,
-    0x04,
-    EMPTY_BLOCK,
-    ...get(pendingAction),
-    ...set(action),
-    0x05,
-    ...saveBranchFrame({
-      branchBase,
-      branchCapacity,
-      branchCount,
-      branchStride,
-      frameBase,
-      stateCapacity,
-      traceCapacity,
-      stack,
-      trace,
-      pendingAction,
-      depth,
-      streamIndex,
-      traceCount,
-      copyIndex,
-    }),
-    ...get(branchCount),
-    ...i32(1),
-    0x6a,
-    ...set(branchCount),
-    0x0b,
-    ...get(matchedCount),
-    ...i32(1),
-    0x6a,
-    ...set(matchedCount),
-    0x0b,
-
-    ...get(actionIndex),
-    ...i32(1),
-    0x6a,
-    ...set(actionIndex),
-    0x0c,
-    ...u32(0),
-    0x0b,
-    0x0b,
-
-    ...get(matchedCount),
-    ...i32(0),
-    0x46,
-    0x04,
-    EMPTY_BLOCK,
-    ...updateBestFailure(bestIndex, bestState, streamIndex, state),
-    ...i32(1),
-    ...set(needRestore),
-    0x0c,
-    ...u32(2),
-    0x0b,
-    0x0b,
-
-    ...get(action),
-    ...i32(RUNTIME_ACTION_KIND_MASK),
-    0x71,
-    ...set(kind),
-    ...get(action),
-    ...i32(RUNTIME_ACTION_PAYLOAD_MASK),
-    0x71,
-    ...set(payload),
-
-    ...get(kind),
-    ...i32(ACTION_SHIFT),
-    0x46,
-    0x04,
-    EMPTY_BLOCK,
-    ...storeTraceOrOverflow(trace, traceCapacity, traceCount, action),
-    ...get(stack),
-    ...get(depth),
-    ...i32(4),
-    0x6c,
-    0x6a,
-    ...get(payload),
-    ...store32(),
-    ...get(depth),
-    ...i32(1),
-    0x6a,
-    ...set(depth),
-    ...get(streamIndex),
-    ...i32(1),
-    0x6a,
-    ...set(streamIndex),
-    0x0c,
-    ...u32(1),
-    0x0b,
-
-    ...get(kind),
-    ...i32(ACTION_REDUCE),
-    0x46,
-    0x04,
-    EMPTY_BLOCK,
-    ...storeTraceOrOverflow(trace, traceCapacity, traceCount, action),
-    ...loadProductionField(layout.productions, payload, 1),
-    ...set(rhsLength),
-    ...loadProductionField(layout.productions, payload, 0),
-    ...set(lhs),
-    ...get(depth),
-    ...get(rhsLength),
-    0x6b,
-    ...set(depth),
-    ...loadStackValue(stack, depth, -1),
-    ...set(state),
-    ...get(state),
-    ...get(lhs),
-    0x10,
-    ...u32(3),
-    ...set(gotoState),
-    ...get(gotoState),
-    ...i32(0),
-    0x48,
-    0x04,
-    EMPTY_BLOCK,
-    ...updateBestFailure(bestIndex, bestState, streamIndex, state),
-    ...i32(1),
-    ...set(needRestore),
-    0x0c,
-    ...u32(2),
-    0x0b,
-    ...get(stack),
-    ...get(depth),
-    ...i32(4),
-    0x6c,
-    0x6a,
-    ...get(gotoState),
-    ...store32(),
-    ...get(depth),
-    ...i32(1),
-    0x6a,
-    ...set(depth),
-    0x0c,
-    ...u32(1),
-    0x0b,
-
-    ...get(kind),
-    ...i32(ACTION_ACCEPT),
-    0x46,
-    0x04,
-    EMPTY_BLOCK,
-    ...storeTraceOrOverflow(trace, traceCapacity, traceCount, action),
-    ...get(traceCount),
-    0x0f,
-    0x0b,
-
-    ...updateBestFailure(bestIndex, bestState, streamIndex, state),
-    ...i32(1),
-    ...set(needRestore),
-    0x0c,
-    ...u32(0),
-
-    0x0b,
-    0x0b,
-
-    ...i32(-3),
-  ];
-}
-
-function saveBranchFrame(options: {
-  branchBase: number;
-  branchCapacity: number;
-  branchCount: number;
-  branchStride: number;
-  frameBase: number;
-  stateCapacity: number;
-  traceCapacity: number;
-  stack: number;
-  trace: number;
-  pendingAction: number;
-  depth: number;
-  streamIndex: number;
-  traceCount: number;
-  copyIndex: number;
-}): number[] {
-  return [
-    ...get(options.branchCount),
-    ...get(options.branchCapacity),
-    0x4f,
-    0x04,
-    EMPTY_BLOCK,
-    ...i32(-4),
-    0x0f,
-    0x0b,
-    ...branchFrameBase(
-      options.branchBase,
-      options.branchCount,
-      options.branchStride,
-      options.frameBase,
-    ),
-    ...storeFrameSlot(options.frameBase, 0, options.pendingAction),
-    ...storeFrameSlot(options.frameBase, 1, options.depth),
-    ...storeFrameSlot(options.frameBase, 2, options.streamIndex),
-    ...storeFrameSlot(options.frameBase, 3, options.traceCount),
-    ...copyStackToFrame(
-      options.frameBase,
-      options.stateCapacity,
-      options.stack,
-      options.depth,
-      options.copyIndex,
-    ),
-    ...copyTraceToFrame(
-      options.frameBase,
-      options.stateCapacity,
-      options.trace,
-      options.traceCount,
-      options.copyIndex,
-    ),
-  ];
-}
-
-function restoreBranchFrame(options: {
-  branchBase: number;
-  branchCount: number;
-  branchStride: number;
-  frameBase: number;
-  stateCapacity: number;
-  traceCapacity: number;
-  stack: number;
-  trace: number;
-  action: number;
-  depth: number;
-  streamIndex: number;
-  traceCount: number;
-  copyIndex: number;
-}): number[] {
-  return [
-    ...branchFrameBase(
-      options.branchBase,
-      options.branchCount,
-      options.branchStride,
-      options.frameBase,
-    ),
-    ...loadFrameSlot(options.frameBase, 0),
-    ...set(options.action),
-    ...loadFrameSlot(options.frameBase, 1),
-    ...set(options.depth),
-    ...loadFrameSlot(options.frameBase, 2),
-    ...set(options.streamIndex),
-    ...loadFrameSlot(options.frameBase, 3),
-    ...set(options.traceCount),
-    ...copyFrameToStack(
-      options.frameBase,
-      options.stateCapacity,
-      options.stack,
-      options.depth,
-      options.copyIndex,
-    ),
-    ...copyFrameToTrace(
-      options.frameBase,
-      options.stateCapacity,
-      options.trace,
-      options.traceCount,
-      options.copyIndex,
-    ),
-  ];
-}
-
-function branchFrameBase(
-  branchBaseLocal: number,
-  branchCountLocal: number,
-  branchStrideLocal: number,
-  frameBaseLocal: number,
-): number[] {
-  return [
-    ...get(branchBaseLocal),
-    ...get(branchCountLocal),
-    ...get(branchStrideLocal),
-    0x6c,
-    ...i32(4),
-    0x6c,
-    0x6a,
-    ...set(frameBaseLocal),
-  ];
-}
-
-function storeFrameSlot(
-  frameBaseLocal: number,
-  slot: number,
-  valueLocal: number,
-): number[] {
-  return [
-    ...frameSlotAddress(frameBaseLocal, slot),
-    ...get(valueLocal),
-    ...store32(),
-  ];
-}
-
-function loadFrameSlot(frameBaseLocal: number, slot: number): number[] {
-  return [
-    ...frameSlotAddress(frameBaseLocal, slot),
-    ...load32(),
-  ];
-}
-
-function frameSlotAddress(frameBaseLocal: number, slot: number): number[] {
-  return [
-    ...get(frameBaseLocal),
-    ...i32(slot * 4),
-    0x6a,
-  ];
-}
-
-function copyStackToFrame(
-  frameBaseLocal: number,
-  _stateCapacityLocal: number,
-  stackLocal: number,
-  depthLocal: number,
-  copyIndexLocal: number,
-): number[] {
-  return copyLoop(copyIndexLocal, depthLocal, [
-    ...frameStackAddress(frameBaseLocal, copyIndexLocal),
-    ...loadArrayValue(stackLocal, copyIndexLocal),
-    ...store32(),
-  ]);
-}
-
-function copyFrameToStack(
-  frameBaseLocal: number,
-  _stateCapacityLocal: number,
-  stackLocal: number,
-  depthLocal: number,
-  copyIndexLocal: number,
-): number[] {
-  return copyLoop(copyIndexLocal, depthLocal, [
-    ...get(stackLocal),
-    ...get(copyIndexLocal),
-    ...i32(4),
-    0x6c,
-    0x6a,
-    ...frameStackAddress(frameBaseLocal, copyIndexLocal),
-    ...load32(),
-    ...store32(),
-  ]);
-}
-
-function copyTraceToFrame(
-  frameBaseLocal: number,
-  stateCapacityLocal: number,
-  traceLocal: number,
-  traceCountLocal: number,
-  copyIndexLocal: number,
-): number[] {
-  return copyLoop(copyIndexLocal, traceCountLocal, [
-    ...frameTraceAddress(frameBaseLocal, stateCapacityLocal, copyIndexLocal),
-    ...loadArrayValue(traceLocal, copyIndexLocal),
-    ...store32(),
-  ]);
-}
-
-function copyFrameToTrace(
-  frameBaseLocal: number,
-  stateCapacityLocal: number,
-  traceLocal: number,
-  traceCountLocal: number,
-  copyIndexLocal: number,
-): number[] {
-  return copyLoop(copyIndexLocal, traceCountLocal, [
-    ...get(traceLocal),
-    ...get(copyIndexLocal),
-    ...i32(4),
-    0x6c,
-    0x6a,
-    ...frameTraceAddress(frameBaseLocal, stateCapacityLocal, copyIndexLocal),
-    ...load32(),
-    ...store32(),
-  ]);
-}
-
-function frameStackAddress(
-  frameBaseLocal: number,
-  copyIndexLocal: number,
-): number[] {
-  return [
-    ...get(frameBaseLocal),
-    ...i32(4),
-    ...get(copyIndexLocal),
-    0x6a,
-    ...i32(4),
-    0x6c,
-    0x6a,
-  ];
-}
-
-function frameTraceAddress(
-  frameBaseLocal: number,
-  stateCapacityLocal: number,
-  copyIndexLocal: number,
-): number[] {
-  return [
-    ...get(frameBaseLocal),
-    ...i32(4),
-    ...get(stateCapacityLocal),
-    0x6a,
-    ...get(copyIndexLocal),
-    0x6a,
-    ...i32(4),
-    0x6c,
-    0x6a,
-  ];
-}
-
-function copyLoop(
-  copyIndexLocal: number,
-  countLocal: number,
-  body: readonly number[],
-): number[] {
-  return [
-    ...i32(0),
-    ...set(copyIndexLocal),
-    0x02,
-    EMPTY_BLOCK,
-    0x03,
-    EMPTY_BLOCK,
-    ...get(copyIndexLocal),
-    ...get(countLocal),
-    0x4f,
-    0x0d,
-    ...u32(1),
-    ...body,
-    ...get(copyIndexLocal),
-    ...i32(1),
-    0x6a,
-    ...set(copyIndexLocal),
-    0x0c,
-    ...u32(0),
-    0x0b,
-    0x0b,
-  ];
-}
-
-function updateBestFailure(
-  bestIndexLocal: number,
-  bestStateLocal: number,
-  streamIndexLocal: number,
-  stateLocal: number,
-): number[] {
-  return [
-    ...get(streamIndexLocal),
-    ...get(bestIndexLocal),
-    0x4a,
-    0x04,
-    EMPTY_BLOCK,
-    ...get(streamIndexLocal),
-    ...set(bestIndexLocal),
-    ...get(stateLocal),
-    ...set(bestStateLocal),
-    0x0b,
-  ];
-}
-
 function tableLookupFunction(options: {
   rows: number;
   pairs: number;
@@ -1587,97 +960,6 @@ function loadTableValue(offset: number, indexLocal: number): number[] {
     0x6c,
     0x6a,
     ...load32(),
-  ];
-}
-
-function loadArrayValue(baseLocal: number, indexLocal: number): number[] {
-  return [
-    ...get(baseLocal),
-    ...get(indexLocal),
-    ...i32(4),
-    0x6c,
-    0x6a,
-    ...load32(),
-  ];
-}
-
-function loadStackValue(
-  stackLocal: number,
-  depthLocal: number,
-  relative: number,
-): number[] {
-  return [
-    ...get(stackLocal),
-    ...get(depthLocal),
-    ...i32(relative),
-    0x6a,
-    ...i32(4),
-    0x6c,
-    0x6a,
-    ...load32(),
-  ];
-}
-
-function loadProductionField(
-  productionsOffset: number,
-  productionLocal: number,
-  field: 0 | 1,
-): number[] {
-  return [
-    ...i32(productionsOffset),
-    ...get(productionLocal),
-    ...i32(8),
-    0x6c,
-    0x6a,
-    ...i32(field * 4),
-    0x6a,
-    ...load32(),
-  ];
-}
-
-function storeError(
-  errorLocal: number,
-  stateLocal: number,
-  indexLocal: number,
-): number[] {
-  return [
-    ...get(errorLocal),
-    ...get(stateLocal),
-    ...store32(),
-    ...get(errorLocal),
-    ...i32(4),
-    0x6a,
-    ...get(indexLocal),
-    ...store32(),
-  ];
-}
-
-function storeTraceOrOverflow(
-  traceLocal: number,
-  capacityLocal: number,
-  countLocal: number,
-  actionLocal: number,
-): number[] {
-  return [
-    ...get(countLocal),
-    ...get(capacityLocal),
-    0x4f,
-    0x04,
-    EMPTY_BLOCK,
-    ...i32(-2),
-    0x0f,
-    0x0b,
-    ...get(traceLocal),
-    ...get(countLocal),
-    ...i32(4),
-    0x6c,
-    0x6a,
-    ...get(actionLocal),
-    ...store32(),
-    ...get(countLocal),
-    ...i32(1),
-    0x6a,
-    ...set(countLocal),
   ];
 }
 
