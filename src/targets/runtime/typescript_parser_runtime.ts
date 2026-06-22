@@ -72,6 +72,16 @@ import {
   RUNTIME_REDUCER_REPEAT1_FIRST,
   RUNTIME_REDUCER_REPEAT_APPEND,
   RUNTIME_REDUCER_REPEAT_EMPTY,
+  RUNTIME_REDUCER_RESULT_APPEND_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_EMPTY_NULL_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_FIELD_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_FIRST_ARRAY_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_RAW_CHILD,
+  RUNTIME_REDUCER_RESULT_RULE_NODE,
+  RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_SEQUENCE_FRAGMENT,
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_RULE_REF,
   RUNTIME_REDUCER_SEPARATED_APPEND,
@@ -349,6 +359,16 @@ const REDUCER_CHILD_RAW = ${RUNTIME_REDUCER_CHILD_RAW};
 const REDUCER_CHILD_FRAGMENT = ${RUNTIME_REDUCER_CHILD_FRAGMENT};
 const REDUCER_CHILD_SHIFTED_TOKEN = ${RUNTIME_REDUCER_CHILD_SHIFTED_TOKEN};
 const REDUCER_CHILD_RULE_NODE = ${RUNTIME_REDUCER_CHILD_RULE_NODE};
+const REDUCER_RESULT_RAW_CHILD = ${RUNTIME_REDUCER_RESULT_RAW_CHILD};
+const REDUCER_RESULT_RULE_NODE = ${RUNTIME_REDUCER_RESULT_RULE_NODE};
+const REDUCER_RESULT_CHILD_FRAGMENT = ${RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT};
+const REDUCER_RESULT_SEQUENCE_FRAGMENT = ${RUNTIME_REDUCER_RESULT_SEQUENCE_FRAGMENT};
+const REDUCER_RESULT_EMPTY_NULL_FRAGMENT = ${RUNTIME_REDUCER_RESULT_EMPTY_NULL_FRAGMENT};
+const REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT = ${RUNTIME_REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT};
+const REDUCER_RESULT_APPEND_FRAGMENT = ${RUNTIME_REDUCER_RESULT_APPEND_FRAGMENT};
+const REDUCER_RESULT_FIRST_ARRAY_FRAGMENT = ${RUNTIME_REDUCER_RESULT_FIRST_ARRAY_FRAGMENT};
+const REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT = ${RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT};
+const REDUCER_RESULT_FIELD_FRAGMENT = ${RUNTIME_REDUCER_RESULT_FIELD_FRAGMENT};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
 const FIELD_VALUE_ARRAY = ${RUNTIME_FIELD_VALUE_ARRAY};
 const FIELD_VALUE_NULLABLE = ${RUNTIME_FIELD_VALUE_NULLABLE};
@@ -819,10 +839,11 @@ function reductionRuntime(): string {
   offset: number,
   tokenIndex: number,
 ): unknown {
-  switch (reducerOperation) {
-    case REDUCER_OPERATION_START:
+  const reducerResultKind = parserReducerResultKind(reducerOperation);
+  switch (reducerResultKind) {
+    case REDUCER_RESULT_RAW_CHILD:
       return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_OPERATION_RULE: {
+    case REDUCER_RESULT_RULE_NODE: {
       const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
       const node = {
         type: "rule",
@@ -834,35 +855,31 @@ function reductionRuntime(): string {
       };
       return node as unknown as AnyRuleNode;
     }
-    case REDUCER_OPERATION_TERMINAL:
+    case REDUCER_RESULT_CHILD_FRAGMENT:
       return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_OPERATION_RULE_REF:
-      return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_OPERATION_IDENTITY:
-      return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_OPERATION_SEQUENCE:
+    case REDUCER_RESULT_SEQUENCE_FRAGMENT:
       return sequenceFragment(reducerOperation, rhs, offset, tokenIndex);
-    case REDUCER_OPERATION_EMPTY_NULL:
+    case REDUCER_RESULT_EMPTY_NULL_FRAGMENT:
       return emptyFragment(null, offset, tokenIndex);
-    case REDUCER_OPERATION_EMPTY_ARRAY:
+    case REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT:
       return emptyFragment([], offset, tokenIndex);
-    case REDUCER_OPERATION_APPEND:
+    case REDUCER_RESULT_APPEND_FRAGMENT:
       return appendFragment(
         reducerFragmentChild(reducerOperation, rhs, 0),
         reducerFragmentChild(reducerOperation, rhs, 1),
       );
-    case REDUCER_OPERATION_FIRST_ARRAY: {
+    case REDUCER_RESULT_FIRST_ARRAY_FRAGMENT: {
       const item = reducerFragmentChild(reducerOperation, rhs, 0);
       item.value = [item.value];
       return item;
     }
-    case REDUCER_OPERATION_SEPARATED_APPEND:
+    case REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT:
       return appendSeparatedFragment(
         reducerFragmentChild(reducerOperation, rhs, 0),
         reducerFragmentChild(reducerOperation, rhs, 1),
         reducerFragmentChild(reducerOperation, rhs, 2),
       );
-    case REDUCER_OPERATION_FIELD: {
+    case REDUCER_RESULT_FIELD_FRAGMENT: {
       const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
       fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;

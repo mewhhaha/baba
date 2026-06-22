@@ -80,6 +80,12 @@ import {
   RUNTIME_REDUCER_PAYLOAD_STATUS_OK,
   RUNTIME_REDUCER_PAYLOAD_STATUS_RULE_MISSING,
   RUNTIME_REDUCER_PAYLOAD_STATUS_UNKNOWN,
+  RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_RAW_CHILD,
+  RUNTIME_REDUCER_RESULT_RULE_NODE,
+  RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_SEQUENCE_FRAGMENT,
+  RUNTIME_REDUCER_RESULT_UNKNOWN,
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_SEQUENCE,
   RUNTIME_REDUCER_UNKNOWN,
@@ -569,12 +575,70 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                                                 ]),
                                                 u32(100_000),
                                               ),
-                                              call("parserReducerChildRole", [
-                                                u32(
-                                                  RUNTIME_REDUCER_OPERATION_FIELD,
+                                              add(
+                                                call("parserReducerChildRole", [
+                                                  u32(
+                                                    RUNTIME_REDUCER_OPERATION_FIELD,
+                                                  ),
+                                                  u32(1),
+                                                ]),
+                                                add(
+                                                  call(
+                                                    "parserReducerResultKind",
+                                                    [
+                                                      u32(
+                                                        RUNTIME_REDUCER_OPERATION_START,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  add(
+                                                    call(
+                                                      "parserReducerResultKind",
+                                                      [
+                                                        u32(
+                                                          RUNTIME_REDUCER_OPERATION_RULE,
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    add(
+                                                      call(
+                                                        "parserReducerResultKind",
+                                                        [
+                                                          u32(
+                                                            RUNTIME_REDUCER_OPERATION_TERMINAL,
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      add(
+                                                        call(
+                                                          "parserReducerResultKind",
+                                                          [
+                                                            u32(
+                                                              RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        add(
+                                                          call(
+                                                            "parserReducerResultKind",
+                                                            [
+                                                              u32(99),
+                                                            ],
+                                                          ),
+                                                          call(
+                                                            "parserReducerResultKind",
+                                                            [
+                                                              u32(
+                                                                RUNTIME_REDUCER_OPERATION_SEQUENCE,
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
                                                 ),
-                                                u32(1),
-                                              ]),
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -1426,7 +1490,13 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_REDUCER_CHILD_RULE_NODE * 10_000_000 +
           RUNTIME_REDUCER_CHILD_FRAGMENT * 1_000_000 +
           RUNTIME_REDUCER_CHILD_FRAGMENT * 100_000 +
-          RUNTIME_REDUCER_CHILD_UNKNOWN,
+          RUNTIME_REDUCER_CHILD_UNKNOWN +
+          RUNTIME_REDUCER_RESULT_RAW_CHILD +
+          RUNTIME_REDUCER_RESULT_RULE_NODE +
+          RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT +
+          RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT +
+          RUNTIME_REDUCER_RESULT_UNKNOWN +
+          RUNTIME_REDUCER_RESULT_SEQUENCE_FRAGMENT,
       },
     },
     {

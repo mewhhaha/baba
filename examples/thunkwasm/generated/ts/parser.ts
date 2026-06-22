@@ -73,6 +73,16 @@ const REDUCER_CHILD_RAW = 1;
 const REDUCER_CHILD_FRAGMENT = 2;
 const REDUCER_CHILD_SHIFTED_TOKEN = 3;
 const REDUCER_CHILD_RULE_NODE = 4;
+const REDUCER_RESULT_RAW_CHILD = 1;
+const REDUCER_RESULT_RULE_NODE = 2;
+const REDUCER_RESULT_CHILD_FRAGMENT = 3;
+const REDUCER_RESULT_SEQUENCE_FRAGMENT = 4;
+const REDUCER_RESULT_EMPTY_NULL_FRAGMENT = 5;
+const REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT = 6;
+const REDUCER_RESULT_APPEND_FRAGMENT = 7;
+const REDUCER_RESULT_FIRST_ARRAY_FRAGMENT = 8;
+const REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT = 9;
+const REDUCER_RESULT_FIELD_FRAGMENT = 10;
 const NO_FIELD = 4294967295;
 const FIELD_VALUE_ARRAY = 3;
 const FIELD_VALUE_NULLABLE = 2;
@@ -685,6 +695,47 @@ function parserReducerChildRole(operation: number, slot: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserReducerResultKind(operation: number): number {
+  if (((((operation) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+    return (4) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+    return (5) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((8) >>> 0) ? 1 : 0)) !== 0) {
+    return (6) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((9) >>> 0) ? 1 : 0)) !== 0) {
+    return (7) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((10) >>> 0) ? 1 : 0)) !== 0) {
+    return (8) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((11) >>> 0) ? 1 : 0)) !== 0) {
+    return (9) >>> 0;
+  }
+  if (((((operation) >>> 0) === ((12) >>> 0) ? 1 : 0)) !== 0) {
+    return (10) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function lexerSpecFlags(specIndex: number): number {
   let offset = 0;
   if (((((specIndex) | 0) < ((31) | 0) ? 1 : 0)) !== 0) {
@@ -1223,10 +1274,11 @@ function reduceProduction(
   offset: number,
   tokenIndex: number,
 ): unknown {
-  switch (reducerOperation) {
-    case REDUCER_OPERATION_START:
+  const reducerResultKind = parserReducerResultKind(reducerOperation);
+  switch (reducerResultKind) {
+    case REDUCER_RESULT_RAW_CHILD:
       return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_OPERATION_RULE: {
+    case REDUCER_RESULT_RULE_NODE: {
       const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
       const node = {
         type: "rule",
@@ -1238,35 +1290,31 @@ function reduceProduction(
       };
       return node as unknown as AnyRuleNode;
     }
-    case REDUCER_OPERATION_TERMINAL:
+    case REDUCER_RESULT_CHILD_FRAGMENT:
       return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_OPERATION_RULE_REF:
-      return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_OPERATION_IDENTITY:
-      return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_OPERATION_SEQUENCE:
+    case REDUCER_RESULT_SEQUENCE_FRAGMENT:
       return sequenceFragment(reducerOperation, rhs, offset, tokenIndex);
-    case REDUCER_OPERATION_EMPTY_NULL:
+    case REDUCER_RESULT_EMPTY_NULL_FRAGMENT:
       return emptyFragment(null, offset, tokenIndex);
-    case REDUCER_OPERATION_EMPTY_ARRAY:
+    case REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT:
       return emptyFragment([], offset, tokenIndex);
-    case REDUCER_OPERATION_APPEND:
+    case REDUCER_RESULT_APPEND_FRAGMENT:
       return appendFragment(
         reducerFragmentChild(reducerOperation, rhs, 0),
         reducerFragmentChild(reducerOperation, rhs, 1),
       );
-    case REDUCER_OPERATION_FIRST_ARRAY: {
+    case REDUCER_RESULT_FIRST_ARRAY_FRAGMENT: {
       const item = reducerFragmentChild(reducerOperation, rhs, 0);
       item.value = [item.value];
       return item;
     }
-    case REDUCER_OPERATION_SEPARATED_APPEND:
+    case REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT:
       return appendSeparatedFragment(
         reducerFragmentChild(reducerOperation, rhs, 0),
         reducerFragmentChild(reducerOperation, rhs, 1),
         reducerFragmentChild(reducerOperation, rhs, 2),
       );
-    case REDUCER_OPERATION_FIELD: {
+    case REDUCER_RESULT_FIELD_FRAGMENT: {
       const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
       fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;

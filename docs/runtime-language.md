@@ -59,13 +59,17 @@ execution and CST construction. Generated parser replay now gets reducer
 descriptor kind/payload metadata from `parserReducerKind`/`parserReducerPayload`
 helpers, reducer operation classes from `parserReducerOperation`, and required
 payload status from `parserReducerPayloadStatus`, plus child-role requirements
-from `parserReducerChildRole`, all backed by numeric reducer tables. CST field
+from `parserReducerChildRole`; reducer result-shape classification comes from
+`parserReducerResultKind`, all backed by numeric reducer tables. CST field
 assembly now reads field row/config metadata through
 `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
 `parserFieldFlags`/`parserFieldIndex` helpers. JavaScript still executes reducer
-fragment assembly and builds public CST objects, but field value-class/count
-validation now uses `parserFieldValueClass`/`parserFieldCaptureStatus`/
-`parserFieldFinalStatus` helpers, and span/token-range merge arithmetic uses
+fragment assembly and builds public CST objects, but it now gets the result
+shape from the runtime-language helper before allocating raw child, rule-node,
+fragment, sequence, empty, append, separated-append, or field-capture results.
+Field value-class/count validation now uses
+`parserFieldValueClass`/`parserFieldCaptureStatus`/`parserFieldFinalStatus`
+helpers, and span/token-range merge arithmetic uses
 `parserMergeStart`/`parserMergeEnd` helpers. Generated parser action decoding
 uses `parserActionKind`/`parserActionPayload` helpers, and `parserTrace` uses
 the same helpers to classify encoded actions. Deterministic TypeScript parsers

@@ -72,6 +72,17 @@ export const RUNTIME_REDUCER_CHILD_RAW = 1;
 export const RUNTIME_REDUCER_CHILD_FRAGMENT = 2;
 export const RUNTIME_REDUCER_CHILD_SHIFTED_TOKEN = 3;
 export const RUNTIME_REDUCER_CHILD_RULE_NODE = 4;
+export const RUNTIME_REDUCER_RESULT_UNKNOWN = 0;
+export const RUNTIME_REDUCER_RESULT_RAW_CHILD = 1;
+export const RUNTIME_REDUCER_RESULT_RULE_NODE = 2;
+export const RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT = 3;
+export const RUNTIME_REDUCER_RESULT_SEQUENCE_FRAGMENT = 4;
+export const RUNTIME_REDUCER_RESULT_EMPTY_NULL_FRAGMENT = 5;
+export const RUNTIME_REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT = 6;
+export const RUNTIME_REDUCER_RESULT_APPEND_FRAGMENT = 7;
+export const RUNTIME_REDUCER_RESULT_FIRST_ARRAY_FRAGMENT = 8;
+export const RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT = 9;
+export const RUNTIME_REDUCER_RESULT_FIELD_FRAGMENT = 10;
 export const RUNTIME_NO_FIELD = 0xffff_ffff;
 export const RUNTIME_FIELD_ARRAY = 1;
 export const RUNTIME_FIELD_NULLABLE = 2;
@@ -1044,6 +1055,7 @@ function parserReducerFunctions(
     parserReducerOperationFunction(reducerCount),
     parserReducerPayloadStatusFunction(reducerCount),
     parserReducerChildRoleFunction(),
+    parserReducerResultKindFunction(),
   ];
 }
 
@@ -1321,6 +1333,81 @@ function parserReducerChildRoleFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_REDUCER_CHILD_UNKNOWN),
+      },
+    ],
+  };
+}
+
+function parserReducerResultKindFunction(): RuntimeLanguageFunction {
+  const operationIs = (
+    operation: number,
+    resultKind: number,
+  ): RuntimeStatement => ({
+    kind: "if",
+    condition: eq(local("operation"), u32(operation)),
+    consequent: [{
+      kind: "return",
+      expression: u32(resultKind),
+    }],
+  });
+  return {
+    name: "parserReducerResultKind",
+    parameters: [
+      { name: "operation", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_START,
+        RUNTIME_REDUCER_RESULT_RAW_CHILD,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_RULE,
+        RUNTIME_REDUCER_RESULT_RULE_NODE,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_TERMINAL,
+        RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_RULE_REF,
+        RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_IDENTITY,
+        RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_SEQUENCE,
+        RUNTIME_REDUCER_RESULT_SEQUENCE_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_EMPTY_NULL,
+        RUNTIME_REDUCER_RESULT_EMPTY_NULL_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_EMPTY_ARRAY,
+        RUNTIME_REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_APPEND,
+        RUNTIME_REDUCER_RESULT_APPEND_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_FIRST_ARRAY,
+        RUNTIME_REDUCER_RESULT_FIRST_ARRAY_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_SEPARATED_APPEND,
+        RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT,
+      ),
+      operationIs(
+        RUNTIME_REDUCER_OPERATION_FIELD,
+        RUNTIME_REDUCER_RESULT_FIELD_FRAGMENT,
+      ),
+      {
+        kind: "return",
+        expression: u32(RUNTIME_REDUCER_RESULT_UNKNOWN),
       },
     ],
   };

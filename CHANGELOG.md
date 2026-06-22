@@ -106,6 +106,9 @@
 - Generated parser replay now reads reducer child-role requirements through
   runtime-language `parserReducerChildRole` before converting reduced values at
   the TypeScript object boundary.
+- Generated parser replay now reads reducer result-shape classes through
+  runtime-language `parserReducerResultKind` before assembling fragments, field
+  captures, arrays, and rule nodes.
 - Generated parsers now read CST field schema rows/config through
   runtime-language `parserField*` helpers instead of generated field-schema
   lookup object tables.
