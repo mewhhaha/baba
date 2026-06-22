@@ -184,6 +184,10 @@ execute both outputs and compare returned values or traps.
   tracks those buffers by object provenance and input epoch, rejects forged
   plain objects, and invalidates previous buffers when `reset()` runs or when
   `writeSource()` installs a different source into the shared Wasm input area.
+- Generated JavaScript-hosted Wasm adapters treat `ParseTraceInput` values
+  returned by `createParseTraceInput()` as adapter-owned parser-trace
+  capabilities. The adapter rejects forged plain objects and invalidates
+  previous trace inputs when `reset()` reinstantiates the parser trace runtime.
 - Public token, CST, and diagnostic spans are half-open UTF-16 code-unit
   offsets. CRLF is two code units, NUL is one code unit, U+2028 and U+2029 are
   one code unit each, and astral code points occupy two code units when encoded
@@ -282,7 +286,8 @@ execute both outputs and compare returned values or traps.
 These rules must be specified before the parser runtime can be fully lowered:
 
 - host-boundary ownership and handle capability lifetimes for future non-JS Wasm
-  hosts beyond the current JavaScript-hosted `WasmSourceBuffer` provenance gate;
+  hosts beyond the current JavaScript-hosted `WasmSourceBuffer` and
+  `ParseTraceInput` provenance gates;
 - first-class runtime-language text values, if source decoding moves fully into
   the runtime language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;

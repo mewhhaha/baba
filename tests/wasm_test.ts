@@ -202,7 +202,19 @@ Deno.test("Wasm runtime validates parse trace input bounds", async () => {
           terminals: new Int32Array(0),
           terminalCapacity: 1,
         }, 0),
+      "ParseTraceInput is not owned by this adapter",
+    );
+    const tamperedInput = runtime.createParseTraceInput(1);
+    tamperedInput.terminals = new Int32Array(0);
+    assertThrowsIncludes(
+      () => runtime.parseTrace(tamperedInput, 0),
       "terminals length must cover parse input terminalCapacity",
+    );
+    const staleInput = runtime.createParseTraceInput(1);
+    runtime.reset();
+    assertThrowsIncludes(
+      () => runtime.parseTrace(staleInput, 0),
+      "ParseTraceInput is stale; call createParseTraceInput() again",
     );
   } finally {
     await Deno.remove(dir, { recursive: true });

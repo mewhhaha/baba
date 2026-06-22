@@ -2283,6 +2283,7 @@ export function reset(): void {
   wasm.reset();
   parserTraceRuntime = instantiateParserTraceRuntime();
   sourceBufferEpoch++;
+  parseTraceInputEpoch++;
   cachedSource = null;
   cachedBuffer = null;
 }
@@ -2369,12 +2370,17 @@ export interface ParseTraceInput {
   terminalCapacity: number;
 }
 
+let parseTraceInputEpoch = 0;
+const parseTraceInputOwners = new WeakMap<ParseTraceInput, number>();
+
 export function createParseTraceInput(terminalCapacity: number): ParseTraceInput {
   assertPositiveInteger("terminalCapacity", terminalCapacity);
-  return {
+  const input = {
     terminals: new Int32Array(terminalCapacity),
     terminalCapacity,
   };
+  parseTraceInputOwners.set(input, parseTraceInputEpoch);
+  return input;
 }
 
 export function parseTrace(
@@ -2445,6 +2451,7 @@ function align4(value: number): number {
 }
 
 function assertParseTraceInput(input: ParseTraceInput): void {
+  assertOwnedParseTraceInput(input);
   assertPositiveInteger("terminalCapacity", input.terminalCapacity);
   if (!(input.terminals instanceof Int32Array)) {
     throw new TypeError("terminals must be an Int32Array.");
@@ -2463,6 +2470,16 @@ function assertOwnedSourceBuffer(buffer: WasmSourceBuffer): void {
   }
   if (epoch !== sourceBufferEpoch) {
     throw new TypeError("WasmSourceBuffer is stale; call writeSource() again.");
+  }
+}
+
+function assertOwnedParseTraceInput(input: ParseTraceInput): void {
+  const epoch = parseTraceInputOwners.get(input);
+  if (epoch === undefined) {
+    throw new TypeError("ParseTraceInput is not owned by this adapter.");
+  }
+  if (epoch !== parseTraceInputEpoch) {
+    throw new TypeError("ParseTraceInput is stale; call createParseTraceInput() again.");
   }
 }
 
