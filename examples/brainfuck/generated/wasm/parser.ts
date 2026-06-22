@@ -103,10 +103,12 @@ const FIELD_FINAL_TOO_MANY = 2;
 const PUBLIC_TOKEN_LITERAL = 1;
 const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
+const PUBLIC_TOKEN_ERROR = 4;
 const SPEC_STATUS_OK = 0;
 const SPEC_STATUS_NOT_LITERAL = 2;
 const SPEC_STATUS_NOT_MAIN = 3;
 const SPEC_STATUS_NOT_TRIVIA = 4;
+const LEXICAL_TOKEN_OK = 0;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -551,6 +553,31 @@ function lexerSpecPublicTokenStatus(specIndex: number, publicClass: number): num
     }
   }
   return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerTokenDiagnosticStatus(publicClass: number, terminal: number): number {
+  if (((((publicClass) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((terminal) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    } else {
+      return (0) >>> 0;
+    }
+  }
+  if (((((publicClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((terminal) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    } else {
+      return (0) >>> 0;
+    }
+  }
+  return (2) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -1227,10 +1254,12 @@ function lexicalTokenDiagnostics(
 ): readonly ParseDiagnostic[] {
   let diagnostics: ParseDiagnostic[] | null = null;
   for (const token of tokens) {
-    if (
-      token.type !== "error" &&
-      (isTriviaToken(token) || tokenToTerminal(token) >= 0)
-    ) {
+    const terminal = tokenToTerminal(token);
+    const status = lexerTokenDiagnosticStatus(
+      publicTokenClass(token),
+      terminal < 0 ? NO_TERMINAL : terminal,
+    );
+    if (status === LEXICAL_TOKEN_OK) {
       continue;
     }
     diagnostics ??= [];
@@ -1389,6 +1418,15 @@ function tokenSpecIndex(token: Token): number {
     return LITERAL_SPEC_INDICES.get(token.literal) ?? -1;
   }
   return -1;
+}
+
+function publicTokenClass(token: Token): number {
+  if (token.type === "error") return PUBLIC_TOKEN_ERROR;
+  if (token.type === "literal") return PUBLIC_TOKEN_LITERAL;
+  if (token.type === "named" && token.channel === "trivia") {
+    return PUBLIC_TOKEN_TRIVIA;
+  }
+  return PUBLIC_TOKEN_MAIN;
 }
 
 function runtimeTokenTerminal(token: Token): number {

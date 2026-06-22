@@ -34,6 +34,8 @@
   DFA transition helper.
 - Added runtime-language lexer scan helpers for longest-match accept tracking,
   with TypeScript/Wasm conformance coverage for accepting candidate selection.
+- Added a runtime-language lexer token diagnostic status helper for external
+  token-stream lexical diagnostic classification.
 - Moved generated deterministic TypeScript parser action/goto table lookup onto
   a runtime-language source program backed by read-only `u32` tables.
 - Moved generated conflict-parser TypeScript goto lookup onto the same

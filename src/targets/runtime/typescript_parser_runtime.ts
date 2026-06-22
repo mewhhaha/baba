@@ -36,12 +36,14 @@ import {
   RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA,
   RUNTIME_LEXER_SPEC_STATUS_OK,
   RUNTIME_LEXER_SPEC_TRIVIA,
+  RUNTIME_LEXICAL_TOKEN_STATUS_OK,
   RUNTIME_NO_FIELD,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_SPAN,
   RUNTIME_NO_TERMINAL,
+  RUNTIME_PUBLIC_TOKEN_ERROR,
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
@@ -396,10 +398,12 @@ const FIELD_FINAL_TOO_MANY = ${RUNTIME_FIELD_FINAL_TOO_MANY};
 const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
 const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
+const PUBLIC_TOKEN_ERROR = ${RUNTIME_PUBLIC_TOKEN_ERROR};
 const SPEC_STATUS_OK = ${RUNTIME_LEXER_SPEC_STATUS_OK};
 const SPEC_STATUS_NOT_LITERAL = ${RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL};
 const SPEC_STATUS_NOT_MAIN = ${RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN};
 const SPEC_STATUS_NOT_TRIVIA = ${RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA};
+const LEXICAL_TOKEN_OK = ${RUNTIME_LEXICAL_TOKEN_STATUS_OK};
 
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
 }
@@ -1099,10 +1103,12 @@ function lexicalTokenDiagnostics(
 ): readonly ParseDiagnostic[] {
   let diagnostics: ParseDiagnostic[] | null = null;
   for (const token of tokens) {
-    if (
-      token.type !== "error" &&
-      (isTriviaToken(token) || tokenToTerminal(token) >= 0)
-    ) {
+    const terminal = tokenToTerminal(token);
+    const status = lexerTokenDiagnosticStatus(
+      publicTokenClass(token),
+      terminal < 0 ? NO_TERMINAL : terminal,
+    );
+    if (status === LEXICAL_TOKEN_OK) {
       continue;
     }
     diagnostics ??= [];
@@ -1261,6 +1267,15 @@ function tokenSpecIndex(token: Token): number {
     return LITERAL_SPEC_INDICES.get(token.literal) ?? -1;
   }
   return -1;
+}
+
+function publicTokenClass(token: Token): number {
+  if (token.type === "error") return PUBLIC_TOKEN_ERROR;
+  if (token.type === "literal") return PUBLIC_TOKEN_LITERAL;
+  if (token.type === "named" && token.channel === "trivia") {
+    return PUBLIC_TOKEN_TRIVIA;
+  }
+  return PUBLIC_TOKEN_MAIN;
 }
 
 function runtimeTokenTerminal(token: Token): number {

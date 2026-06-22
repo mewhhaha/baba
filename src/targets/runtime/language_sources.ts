@@ -20,11 +20,15 @@ export const RUNTIME_LEXER_TOKEN_MAIN = 3;
 export const RUNTIME_PUBLIC_TOKEN_LITERAL = 1;
 export const RUNTIME_PUBLIC_TOKEN_MAIN = 2;
 export const RUNTIME_PUBLIC_TOKEN_TRIVIA = 3;
+export const RUNTIME_PUBLIC_TOKEN_ERROR = 4;
 export const RUNTIME_LEXER_SPEC_STATUS_OK = 0;
 export const RUNTIME_LEXER_SPEC_STATUS_UNKNOWN = 1;
 export const RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL = 2;
 export const RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN = 3;
 export const RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA = 4;
+export const RUNTIME_LEXICAL_TOKEN_STATUS_OK = 0;
+export const RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN = 1;
+export const RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL = 2;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -766,6 +770,7 @@ function lexerSpecFunctions(
   ];
   if (options.includePublicTokenStatus) {
     functions.push(lexerSpecPublicTokenStatusFunction(specCount));
+    functions.push(lexerTokenDiagnosticStatusFunction());
   }
   return functions;
 }
@@ -941,6 +946,87 @@ function lexerSpecPublicTokenStatusFunction(
         }],
       },
       { kind: "return", expression: u32(RUNTIME_LEXER_SPEC_STATUS_UNKNOWN) },
+    ],
+  };
+}
+
+function lexerTokenDiagnosticStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerTokenDiagnosticStatus",
+    parameters: [
+      { name: "publicClass", type: "u32" },
+      { name: "terminal", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_ERROR),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+        ),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(local("terminal"), u32(RUNTIME_NO_TERMINAL)),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL),
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+        ),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(local("terminal"), u32(RUNTIME_NO_TERMINAL)),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL),
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL),
+      },
     ],
   };
 }

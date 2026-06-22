@@ -53,12 +53,16 @@ import {
   RUNTIME_LEXER_TOKEN_LITERAL,
   RUNTIME_LEXER_TOKEN_MAIN,
   RUNTIME_LEXER_TOKEN_TRIVIA,
+  RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN,
+  RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL,
+  RUNTIME_LEXICAL_TOKEN_STATUS_OK,
   RUNTIME_NO_FIELD,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_TERMINAL,
   RUNTIME_NO_TRANSITION,
+  RUNTIME_PUBLIC_TOKEN_ERROR,
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
   RUNTIME_PUBLIC_TOKEN_TRIVIA,
@@ -202,6 +206,67 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                       ),
                     ),
                   ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const lexerTokenDiagnosticRuntimeProgram: RuntimeLanguageProgram = {
+    ...lexerSpecBaseProgram,
+    name: "lexer_token_diagnostic_status_conformance",
+    entry: "main",
+    functions: [
+      ...lexerSpecBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("lexerTokenDiagnosticStatus", [
+                u32(RUNTIME_PUBLIC_TOKEN_ERROR),
+                u32(RUNTIME_NO_TERMINAL),
+              ]),
+              u32(10_000),
+            ),
+            add(
+              mul(
+                eq(
+                  call("lexerTokenDiagnosticStatus", [
+                    u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                    u32(RUNTIME_NO_TERMINAL),
+                  ]),
+                  u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
+                ),
+                u32(1_000),
+              ),
+              add(
+                mul(
+                  eq(
+                    call("lexerTokenDiagnosticStatus", [
+                      u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                      u32(4),
+                    ]),
+                    u32(RUNTIME_LEXICAL_TOKEN_STATUS_OK),
+                  ),
+                  u32(100),
+                ),
+                add(
+                  mul(
+                    call("lexerTokenDiagnosticStatus", [
+                      u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+                      u32(RUNTIME_NO_TERMINAL),
+                    ]),
+                    u32(10),
+                  ),
+                  call("lexerTokenDiagnosticStatus", [
+                    u32(99),
+                    u32(4),
+                  ]),
                 ),
               ),
             ),
@@ -1508,6 +1573,17 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL +
           RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN +
           RUNTIME_LEXER_SPEC_STATUS_NOT_TRIVIA,
+      },
+    },
+    {
+      name: "lexer token diagnostic helper classifies public tokens",
+      program: lexerTokenDiagnosticRuntimeProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN * 10_000 +
+          1_000 + 100 +
+          RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL * 10 +
+          RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL,
       },
     },
     {
