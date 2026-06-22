@@ -129,12 +129,17 @@ functions with statement bodies. The current conformance subset supports:
 
 - `u32` function parameters and locals;
 - read-only `u32` tables;
+- immutable named UTF-16 text constants represented by opaque numeric handles;
 - zero-initialized `u32` scratch memory declared per program with an initial
   size and explicit checked growth;
 - `u32` constants;
 - local reads and assignments;
 - calls between `u32` functions;
 - checked read-only table loads by constant or local index;
+- typed `text` parameters, locals, and helper-return values inside
+  runtime-language programs, with exported entry points still restricted to
+  `u32` for current host compatibility;
+- checked text length and UTF-16 code-unit access;
 - checked scratch-memory growth, loads, and stores by computed `u32` index;
 - tagged arena-backed `u32` arrays, fixed records, and growable vectors
   represented as scratch-memory handles with resettable allocation lifetime;
@@ -172,8 +177,8 @@ execute both outputs and compare returned values or traps.
 - Function bodies execute statements in source order.
 - `return` exits the function immediately.
 - Explicit `trap` aborts execution.
-- Function results are currently `u32`.
-- Parameters and locals are currently `u32`.
+- Exported entry function results are currently `u32`.
+- Parameters, locals, and non-entry helper results may be `u32` or `text`.
 - Locals are initialized to zero before the first statement executes.
 - Scratch memory is a growable `u32` word array, initialized to the program's
   requested size when the emitted runtime artifact is instantiated, and persists
@@ -183,9 +188,13 @@ execute both outputs and compare returned values or traps.
 - Table loads trap on out-of-bounds indexes.
 - Table load indexes are currently restricted to constants and locals; assign
   computed indexes to locals before loading.
-- Runtime-language programs do not yet have first-class text values. Generated
-  standalone parser runtimes treat source text as an immutable UTF-16 code-unit
-  sequence at the host boundary, matching JavaScript `string` indexing.
+- Runtime-language text values are immutable handles to named UTF-16 text
+  constants. `textLength(text)` returns the number of UTF-16 code units.
+  `textCodeUnitAt(text, index)` returns the code unit at a checked zero-based
+  offset and traps when the text handle or index is out of bounds. Generated
+  standalone parser runtimes still treat host source text as an immutable UTF-16
+  code-unit sequence at the host boundary; turning host source buffers into
+  runtime-language text handles remains a future lowering step.
 - Generated JavaScript-hosted Wasm adapters treat `WasmSourceBuffer` values
   returned by `writeSource()` as adapter-owned source capabilities. The adapter
   tracks those buffers by object provenance and input epoch, rejects forged
@@ -320,8 +329,8 @@ These rules must be specified before the parser runtime can be fully lowered:
 - host-boundary ownership and handle capability lifetimes for future non-JS Wasm
   hosts beyond the current linear-memory ownership metadata and
   JavaScript-hosted `WasmSourceBuffer`/`ParseTraceInput` provenance gates;
-- first-class runtime-language text values, if source decoding moves fully into
-  the runtime language;
+- host source-text handles and source decoding fully lowered into the runtime
+  language;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
 - complete generated-parser lowering for remaining host public object
   materialization that still sits outside the shared token, lex diagnostic,

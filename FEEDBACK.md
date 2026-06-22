@@ -87,6 +87,10 @@ runtime language:
 - Expanded the private runtime-language conformance subset with `u32`
   parameters, locals, assignments, structured branches, and loops across both
   TypeScript and Wasm backends.
+- Added immutable runtime-language `text` values as UTF-16 text-constant
+  handles, with typed text locals/parameters, checked length/code-unit helpers,
+  and TypeScript/Wasm conformance coverage for non-BMP, NUL, and Unicode line
+  separator code units.
 - Added runtime-language unsigned less-than and a resettable scratch-memory
   arena with tagged arena-backed `u32` array, fixed-record, and growable-vector
   helpers, including allocation overflow, reset/reuse, zero initialization,
@@ -383,15 +387,15 @@ Still unresolved:
   provenance/epoch gates for the current JavaScript-hosted Wasm adapter, and
   core Wasm metadata for host-owned linear-memory buffers plus caller-owned
   result-buffer lifetimes, but it still lacks future non-JS host helpers and
-  opaque host-neutral handle capabilities beyond that metadata, first-class
-  runtime-language text values if source decoding moves fully into the runtime
-  language, plus complete generated parser-runtime lowering for remaining host
-  public object materialization outside the shared wrapper helpers and a richer
-  host-neutral error payload taxonomy beyond the current trace status metadata
-  and parser diagnostic IDs. The compiler now has a shared lowered
-  control-flow/value IR and checked helper artifact hashes, but it still needs
-  broader parser-runtime lowering before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  opaque host-neutral handle capabilities beyond that metadata, host source-text
+  handles plus source decoding fully lowered into the runtime language, complete
+  generated parser-runtime lowering for remaining host public object
+  materialization outside the shared wrapper helpers, and a richer host-neutral
+  error payload taxonomy beyond the current trace status metadata and parser
+  diagnostic IDs. The compiler now has a shared lowered control-flow/value IR
+  and checked helper artifact hashes, but it still needs broader parser-runtime
+  lowering before the release can fully satisfy "one runtime implementation, two
+  execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

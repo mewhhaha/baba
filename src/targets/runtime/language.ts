@@ -6,13 +6,19 @@ export interface RuntimeLanguageProgram {
   readonly entry: string;
   readonly scratchMemoryWords?: number;
   readonly tables?: readonly RuntimeLanguageTable[];
+  readonly texts?: readonly RuntimeLanguageText[];
   readonly functions: readonly RuntimeLanguageFunction[];
 }
 
 export interface RuntimeLanguageTable {
   readonly name: string;
-  readonly type: RuntimeScalarType;
+  readonly type: "u32";
   readonly values: readonly number[];
+}
+
+export interface RuntimeLanguageText {
+  readonly name: string;
+  readonly value: string;
 }
 
 export interface RuntimeLanguageFunction {
@@ -37,6 +43,8 @@ export interface RuntimeLanguageIrProgram {
   readonly functionMap: ReadonlyMap<string, RuntimeIrFunction>;
   readonly tables: readonly RuntimeLanguageTable[];
   readonly tableMap: ReadonlyMap<string, RuntimeLanguageTable>;
+  readonly texts: readonly RuntimeLanguageText[];
+  readonly textMap: ReadonlyMap<string, RuntimeLanguageText>;
   readonly hasScratchMemory: boolean;
   readonly scratchMemoryWords: number;
 }
@@ -52,7 +60,7 @@ export interface RuntimeIrFunction {
   readonly body: readonly RuntimeIrStatement[];
 }
 
-export type RuntimeScalarType = "u32";
+export type RuntimeScalarType = "u32" | "text";
 
 export type RuntimeBinaryOperator =
   | "addU32"
@@ -113,6 +121,19 @@ export type RuntimeExpression =
   | {
     readonly kind: "loadTableU32";
     readonly table: string;
+    readonly index: RuntimeExpression;
+  }
+  | {
+    readonly kind: "text";
+    readonly name: string;
+  }
+  | {
+    readonly kind: "textLength";
+    readonly text: RuntimeExpression;
+  }
+  | {
+    readonly kind: "textCodeUnitAt";
+    readonly text: RuntimeExpression;
     readonly index: RuntimeExpression;
   }
   | {
@@ -185,6 +206,21 @@ export type RuntimeIrExpression =
     readonly index: RuntimeIrExpression;
   }
   | {
+    readonly kind: "text";
+    readonly textName: string;
+    readonly textIndex: number;
+    readonly text: RuntimeLanguageText;
+  }
+  | {
+    readonly kind: "textLength";
+    readonly text: RuntimeIrExpression;
+  }
+  | {
+    readonly kind: "textCodeUnitAt";
+    readonly text: RuntimeIrExpression;
+    readonly index: RuntimeIrExpression;
+  }
+  | {
     readonly kind: "loadScratchU32";
     readonly index: RuntimeIrExpression;
   }
@@ -244,6 +280,7 @@ export function compileRuntimeLanguageIr(
   validateRuntimeLanguageProgram(program);
   const sourceFunctions = runtimeLanguageFunctions(program);
   const tables = runtimeLanguageTables(program);
+  const texts = runtimeLanguageTexts(program);
   const sourceFunctionMap = new Map(
     sourceFunctions.map((fn) => [fn.name, fn]),
   );
@@ -254,6 +291,10 @@ export function compileRuntimeLanguageIr(
   const tableIndexes = new Map(
     tables.map((table, index) => [table.name, index]),
   );
+  const textMap = new Map(texts.map((text) => [text.name, text]));
+  const textIndexes = new Map(
+    texts.map((text, index) => [text.name, index]),
+  );
   const functions = sourceFunctions.map((fn) =>
     lowerRuntimeLanguageFunction(
       fn,
@@ -261,6 +302,8 @@ export function compileRuntimeLanguageIr(
       sourceFunctionIndexes,
       tableMap,
       tableIndexes,
+      textMap,
+      textIndexes,
     )
   );
   const functionMap = new Map(functions.map((fn) => [fn.name, fn]));
@@ -281,6 +324,8 @@ export function compileRuntimeLanguageIr(
     functionMap,
     tables,
     tableMap,
+    texts,
+    textMap,
     hasScratchMemory,
     scratchMemoryWords,
   };
@@ -292,6 +337,8 @@ function lowerRuntimeLanguageFunction(
   functionIndexes: ReadonlyMap<string, number>,
   tables: ReadonlyMap<string, RuntimeLanguageTable>,
   tableIndexes: ReadonlyMap<string, number>,
+  texts: ReadonlyMap<string, RuntimeLanguageText>,
+  textIndexes: ReadonlyMap<string, number>,
 ): RuntimeIrFunction {
   const parameters = functionParameters(fn);
   const locals = functionLocals(fn);
@@ -316,6 +363,8 @@ function lowerRuntimeLanguageFunction(
         functionIndexes,
         tables,
         tableIndexes,
+        texts,
+        textIndexes,
       )
     ),
   };
@@ -329,6 +378,8 @@ function lowerRuntimeStatement(
   functionIndexes: ReadonlyMap<string, number>,
   tables: ReadonlyMap<string, RuntimeLanguageTable>,
   tableIndexes: ReadonlyMap<string, number>,
+  texts: ReadonlyMap<string, RuntimeLanguageText>,
+  textIndexes: ReadonlyMap<string, number>,
 ): RuntimeIrStatement {
   switch (statement.kind) {
     case "trap":
@@ -344,6 +395,8 @@ function lowerRuntimeStatement(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
       };
     case "setLocal":
@@ -359,6 +412,8 @@ function lowerRuntimeStatement(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
       };
     case "storeScratchU32":
@@ -372,6 +427,8 @@ function lowerRuntimeStatement(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
         value: lowerRuntimeExpression(
           statement.value,
@@ -381,6 +438,8 @@ function lowerRuntimeStatement(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
       };
     case "if":
@@ -394,6 +453,8 @@ function lowerRuntimeStatement(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
         consequent: statement.consequent.map((item) =>
           lowerRuntimeStatement(
@@ -404,6 +465,8 @@ function lowerRuntimeStatement(
             functionIndexes,
             tables,
             tableIndexes,
+            texts,
+            textIndexes,
           )
         ),
         alternate: (statement.alternate ?? []).map((item) =>
@@ -415,6 +478,8 @@ function lowerRuntimeStatement(
             functionIndexes,
             tables,
             tableIndexes,
+            texts,
+            textIndexes,
           )
         ),
       };
@@ -429,6 +494,8 @@ function lowerRuntimeStatement(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
         body: statement.body.map((item) =>
           lowerRuntimeStatement(
@@ -439,6 +506,8 @@ function lowerRuntimeStatement(
             functionIndexes,
             tables,
             tableIndexes,
+            texts,
+            textIndexes,
           )
         ),
       };
@@ -453,6 +522,8 @@ function lowerRuntimeExpression(
   functionIndexes: ReadonlyMap<string, number>,
   tables: ReadonlyMap<string, RuntimeLanguageTable>,
   tableIndexes: ReadonlyMap<string, number>,
+  texts: ReadonlyMap<string, RuntimeLanguageText>,
+  textIndexes: ReadonlyMap<string, number>,
 ): RuntimeIrExpression {
   switch (expression.kind) {
     case "u32":
@@ -478,6 +549,8 @@ function lowerRuntimeExpression(
             functionIndexes,
             tables,
             tableIndexes,
+            texts,
+            textIndexes,
           )
         ),
       };
@@ -495,6 +568,56 @@ function lowerRuntimeExpression(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
+        ),
+      };
+    case "text":
+      return {
+        kind: "text",
+        textName: expression.name,
+        textIndex: textIndex(expression.name, textIndexes),
+        text: requiredRuntimeText(texts, expression.name),
+      };
+    case "textLength":
+      return {
+        kind: "textLength",
+        text: lowerRuntimeExpression(
+          expression.text,
+          locals,
+          localIndexes,
+          functions,
+          functionIndexes,
+          tables,
+          tableIndexes,
+          texts,
+          textIndexes,
+        ),
+      };
+    case "textCodeUnitAt":
+      return {
+        kind: "textCodeUnitAt",
+        text: lowerRuntimeExpression(
+          expression.text,
+          locals,
+          localIndexes,
+          functions,
+          functionIndexes,
+          tables,
+          tableIndexes,
+          texts,
+          textIndexes,
+        ),
+        index: lowerRuntimeExpression(
+          expression.index,
+          locals,
+          localIndexes,
+          functions,
+          functionIndexes,
+          tables,
+          tableIndexes,
+          texts,
+          textIndexes,
         ),
       };
     case "loadScratchU32":
@@ -508,6 +631,8 @@ function lowerRuntimeExpression(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
       };
     case "ensureScratchWords":
@@ -521,6 +646,8 @@ function lowerRuntimeExpression(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
       };
     default:
@@ -534,6 +661,8 @@ function lowerRuntimeExpression(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
         right: lowerRuntimeExpression(
           expression.right,
@@ -543,6 +672,8 @@ function lowerRuntimeExpression(
           functionIndexes,
           tables,
           tableIndexes,
+          texts,
+          textIndexes,
         ),
       };
   }
@@ -568,6 +699,8 @@ function divU32(left: number, right: number): number {
 ${ir.tables.map(emitTypeScriptTable).join("\n")}
 ${ir.tables.map((table) => emitTypeScriptTableLoader(table)).join("\n")}${
     ir.tables.length > 0 ? "\n" : ""
+  }${ir.texts.length > 0 ? emitTypeScriptTexts(ir.texts) : ""}${
+    ir.texts.length > 0 ? "\n" : ""
   }
 ${
     ir.hasScratchMemory
@@ -581,6 +714,34 @@ ${
       })
     ).join("\n")
   }`;
+}
+
+function emitTypeScriptTexts(texts: readonly RuntimeLanguageText[]): string {
+  return `const __baba_texts: readonly string[] = ${
+    JSON.stringify(texts.map((text) => text.value))
+  };
+
+function __baba_text(handle: number): string {
+  const normalized = handle >>> 0;
+  if (normalized >= __baba_texts.length) {
+    throw new RuntimeLanguageTrap("text handle out of bounds");
+  }
+  return __baba_texts[normalized];
+}
+
+function __baba_text_length(handle: number): number {
+  return __baba_text(handle).length >>> 0;
+}
+
+function __baba_text_code_unit_at(handle: number, index: number): number {
+  const text = __baba_text(handle);
+  const normalized = index >>> 0;
+  if (normalized >= text.length) {
+    throw new RuntimeLanguageTrap("text index out of bounds");
+  }
+  return text.charCodeAt(normalized) >>> 0;
+}
+`;
 }
 
 function emitTypeScriptTable(table: RuntimeLanguageTable): string {
@@ -664,21 +825,29 @@ export function compileRuntimeLanguageWasm(
 ): Uint8Array {
   const ir = compileRuntimeLanguageIr(program);
   const tableLayout = buildRuntimeTableLayout(ir.tables);
+  const textLayout = buildRuntimeTextLayout(tableLayout.bytes, ir.texts);
   const scratchMemory = ir.hasScratchMemory
     ? buildRuntimeScratchMemory(
-      tableLayout.bytes.length,
+      textLayout.bytes.length,
       ir.scratchMemoryWords,
     )
     : null;
-  const staticData = buildRuntimeStaticData(tableLayout.bytes, scratchMemory);
+  const staticData = buildRuntimeStaticData(textLayout.bytes, scratchMemory);
   const tableLoaders = ir.tables.map((table) => ({
     table,
     name: runtimeTableLoaderIdentifier(table),
     offset: tableLayout.offsets.get(table.name) ?? 0,
   }));
+  const textHelperCount = ir.texts.length > 0 ? 2 : 0;
   const allFunctions = [
     ...ir.functions.map((fn) => ({ kind: "program" as const, fn })),
     ...tableLoaders.map((loader) => ({ kind: "tableLoader" as const, loader })),
+    ...(ir.texts.length > 0
+      ? [
+        { kind: "textLength" as const, text: textLayout },
+        { kind: "textCodeUnitAt" as const, text: textLayout },
+      ]
+      : []),
     ...(scratchMemory
       ? [
         { kind: "scratchLoad" as const, scratch: scratchMemory },
@@ -690,11 +859,17 @@ export function compileRuntimeLanguageWasm(
   const functionIndexes = new Map(
     ir.functions.map((fn, index) => [fn.name, index]),
   );
+  const textIndexes = ir.texts.length > 0
+    ? {
+      length: ir.functions.length + tableLoaders.length,
+      codeUnitAt: ir.functions.length + tableLoaders.length + 1,
+    }
+    : null;
   const scratchIndexes = scratchMemory
     ? {
-      load: ir.functions.length + tableLoaders.length,
-      store: ir.functions.length + tableLoaders.length + 1,
-      ensure: ir.functions.length + tableLoaders.length + 2,
+      load: ir.functions.length + tableLoaders.length + textHelperCount,
+      store: ir.functions.length + tableLoaders.length + textHelperCount + 1,
+      ensure: ir.functions.length + tableLoaders.length + textHelperCount + 2,
     }
     : null;
   const exportNames = options.exports ?? [ir.entry];
@@ -707,10 +882,15 @@ export function compileRuntimeLanguageWasm(
       ? wasmProgramFunctionBody(
         item.fn,
         ir.functions.length,
+        textIndexes,
         scratchIndexes,
       )
       : item.kind === "tableLoader"
       ? wasmTableLoaderBody(item.loader)
+      : item.kind === "textLength"
+      ? wasmTextLengthBody(item.text)
+      : item.kind === "textCodeUnitAt"
+      ? wasmTextCodeUnitAtBody(item.text)
       : item.kind === "scratchLoad"
       ? wasmScratchLoaderBody(item.scratch)
       : item.kind === "scratchStore"
@@ -730,6 +910,10 @@ export function compileRuntimeLanguageWasm(
           ? wasmFunctionType(item.fn)
           : item.kind === "tableLoader"
           ? wasmTableLoaderType()
+          : item.kind === "textLength"
+          ? wasmTextLengthType()
+          : item.kind === "textCodeUnitAt"
+          ? wasmTextCodeUnitAtType()
           : item.kind === "scratchLoad"
           ? wasmScratchLoaderType()
           : item.kind === "scratchStore"
@@ -804,6 +988,7 @@ function validateRuntimeLanguageProgram(program: RuntimeLanguageProgram): void {
   runtimeLanguageEntryFunction(program);
   const functions = runtimeLanguageFunctions(program);
   const tables = runtimeLanguageTables(program);
+  const texts = runtimeLanguageTexts(program);
   const hasScratchMemory = runtimeLanguageHasScratchMemory(program);
   const tableNames = new Set<string>();
   for (const table of tables) {
@@ -815,6 +1000,16 @@ function validateRuntimeLanguageProgram(program: RuntimeLanguageProgram): void {
     }
     tableNames.add(table.name);
   }
+  const textNames = new Set<string>();
+  for (const text of texts) {
+    validateRuntimeLanguageText(text);
+    if (textNames.has(text.name)) {
+      throw new Error(
+        `Runtime-language program '${program.name}' has duplicate text '${text.name}'.`,
+      );
+    }
+    textNames.add(text.name);
+  }
   const names = new Set<string>();
   for (const fn of functions) {
     identifier(fn.name);
@@ -825,7 +1020,7 @@ function validateRuntimeLanguageProgram(program: RuntimeLanguageProgram): void {
       );
     }
     names.add(fn.name);
-    if (fn.result !== "u32") {
+    if (!isRuntimeScalarType(fn.result)) {
       throw new Error(
         `Runtime-language function '${fn.name}' has unsupported result type '${fn.result}'.`,
       );
@@ -834,17 +1029,21 @@ function validateRuntimeLanguageProgram(program: RuntimeLanguageProgram): void {
   }
   const functionMap = new Map(functions.map((fn) => [fn.name, fn]));
   for (const fn of functions) {
-    const locals = new Set([
-      ...functionParameters(fn).map((parameter) => parameter.name),
-      ...functionLocals(fn).map((local) => local.name),
-    ]);
+    const locals = new Map(
+      [...functionParameters(fn), ...functionLocals(fn)].map((variable) => [
+        variable.name,
+        variable.type,
+      ]),
+    );
     for (const statement of fn.body) {
       validateStatement(
         statement,
         locals,
         functionMap,
         tableNames,
+        textNames,
         hasScratchMemory,
+        fn.result,
       );
     }
   }
@@ -867,81 +1066,148 @@ function validateRuntimeLanguageTable(table: RuntimeLanguageTable): void {
   }
 }
 
+function validateRuntimeLanguageText(text: RuntimeLanguageText): void {
+  identifier(text.name);
+  assertNotReservedRuntimeName(text.name);
+  if (typeof text.value !== "string") {
+    throw new Error(
+      `Runtime-language text '${text.name}' has non-string value.`,
+    );
+  }
+}
+
 function validateStatement(
   statement: RuntimeStatement,
-  locals: ReadonlySet<string>,
+  locals: ReadonlyMap<string, RuntimeScalarType>,
   functions: ReadonlyMap<string, RuntimeLanguageFunction>,
   tables: ReadonlySet<string>,
+  texts: ReadonlySet<string>,
   hasScratchMemory: boolean,
+  expectedReturn: RuntimeScalarType,
 ): void {
   switch (statement.kind) {
     case "trap":
       return;
     case "return":
-      validateExpression(
-        statement.expression,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          statement.expression,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        expectedReturn,
+        "return expression",
       );
       return;
-    case "setLocal":
-      assertKnownLocal(statement.name, locals);
-      validateExpression(
-        statement.expression,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+    case "setLocal": {
+      const type = localType(statement.name, locals);
+      assertExpressionType(
+        validateExpression(
+          statement.expression,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        type,
+        `assignment to '${statement.name}'`,
       );
       return;
+    }
     case "storeScratchU32":
       if (!hasScratchMemory) {
         throw new Error(
           "Runtime-language scratch memory store requires scratchMemoryWords.",
         );
       }
-      validateExpression(
-        statement.index,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          statement.index,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        "scratch memory store index",
       );
-      validateExpression(
-        statement.value,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          statement.value,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        "scratch memory store value",
       );
       return;
     case "if":
-      validateExpression(
-        statement.condition,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          statement.condition,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        "if condition",
       );
       for (const item of statement.consequent) {
-        validateStatement(item, locals, functions, tables, hasScratchMemory);
+        validateStatement(
+          item,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+          expectedReturn,
+        );
       }
       for (const item of statement.alternate ?? []) {
-        validateStatement(item, locals, functions, tables, hasScratchMemory);
+        validateStatement(
+          item,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+          expectedReturn,
+        );
       }
       return;
     case "while":
-      validateExpression(
-        statement.condition,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          statement.condition,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        "while condition",
       );
       for (const item of statement.body) {
-        validateStatement(item, locals, functions, tables, hasScratchMemory);
+        validateStatement(
+          item,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+          expectedReturn,
+        );
       }
       return;
   }
@@ -949,17 +1215,17 @@ function validateStatement(
 
 function validateExpression(
   expression: RuntimeExpression,
-  locals: ReadonlySet<string>,
+  locals: ReadonlyMap<string, RuntimeScalarType>,
   functions: ReadonlyMap<string, RuntimeLanguageFunction>,
   tables: ReadonlySet<string>,
+  texts: ReadonlySet<string>,
   hasScratchMemory: boolean,
-): void {
+): RuntimeScalarType {
   switch (expression.kind) {
     case "u32":
-      return;
+      return "u32";
     case "local":
-      assertKnownLocal(expression.name, locals);
-      return;
+      return localType(expression.name, locals);
     case "call": {
       const target = functions.get(expression.function);
       if (!target) {
@@ -967,17 +1233,16 @@ function validateExpression(
           `Runtime-language function '${expression.function}' is not declared.`,
         );
       }
-      validateCallExpression(expression, target);
-      for (const argument of expression.args) {
-        validateExpression(
-          argument,
-          locals,
-          functions,
-          tables,
-          hasScratchMemory,
-        );
-      }
-      return;
+      validateCallExpression(
+        expression,
+        target,
+        locals,
+        functions,
+        tables,
+        texts,
+        hasScratchMemory,
+      );
+      return target.result;
     }
     case "loadTableU32":
       if (!tables.has(expression.table)) {
@@ -986,51 +1251,118 @@ function validateExpression(
         );
       }
       validateSimpleTableIndex(expression.index, locals);
-      return;
+      return "u32";
+    case "text":
+      if (!texts.has(expression.name)) {
+        throw new Error(
+          `Runtime-language text '${expression.name}' is not declared.`,
+        );
+      }
+      return "text";
+    case "textLength":
+      assertExpressionType(
+        validateExpression(
+          expression.text,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "text",
+        "text length operand",
+      );
+      return "u32";
+    case "textCodeUnitAt":
+      assertExpressionType(
+        validateExpression(
+          expression.text,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "text",
+        "text code-unit operand",
+      );
+      assertExpressionType(
+        validateExpression(
+          expression.index,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        "text code-unit index",
+      );
+      return "u32";
     case "loadScratchU32":
       if (!hasScratchMemory) {
         throw new Error(
           "Runtime-language scratch memory load requires scratchMemoryWords.",
         );
       }
-      validateExpression(
-        expression.index,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          expression.index,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        "scratch memory load index",
       );
-      return;
+      return "u32";
     case "ensureScratchWords":
       if (!hasScratchMemory) {
         throw new Error(
           "Runtime-language scratch memory growth requires scratchMemoryWords.",
         );
       }
-      validateExpression(
-        expression.words,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          expression.words,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        "scratch memory growth size",
       );
-      return;
+      return "u32";
     default:
-      validateExpression(
-        expression.left,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          expression.left,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        `${expression.kind} left operand`,
       );
-      validateExpression(
-        expression.right,
-        locals,
-        functions,
-        tables,
-        hasScratchMemory,
+      assertExpressionType(
+        validateExpression(
+          expression.right,
+          locals,
+          functions,
+          tables,
+          texts,
+          hasScratchMemory,
+        ),
+        "u32",
+        `${expression.kind} right operand`,
       );
-      return;
+      return "u32";
   }
 }
 
@@ -1123,6 +1455,16 @@ function emitTypeScriptExpression(
       return `${runtimeTableLoaderIdentifier(expression.table)}(${
         emitTypeScriptExpression(expression.index)
       }) >>> 0`;
+    case "text":
+      return String(expression.textIndex >>> 0);
+    case "textLength":
+      return `__baba_text_length(${
+        emitTypeScriptExpression(expression.text)
+      }) >>> 0`;
+    case "textCodeUnitAt":
+      return `__baba_text_code_unit_at(${
+        emitTypeScriptExpression(expression.text)
+      }, ${emitTypeScriptExpression(expression.index)}) >>> 0`;
     case "loadScratchU32":
       return `__baba_load_scratch(${
         emitTypeScriptExpression(expression.index)
@@ -1177,6 +1519,7 @@ function emitTypeScriptExpression(
 function emitWasmStatement(
   statement: RuntimeIrStatement,
   tableLoaderOffset: number,
+  text: RuntimeTextIndexes | null,
   scratch: RuntimeScratchIndexes | null,
 ): number[] {
   switch (statement.kind) {
@@ -1187,6 +1530,7 @@ function emitWasmStatement(
         ...emitWasmExpression(
           statement.expression,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         0x0f,
@@ -1196,6 +1540,7 @@ function emitWasmStatement(
         ...emitWasmExpression(
           statement.expression,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         0x21,
@@ -1206,11 +1551,13 @@ function emitWasmStatement(
         ...emitWasmExpression(
           statement.index,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         ...emitWasmExpression(
           statement.value,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         0x10,
@@ -1221,18 +1568,19 @@ function emitWasmStatement(
         ...emitWasmExpression(
           statement.condition,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         0x04,
         0x40,
         ...statement.consequent.flatMap((item) =>
-          emitWasmStatement(item, tableLoaderOffset, scratch)
+          emitWasmStatement(item, tableLoaderOffset, text, scratch)
         ),
         ...(statement.alternate.length > 0
           ? [
             0x05,
             ...statement.alternate.flatMap((item) =>
-              emitWasmStatement(item, tableLoaderOffset, scratch)
+              emitWasmStatement(item, tableLoaderOffset, text, scratch)
             ),
           ]
           : []),
@@ -1247,13 +1595,14 @@ function emitWasmStatement(
         ...emitWasmExpression(
           statement.condition,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         0x45,
         0x0d,
         ...u32(1),
         ...statement.body.flatMap((item) =>
-          emitWasmStatement(item, tableLoaderOffset, scratch)
+          emitWasmStatement(item, tableLoaderOffset, text, scratch)
         ),
         0x0c,
         ...u32(0),
@@ -1266,6 +1615,7 @@ function emitWasmStatement(
 function emitWasmExpression(
   expression: RuntimeIrExpression,
   tableLoaderOffset: number,
+  text: RuntimeTextIndexes | null,
   scratch: RuntimeScratchIndexes | null,
 ): number[] {
   switch (expression.kind) {
@@ -1276,7 +1626,7 @@ function emitWasmExpression(
     case "call":
       return [
         ...expression.args.flatMap((argument) =>
-          emitWasmExpression(argument, tableLoaderOffset, scratch)
+          emitWasmExpression(argument, tableLoaderOffset, text, scratch)
         ),
         0x10,
         ...u32(expression.functionIndex),
@@ -1286,16 +1636,48 @@ function emitWasmExpression(
         ...emitWasmExpression(
           expression.index,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         0x10,
         ...u32(tableLoaderOffset + expression.tableIndex),
+      ];
+    case "text":
+      return [0x41, ...i32(expression.textIndex | 0)];
+    case "textLength":
+      return [
+        ...emitWasmExpression(
+          expression.text,
+          tableLoaderOffset,
+          text,
+          scratch,
+        ),
+        0x10,
+        ...u32(textLengthIndex(text)),
+      ];
+    case "textCodeUnitAt":
+      return [
+        ...emitWasmExpression(
+          expression.text,
+          tableLoaderOffset,
+          text,
+          scratch,
+        ),
+        ...emitWasmExpression(
+          expression.index,
+          tableLoaderOffset,
+          text,
+          scratch,
+        ),
+        0x10,
+        ...u32(textCodeUnitAtIndex(text)),
       ];
     case "loadScratchU32":
       return [
         ...emitWasmExpression(
           expression.index,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         0x10,
@@ -1306,6 +1688,7 @@ function emitWasmExpression(
         ...emitWasmExpression(
           expression.words,
           tableLoaderOffset,
+          text,
           scratch,
         ),
         0x10,
@@ -1315,6 +1698,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x6a,
       );
@@ -1322,6 +1706,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x6b,
       );
@@ -1329,6 +1714,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x6c,
       );
@@ -1336,6 +1722,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x6e,
       );
@@ -1343,6 +1730,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x71,
       );
@@ -1350,6 +1738,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x46,
       );
@@ -1357,6 +1746,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x48,
       );
@@ -1364,6 +1754,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x49,
       );
@@ -1371,6 +1762,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x74,
       );
@@ -1378,6 +1770,7 @@ function emitWasmExpression(
       return binaryExpression(
         expression,
         tableLoaderOffset,
+        text,
         scratch,
         0x76,
       );
@@ -1390,12 +1783,13 @@ function binaryExpression(
     { readonly left: RuntimeIrExpression; readonly right: RuntimeIrExpression }
   >,
   tableLoaderOffset: number,
+  text: RuntimeTextIndexes | null,
   scratch: RuntimeScratchIndexes | null,
   opcode: number,
 ): number[] {
   return [
-    ...emitWasmExpression(expression.left, tableLoaderOffset, scratch),
-    ...emitWasmExpression(expression.right, tableLoaderOffset, scratch),
+    ...emitWasmExpression(expression.left, tableLoaderOffset, text, scratch),
+    ...emitWasmExpression(expression.right, tableLoaderOffset, text, scratch),
     opcode,
   ];
 }
@@ -1403,12 +1797,13 @@ function binaryExpression(
 function wasmProgramFunctionBody(
   fn: RuntimeIrFunction,
   tableLoaderOffset: number,
+  text: RuntimeTextIndexes | null,
   scratch: RuntimeScratchIndexes | null,
 ): number[] {
   return [
     ...localDeclarations(fn.locals),
     ...fn.body.flatMap((statement) =>
-      emitWasmStatement(statement, tableLoaderOffset, scratch)
+      emitWasmStatement(statement, tableLoaderOffset, text, scratch)
     ),
     0x00,
     0x0b,
@@ -1439,6 +1834,105 @@ function wasmTableLoaderBody(
     0x6a,
     0x28,
     ...u32(2),
+    ...u32(0),
+    0x0f,
+    0x00,
+    0x0b,
+  ];
+}
+
+function wasmTextLengthBody(
+  text: RuntimeTextLayout,
+): number[] {
+  return [
+    0x00,
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(text.count),
+    0x4f,
+    0x04,
+    0x40,
+    0x00,
+    0x0b,
+    0x41,
+    ...i32(text.rowsOffset),
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(3),
+    0x74,
+    0x6a,
+    0x41,
+    ...i32(4),
+    0x6a,
+    0x28,
+    ...u32(2),
+    ...u32(0),
+    0x0f,
+    0x00,
+    0x0b,
+  ];
+}
+
+function wasmTextCodeUnitAtBody(
+  text: RuntimeTextLayout,
+): number[] {
+  return [
+    0x01,
+    ...u32(2),
+    0x7f,
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(text.count),
+    0x4f,
+    0x04,
+    0x40,
+    0x00,
+    0x0b,
+    0x41,
+    ...i32(text.rowsOffset),
+    0x20,
+    ...u32(0),
+    0x41,
+    ...i32(3),
+    0x74,
+    0x6a,
+    0x21,
+    ...u32(2),
+    0x20,
+    ...u32(2),
+    0x41,
+    ...i32(4),
+    0x6a,
+    0x28,
+    ...u32(2),
+    ...u32(0),
+    0x21,
+    ...u32(3),
+    0x20,
+    ...u32(1),
+    0x20,
+    ...u32(3),
+    0x4f,
+    0x04,
+    0x40,
+    0x00,
+    0x0b,
+    0x20,
+    ...u32(2),
+    0x28,
+    ...u32(2),
+    ...u32(0),
+    0x20,
+    ...u32(1),
+    0x41,
+    ...i32(1),
+    0x74,
+    0x6a,
+    0x2f,
+    ...u32(1),
     ...u32(0),
     0x0f,
     0x00,
@@ -1633,6 +2127,17 @@ interface RuntimeScratchMemory {
   readonly valuesOffset: number;
 }
 
+interface RuntimeTextLayout {
+  readonly count: number;
+  readonly rowsOffset: number;
+  readonly bytes: Uint8Array;
+}
+
+interface RuntimeTextIndexes {
+  readonly length: number;
+  readonly codeUnitAt: number;
+}
+
 interface RuntimeScratchIndexes {
   readonly load: number;
   readonly store: number;
@@ -1661,6 +2166,39 @@ function buildRuntimeTableLayout(
     }
   }
   return { offsets, bytes: Uint8Array.from(bytes) };
+}
+
+function buildRuntimeTextLayout(
+  prefixBytes: Uint8Array,
+  texts: readonly RuntimeLanguageText[],
+): RuntimeTextLayout {
+  if (texts.length === 0) {
+    return { count: 0, rowsOffset: 0, bytes: prefixBytes };
+  }
+  const bytes = [...prefixBytes];
+  while (bytes.length % 4 !== 0) bytes.push(0);
+  const rowsOffset = bytes.length;
+  const rowBytes = texts.length * 8;
+  const unitsOffset = align(rowsOffset + rowBytes, 2);
+  while (bytes.length < unitsOffset) bytes.push(0);
+  const rows: number[] = [];
+  for (const text of texts) {
+    const offset = bytes.length;
+    rows.push(offset, text.value.length);
+    for (let index = 0; index < text.value.length; index++) {
+      const unit = text.value.charCodeAt(index);
+      bytes.push(unit & 0xff, (unit >>> 8) & 0xff);
+    }
+  }
+  for (let index = 0; index < rows.length; index++) {
+    const value = rows[index] >>> 0;
+    const offset = rowsOffset + index * 4;
+    bytes[offset] = value & 0xff;
+    bytes[offset + 1] = (value >>> 8) & 0xff;
+    bytes[offset + 2] = (value >>> 16) & 0xff;
+    bytes[offset + 3] = (value >>> 24) & 0xff;
+  }
+  return { count: texts.length, rowsOffset, bytes: Uint8Array.from(bytes) };
 }
 
 function buildRuntimeScratchMemory(
@@ -1738,6 +2276,12 @@ function runtimeLanguageTables(
   return program.tables ?? [];
 }
 
+function runtimeLanguageTexts(
+  program: RuntimeLanguageProgram,
+): readonly RuntimeLanguageText[] {
+  return program.texts ?? [];
+}
+
 function runtimeLanguageHasScratchMemory(
   program: RuntimeLanguageProgram,
 ): boolean {
@@ -1768,7 +2312,7 @@ function validateVariableSet(
 ): void {
   const seen = new Set<string>();
   for (const variable of [...parameters, ...locals]) {
-    if (variable.type !== "u32") {
+    if (!isRuntimeScalarType(variable.type)) {
       throw new Error(
         `Runtime-language variable '${variable.name}' has unsupported type '${variable.type}'.`,
       );
@@ -1782,6 +2326,10 @@ function validateVariableSet(
     seen.add(variable.name);
   }
   identifier(fn.name);
+}
+
+function isRuntimeScalarType(value: unknown): value is RuntimeScalarType {
+  return value === "u32" || value === "text";
 }
 
 function localIndexMap(
@@ -1864,11 +2412,47 @@ function requiredRuntimeTable(
   return table;
 }
 
+function textIndex(
+  name: string,
+  texts: ReadonlyMap<string, number>,
+): number {
+  const index = texts.get(name);
+  if (index === undefined) {
+    throw new Error(`Runtime-language text '${name}' is not declared.`);
+  }
+  return index;
+}
+
+function requiredRuntimeText(
+  texts: ReadonlyMap<string, RuntimeLanguageText>,
+  name: string,
+): RuntimeLanguageText {
+  const text = texts.get(name);
+  if (!text) {
+    throw new Error(`Runtime-language text '${name}' is not declared.`);
+  }
+  return text;
+}
+
 function scratchLoadIndex(scratch: RuntimeScratchIndexes | null): number {
   if (!scratch) {
     throw new Error("Runtime-language scratch memory load is not available.");
   }
   return scratch.load;
+}
+
+function textLengthIndex(text: RuntimeTextIndexes | null): number {
+  if (!text) {
+    throw new Error("Runtime-language text length is not available.");
+  }
+  return text.length;
+}
+
+function textCodeUnitAtIndex(text: RuntimeTextIndexes | null): number {
+  if (!text) {
+    throw new Error("Runtime-language text code-unit access is not available.");
+  }
+  return text.codeUnitAt;
 }
 
 function scratchStoreIndex(scratch: RuntimeScratchIndexes | null): number {
@@ -1885,12 +2469,33 @@ function scratchEnsureIndex(scratch: RuntimeScratchIndexes | null): number {
   return scratch.ensure;
 }
 
+function localType(
+  name: string,
+  locals: ReadonlyMap<string, RuntimeScalarType>,
+): RuntimeScalarType {
+  const type = locals.get(name);
+  if (!type) {
+    throw new Error(`Runtime-language variable '${name}' is not declared.`);
+  }
+  return type;
+}
+
 function assertKnownLocal(
   name: string,
-  locals: ReadonlySet<string>,
+  locals: ReadonlyMap<string, RuntimeScalarType>,
 ): void {
-  if (!locals.has(name)) {
-    throw new Error(`Runtime-language variable '${name}' is not declared.`);
+  localType(name, locals);
+}
+
+function assertExpressionType(
+  actual: RuntimeScalarType,
+  expected: RuntimeScalarType,
+  label: string,
+): void {
+  if (actual !== expected) {
+    throw new Error(
+      `Runtime-language ${label} has type '${actual}', expected '${expected}'.`,
+    );
   }
 }
 
@@ -1902,7 +2507,7 @@ function localDeclarations(
 }
 
 function wasmType(variable: RuntimeLanguageVariable): number[] {
-  if (variable.type !== "u32") {
+  if (!isRuntimeScalarType(variable.type)) {
     throw new Error(
       `Runtime-language variable '${variable.name}' has unsupported type '${variable.type}'.`,
     );
@@ -1925,6 +2530,27 @@ function wasmTableLoaderType(): number[] {
   return [
     0x60,
     ...u32(1),
+    0x7f,
+    0x01,
+    0x7f,
+  ];
+}
+
+function wasmTextLengthType(): number[] {
+  return [
+    0x60,
+    ...u32(1),
+    0x7f,
+    0x01,
+    0x7f,
+  ];
+}
+
+function wasmTextCodeUnitAtType(): number[] {
+  return [
+    0x60,
+    ...u32(2),
+    0x7f,
     0x7f,
     0x01,
     0x7f,
@@ -2002,22 +2628,47 @@ function exportSection(
 function validateCallExpression(
   expression: Extract<RuntimeExpression, { readonly kind: "call" }>,
   target: RuntimeLanguageFunction,
+  locals: ReadonlyMap<string, RuntimeScalarType>,
+  functions: ReadonlyMap<string, RuntimeLanguageFunction>,
+  tables: ReadonlySet<string>,
+  texts: ReadonlySet<string>,
+  hasScratchMemory: boolean,
 ): void {
-  const expected = functionParameters(target).length;
-  if (expression.args.length !== expected) {
+  const parameters = functionParameters(target);
+  if (expression.args.length !== parameters.length) {
     throw new Error(
-      `Runtime-language call to '${expression.function}' has ${expression.args.length} arguments, expected ${expected}.`,
+      `Runtime-language call to '${expression.function}' has ${expression.args.length} arguments, expected ${parameters.length}.`,
+    );
+  }
+  for (const [index, argument] of expression.args.entries()) {
+    const parameter = parameters[index];
+    if (!parameter) continue;
+    assertExpressionType(
+      validateExpression(
+        argument,
+        locals,
+        functions,
+        tables,
+        texts,
+        hasScratchMemory,
+      ),
+      parameter.type,
+      `argument ${index} for '${expression.function}'`,
     );
   }
 }
 
 function validateSimpleTableIndex(
   expression: RuntimeExpression,
-  locals: ReadonlySet<string>,
+  locals: ReadonlyMap<string, RuntimeScalarType>,
 ): void {
   if (expression.kind === "u32") return;
   if (expression.kind === "local") {
-    assertKnownLocal(expression.name, locals);
+    assertExpressionType(
+      localType(expression.name, locals),
+      "u32",
+      `table index '${expression.name}'`,
+    );
     return;
   }
   throw new Error(

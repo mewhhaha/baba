@@ -2742,6 +2742,67 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 8 },
     },
     {
+      name: "immutable text values expose UTF-16 length and code units",
+      program: {
+        name: "text_values",
+        entry: "main",
+        texts: [{
+          name: "source",
+          value: "A😀\u0000\u2028",
+        }],
+        functions: [
+          {
+            name: "measure",
+            parameters: [{ name: "input", type: "text" }],
+            result: "u32",
+            body: [{
+              kind: "return",
+              expression: add(
+                textLength(local("input")),
+                textCodeUnitAt(local("input"), u32(0)),
+              ),
+            }],
+          },
+          {
+            name: "main",
+            locals: [{ name: "value", type: "text" }],
+            result: "u32",
+            body: [
+              setLocal("value", text("source")),
+              {
+                kind: "return",
+                expression: add(
+                  call("measure", [local("value")]),
+                  textCodeUnitAt(local("value"), u32(4)),
+                ),
+              },
+            ],
+          },
+        ],
+      },
+      expected: { kind: "value", value: 8302 },
+    },
+    {
+      name: "immutable text code-unit access traps out of bounds",
+      program: {
+        name: "text_oob",
+        entry: "main",
+        texts: [{
+          name: "source",
+          value: "ok",
+        }],
+        functions: [{
+          name: "main",
+          result: "u32",
+          body: [{
+            kind: "return",
+            expression: textCodeUnitAt(text("source"), u32(2)),
+          }],
+        }],
+      },
+      expected: { kind: "trap" },
+    },
+    {
       name: "read-only table bounds failures trap",
       program: {
         name: "table_oob",
@@ -3156,6 +3217,10 @@ Deno.test("runtime language lowers to a resolved IR", () => {
       type: "u32",
       values: [1, 2],
     }],
+    texts: [{
+      name: "label",
+      value: "hi",
+    }],
     functions: [{
       name: "main",
       parameters: [{ name: "slot", type: "u32" }],
@@ -3181,6 +3246,8 @@ Deno.test("runtime language lowers to a resolved IR", () => {
   assertEquals(ir.functionMap.get("main")?.name, "main");
   assertEquals(ir.tables.length, 1);
   assertEquals(ir.tableMap.get("values")?.values[1], 2);
+  assertEquals(ir.texts.length, 1);
+  assertEquals(ir.textMap.get("label")?.value, "hi");
   assertEquals(ir.hasScratchMemory, true);
   assertEquals(ir.scratchMemoryWords, 2);
 
@@ -3300,6 +3367,18 @@ function storeScratch(index: RuntimeExpression, value: RuntimeExpression) {
 
 function ensureScratch(words: RuntimeExpression) {
   return { kind: "ensureScratchWords" as const, words };
+}
+
+function text(name: string) {
+  return { kind: "text" as const, name };
+}
+
+function textLength(value: RuntimeExpression) {
+  return { kind: "textLength" as const, text: value };
+}
+
+function textCodeUnitAt(value: RuntimeExpression, index: RuntimeExpression) {
+  return { kind: "textCodeUnitAt" as const, text: value, index };
 }
 
 function add(left: RuntimeExpression, right: RuntimeExpression) {
