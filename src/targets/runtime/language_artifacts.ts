@@ -281,9 +281,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_object_runtime",
       entry: "parserFragmentNew",
-      sourceHash: "fnv1a64:072f1fbf1dae3479",
-      typescriptHash: "fnv1a64:26c800d645f1c361",
-      wasmHash: "fnv1a64:7cea819e63eb30c3",
+      sourceHash: "fnv1a64:f07ef7d0564132d0",
+      typescriptHash: "fnv1a64:7b7347b282bba3fc",
+      wasmHash: "fnv1a64:704ebed8b427f1d6",
     },
     {
       name: "lexer_runtime",
@@ -372,7 +372,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:712f011518c8a2b0" as const;
+  "fnv1a64:e55415658a307912" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

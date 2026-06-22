@@ -1711,6 +1711,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamEofStatusFunction(),
     parserTokenStreamGapTokenStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
+    parserTraceTerminalFunction(),
     parserRuleNodeFromFragmentFunction(),
     parserRuleNodeRuleIdFunction(),
     parserRuleNodeSpanStartFunction(),
@@ -2871,6 +2872,48 @@ function parserTraceTokenStreamStatusFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_TRACE_TOKEN_STREAM_EMIT),
+      },
+    ],
+  };
+}
+
+function parserTraceTerminalFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceTerminal",
+    parameters: [
+      { name: "publicClass", type: "u32" },
+      { name: "trustedTerminal", type: "u32" },
+      { name: "specTerminal", type: "u32" },
+      { name: "eofTerminal", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_EOF),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: local("eofTerminal"),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("trustedTerminal"),
+          u32(RUNTIME_NO_TERMINAL),
+        ),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: local("trustedTerminal"),
+        }],
+      },
+      {
+        kind: "return",
+        expression: local("specTerminal"),
       },
     ],
   };

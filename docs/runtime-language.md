@@ -71,9 +71,11 @@ TypeScript allocates the public diagnostic object.
 `parserTraceTokenStreamStatus` classifies public token records as parser-trace
 input, skippable trivia, or EOF stop tokens before generated TypeScript parsers
 and Wasm adapters compact public tokens into terminal streams. Deterministic
-parsers use `parserAction`/`parserGoto` for parser table lookup, and conflict
-parsers use generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers
-for multi-action fan-out and goto lookup. Generated parsers also use the
+parsers also call `parserTraceTerminal` to select EOF, trusted runtime, spec, or
+missing parser terminals before tracing. Deterministic parsers use
+`parserAction`/`parserGoto` for parser table lookup, and conflict parsers use
+generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
+multi-action fan-out and goto lookup. Generated parsers also use the
 `parserExpectedStart` and `parserExpectedEnd` helpers to map parser states to
 flattened expected-terminal display ranges for diagnostics, and
 `parserUnexpectedDiagnosticCode` uses runtime EOF flags to choose

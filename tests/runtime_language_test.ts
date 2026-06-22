@@ -2116,6 +2116,72 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserTraceTerminalProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_trace_terminal",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              eq(
+                call("parserTraceTerminal", [
+                  u32(RUNTIME_PUBLIC_TOKEN_EOF),
+                  u32(RUNTIME_NO_TERMINAL),
+                  u32(8),
+                  u32(9),
+                ]),
+                u32(9),
+              ),
+              u32(1_000),
+            ),
+            add(
+              mul(
+                eq(
+                  call("parserTraceTerminal", [
+                    u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                    u32(7),
+                    u32(8),
+                    u32(9),
+                  ]),
+                  u32(7),
+                ),
+                u32(100),
+              ),
+              add(
+                mul(
+                  eq(
+                    call("parserTraceTerminal", [
+                      u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                      u32(RUNTIME_NO_TERMINAL),
+                      u32(8),
+                      u32(9),
+                    ]),
+                    u32(8),
+                  ),
+                  u32(10),
+                ),
+                eq(
+                  call("parserTraceTerminal", [
+                    u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                    u32(RUNTIME_NO_TERMINAL),
+                    u32(RUNTIME_NO_TERMINAL),
+                    u32(9),
+                  ]),
+                  u32(RUNTIME_NO_TERMINAL),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserObjectWrongKindProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_object_wrong_kind",
@@ -2858,6 +2924,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_TRACE_TOKEN_STREAM_SKIP * 10 +
           RUNTIME_TRACE_TOKEN_STREAM_STOP,
       },
+    },
+    {
+      name: "runtime trace terminal helper selects parser terminals",
+      program: parserTraceTerminalProgram,
+      expected: { kind: "value", value: 1_111 },
     },
     {
       name: "runtime parser object access traps on wrong handle kind",

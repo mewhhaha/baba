@@ -1261,14 +1261,17 @@ function acceptedParseResult(
 }
 
 function tokenToTerminal(token: Token, trustRuntimeTerminal = false): number {
-  if (token.type === "eof") return EOF_TERMINAL;
-  if (trustRuntimeTerminal) {
-    const terminal = runtimeTokenTerminal(token);
-    if (terminal >= 0) return terminal;
-  }
+  const trustedTerminal = trustRuntimeTerminal
+    ? runtimeTokenTerminal(token)
+    : NO_TERMINAL;
   const specIndex = tokenSpecIndex(token);
-  if (specIndex < 0) return -1;
-  const terminal = lexerSpecTerminal(specIndex);
+  const specTerminal = specIndex < 0 ? NO_TERMINAL : lexerSpecTerminal(specIndex);
+  const terminal = parserTraceTerminal(
+    publicTokenClass(token),
+    trustedTerminal,
+    specTerminal,
+    EOF_TERMINAL,
+  );
   return terminal === NO_TERMINAL ? -1 : terminal;
 }
 

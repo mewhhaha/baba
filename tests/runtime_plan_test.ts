@@ -275,6 +275,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "parserTraceTokenStreamStatus",
   );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTraceTerminal",
+  );
   assertIncludes(parserRuntimeSource, "sourceTextMatches");
   assertNotIncludes(parserRuntimeSource, "source.slice");
   assertIncludes(
@@ -366,6 +370,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "LITERAL_TERMINALS");
   assertNotIncludes(parserRuntimeSource, "MAIN_TOKEN_KINDS");
   assertNotIncludes(parserRuntimeSource, "TRIVIA_TOKEN_KINDS");
+  assertNotIncludes(
+    parserRuntimeSource,
+    'if (token.type === "eof") return EOF_TERMINAL',
+  );
+  assertNotIncludes(parserRuntimeSource, "if (terminal >= 0) return terminal");
   assertNotIncludes(parserRuntimeSource, "flags & FIELD_ARRAY");
   assertNotIncludes(parserRuntimeSource, "flags & FIELD_NULLABLE");
   assertNotIncludes(parserRuntimeSource, "tokenClass === TOKEN_TRIVIA");

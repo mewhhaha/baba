@@ -1822,6 +1822,18 @@ function parserTraceTokenStreamStatus(publicClass: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTraceTerminal(publicClass: number, trustedTerminal: number, specTerminal: number, eofTerminal: number): number {
+  if (((((publicClass) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+    return (eofTerminal) >>> 0;
+  }
+  if (((((trustedTerminal) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (trustedTerminal) >>> 0;
+  }
+  return (specTerminal) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserRuleNodeFromFragment(ruleId: number, fragment: number): number {
   let handle = 0;
   handle = (runtimeArenaAlloc(8) >>> 0) >>> 0;
@@ -2935,14 +2947,17 @@ function acceptedParseResult(
 }
 
 function tokenToTerminal(token: Token, trustRuntimeTerminal = false): number {
-  if (token.type === "eof") return EOF_TERMINAL;
-  if (trustRuntimeTerminal) {
-    const terminal = runtimeTokenTerminal(token);
-    if (terminal >= 0) return terminal;
-  }
+  const trustedTerminal = trustRuntimeTerminal
+    ? runtimeTokenTerminal(token)
+    : NO_TERMINAL;
   const specIndex = tokenSpecIndex(token);
-  if (specIndex < 0) return -1;
-  const terminal = lexerSpecTerminal(specIndex);
+  const specTerminal = specIndex < 0 ? NO_TERMINAL : lexerSpecTerminal(specIndex);
+  const terminal = parserTraceTerminal(
+    publicTokenClass(token),
+    trustedTerminal,
+    specTerminal,
+    EOF_TERMINAL,
+  );
   return terminal === NO_TERMINAL ? -1 : terminal;
 }
 
