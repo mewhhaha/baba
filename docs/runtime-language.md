@@ -114,8 +114,9 @@ functions with statement bodies. The current conformance subset supports:
 - checked scratch-memory growth, loads, and stores by computed `u32` index;
 - tagged arena-backed `u32` arrays, fixed records, and growable vectors
   represented as scratch-memory handles with resettable allocation lifetime;
-- arena-backed parser fragment, field-capture, and rule-node layout helpers for
-  the first host-visible CST object substrate;
+- arena-backed parser fragment, field-capture, rule-node, token, and diagnostic
+  layout helpers for the first host-visible CST/token/diagnostic object
+  substrate;
 - `u32` addition, subtraction, and multiplication, wrapping modulo `2^32`;
 - unsigned `u32` division, trapping on division by zero;
 - bitwise AND;
@@ -179,8 +180,11 @@ execute both outputs and compare returned values or traps.
   start/end, and child/field vector handles. Parser field-capture objects store
   a field id and value handle/id. Parser rule-node objects store a rule id,
   span, token range, and child/field vector handles copied from a fragment.
-- Parser fragment, field-capture, and rule-node helpers trap for wrong object
-  kind and delegate vector bounds checks to the arena-backed vector helpers.
+  Parser token objects store class, payload, terminal, and span data; parser
+  diagnostic objects store code, span, and detail data.
+- Parser fragment, field-capture, rule-node, token, and diagnostic helpers trap
+  for wrong object kind and delegate vector bounds checks to the arena-backed
+  vector helpers.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset
@@ -190,7 +194,8 @@ These rules must be specified before the parser runtime can be fully lowered:
 - ownership and opaque typed handle provenance;
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
-- complete host-visible token and diagnostic memory layout.
+- complete generated-parser lowering onto the host-visible token and diagnostic
+  memory layout.
 
 Until the parser runtime is lowered through this language, Baba does not claim
 that the full TypeScript and Wasm parser runtimes are mechanically emitted from

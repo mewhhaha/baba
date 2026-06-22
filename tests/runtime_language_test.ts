@@ -1657,6 +1657,9 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           { name: "fragment", type: "u32" },
           { name: "child", type: "u32" },
           { name: "capture", type: "u32" },
+          { name: "token", type: "u32" },
+          { name: "tokenFragment", type: "u32" },
+          { name: "diagnostic", type: "u32" },
           { name: "rule", type: "u32" },
         ],
         result: "u32",
@@ -1685,6 +1688,18 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           setLocal(
             "capture",
             call("parserFieldCaptureNew", [u32(9), local("child")]),
+          ),
+          setLocal(
+            "token",
+            call("parserTokenNew", [u32(2), u32(33), u32(44), u32(7), u32(11)]),
+          ),
+          setLocal(
+            "tokenFragment",
+            call("parserFragmentFromToken", [local("token"), u32(5)]),
+          ),
+          setLocal(
+            "diagnostic",
+            call("parserDiagnosticNew", [u32(6), u32(7), u32(11), u32(99)]),
           ),
           setLocal(
             "discard",
@@ -1716,6 +1731,114 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                 call("parserFragmentFieldAt", [local("fragment"), u32(0)]),
               ]),
               local("child"),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTokenClass", [local("token")]),
+              u32(2),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTokenPayload", [local("token")]),
+              u32(33),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTokenTerminal", [local("token")]),
+              u32(44),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentSpanStart", [local("tokenFragment")]),
+              u32(7),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentSpanEnd", [local("tokenFragment")]),
+              u32(11),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentTokenStart", [local("tokenFragment")]),
+              u32(5),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentTokenEnd", [local("tokenFragment")]),
+              u32(6),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserFragmentChildAt", [local("tokenFragment"), u32(0)]),
+              local("token"),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserDiagnosticCode", [local("diagnostic")]),
+              u32(6),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserDiagnosticSpanStart", [local("diagnostic")]),
+              u32(7),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserDiagnosticSpanEnd", [local("diagnostic")]),
+              u32(11),
+            ),
+            consequent: [],
+            alternate: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserDiagnosticDetail", [local("diagnostic")]),
+              u32(99),
             ),
             consequent: [],
             alternate: [{ kind: "return", expression: u32(0) }],
@@ -1801,6 +1924,60 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           {
             kind: "return",
             expression: call("parserFragmentValue", [local("handle")]),
+          },
+        ],
+      },
+    ],
+  };
+  const parserTokenWrongKindProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_token_wrong_kind",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "fragment", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal(
+            "fragment",
+            call("parserFragmentNew", [u32(1), u32(0), u32(0), u32(0), u32(0)]),
+          ),
+          {
+            kind: "return",
+            expression: call("parserTokenClass", [local("fragment")]),
+          },
+        ],
+      },
+    ],
+  };
+  const parserDiagnosticWrongKindProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_diagnostic_wrong_kind",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "token", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal(
+            "token",
+            call("parserTokenNew", [u32(1), u32(2), u32(3), u32(4), u32(5)]),
+          ),
+          {
+            kind: "return",
+            expression: call("parserDiagnosticCode", [local("token")]),
           },
         ],
       },
@@ -2131,6 +2308,16 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "runtime parser object access traps on wrong handle kind",
       program: parserObjectWrongKindProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime parser token access traps on wrong handle kind",
+      program: parserTokenWrongKindProgram,
+      expected: { kind: "trap" },
+    },
+    {
+      name: "runtime parser diagnostic access traps on wrong handle kind",
+      program: parserDiagnosticWrongKindProgram,
       expected: { kind: "trap" },
     },
     {

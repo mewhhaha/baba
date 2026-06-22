@@ -139,6 +139,8 @@ const RUNTIME_OBJECT_VECTOR = 3;
 const RUNTIME_OBJECT_PARSER_FRAGMENT = 4;
 const RUNTIME_OBJECT_PARSER_FIELD_CAPTURE = 5;
 const RUNTIME_OBJECT_PARSER_RULE_NODE = 6;
+const RUNTIME_OBJECT_PARSER_TOKEN = 7;
+const RUNTIME_OBJECT_PARSER_DIAGNOSTIC = 8;
 const RUNTIME_ARRAY_LENGTH_WORD_OFFSET = 1;
 const RUNTIME_ARRAY_DATA_WORD_OFFSET = 2;
 const RUNTIME_RECORD_TAG_WORD_OFFSET = 1;
@@ -167,6 +169,17 @@ const RUNTIME_PARSER_RULE_NODE_TOKEN_END_WORD_OFFSET = 5;
 const RUNTIME_PARSER_RULE_NODE_CHILDREN_WORD_OFFSET = 6;
 const RUNTIME_PARSER_RULE_NODE_FIELDS_WORD_OFFSET = 7;
 const RUNTIME_PARSER_RULE_NODE_HEADER_WORDS = 8;
+const RUNTIME_PARSER_TOKEN_CLASS_WORD_OFFSET = 1;
+const RUNTIME_PARSER_TOKEN_PAYLOAD_WORD_OFFSET = 2;
+const RUNTIME_PARSER_TOKEN_TERMINAL_WORD_OFFSET = 3;
+const RUNTIME_PARSER_TOKEN_SPAN_START_WORD_OFFSET = 4;
+const RUNTIME_PARSER_TOKEN_SPAN_END_WORD_OFFSET = 5;
+const RUNTIME_PARSER_TOKEN_HEADER_WORDS = 6;
+const RUNTIME_PARSER_DIAGNOSTIC_CODE_WORD_OFFSET = 1;
+const RUNTIME_PARSER_DIAGNOSTIC_SPAN_START_WORD_OFFSET = 2;
+const RUNTIME_PARSER_DIAGNOSTIC_SPAN_END_WORD_OFFSET = 3;
+const RUNTIME_PARSER_DIAGNOSTIC_DETAIL_WORD_OFFSET = 4;
+const RUNTIME_PARSER_DIAGNOSTIC_HEADER_WORDS = 5;
 
 export type LexerRuntimeTransition = readonly [
   start: number,
@@ -1520,6 +1533,18 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserFieldCaptureNewFunction(),
     parserFieldCaptureFieldIdFunction(),
     parserFieldCaptureValueFunction(),
+    parserTokenNewFunction(),
+    parserTokenClassFunction(),
+    parserTokenPayloadFunction(),
+    parserTokenTerminalFunction(),
+    parserTokenSpanStartFunction(),
+    parserTokenSpanEndFunction(),
+    parserFragmentFromTokenFunction(),
+    parserDiagnosticNewFunction(),
+    parserDiagnosticCodeFunction(),
+    parserDiagnosticSpanStartFunction(),
+    parserDiagnosticSpanEndFunction(),
+    parserDiagnosticDetailFunction(),
     parserRuleNodeFromFragmentFunction(),
     parserRuleNodeRuleIdFunction(),
     parserRuleNodeSpanStartFunction(),
@@ -1702,6 +1727,134 @@ function parserRuleNodeFromFragmentFunction(): RuntimeLanguageFunction {
   };
 }
 
+function parserTokenNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenNew",
+    parameters: [
+      { name: "tokenClass", type: "u32" },
+      { name: "payload", type: "u32" },
+      { name: "terminal", type: "u32" },
+      { name: "spanStart", type: "u32" },
+      { name: "spanEnd", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "handle",
+        call("runtimeArenaAlloc", [u32(RUNTIME_PARSER_TOKEN_HEADER_WORDS)]),
+      ),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_PARSER_TOKEN)),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_TOKEN_CLASS_WORD_OFFSET)),
+        local("tokenClass"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_TOKEN_PAYLOAD_WORD_OFFSET)),
+        local("payload"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_TOKEN_TERMINAL_WORD_OFFSET)),
+        local("terminal"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_TOKEN_SPAN_START_WORD_OFFSET)),
+        local("spanStart"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_TOKEN_SPAN_END_WORD_OFFSET)),
+        local("spanEnd"),
+      ),
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function parserFragmentFromTokenFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFragmentFromToken",
+    parameters: [
+      { name: "token", type: "u32" },
+      { name: "tokenIndex", type: "u32" },
+    ],
+    locals: [
+      { name: "fragment", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "fragment",
+        call("parserFragmentNew", [
+          local("token"),
+          call("parserTokenSpanStart", [local("token")]),
+          call("parserTokenSpanEnd", [local("token")]),
+          local("tokenIndex"),
+          add(local("tokenIndex"), u32(1)),
+        ]),
+      ),
+      setLocal(
+        "discard",
+        call("parserFragmentAppendChild", [
+          local("fragment"),
+          local("token"),
+        ]),
+      ),
+      { kind: "return", expression: local("fragment") },
+    ],
+  };
+}
+
+function parserDiagnosticNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserDiagnosticNew",
+    parameters: [
+      { name: "code", type: "u32" },
+      { name: "spanStart", type: "u32" },
+      { name: "spanEnd", type: "u32" },
+      { name: "detail", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "handle",
+        call("runtimeArenaAlloc", [
+          u32(RUNTIME_PARSER_DIAGNOSTIC_HEADER_WORDS),
+        ]),
+      ),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_PARSER_DIAGNOSTIC)),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_DIAGNOSTIC_CODE_WORD_OFFSET)),
+        local("code"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_DIAGNOSTIC_SPAN_START_WORD_OFFSET),
+        ),
+        local("spanStart"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_DIAGNOSTIC_SPAN_END_WORD_OFFSET),
+        ),
+        local("spanEnd"),
+      ),
+      storeScratch(
+        add(local("handle"), u32(RUNTIME_PARSER_DIAGNOSTIC_DETAIL_WORD_OFFSET)),
+        local("detail"),
+      ),
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
 function parserFragmentValueFunction(): RuntimeLanguageFunction {
   return parserObjectLoadFunction(
     "parserFragmentValue",
@@ -1837,6 +1990,78 @@ function parserFieldCaptureValueFunction(): RuntimeLanguageFunction {
     "parserFieldCaptureValue",
     RUNTIME_OBJECT_PARSER_FIELD_CAPTURE,
     RUNTIME_PARSER_FIELD_CAPTURE_VALUE_WORD_OFFSET,
+  );
+}
+
+function parserTokenClassFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserTokenClass",
+    RUNTIME_OBJECT_PARSER_TOKEN,
+    RUNTIME_PARSER_TOKEN_CLASS_WORD_OFFSET,
+  );
+}
+
+function parserTokenPayloadFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserTokenPayload",
+    RUNTIME_OBJECT_PARSER_TOKEN,
+    RUNTIME_PARSER_TOKEN_PAYLOAD_WORD_OFFSET,
+  );
+}
+
+function parserTokenTerminalFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserTokenTerminal",
+    RUNTIME_OBJECT_PARSER_TOKEN,
+    RUNTIME_PARSER_TOKEN_TERMINAL_WORD_OFFSET,
+  );
+}
+
+function parserTokenSpanStartFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserTokenSpanStart",
+    RUNTIME_OBJECT_PARSER_TOKEN,
+    RUNTIME_PARSER_TOKEN_SPAN_START_WORD_OFFSET,
+  );
+}
+
+function parserTokenSpanEndFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserTokenSpanEnd",
+    RUNTIME_OBJECT_PARSER_TOKEN,
+    RUNTIME_PARSER_TOKEN_SPAN_END_WORD_OFFSET,
+  );
+}
+
+function parserDiagnosticCodeFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserDiagnosticCode",
+    RUNTIME_OBJECT_PARSER_DIAGNOSTIC,
+    RUNTIME_PARSER_DIAGNOSTIC_CODE_WORD_OFFSET,
+  );
+}
+
+function parserDiagnosticSpanStartFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserDiagnosticSpanStart",
+    RUNTIME_OBJECT_PARSER_DIAGNOSTIC,
+    RUNTIME_PARSER_DIAGNOSTIC_SPAN_START_WORD_OFFSET,
+  );
+}
+
+function parserDiagnosticSpanEndFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserDiagnosticSpanEnd",
+    RUNTIME_OBJECT_PARSER_DIAGNOSTIC,
+    RUNTIME_PARSER_DIAGNOSTIC_SPAN_END_WORD_OFFSET,
+  );
+}
+
+function parserDiagnosticDetailFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserDiagnosticDetail",
+    RUNTIME_OBJECT_PARSER_DIAGNOSTIC,
+    RUNTIME_PARSER_DIAGNOSTIC_DETAIL_WORD_OFFSET,
   );
 }
 
