@@ -58,6 +58,9 @@ export const RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH = 4;
 export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF = 5;
 export const RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP = 6;
 export const RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH = 7;
+export const RUNTIME_TOKEN_STREAM_CANONICAL_MATCH = 0;
+export const RUNTIME_TOKEN_STREAM_CANONICAL_SKIP = 1;
+export const RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH = 2;
 export const RUNTIME_TRACE_TOKEN_STREAM_EMIT = 0;
 export const RUNTIME_TRACE_TOKEN_STREAM_SKIP = 1;
 export const RUNTIME_TRACE_TOKEN_STREAM_STOP = 2;
@@ -1736,6 +1739,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamEofStatusFunction(),
     parserTokenStreamGapTokenStatusFunction(),
     parserTokenStreamTokenMatchStatusFunction(),
+    parserTokenStreamCanonicalMatchStatusFunction(),
     parserTokenStreamFinalStatusFunction(),
     parserTokenStreamPublicTokenStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
@@ -2934,6 +2938,57 @@ function parserTokenStreamTokenMatchStatusFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamCanonicalMatchStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamCanonicalMatchStatus",
+    parameters: [
+      { name: "canonicalClass", type: "u32" },
+      { name: "tokenMatchStatus", type: "u32" },
+      { name: "canonicalEnd", type: "u32" },
+      { name: "suppliedStart", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenMatchStatus"),
+          u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MATCH),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          call("parserTraceTokenStreamStatus", [local("canonicalClass")]),
+          u32(RUNTIME_TRACE_TOKEN_STREAM_SKIP),
+        ),
+        consequent: [
+          {
+            kind: "if",
+            condition: ltu(local("suppliedStart"), local("canonicalEnd")),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH),
+            }],
+          },
+          {
+            kind: "return",
+            expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_SKIP),
+          },
+        ],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH),
       },
     ],
   };

@@ -128,6 +128,9 @@ import {
   RUNTIME_RULE_NODE_CHILD_LIST_PRESENT,
   RUNTIME_SHIFTED_TOKEN_STATUS_INVALID,
   RUNTIME_SHIFTED_TOKEN_STATUS_OK,
+  RUNTIME_TOKEN_STREAM_CANONICAL_MATCH,
+  RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH,
+  RUNTIME_TOKEN_STREAM_CANONICAL_SKIP,
   RUNTIME_TOKEN_STREAM_STATUS_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
@@ -2337,6 +2340,60 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserTokenStreamCanonicalMatchProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_token_stream_canonical_match",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserTokenStreamCanonicalMatchStatus", [
+                u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+                u32(5),
+                u32(3),
+              ]),
+              u32(1_000),
+            ),
+            add(
+              mul(
+                call("parserTokenStreamCanonicalMatchStatus", [
+                  u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                  u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+                  u32(5),
+                  u32(5),
+                ]),
+                u32(100),
+              ),
+              add(
+                mul(
+                  call("parserTokenStreamCanonicalMatchStatus", [
+                    u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                    u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+                    u32(5),
+                    u32(4),
+                  ]),
+                  u32(10),
+                ),
+                call("parserTokenStreamCanonicalMatchStatus", [
+                  u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                  u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+                  u32(5),
+                  u32(5),
+                ]),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserTokenStreamFinalStatusProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_token_stream_final_status",
@@ -3371,6 +3428,18 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH * 100 +
           RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH * 10 +
           RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH,
+      },
+    },
+    {
+      name:
+        "runtime token-stream canonical match helper classifies trivia skips",
+      program: parserTokenStreamCanonicalMatchProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_TOKEN_STREAM_CANONICAL_MATCH * 1_000 +
+          RUNTIME_TOKEN_STREAM_CANONICAL_SKIP * 100 +
+          RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH * 10 +
+          RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH,
       },
     },
     {

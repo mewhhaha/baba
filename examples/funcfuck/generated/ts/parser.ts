@@ -130,6 +130,10 @@ const TOKEN_STREAM_GAP = 2;
 const TOKEN_STREAM_OVERLAP = 3;
 const TOKEN_STREAM_ZERO_WIDTH = 4;
 const TOKEN_STREAM_INVALID_EOF = 5;
+const TOKEN_STREAM_TOKEN_MISMATCH = 7;
+const TOKEN_STREAM_CANONICAL_MATCH = 0;
+const TOKEN_STREAM_CANONICAL_SKIP = 1;
+const TOKEN_STREAM_CANONICAL_MISMATCH = 2;
 const TRACE_TOKEN_STREAM_EMIT = 0;
 const TRACE_TOKEN_STREAM_SKIP = 1;
 const TRACE_TOKEN_STREAM_STOP = 2;
@@ -1895,6 +1899,20 @@ function parserTokenStreamTokenMatchStatus(leftClass: number, rightClass: number
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTokenStreamCanonicalMatchStatus(canonicalClass: number, tokenMatchStatus: number, canonicalEnd: number, suppliedStart: number): number {
+  if (((((tokenMatchStatus) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((parserTraceTokenStreamStatus(canonicalClass) >>> 0) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((suppliedStart) >>> 0) < ((canonicalEnd) >>> 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    }
+    return (1) >>> 0;
+  }
+  return (2) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTokenStreamFinalStatus(hasEof: number, eofIndex: number, tokenCount: number, previousEnd: number, sourceLength: number): number {
   if (((((hasEof) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
     if (((((((eofIndex) + (1)) >>> 0) >>> 0) === ((tokenCount) >>> 0) ? 1 : 0)) !== 0) {
@@ -3171,10 +3189,6 @@ function traceTokenStreamStatus(token: Token): number {
   return parserTraceTokenStreamStatus(publicTokenClass(token));
 }
 
-function isTraceTriviaToken(token: Token): boolean {
-  return traceTokenStreamStatus(token) === TRACE_TOKEN_STREAM_SKIP;
-}
-
 function shiftedToken(token: Token, tokenIndex: number): ShiftedToken {
   return { token, tokenIndex };
 }
@@ -3478,21 +3492,31 @@ function matchCanonicalToken(
 ): number {
   for (let index = startIndex; index < canonicalTokens.length; index++) {
     const canonical = canonicalTokens[index];
-    if (isTraceTriviaToken(canonical)) {
-      if (sameToken(canonical, token)) return index;
-      if (canonical.span.end <= token.span.start) continue;
+    const status = parserTokenStreamCanonicalMatchStatus(
+      publicTokenClass(canonical),
+      sameTokenStatus(canonical, token),
+      canonical.span.end,
+      token.span.start,
+    );
+    if (status === TOKEN_STREAM_CANONICAL_MATCH) return index;
+    if (status === TOKEN_STREAM_CANONICAL_SKIP) {
+      continue;
     }
-    return sameToken(canonical, token) ? index : -1;
+    return -1;
   }
   return -1;
 }
 
 function sameToken(left: Token, right: Token): boolean {
+  return sameTokenStatus(left, right) === TOKEN_STREAM_OK;
+}
+
+function sameTokenStatus(left: Token, right: Token): number {
   if (
     left.text !== right.text ||
     left.channel !== right.channel
   ) {
-    return false;
+    return TOKEN_STREAM_TOKEN_MISMATCH;
   }
   return parserTokenStreamTokenMatchStatus(
     publicTokenClass(left),
@@ -3505,7 +3529,7 @@ function sameToken(left: Token, right: Token): boolean {
     left.span.end,
     right.span.start,
     right.span.end,
-  ) === TOKEN_STREAM_OK;
+  );
 }
 
 function clampSpan(span: Span, sourceLength: number): Span {

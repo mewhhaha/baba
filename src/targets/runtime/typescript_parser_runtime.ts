@@ -128,11 +128,15 @@ import {
   RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION,
   RUNTIME_RULE_NODE_CHILD_LIST_EMPTY,
   RUNTIME_SHIFTED_TOKEN_STATUS_OK,
+  RUNTIME_TOKEN_STREAM_CANONICAL_MATCH,
+  RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH,
+  RUNTIME_TOKEN_STREAM_CANONICAL_SKIP,
   RUNTIME_TOKEN_STREAM_STATUS_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
   RUNTIME_TOKEN_STREAM_STATUS_OK,
   RUNTIME_TOKEN_STREAM_STATUS_OVERLAP,
+  RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH,
   RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_OK,
@@ -481,6 +485,10 @@ const TOKEN_STREAM_GAP = ${RUNTIME_TOKEN_STREAM_STATUS_GAP};
 const TOKEN_STREAM_OVERLAP = ${RUNTIME_TOKEN_STREAM_STATUS_OVERLAP};
 const TOKEN_STREAM_ZERO_WIDTH = ${RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH};
 const TOKEN_STREAM_INVALID_EOF = ${RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF};
+const TOKEN_STREAM_TOKEN_MISMATCH = ${RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH};
+const TOKEN_STREAM_CANONICAL_MATCH = ${RUNTIME_TOKEN_STREAM_CANONICAL_MATCH};
+const TOKEN_STREAM_CANONICAL_SKIP = ${RUNTIME_TOKEN_STREAM_CANONICAL_SKIP};
+const TOKEN_STREAM_CANONICAL_MISMATCH = ${RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH};
 const TRACE_TOKEN_STREAM_EMIT = ${RUNTIME_TRACE_TOKEN_STREAM_EMIT};
 const TRACE_TOKEN_STREAM_SKIP = ${RUNTIME_TRACE_TOKEN_STREAM_SKIP};
 const TRACE_TOKEN_STREAM_STOP = ${RUNTIME_TRACE_TOKEN_STREAM_STOP};
@@ -1366,10 +1374,6 @@ function traceTokenStreamStatus(token: Token): number {
   return parserTraceTokenStreamStatus(publicTokenClass(token));
 }
 
-function isTraceTriviaToken(token: Token): boolean {
-  return traceTokenStreamStatus(token) === TRACE_TOKEN_STREAM_SKIP;
-}
-
 function shiftedToken(token: Token, tokenIndex: number): ShiftedToken {
   return { token, tokenIndex };
 }
@@ -1673,21 +1677,31 @@ function matchCanonicalToken(
 ): number {
   for (let index = startIndex; index < canonicalTokens.length; index++) {
     const canonical = canonicalTokens[index];
-    if (isTraceTriviaToken(canonical)) {
-      if (sameToken(canonical, token)) return index;
-      if (canonical.span.end <= token.span.start) continue;
+    const status = parserTokenStreamCanonicalMatchStatus(
+      publicTokenClass(canonical),
+      sameTokenStatus(canonical, token),
+      canonical.span.end,
+      token.span.start,
+    );
+    if (status === TOKEN_STREAM_CANONICAL_MATCH) return index;
+    if (status === TOKEN_STREAM_CANONICAL_SKIP) {
+      continue;
     }
-    return sameToken(canonical, token) ? index : -1;
+    return -1;
   }
   return -1;
 }
 
 function sameToken(left: Token, right: Token): boolean {
+  return sameTokenStatus(left, right) === TOKEN_STREAM_OK;
+}
+
+function sameTokenStatus(left: Token, right: Token): number {
   if (
     left.text !== right.text ||
     left.channel !== right.channel
   ) {
-    return false;
+    return TOKEN_STREAM_TOKEN_MISMATCH;
   }
   return parserTokenStreamTokenMatchStatus(
     publicTokenClass(left),
@@ -1700,7 +1714,7 @@ function sameToken(left: Token, right: Token): boolean {
     left.span.end,
     right.span.start,
     right.span.end,
-  ) === TOKEN_STREAM_OK;
+  );
 }
 
 function clampSpan(span: Span, sourceLength: number): Span {

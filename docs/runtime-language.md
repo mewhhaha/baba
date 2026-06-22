@@ -67,6 +67,8 @@ EOF-shape errors before TypeScript allocates public diagnostics.
 omitted source gaps as safely omitted trivia or invalid nontrivia source.
 `parserTokenStreamTokenMatchStatus` compares canonical and supplied token
 numeric identity, terminal, spec index, and span after host text/channel checks.
+`parserTokenStreamCanonicalMatchStatus` classifies canonical lexer replay
+advancement as a supplied-token match, an omitted-trivia skip, or a mismatch.
 `parserTokenStreamFinalStatus` classifies end-of-stream EOF placement and
 trailing source gaps before TypeScript allocates final token-stream diagnostics.
 `parserTokenStreamPublicTokenStatus` classifies public literal/named/error token
