@@ -109,6 +109,7 @@ import {
   RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
   RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
   RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION,
+  RUNTIME_SHIFTED_TOKEN_STATUS_OK,
   RUNTIME_TOKEN_STREAM_STATUS_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
@@ -419,6 +420,7 @@ const REPLAY_REDUCTION_UNKNOWN_PRODUCTION = ${RUNTIME_REPLAY_REDUCTION_STATUS_UN
 const REPLAY_REDUCTION_RULE_PAYLOAD_MISSING = ${RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING};
 const REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING = ${RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING};
 const REPLAY_REDUCTION_STACK_UNDERFLOW = ${RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW};
+const SHIFTED_TOKEN_OK = ${RUNTIME_SHIFTED_TOKEN_STATUS_OK};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
 const FIELD_VALUE_ARRAY = ${RUNTIME_FIELD_VALUE_ARRAY};
 const FIELD_VALUE_NULLABLE = ${RUNTIME_FIELD_VALUE_NULLABLE};
@@ -948,26 +950,28 @@ function reduceProduction(
 
 function tokenFragment(shifted: ShiftedToken): Fragment {
   const token = shifted.token;
-  if (!isMainSyntaxToken(token)) {
+  const status = parserShiftedTokenStatus(publicTokenClass(token));
+  if (status !== SHIFTED_TOKEN_OK) {
     throw new Error("Expected shifted main syntax token.");
   }
+  const syntaxToken = token as MainNamedToken | LiteralToken;
   const tokenHandle = parserTokenNew(
-    publicTokenClass(token),
-    tokenSpecIndex(token),
-    tokenToTerminal(token),
-    token.span.start,
-    token.span.end,
+    publicTokenClass(syntaxToken),
+    tokenSpecIndex(syntaxToken),
+    tokenToTerminal(syntaxToken),
+    syntaxToken.span.start,
+    syntaxToken.span.end,
   );
-  rememberSyntaxValue(tokenHandle, token);
+  rememberSyntaxValue(tokenHandle, syntaxToken);
   const runtimeHandle = parserFragmentFromToken(
     tokenHandle,
     shifted.tokenIndex,
   );
-  rememberFragmentValue(runtimeHandle, token);
+  rememberFragmentValue(runtimeHandle, syntaxToken);
   return {
     runtimeHandle,
-    value: token,
-    span: token.span,
+    value: syntaxToken,
+    span: syntaxToken.span,
     tokenRange: { start: shifted.tokenIndex, end: shifted.tokenIndex + 1 },
   };
 }
@@ -1334,18 +1338,6 @@ function isFragment(value: unknown): value is Fragment {
     "runtimeHandle" in value &&
     "value" in value &&
     "tokenRange" in value;
-}
-
-function isMainSyntaxToken(
-  value: unknown,
-): value is MainNamedToken | LiteralToken {
-  return !!value &&
-    typeof value === "object" &&
-    (
-      (value as { type?: unknown }).type === "literal" ||
-      ((value as { type?: unknown; channel?: unknown }).type === "named" &&
-        (value as { channel?: unknown }).channel === "main")
-    );
 }
 
 function validateTokenStream(

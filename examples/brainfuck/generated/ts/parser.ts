@@ -87,6 +87,7 @@ const REPLAY_REDUCTION_UNKNOWN_PRODUCTION = 1;
 const REPLAY_REDUCTION_RULE_PAYLOAD_MISSING = 2;
 const REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING = 3;
 const REPLAY_REDUCTION_STACK_UNDERFLOW = 4;
+const SHIFTED_TOKEN_OK = 0;
 const NO_FIELD = 4294967295;
 const FIELD_VALUE_ARRAY = 3;
 const FIELD_VALUE_NULLABLE = 2;
@@ -1834,6 +1835,17 @@ function parserTraceTerminal(publicClass: number, trustedTerminal: number, specT
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserShiftedTokenStatus(publicClass: number): number {
+  if (((((publicClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((publicClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserRuleNodeFromFragment(ruleId: number, fragment: number): number {
   let handle = 0;
   handle = (runtimeArenaAlloc(8) >>> 0) >>> 0;
@@ -2634,26 +2646,28 @@ function reduceProduction(
 
 function tokenFragment(shifted: ShiftedToken): Fragment {
   const token = shifted.token;
-  if (!isMainSyntaxToken(token)) {
+  const status = parserShiftedTokenStatus(publicTokenClass(token));
+  if (status !== SHIFTED_TOKEN_OK) {
     throw new Error("Expected shifted main syntax token.");
   }
+  const syntaxToken = token as MainNamedToken | LiteralToken;
   const tokenHandle = parserTokenNew(
-    publicTokenClass(token),
-    tokenSpecIndex(token),
-    tokenToTerminal(token),
-    token.span.start,
-    token.span.end,
+    publicTokenClass(syntaxToken),
+    tokenSpecIndex(syntaxToken),
+    tokenToTerminal(syntaxToken),
+    syntaxToken.span.start,
+    syntaxToken.span.end,
   );
-  rememberSyntaxValue(tokenHandle, token);
+  rememberSyntaxValue(tokenHandle, syntaxToken);
   const runtimeHandle = parserFragmentFromToken(
     tokenHandle,
     shifted.tokenIndex,
   );
-  rememberFragmentValue(runtimeHandle, token);
+  rememberFragmentValue(runtimeHandle, syntaxToken);
   return {
     runtimeHandle,
-    value: token,
-    span: token.span,
+    value: syntaxToken,
+    span: syntaxToken.span,
     tokenRange: { start: shifted.tokenIndex, end: shifted.tokenIndex + 1 },
   };
 }
@@ -3020,18 +3034,6 @@ function isFragment(value: unknown): value is Fragment {
     "runtimeHandle" in value &&
     "value" in value &&
     "tokenRange" in value;
-}
-
-function isMainSyntaxToken(
-  value: unknown,
-): value is MainNamedToken | LiteralToken {
-  return !!value &&
-    typeof value === "object" &&
-    (
-      (value as { type?: unknown }).type === "literal" ||
-      ((value as { type?: unknown; channel?: unknown }).type === "named" &&
-        (value as { channel?: unknown }).channel === "main")
-    );
 }
 
 function validateTokenStream(

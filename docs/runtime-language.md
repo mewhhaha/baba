@@ -72,12 +72,15 @@ TypeScript allocates the public diagnostic object.
 input, skippable trivia, or EOF stop tokens before generated TypeScript parsers
 and Wasm adapters compact public tokens into terminal streams. Deterministic
 parsers also call `parserTraceTerminal` to select EOF, trusted runtime, spec, or
-missing parser terminals before tracing. Deterministic parsers use
-`parserAction`/`parserGoto` for parser table lookup, and conflict parsers use
-generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
-multi-action fan-out and goto lookup. Generated parsers also use the
-`parserExpectedStart` and `parserExpectedEnd` helpers to map parser states to
-flattened expected-terminal display ranges for diagnostics, and
+missing parser terminals before tracing. `parserShiftedTokenStatus` classifies
+literal/main public tokens as valid shifted CST token fragments and rejects
+trivia, lexical error, and EOF records before generated replay allocates runtime
+token fragments. Deterministic parsers use `parserAction`/`parserGoto` for
+parser table lookup, and conflict parsers use generated
+`parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
+fan-out and goto lookup. Generated parsers also use the `parserExpectedStart`
+and `parserExpectedEnd` helpers to map parser states to flattened
+expected-terminal display ranges for diagnostics, and
 `parserUnexpectedDiagnosticCode` uses runtime EOF flags to choose
 unexpected-token versus trailing-input runtime diagnostic codes without scanning
 display strings. Reduction replay uses

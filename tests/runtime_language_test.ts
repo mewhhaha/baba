@@ -105,6 +105,8 @@ import {
   RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
   RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW,
   RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION,
+  RUNTIME_SHIFTED_TOKEN_STATUS_INVALID,
+  RUNTIME_SHIFTED_TOKEN_STATUS_OK,
   RUNTIME_TOKEN_STREAM_STATUS_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
@@ -2182,6 +2184,56 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserShiftedTokenStatusProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_shifted_token_status",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserShiftedTokenStatus", [
+                u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+              ]),
+              u32(10_000),
+            ),
+            add(
+              mul(
+                call("parserShiftedTokenStatus", [
+                  u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                ]),
+                u32(1_000),
+              ),
+              add(
+                mul(
+                  call("parserShiftedTokenStatus", [
+                    u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                  ]),
+                  u32(100),
+                ),
+                add(
+                  mul(
+                    call("parserShiftedTokenStatus", [
+                      u32(RUNTIME_PUBLIC_TOKEN_ERROR),
+                    ]),
+                    u32(10),
+                  ),
+                  call("parserShiftedTokenStatus", [
+                    u32(RUNTIME_PUBLIC_TOKEN_EOF),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserObjectWrongKindProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_object_wrong_kind",
@@ -2929,6 +2981,18 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "runtime trace terminal helper selects parser terminals",
       program: parserTraceTerminalProgram,
       expected: { kind: "value", value: 1_111 },
+    },
+    {
+      name: "runtime shifted-token helper classifies syntax tokens",
+      program: parserShiftedTokenStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_SHIFTED_TOKEN_STATUS_OK * 10_000 +
+          RUNTIME_SHIFTED_TOKEN_STATUS_OK * 1_000 +
+          RUNTIME_SHIFTED_TOKEN_STATUS_INVALID * 100 +
+          RUNTIME_SHIFTED_TOKEN_STATUS_INVALID * 10 +
+          RUNTIME_SHIFTED_TOKEN_STATUS_INVALID,
+      },
     },
     {
       name: "runtime parser object access traps on wrong handle kind",

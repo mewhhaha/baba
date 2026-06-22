@@ -73,7 +73,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_sources.ts",
       role: "runtime-language-source",
-      hash: "fnv1a64:7069bdc95b3545e4",
+      hash: "fnv1a64:6576d63ac61bf49a",
     },
     {
       path: "src/targets/runtime/language.ts",
@@ -83,12 +83,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_artifacts.ts",
       role: "runtime-language-artifact-manifest",
-      hash: "fnv1a64:de0369a70d2ea30f",
+      hash: "fnv1a64:90b1174531e12616",
     },
     {
       path: "src/targets/runtime/typescript_parser_runtime.ts",
       role: "typescript-parser-runtime",
-      hash: "fnv1a64:0a26fdbcceaf189e",
+      hash: "fnv1a64:6c6dd427c5020626",
     },
     {
       path: "src/targets/runtime/wasm_abi.ts",
@@ -102,7 +102,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:f0da8c52558c7cdc" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:75589a3554936fdb" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

@@ -279,6 +279,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "parserTraceTerminal",
   );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserShiftedTokenStatus",
+  );
   assertIncludes(parserRuntimeSource, "sourceTextMatches");
   assertNotIncludes(parserRuntimeSource, "source.slice");
   assertIncludes(
@@ -400,6 +404,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(parserRuntimeSource, "toFragment(rhs[0])");
   assertNotIncludes(parserRuntimeSource, "rhs[0] as ShiftedToken");
   assertNotIncludes(parserRuntimeSource, "rhs[0] as AnyRuleNode");
+  assertNotIncludes(parserRuntimeSource, "function isMainSyntaxToken");
+  assertNotIncludes(
+    parserRuntimeSource,
+    '(value as { type?: unknown }).type === "literal"',
+  );
   assertNotIncludes(parserRuntimeSource, "PRODUCTION_REDUCERS");
   assertNotIncludes(parserRuntimeSource, "RULE_FIELD_SCHEMA_ENTRIES");
   assertNotIncludes(parserRuntimeSource, "RULE_FIELD_SCHEMAS");

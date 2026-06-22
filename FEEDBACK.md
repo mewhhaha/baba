@@ -359,6 +359,10 @@ runtime language:
   `parserTraceTerminal`, so generated parsers no longer directly choose between
   EOF terminals, trusted same-plan terminals, lexer-spec terminals, and missing
   parser terminals.
+- Moved generated shifted-token syntax classification onto runtime-language
+  `parserShiftedTokenStatus`, so replay no longer directly decides in TypeScript
+  whether a shifted public token is a literal/main CST fragment or an invalid
+  trivia/error/EOF record.
 - Moved generated parser replay span/token-range merge arithmetic onto
   runtime-language `parserMergeStart`/`parserMergeEnd` helpers. Generated
   TypeScript still allocates JavaScript fragment, field, and CST objects.
@@ -405,15 +409,18 @@ Still unresolved:
   `parserTraceTokenStreamStatus` to classify emitted parser tokens, skippable
   trivia, and EOF stop records, and parser trace terminal selection now uses
   runtime-language `parserTraceTerminal` to choose EOF, trusted, spec, or
-  missing parser terminals. Parser replay span and token-range merge arithmetic
-  is runtime-language-backed, trailing-input diagnostic code selection uses
-  runtime-language `parserUnexpectedDiagnosticCode`, reducer result-shape
-  classification is runtime-language-backed, and parser replay action dispatch,
-  parser trace status, plus replay reduction validity classification now use
-  runtime-language helpers. Generated replay also now carries runtime-language
-  parser object handles and calls runtime-language fragment assembly helpers
-  during token/rule/sequence/empty/list/field reductions. Public field assembly
-  now consumes runtime-language field-capture vectors instead of a parallel
+  missing parser terminals. Shifted-token syntax classification now uses
+  runtime-language `parserShiftedTokenStatus` to distinguish literal/main CST
+  token fragments from trivia/error/EOF records. Parser replay span and
+  token-range merge arithmetic is runtime-language-backed, trailing-input
+  diagnostic code selection uses runtime-language
+  `parserUnexpectedDiagnosticCode`, reducer result-shape classification is
+  runtime-language-backed, and parser replay action dispatch, parser trace
+  status, plus replay reduction validity classification now use runtime-language
+  helpers. Generated replay also now carries runtime-language parser object
+  handles and calls runtime-language fragment assembly helpers during
+  token/rule/sequence/empty/list/field reductions. Public field assembly now
+  consumes runtime-language field-capture vectors instead of a parallel
   JavaScript capture list, and field capture counts now use a runtime-language
   array instead of a parallel JavaScript count object. Public field value
   accumulation now stores captured fragment handles in tagged runtime

@@ -46,6 +46,8 @@ export const RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP = 6;
 export const RUNTIME_TRACE_TOKEN_STREAM_EMIT = 0;
 export const RUNTIME_TRACE_TOKEN_STREAM_SKIP = 1;
 export const RUNTIME_TRACE_TOKEN_STREAM_STOP = 2;
+export const RUNTIME_SHIFTED_TOKEN_STATUS_OK = 0;
+export const RUNTIME_SHIFTED_TOKEN_STATUS_INVALID = 1;
 export const RUNTIME_ACTION_NONE = 0;
 export const RUNTIME_ACTION_SHIFT = 0x01_00_00_00;
 export const RUNTIME_ACTION_REDUCE = 0x02_00_00_00;
@@ -1712,6 +1714,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamGapTokenStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
     parserTraceTerminalFunction(),
+    parserShiftedTokenStatusFunction(),
     parserRuleNodeFromFragmentFunction(),
     parserRuleNodeRuleIdFunction(),
     parserRuleNodeSpanStartFunction(),
@@ -2914,6 +2917,44 @@ function parserTraceTerminalFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: local("specTerminal"),
+      },
+    ],
+  };
+}
+
+function parserShiftedTokenStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserShiftedTokenStatus",
+    parameters: [
+      { name: "publicClass", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_SHIFTED_TOKEN_STATUS_OK),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("publicClass"),
+          u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_SHIFTED_TOKEN_STATUS_OK),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_SHIFTED_TOKEN_STATUS_INVALID),
       },
     ],
   };
