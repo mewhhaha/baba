@@ -198,12 +198,15 @@ Deno.test("TypeScript parser branches through declared local grammar conflicts",
   try {
     await applyBundle(resolved.bundle, { root: dir });
     const parserSource = await Deno.readTextFile(`${dir}/typescript/parser.ts`);
-    assertIncludes(parserSource, "MAX_PARSE_BRANCHES");
-    assertIncludes(parserSource, "interface ParseBranch");
-    assertIncludes(parserSource, "function findActions(");
+    assertIncludes(parserSource, "function parserTrace(");
+    assertIncludes(parserSource, "function parserTraceSetTerminal(");
     assertIncludes(parserSource, "function parserActionAt(");
     assertIncludes(parserSource, "function parserActionCount(");
     assertIncludes(parserSource, "function parserGoto(");
+    assertNotIncludes(parserSource, "MAX_PARSE_BRANCHES");
+    assertNotIncludes(parserSource, "interface ParseBranch");
+    assertNotIncludes(parserSource, "function findActions(");
+    assertNotIncludes(parserSource, "function applyAction(");
     assertNotIncludes(parserSource, "const ACTIONS");
     assertNotIncludes(parserSource, "const GOTOS");
     await denoCheck(`${dir}/typescript/mod.ts`);
@@ -211,6 +214,44 @@ Deno.test("TypeScript parser branches through declared local grammar conflicts",
     for (const source of ["(a)", "(a, b)", "((a))"]) {
       assertEquals(mod.parse(source).ok, true);
     }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser restores saved reduce branch after shifted branch fails", async () => {
+  const unresolved = compile(shiftFirstRestoreGrammar, {
+    targets: ["typescript"],
+  });
+  assertEquals(unresolved.bundle, undefined);
+  assertEquals(
+    unresolved.diagnostics[0].code,
+    "TS_PARSER_SHIFT_REDUCE_CONFLICT",
+  );
+
+  const metadata = parseMetadata(JSON.stringify({
+    version: 1,
+    parser: {
+      conflicts: [["short", "long"]],
+    },
+  }));
+  const result = compile(shiftFirstRestoreGrammar, {
+    targets: ["typescript"],
+    metadata,
+  });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    assertEquals(mod.parse("a b").ok, true);
+    assertEquals(mod.parse("a b c").ok, true);
+    const invalid = mod.parse("a c");
+    assertEquals(invalid.ok, false);
+    assertEquals(invalid.diagnostics[0].code, "PARSE_UNEXPECTED_TOKEN");
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

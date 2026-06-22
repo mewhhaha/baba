@@ -10,6 +10,7 @@ import {
   createLexerRuntimeProgram,
   createParserActionRuntimeProgram,
   createParserConflictTableRuntimeProgram,
+  createParserConflictTraceRuntimeProgram,
   createParserExpectedRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserProductionRuntimeProgram,
@@ -123,6 +124,41 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
       }),
     },
     {
+      name: "parser_conflict_trace_runtime",
+      program: createParserConflictTraceRuntimeProgram({
+        actionRows: [
+          [[1, RUNTIME_ACTION_SHIFT + 1]],
+          [[2, RUNTIME_ACTION_SHIFT + 3], [2, RUNTIME_ACTION_REDUCE + 2]],
+          [[2, RUNTIME_ACTION_SHIFT + 5]],
+          [[3, RUNTIME_ACTION_REDUCE + 3]],
+          [[3, RUNTIME_ACTION_SHIFT + 7]],
+          [[0, RUNTIME_ACTION_REDUCE]],
+          [[0, RUNTIME_ACTION_ACCEPT]],
+          [[0, RUNTIME_ACTION_REDUCE + 1]],
+        ],
+        gotoRows: [
+          [
+            [1, 6],
+            [2, 2],
+            [3, 4],
+          ],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+        ],
+        productions: [
+          [1, 2],
+          [1, 2],
+          [2, 1],
+          [3, 2],
+        ],
+      }),
+    },
+    {
       name: "parser_goto_runtime",
       program: createParserGotoRuntimeProgram({
         gotoRows: [
@@ -213,6 +249,13 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
       wasmHash: "fnv1a64:b4c4bf962f2536ef",
     },
     {
+      name: "parser_conflict_trace_runtime",
+      entry: "parserTrace",
+      sourceHash: "fnv1a64:5dbf53c4bcf930db",
+      typescriptHash: "fnv1a64:4f1fde74817d0b59",
+      wasmHash: "fnv1a64:bcf35071ff0b8c12",
+    },
+    {
       name: "parser_goto_runtime",
       entry: "parserGoto",
       sourceHash: "fnv1a64:03418d9f8d0c5c19",
@@ -243,7 +286,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:4065ac0158043a39" as const;
+  "fnv1a64:97479f9b69744e92" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

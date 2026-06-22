@@ -63,6 +63,8 @@
   kind/payload masks.
 - Added a runtime-language `parserActionCount` helper for conflict parser action
   fan-out.
+- Moved generated TypeScript conflict-parser branch scheduling onto a
+  runtime-language `parserTrace` helper with scratch-memory branch frames.
 
 ### Changed
 

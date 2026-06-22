@@ -26,6 +26,8 @@ const TRACE_TERMINALS_BASE = 8;
 const TRACE_STATUS_OK = 0;
 const TRACE_STATUS_UNEXPECTED = 1;
 const TRACE_STATUS_INTERNAL = 2;
+const TRACE_STATUS_BRANCH_LIMIT = 3;
+const TRACE_BRANCH_LIMIT = 100_000;
 
 const LEXER_SCAN_STATE = 0;
 const LEXER_SCAN_LENGTH = 1;
@@ -64,6 +66,9 @@ export interface ParserTraceRuntimeProgramInput
   extends ParserTableRuntimeProgramInput, ParserProductionRuntimeProgramInput {}
 
 export interface ParserConflictTableRuntimeProgramInput
+  extends ParserTableRuntimeProgramInput, ParserProductionRuntimeProgramInput {}
+
+export interface ParserConflictTraceRuntimeProgramInput
   extends ParserTableRuntimeProgramInput, ParserProductionRuntimeProgramInput {}
 
 export interface ParserGotoRuntimeProgramInput {
@@ -264,6 +269,46 @@ export function createParserConflictTableRuntimeProgram(
       ),
       ...parserActionFunctions(),
       ...parserProductionFunctions(input.productions.length),
+    ],
+  };
+}
+
+export function createParserConflictTraceRuntimeProgram(
+  input: ParserConflictTraceRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  const actionTable = flattenLookupTable("parserAction", input.actionRows);
+  const gotoTable = flattenLookupTable("parserGoto", input.gotoRows);
+  return {
+    name: "parser_conflict_trace_runtime",
+    entry: "parserTrace",
+    scratchMemoryWords: 0,
+    tables: [
+      ...actionTable.tables,
+      ...gotoTable.tables,
+      parserProductionsTable(input.productions),
+    ],
+    functions: [
+      tableLookupAtFunction(
+        "parserActionAt",
+        actionTable.rowsTable,
+        actionTable.entriesTable,
+        RUNTIME_ACTION_NONE,
+      ),
+      parserActionCountFunction(),
+      tableLookupFunction(
+        "parserGoto",
+        gotoTable.rowsTable,
+        gotoTable.entriesTable,
+        RUNTIME_NO_GOTO,
+      ),
+      ...parserActionFunctions(),
+      ...parserProductionFunctions(input.productions.length),
+      parserTraceSetTerminalFunction(),
+      parserConflictTraceFunction(input.productions.length),
+      parserTraceErrorStateFunction(),
+      parserTraceErrorIndexFunction(),
+      parserTraceCountFunction(),
+      parserTraceActionFunction(),
     ],
   };
 }
@@ -1033,6 +1078,331 @@ function parserTraceFunction(
   };
 }
 
+function parserConflictTraceFunction(
+  productionCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserTrace",
+    parameters: [
+      { name: "terminalCount", type: "u32" },
+    ],
+    locals: [
+      { name: "capacity", type: "u32" },
+      { name: "stackBase", type: "u32" },
+      { name: "stateCapacity", type: "u32" },
+      { name: "traceBase", type: "u32" },
+      { name: "traceCapacity", type: "u32" },
+      { name: "branchBase", type: "u32" },
+      { name: "branchStride", type: "u32" },
+      { name: "branchCount", type: "u32" },
+      { name: "exploredBranches", type: "u32" },
+      { name: "frameBase", type: "u32" },
+      { name: "copyIndex", type: "u32" },
+      { name: "depth", type: "u32" },
+      { name: "streamIndex", type: "u32" },
+      { name: "traceCount", type: "u32" },
+      { name: "loop", type: "u32" },
+      { name: "hasPendingAction", type: "u32" },
+      { name: "actionReady", type: "u32" },
+      { name: "state", type: "u32" },
+      { name: "terminal", type: "u32" },
+      { name: "actionCount", type: "u32" },
+      { name: "ordinal", type: "u32" },
+      { name: "action", type: "u32" },
+      { name: "pendingAction", type: "u32" },
+      { name: "actionKind", type: "u32" },
+      { name: "actionPayload", type: "u32" },
+      { name: "productionIndex", type: "u32" },
+      { name: "lhs", type: "u32" },
+      { name: "rhsLength", type: "u32" },
+      { name: "gotoState", type: "u32" },
+      { name: "bestState", type: "u32" },
+      { name: "bestIndex", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "capacity",
+        ensureScratch(add(u32(TRACE_TERMINALS_BASE), local("terminalCount"))),
+      ),
+      setLocal(
+        "stackBase",
+        add(u32(TRACE_TERMINALS_BASE), local("terminalCount")),
+      ),
+      setLocal(
+        "stateCapacity",
+        add(add(local("terminalCount"), u32(productionCount)), u32(16)),
+      ),
+      setLocal("traceBase", add(local("stackBase"), local("stateCapacity"))),
+      setLocal(
+        "traceCapacity",
+        add(
+          mul(local("terminalCount"), u32(productionCount + 1)),
+          add(u32(productionCount), u32(16)),
+        ),
+      ),
+      setLocal("branchBase", add(local("traceBase"), local("traceCapacity"))),
+      setLocal(
+        "branchStride",
+        add(add(u32(4), local("stateCapacity")), local("traceCapacity")),
+      ),
+      setLocal("capacity", ensureScratch(add(local("branchBase"), u32(1)))),
+      storeScratch(u32(TRACE_STATUS), u32(TRACE_STATUS_OK)),
+      storeScratch(u32(TRACE_ERROR_STATE), u32(0)),
+      storeScratch(u32(TRACE_ERROR_INDEX), u32(0)),
+      storeScratch(u32(TRACE_COUNT), u32(0)),
+      storeScratch(u32(TRACE_BASE), local("traceBase")),
+      storeScratch(local("stackBase"), u32(0)),
+      setLocal("depth", u32(1)),
+      setLocal("streamIndex", u32(0)),
+      setLocal("traceCount", u32(0)),
+      setLocal("branchCount", u32(0)),
+      setLocal("exploredBranches", u32(1)),
+      setLocal("hasPendingAction", u32(0)),
+      setLocal("bestState", u32(0)),
+      setLocal("bestIndex", u32(0xffff_ffff)),
+      setLocal("loop", u32(1)),
+      {
+        kind: "while",
+        condition: local("loop"),
+        body: [
+          setLocal("actionReady", u32(0)),
+          setLocal(
+            "state",
+            loadScratch(add(local("stackBase"), sub(local("depth"), u32(1)))),
+          ),
+          {
+            kind: "if",
+            condition: local("hasPendingAction"),
+            consequent: [
+              setLocal("action", local("pendingAction")),
+              setLocal("hasPendingAction", u32(0)),
+              setLocal("actionReady", u32(1)),
+            ],
+            alternate: [
+              {
+                kind: "if",
+                condition: lt(local("streamIndex"), local("terminalCount")),
+                consequent: [
+                  setLocal(
+                    "terminal",
+                    loadScratch(
+                      add(u32(TRACE_TERMINALS_BASE), local("streamIndex")),
+                    ),
+                  ),
+                  setLocal(
+                    "actionCount",
+                    call("parserActionCount", [
+                      local("state"),
+                      local("terminal"),
+                    ]),
+                  ),
+                  {
+                    kind: "if",
+                    condition: eq(local("actionCount"), u32(0)),
+                    consequent: conflictRestoreBranchOrReturnUnexpected(),
+                    alternate: [
+                      setLocal("ordinal", sub(local("actionCount"), u32(1))),
+                      {
+                        kind: "while",
+                        condition: lt(u32(0), local("ordinal")),
+                        body: [
+                          setLocal(
+                            "pendingAction",
+                            call("parserActionAt", [
+                              local("state"),
+                              local("terminal"),
+                              local("ordinal"),
+                            ]),
+                          ),
+                          ...conflictSaveBranchFrame(),
+                          setLocal("ordinal", sub(local("ordinal"), u32(1))),
+                        ],
+                      },
+                      setLocal(
+                        "action",
+                        call("parserActionAt", [
+                          local("state"),
+                          local("terminal"),
+                          u32(0),
+                        ]),
+                      ),
+                      setLocal("actionReady", u32(1)),
+                    ],
+                  },
+                ],
+                alternate: conflictRestoreBranchOrReturnUnexpected(),
+              },
+            ],
+          },
+          {
+            kind: "if",
+            condition: local("actionReady"),
+            consequent: [
+              setLocal(
+                "actionKind",
+                call("parserActionKind", [local("action")]),
+              ),
+              setLocal(
+                "actionPayload",
+                call("parserActionPayload", [local("action")]),
+              ),
+              {
+                kind: "if",
+                condition: eq(local("actionKind"), u32(RUNTIME_ACTION_SHIFT)),
+                consequent: [
+                  ...conflictTraceStoreAction(),
+                  {
+                    kind: "if",
+                    condition: lt(local("depth"), local("stateCapacity")),
+                    consequent: [
+                      setLocal(
+                        "capacity",
+                        ensureScratch(
+                          add(add(local("stackBase"), local("depth")), u32(1)),
+                        ),
+                      ),
+                      storeScratch(
+                        add(local("stackBase"), local("depth")),
+                        local("actionPayload"),
+                      ),
+                      setLocal("depth", add(local("depth"), u32(1))),
+                      setLocal(
+                        "streamIndex",
+                        add(local("streamIndex"), u32(1)),
+                      ),
+                    ],
+                    alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+                  },
+                ],
+                alternate: [{
+                  kind: "if",
+                  condition: eq(
+                    local("actionKind"),
+                    u32(RUNTIME_ACTION_REDUCE),
+                  ),
+                  consequent: [
+                    setLocal("productionIndex", local("actionPayload")),
+                    setLocal(
+                      "lhs",
+                      call("parserProductionLhs", [local("productionIndex")]),
+                    ),
+                    setLocal(
+                      "rhsLength",
+                      call("parserProductionRhsLength", [
+                        local("productionIndex"),
+                      ]),
+                    ),
+                    {
+                      kind: "if",
+                      condition: eq(
+                        local("rhsLength"),
+                        u32(RUNTIME_NO_PRODUCTION),
+                      ),
+                      consequent: traceReturnStatements(TRACE_STATUS_INTERNAL),
+                      alternate: [
+                        {
+                          kind: "if",
+                          condition: lt(
+                            local("depth"),
+                            add(local("rhsLength"), u32(1)),
+                          ),
+                          consequent: traceReturnStatements(
+                            TRACE_STATUS_INTERNAL,
+                          ),
+                          alternate: [
+                            setLocal(
+                              "depth",
+                              sub(local("depth"), local("rhsLength")),
+                            ),
+                            setLocal(
+                              "state",
+                              loadScratch(
+                                add(
+                                  local("stackBase"),
+                                  sub(local("depth"), u32(1)),
+                                ),
+                              ),
+                            ),
+                            setLocal(
+                              "gotoState",
+                              call("parserGoto", [
+                                local("state"),
+                                local("lhs"),
+                              ]),
+                            ),
+                            {
+                              kind: "if",
+                              condition: eq(
+                                local("gotoState"),
+                                u32(RUNTIME_NO_GOTO),
+                              ),
+                              consequent:
+                                conflictRestoreBranchOrReturnUnexpected(),
+                              alternate: [
+                                ...conflictTraceStoreAction(),
+                                {
+                                  kind: "if",
+                                  condition: lt(
+                                    local("depth"),
+                                    local("stateCapacity"),
+                                  ),
+                                  consequent: [
+                                    setLocal(
+                                      "capacity",
+                                      ensureScratch(
+                                        add(
+                                          add(
+                                            local("stackBase"),
+                                            local("depth"),
+                                          ),
+                                          u32(1),
+                                        ),
+                                      ),
+                                    ),
+                                    storeScratch(
+                                      add(local("stackBase"), local("depth")),
+                                      local("gotoState"),
+                                    ),
+                                    setLocal(
+                                      "depth",
+                                      add(local("depth"), u32(1)),
+                                    ),
+                                  ],
+                                  alternate: traceReturnStatements(
+                                    TRACE_STATUS_INTERNAL,
+                                  ),
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                  alternate: [{
+                    kind: "if",
+                    condition: eq(
+                      local("actionKind"),
+                      u32(RUNTIME_ACTION_ACCEPT),
+                    ),
+                    consequent: [
+                      ...conflictTraceStoreAction(),
+                      ...traceReturnStatements(TRACE_STATUS_OK),
+                    ],
+                    alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+                  }],
+                }],
+              },
+            ],
+          },
+        ],
+      },
+      ...traceReturnStatements(TRACE_STATUS_INTERNAL),
+    ],
+  };
+}
+
 function parserTraceErrorStateFunction(): RuntimeLanguageFunction {
   return traceHeaderLoadFunction("parserTraceErrorState", TRACE_ERROR_STATE);
 }
@@ -1152,6 +1522,170 @@ function traceReturnStatements(status: number): RuntimeStatement[] {
     storeScratch(u32(TRACE_COUNT), local("traceCount")),
     { kind: "return", expression: u32(status) },
   ];
+}
+
+function conflictTraceStoreAction(): RuntimeStatement[] {
+  return [{
+    kind: "if",
+    condition: lt(local("traceCount"), local("traceCapacity")),
+    consequent: [
+      storeScratch(
+        add(local("traceBase"), local("traceCount")),
+        local("action"),
+      ),
+      setLocal("traceCount", add(local("traceCount"), u32(1))),
+    ],
+    alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+  }];
+}
+
+function conflictSaveBranchFrame(): RuntimeStatement[] {
+  return [
+    {
+      kind: "if",
+      condition: lt(local("branchCount"), u32(TRACE_BRANCH_LIMIT)),
+      consequent: [],
+      alternate: traceReturnStatements(TRACE_STATUS_BRANCH_LIMIT),
+    },
+    setLocal(
+      "frameBase",
+      add(
+        local("branchBase"),
+        mul(local("branchCount"), local("branchStride")),
+      ),
+    ),
+    setLocal(
+      "capacity",
+      ensureScratch(add(local("frameBase"), local("branchStride"))),
+    ),
+    storeScratch(local("frameBase"), local("pendingAction")),
+    storeScratch(add(local("frameBase"), u32(1)), local("depth")),
+    storeScratch(add(local("frameBase"), u32(2)), local("streamIndex")),
+    storeScratch(add(local("frameBase"), u32(3)), local("traceCount")),
+    setLocal("copyIndex", u32(0)),
+    {
+      kind: "while",
+      condition: lt(local("copyIndex"), local("depth")),
+      body: [
+        storeScratch(
+          add(add(local("frameBase"), u32(4)), local("copyIndex")),
+          loadScratch(add(local("stackBase"), local("copyIndex"))),
+        ),
+        setLocal("copyIndex", add(local("copyIndex"), u32(1))),
+      ],
+    },
+    setLocal("copyIndex", u32(0)),
+    {
+      kind: "while",
+      condition: lt(local("copyIndex"), local("traceCount")),
+      body: [
+        storeScratch(
+          add(
+            add(add(local("frameBase"), u32(4)), local("stateCapacity")),
+            local("copyIndex"),
+          ),
+          loadScratch(add(local("traceBase"), local("copyIndex"))),
+        ),
+        setLocal("copyIndex", add(local("copyIndex"), u32(1))),
+      ],
+    },
+    setLocal("branchCount", add(local("branchCount"), u32(1))),
+  ];
+}
+
+function conflictRestoreBranchOrReturnUnexpected(): RuntimeStatement[] {
+  return [
+    ...conflictRecordBestFailure(),
+    setLocal("actionReady", u32(0)),
+    {
+      kind: "if",
+      condition: eq(local("branchCount"), u32(0)),
+      consequent: [
+        setLocal("state", local("bestState")),
+        setLocal("streamIndex", local("bestIndex")),
+        ...traceReturnStatements(TRACE_STATUS_UNEXPECTED),
+      ],
+      alternate: [
+        setLocal("branchCount", sub(local("branchCount"), u32(1))),
+        setLocal(
+          "frameBase",
+          add(
+            local("branchBase"),
+            mul(local("branchCount"), local("branchStride")),
+          ),
+        ),
+        setLocal("pendingAction", loadScratch(local("frameBase"))),
+        setLocal("depth", loadScratch(add(local("frameBase"), u32(1)))),
+        setLocal(
+          "streamIndex",
+          loadScratch(add(local("frameBase"), u32(2))),
+        ),
+        setLocal(
+          "traceCount",
+          loadScratch(add(local("frameBase"), u32(3))),
+        ),
+        setLocal("copyIndex", u32(0)),
+        {
+          kind: "while",
+          condition: lt(local("copyIndex"), local("depth")),
+          body: [
+            storeScratch(
+              add(local("stackBase"), local("copyIndex")),
+              loadScratch(
+                add(add(local("frameBase"), u32(4)), local("copyIndex")),
+              ),
+            ),
+            setLocal("copyIndex", add(local("copyIndex"), u32(1))),
+          ],
+        },
+        setLocal("copyIndex", u32(0)),
+        {
+          kind: "while",
+          condition: lt(local("copyIndex"), local("traceCount")),
+          body: [
+            storeScratch(
+              add(local("traceBase"), local("copyIndex")),
+              loadScratch(
+                add(
+                  add(add(local("frameBase"), u32(4)), local("stateCapacity")),
+                  local("copyIndex"),
+                ),
+              ),
+            ),
+            setLocal("copyIndex", add(local("copyIndex"), u32(1))),
+          ],
+        },
+        setLocal("exploredBranches", add(local("exploredBranches"), u32(1))),
+        {
+          kind: "if",
+          condition: lt(u32(TRACE_BRANCH_LIMIT), local("exploredBranches")),
+          consequent: [
+            setLocal("state", local("bestState")),
+            setLocal("streamIndex", local("bestIndex")),
+            ...traceReturnStatements(TRACE_STATUS_BRANCH_LIMIT),
+          ],
+        },
+        setLocal("hasPendingAction", u32(1)),
+      ],
+    },
+  ];
+}
+
+function conflictRecordBestFailure(): RuntimeStatement[] {
+  const update = [
+    setLocal("bestIndex", local("streamIndex")),
+    setLocal("bestState", local("state")),
+  ];
+  return [{
+    kind: "if",
+    condition: eq(local("bestIndex"), u32(0xffff_ffff)),
+    consequent: update,
+    alternate: [{
+      kind: "if",
+      condition: lt(local("bestIndex"), local("streamIndex")),
+      consequent: update,
+    }],
+  }];
 }
 
 function setLocal(

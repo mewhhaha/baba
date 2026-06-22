@@ -127,6 +127,9 @@ runtime language:
   kind/payload masks used by the runtime-language helpers.
 - Added a runtime-language `parserActionCount` helper so generated conflict
   parsers get action fan-out from shared table logic before scheduling branches.
+- Moved generated TypeScript conflict-parser branch scheduling onto a
+  runtime-language `parserTrace` helper that saves and restores branch frames in
+  scratch memory before TypeScript replays the accepted action trace.
 
 Still unresolved:
 
@@ -138,13 +141,13 @@ Still unresolved:
   runtime-language-backed now, and action kind/payload decoding uses
   runtime-language helpers in generated parser replay and `parserTrace`, while
   core Wasm trace decoding uses the same shared masks. Conflict branch fan-out
-  counting is now runtime-language-backed, but branch queue scheduling, the rest
-  of Wasm parser control flow, generated token object emission/diagnostics, and
-  reducer/CST algorithms are still not mechanically emitted from one
-  runtime-language implementation. The compiler now has a shared lowered
-  control-flow/value IR and checked helper artifact hashes, but it still needs
-  broader parser-runtime lowering before the release can fully satisfy "one
-  runtime implementation, two execution targets."
+  counting and generated TypeScript conflict branch scheduling are now
+  runtime-language-backed, but the rest of Wasm parser control flow, generated
+  token object emission/diagnostics, and reducer/CST algorithms are still not
+  mechanically emitted from one runtime-language implementation. The compiler
+  now has a shared lowered control-flow/value IR and checked helper artifact
+  hashes, but it still needs broader parser-runtime lowering before the release
+  can fully satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

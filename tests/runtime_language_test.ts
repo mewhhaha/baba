@@ -20,6 +20,7 @@ import {
   createLexerRuntimeProgram,
   createParserActionRuntimeProgram,
   createParserConflictTableRuntimeProgram,
+  createParserConflictTraceRuntimeProgram,
   createParserExpectedRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserProductionRuntimeProgram,
@@ -378,6 +379,128 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
             ),
             consequent: [
               setLocal("result", add(local("result"), u32(10000))),
+            ],
+          },
+          { kind: "return", expression: local("result") },
+        ],
+      },
+    ],
+  };
+  const parserConflictTraceBaseProgram =
+    createParserConflictTraceRuntimeProgram({
+      actionRows: [
+        [[1, RUNTIME_ACTION_SHIFT + 1]],
+        [[2, RUNTIME_ACTION_SHIFT + 3], [2, RUNTIME_ACTION_REDUCE + 2]],
+        [[2, RUNTIME_ACTION_SHIFT + 5]],
+        [[3, RUNTIME_ACTION_REDUCE + 3]],
+        [[3, RUNTIME_ACTION_SHIFT + 7]],
+        [[0, RUNTIME_ACTION_REDUCE]],
+        [[0, RUNTIME_ACTION_ACCEPT]],
+        [[0, RUNTIME_ACTION_REDUCE + 1]],
+      ],
+      gotoRows: [
+        [
+          [1, 6],
+          [2, 2],
+          [3, 4],
+        ],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+      ],
+      productions: [
+        [1, 2],
+        [1, 2],
+        [2, 1],
+        [3, 2],
+      ],
+    });
+  const parserConflictTraceRuntimeProgram: RuntimeLanguageProgram = {
+    ...parserConflictTraceBaseProgram,
+    name: "parser_conflict_trace_conformance",
+    entry: "main",
+    functions: [
+      ...parserConflictTraceBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "result", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal(
+            "result",
+            call("parserTraceSetTerminal", [u32(0), u32(1)]),
+          ),
+          setLocal(
+            "result",
+            call("parserTraceSetTerminal", [u32(1), u32(2)]),
+          ),
+          setLocal(
+            "result",
+            call("parserTraceSetTerminal", [u32(2), u32(0)]),
+          ),
+          setLocal("result", call("parserTrace", [u32(3)])),
+          {
+            kind: "if",
+            condition: local("result"),
+            consequent: [
+              { kind: "return", expression: local("result") },
+            ],
+          },
+          setLocal("result", call("parserTraceCount", [])),
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(0)]),
+              u32(RUNTIME_ACTION_SHIFT + 1),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(10))),
+            ],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(1)]),
+              u32(RUNTIME_ACTION_REDUCE + 2),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(100))),
+            ],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(2)]),
+              u32(RUNTIME_ACTION_SHIFT + 5),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(1000))),
+            ],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(3)]),
+              u32(RUNTIME_ACTION_REDUCE),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(10000))),
+            ],
+          },
+          {
+            kind: "if",
+            condition: eq(
+              call("parserTraceAction", [u32(4)]),
+              u32(RUNTIME_ACTION_ACCEPT),
+            ),
+            consequent: [
+              setLocal("result", add(local("result"), u32(100000))),
             ],
           },
           { kind: "return", expression: local("result") },
@@ -891,6 +1014,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "parser trace runtime emits deterministic action traces",
       program: parserTraceRuntimeProgram,
       expected: { kind: "value", value: 11114 },
+    },
+    {
+      name: "parser conflict trace runtime restores saved branches",
+      program: parserConflictTraceRuntimeProgram,
+      expected: { kind: "value", value: 111115 },
     },
     {
       name: "early return skips later traps",
