@@ -358,9 +358,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_reducer_runtime",
       entry: "parserReducerKind",
-      sourceHash: "fnv1a64:17a5e0d403915d06",
-      typescriptHash: "fnv1a64:df239cc8bbec80a1",
-      wasmHash: "fnv1a64:e6ecb5dba25db367",
+      sourceHash: "fnv1a64:0a2fbf7b31bca3d7",
+      typescriptHash: "fnv1a64:c2ce4d0f12552b1b",
+      wasmHash: "fnv1a64:fbefb5e92d6381e7",
     },
     {
       name: "parser_trace_runtime",
@@ -372,7 +372,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:bac0c035eaade6e4" as const;
+  "fnv1a64:4098a6a4df7f9aca" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

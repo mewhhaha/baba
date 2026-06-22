@@ -214,9 +214,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "parserReducerResultKind");
   assertIncludes(parserRuntimeSource, "parserReplayReductionStatus");
   assertIncludes(parserRuntimeSource, "parserReplayRhsStart");
+  assertIncludes(parserRuntimeSource, "parserReplayStackDepth");
   assertIncludes(parserRuntimeSource, "parserReplayActionStatus");
   assertNotIncludes(parserRuntimeSource, "rhsLength === 0");
   assertNotIncludes(parserRuntimeSource, "values.length - rhsLength");
+  assertNotIncludes(parserRuntimeSource, "values.length - 1");
   assertIncludes(parserRuntimeSource, "lexerSpecTerminal");
   assertIncludes(parserRuntimeSource, "lexerSpecPublicTokenStatus");
   assertIncludes(parserRuntimeSource, "parserFieldValueClass");

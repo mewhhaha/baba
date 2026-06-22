@@ -3754,6 +3754,7 @@ function parserReducerFunctions(
     parserReducerChildRoleFunction(),
     parserReducerResultKindFunction(),
     parserReplayReductionStatusFunction(),
+    parserReplayStackDepthFunction(),
     parserReplayRhsStartFunction(),
   ];
 }
@@ -4582,6 +4583,27 @@ function parserReplayRhsStartFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: sub(local("valueCount"), local("rhsLength")),
+      },
+    ],
+  };
+}
+
+function parserReplayStackDepthFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserReplayStackDepth",
+    parameters: [
+      { name: "valueCount", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("valueCount"), u32(0)),
+        consequent: [{ kind: "return", expression: u32(0) }],
+      },
+      {
+        kind: "return",
+        expression: sub(local("valueCount"), u32(1)),
       },
     ],
   };

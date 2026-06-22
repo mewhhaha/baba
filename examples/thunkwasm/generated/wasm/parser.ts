@@ -552,6 +552,14 @@ function parserReplayReductionStatus(rhsLength: number, operation: number, paylo
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserReplayStackDepth(valueCount: number): number {
+  if (((((valueCount) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  return (((valueCount) - (1)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserReplayRhsStart(valueCount: number, rhsLength: number): number {
   return (((valueCount) - (rhsLength)) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -2225,7 +2233,11 @@ function replayTrace(
     }
 
     if (actionStatus === REPLAY_ACTION_ACCEPT) {
-      return acceptedParseResult(sourceText, tokens, values[values.length - 1]);
+      return acceptedParseResult(
+        sourceText,
+        tokens,
+        values[parserReplayStackDepth(values.length)],
+      );
     }
 
     const token = streamTokens[index] ?? materializeSourceEofToken(sourceText);
@@ -2248,7 +2260,7 @@ function replayTrace(
       rhsLength,
       reducerOperation,
       reducerPayloadStatus,
-      values.length - 1,
+      parserReplayStackDepth(values.length),
     );
     if (replayReductionStatus === REPLAY_REDUCTION_UNKNOWN_PRODUCTION) {
       return failedParseResult(

@@ -789,7 +789,11 @@ ${replayPrelude}  const values: unknown[] = [null];
     }
 
     if (actionStatus === REPLAY_ACTION_ACCEPT) {
-      return acceptedParseResult(sourceText, tokens, values[values.length - 1]);
+      return acceptedParseResult(
+        sourceText,
+        tokens,
+        values[parserReplayStackDepth(values.length)],
+      );
     }
 
     const token = streamTokens[index] ?? materializeSourceEofToken(sourceText);
@@ -812,7 +816,7 @@ ${replayPrelude}  const values: unknown[] = [null];
       rhsLength,
       reducerOperation,
       reducerPayloadStatus,
-      values.length - 1,
+      parserReplayStackDepth(values.length),
     );
     if (replayReductionStatus === REPLAY_REDUCTION_UNKNOWN_PRODUCTION) {
       return failedParseResult(
