@@ -94,6 +94,7 @@ const FIELD_VALUE_NULLABLE = 2;
 const FIELD_CAPTURE_ARRAY = 2;
 const FIELD_CAPTURE_SCALAR = 1;
 const FIELD_CAPTURE_TOO_MANY = 3;
+const FIELD_SCHEMA_CAPTURE_WITHOUT_SCHEMA = 1;
 const FIELD_FINAL_REQUIRED_MISSING = 1;
 const FIELD_FINAL_TOO_MANY = 2;
 const PUBLIC_TOKEN_LITERAL = 1;
@@ -1358,6 +1359,17 @@ function parserFieldValueClass(entry: number): number {
     } else {
       return (3) >>> 0;
     }
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldSchemaStatus(start: number, end: number, captureCount: number): number {
+  if (((((start) | 0) < ((end) | 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((captureCount) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
   }
   return (1) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -2855,10 +2867,11 @@ function buildFields(
   const start = parserFieldStart(ruleId);
   const end = parserFieldEnd(ruleId);
   const captureCount = parserRuleNodeFieldCount(ruleNodeHandle);
+  const schemaStatus = parserFieldSchemaStatus(start, end, captureCount);
+  if (schemaStatus === FIELD_SCHEMA_CAPTURE_WITHOUT_SCHEMA) {
+    throw new Error("Rule has field captures but no field schema.");
+  }
   if (end <= start) {
-    if (captureCount > 0) {
-      throw new Error("Rule has field captures but no field schema.");
-    }
     return createPublicFieldObject();
   }
   const counts = runtimeArrayNew(end - start);

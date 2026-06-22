@@ -42,6 +42,8 @@ import {
   RUNTIME_FIELD_FINAL_REQUIRED_MISSING,
   RUNTIME_FIELD_FINAL_TOO_MANY,
   RUNTIME_FIELD_NULLABLE,
+  RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA,
+  RUNTIME_FIELD_SCHEMA_STATUS_OK,
   RUNTIME_FIELD_VALUE_ARRAY,
   RUNTIME_FIELD_VALUE_NULLABLE,
   RUNTIME_FIELD_VALUE_REQUIRED,
@@ -572,6 +574,40 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                     ),
                   ),
                 ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserFieldSchemaStatusProgram: RuntimeLanguageProgram = {
+    ...parserFieldBaseProgram,
+    name: "parser_field_schema_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserFieldBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserFieldSchemaStatus", [u32(0), u32(2), u32(0)]),
+              u32(1_000),
+            ),
+            add(
+              mul(
+                call("parserFieldSchemaStatus", [u32(2), u32(2), u32(0)]),
+                u32(100),
+              ),
+              add(
+                mul(
+                  call("parserFieldSchemaStatus", [u32(2), u32(2), u32(1)]),
+                  u32(10),
+                ),
+                call("parserFieldSchemaStatus", [u32(3), u32(2), u32(1)]),
               ),
             ),
           ),
@@ -3438,6 +3474,17 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_FIELD_FINAL_REQUIRED_MISSING +
           RUNTIME_FIELD_FINAL_TOO_MANY +
           RUNTIME_FIELD_FINAL_OK,
+      },
+    },
+    {
+      name: "parser field schema status validates captures without schema",
+      program: parserFieldSchemaStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_FIELD_SCHEMA_STATUS_OK * 1_000 +
+          RUNTIME_FIELD_SCHEMA_STATUS_OK * 100 +
+          RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA * 10 +
+          RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA,
       },
     },
     {

@@ -38,6 +38,7 @@ import {
   RUNTIME_FIELD_FINAL_REQUIRED_MISSING,
   RUNTIME_FIELD_FINAL_TOO_MANY,
   RUNTIME_FIELD_NULLABLE,
+  RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA,
   RUNTIME_FIELD_VALUE_ARRAY,
   RUNTIME_FIELD_VALUE_NULLABLE,
   RUNTIME_LEXER_SPEC_LITERAL,
@@ -427,6 +428,7 @@ const FIELD_VALUE_NULLABLE = ${RUNTIME_FIELD_VALUE_NULLABLE};
 const FIELD_CAPTURE_ARRAY = ${RUNTIME_FIELD_CAPTURE_ARRAY};
 const FIELD_CAPTURE_SCALAR = ${RUNTIME_FIELD_CAPTURE_SCALAR};
 const FIELD_CAPTURE_TOO_MANY = ${RUNTIME_FIELD_CAPTURE_TOO_MANY};
+const FIELD_SCHEMA_CAPTURE_WITHOUT_SCHEMA = ${RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA};
 const FIELD_FINAL_REQUIRED_MISSING = ${RUNTIME_FIELD_FINAL_REQUIRED_MISSING};
 const FIELD_FINAL_TOO_MANY = ${RUNTIME_FIELD_FINAL_TOO_MANY};
 const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
@@ -1159,10 +1161,11 @@ function buildFields(
   const start = parserFieldStart(ruleId);
   const end = parserFieldEnd(ruleId);
   const captureCount = parserRuleNodeFieldCount(ruleNodeHandle);
+  const schemaStatus = parserFieldSchemaStatus(start, end, captureCount);
+  if (schemaStatus === FIELD_SCHEMA_CAPTURE_WITHOUT_SCHEMA) {
+    throw new Error("Rule has field captures but no field schema.");
+  }
   if (end <= start) {
-    if (captureCount > 0) {
-      throw new Error("Rule has field captures but no field schema.");
-    }
     return createPublicFieldObject();
   }
   const counts = runtimeArrayNew(end - start);
