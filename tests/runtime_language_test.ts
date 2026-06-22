@@ -3071,6 +3071,23 @@ Deno.test("runtime language can emit standalone TypeScript helper functions", ()
   );
   assertEquals(source.includes("function utf16CodePointWidth"), true);
   assertEquals(source.includes("runtimeLanguageVersion"), false);
+
+  const arenaSource = emitRuntimeLanguageTypeScriptFunction(
+    RUNTIME_ARENA_PROGRAM,
+  );
+  assertEquals(arenaSource.includes("function runtimeExpectObjectKind"), true);
+  assertEquals(
+    arenaSource.includes("runtimeExpectObjectKind(handle, 1)"),
+    true,
+  );
+  assertEquals(
+    arenaSource.includes("runtimeExpectObjectKind(handle, 2)"),
+    true,
+  );
+  assertEquals(
+    arenaSource.includes("runtimeExpectObjectKind(handle, 3)"),
+    true,
+  );
 });
 
 Deno.test("runtime language Wasm can export selected program functions", async () => {

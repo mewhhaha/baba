@@ -405,6 +405,17 @@ function runtimeObjectKind(handle: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function runtimeExpectObjectKind(handle: number, expectedKind: number): number {
+  let actualKind = 0;
+  actualKind = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((actualKind) >>> 0) === ((expectedKind) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTokenNew(tokenClass: number, payload: number, terminal: number, spanStart: number, spanEnd: number): number {
   let handle = 0;
   handle = (runtimeArenaAlloc(6) >>> 0) >>> 0;
@@ -419,56 +430,36 @@ function parserTokenNew(tokenClass: number, payload: number, terminal: number, s
 }
 
 function parserTokenClass(handle: number): number {
-  let kind = 0;
-  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
-  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    throw new RuntimeLanguageTrap("explicit trap");
-  }
+  let discard = 0;
+  discard = (runtimeExpectObjectKind(handle, 7) >>> 0) >>> 0;
   return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
 function parserTokenPayload(handle: number): number {
-  let kind = 0;
-  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
-  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    throw new RuntimeLanguageTrap("explicit trap");
-  }
+  let discard = 0;
+  discard = (runtimeExpectObjectKind(handle, 7) >>> 0) >>> 0;
   return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
 function parserTokenTerminal(handle: number): number {
-  let kind = 0;
-  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
-  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    throw new RuntimeLanguageTrap("explicit trap");
-  }
+  let discard = 0;
+  discard = (runtimeExpectObjectKind(handle, 7) >>> 0) >>> 0;
   return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
 function parserTokenSpanStart(handle: number): number {
-  let kind = 0;
-  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
-  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    throw new RuntimeLanguageTrap("explicit trap");
-  }
+  let discard = 0;
+  discard = (runtimeExpectObjectKind(handle, 7) >>> 0) >>> 0;
   return (__baba_load_scratch(((handle) + (4)) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
 function parserTokenSpanEnd(handle: number): number {
-  let kind = 0;
-  kind = (runtimeObjectKind(handle) >>> 0) >>> 0;
-  if (((((kind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    throw new RuntimeLanguageTrap("explicit trap");
-  }
+  let discard = 0;
+  discard = (runtimeExpectObjectKind(handle, 7) >>> 0) >>> 0;
   return (__baba_load_scratch(((handle) + (5)) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }

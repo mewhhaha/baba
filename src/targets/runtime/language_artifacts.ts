@@ -274,16 +274,16 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "runtime_arena",
       entry: "runtimeArenaReset",
-      sourceHash: "fnv1a64:715919ae7fd88f51",
-      typescriptHash: "fnv1a64:b2c4d0636400800a",
-      wasmHash: "fnv1a64:c0e57606bfcf9724",
+      sourceHash: "fnv1a64:bdcb55d043072b51",
+      typescriptHash: "fnv1a64:dd1cd7ad04e8894a",
+      wasmHash: "fnv1a64:9595df47c8d1f00b",
     },
     {
       name: "parser_object_runtime",
       entry: "parserFragmentNew",
-      sourceHash: "fnv1a64:212c7ed6e2b42ac7",
-      typescriptHash: "fnv1a64:f9ce7a39d6924bd3",
-      wasmHash: "fnv1a64:f9a88676cb3d731b",
+      sourceHash: "fnv1a64:285ae33fd0281e36",
+      typescriptHash: "fnv1a64:77368b1d5cfbf32e",
+      wasmHash: "fnv1a64:f72627c814f48cec",
     },
     {
       name: "lexer_runtime",
@@ -316,9 +316,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_conflict_trace_runtime",
       entry: "parserTrace",
-      sourceHash: "fnv1a64:b290d23642e1bce2",
-      typescriptHash: "fnv1a64:c2ca0976892e2905",
-      wasmHash: "fnv1a64:428bef833d99ea52",
+      sourceHash: "fnv1a64:3570d1b46716936e",
+      typescriptHash: "fnv1a64:8df910a904b0799d",
+      wasmHash: "fnv1a64:28eb0378700eb661",
     },
     {
       name: "parser_goto_runtime",
@@ -365,14 +365,14 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_trace_runtime",
       entry: "parserTrace",
-      sourceHash: "fnv1a64:ef7287d871d1f11c",
-      typescriptHash: "fnv1a64:e2ab55c7e105a49c",
-      wasmHash: "fnv1a64:9d1a6eefe042089e",
+      sourceHash: "fnv1a64:cf55a26fc053f81c",
+      typescriptHash: "fnv1a64:b8f09fdbcb6f3bda",
+      wasmHash: "fnv1a64:357db0a7c4a1d434",
     },
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:a6206a900fe7a1a7" as const;
+  "fnv1a64:499d1e70a52b84d5" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

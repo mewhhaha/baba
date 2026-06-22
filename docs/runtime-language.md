@@ -194,6 +194,11 @@ execute both outputs and compare returned values or traps.
   out-of-range handles, wrong object kind, out-of-bounds indexes, and offset
   overflow. Handles are currently raw arena offsets with checked object-kind
   tags, not opaque capabilities with full provenance.
+- `runtimeExpectObjectKind(handle, expectedKind)` is the shared in-runtime
+  provenance gate for arena-backed handles. It validates that a handle is live
+  in the current arena and belongs to the expected object kind before returning
+  the original handle; array, record, vector, parser object, and parser
+  field-capture accessors use this gate instead of open-coded kind checks.
 - Parser fragment objects store a value handle/id, span start/end, token-range
   start/end, and child/field vector handles. Parser field-capture objects store
   a field id and value handle/id. Parser rule-node objects store a rule id,
@@ -241,7 +246,7 @@ execute both outputs and compare returned values or traps.
 
 These rules must be specified before the parser runtime can be fully lowered:
 
-- ownership and opaque typed handle provenance;
+- host-boundary ownership and handle capability lifetimes;
 - text representation and Unicode iteration;
 - structured errors versus traps for each runtime boundary;
 - complete generated-parser lowering for final public CST field object

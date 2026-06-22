@@ -675,6 +675,7 @@ function runtimeArenaFunctions(): RuntimeLanguageFunction[] {
     runtimeArenaUsedFunction(),
     runtimeArenaAllocFunction(),
     runtimeObjectKindFunction(),
+    runtimeExpectObjectKindFunction(),
     runtimeArrayNewFunction(),
     runtimeArrayLengthFunction(),
     runtimeArrayElementOffsetFunction(),
@@ -813,6 +814,30 @@ function runtimeObjectKindFunction(): RuntimeLanguageFunction {
   };
 }
 
+function runtimeExpectObjectKindFunction(): RuntimeLanguageFunction {
+  return {
+    name: "runtimeExpectObjectKind",
+    parameters: [
+      { name: "handle", type: "u32" },
+      { name: "expectedKind", type: "u32" },
+    ],
+    locals: [
+      { name: "actualKind", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("actualKind", call("runtimeObjectKind", [local("handle")])),
+      {
+        kind: "if",
+        condition: eq(local("actualKind"), local("expectedKind")),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
 function runtimeArrayNewFunction(): RuntimeLanguageFunction {
   return {
     name: "runtimeArrayNew",
@@ -870,17 +895,17 @@ function runtimeArrayLengthFunction(): RuntimeLanguageFunction {
       { name: "handle", type: "u32" },
     ],
     locals: [
-      { name: "kind", type: "u32" },
+      { name: "discard", type: "u32" },
     ],
     result: "u32",
     body: [
-      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
-      {
-        kind: "if",
-        condition: eq(local("kind"), u32(RUNTIME_OBJECT_ARRAY)),
-        consequent: [],
-        alternate: [{ kind: "trap" }],
-      },
+      setLocal(
+        "discard",
+        call("runtimeExpectObjectKind", [
+          local("handle"),
+          u32(RUNTIME_OBJECT_ARRAY),
+        ]),
+      ),
       {
         kind: "return",
         expression: loadScratch(
@@ -1053,17 +1078,17 @@ function runtimeRecordTagFunction(): RuntimeLanguageFunction {
       { name: "handle", type: "u32" },
     ],
     locals: [
-      { name: "kind", type: "u32" },
+      { name: "discard", type: "u32" },
     ],
     result: "u32",
     body: [
-      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
-      {
-        kind: "if",
-        condition: eq(local("kind"), u32(RUNTIME_OBJECT_RECORD)),
-        consequent: [],
-        alternate: [{ kind: "trap" }],
-      },
+      setLocal(
+        "discard",
+        call("runtimeExpectObjectKind", [
+          local("handle"),
+          u32(RUNTIME_OBJECT_RECORD),
+        ]),
+      ),
       {
         kind: "return",
         expression: loadScratch(
@@ -1081,17 +1106,17 @@ function runtimeRecordFieldCountFunction(): RuntimeLanguageFunction {
       { name: "handle", type: "u32" },
     ],
     locals: [
-      { name: "kind", type: "u32" },
+      { name: "discard", type: "u32" },
     ],
     result: "u32",
     body: [
-      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
-      {
-        kind: "if",
-        condition: eq(local("kind"), u32(RUNTIME_OBJECT_RECORD)),
-        consequent: [],
-        alternate: [{ kind: "trap" }],
-      },
+      setLocal(
+        "discard",
+        call("runtimeExpectObjectKind", [
+          local("handle"),
+          u32(RUNTIME_OBJECT_RECORD),
+        ]),
+      ),
       {
         kind: "return",
         expression: loadScratch(
@@ -1247,17 +1272,17 @@ function runtimeVectorLengthFunction(): RuntimeLanguageFunction {
       { name: "handle", type: "u32" },
     ],
     locals: [
-      { name: "kind", type: "u32" },
+      { name: "discard", type: "u32" },
     ],
     result: "u32",
     body: [
-      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
-      {
-        kind: "if",
-        condition: eq(local("kind"), u32(RUNTIME_OBJECT_VECTOR)),
-        consequent: [],
-        alternate: [{ kind: "trap" }],
-      },
+      setLocal(
+        "discard",
+        call("runtimeExpectObjectKind", [
+          local("handle"),
+          u32(RUNTIME_OBJECT_VECTOR),
+        ]),
+      ),
       {
         kind: "return",
         expression: loadScratch(
@@ -1630,6 +1655,7 @@ function parserTokenRecordFunctions(): RuntimeLanguageFunction[] {
     runtimeArenaResetToFunction(),
     runtimeArenaAllocFunction(),
     runtimeObjectKindFunction(),
+    runtimeExpectObjectKindFunction(),
     parserTokenNewFunction(),
     parserTokenClassFunction(),
     parserTokenPayloadFunction(),
@@ -2035,19 +2061,18 @@ function parserFragmentAppendFieldFunction(): RuntimeLanguageFunction {
       { name: "capture", type: "u32" },
     ],
     locals: [
-      { name: "kind", type: "u32" },
-      { name: "fields", type: "u32" },
       { name: "discard", type: "u32" },
+      { name: "fields", type: "u32" },
     ],
     result: "u32",
     body: [
-      setLocal("kind", call("runtimeObjectKind", [local("capture")])),
-      {
-        kind: "if",
-        condition: eq(local("kind"), u32(RUNTIME_OBJECT_PARSER_FIELD_CAPTURE)),
-        consequent: [],
-        alternate: [{ kind: "trap" }],
-      },
+      setLocal(
+        "discard",
+        call("runtimeExpectObjectKind", [
+          local("capture"),
+          u32(RUNTIME_OBJECT_PARSER_FIELD_CAPTURE),
+        ]),
+      ),
       setLocal("fields", call("parserFragmentFields", [local("fragment")])),
       setLocal(
         "discard",
@@ -2590,17 +2615,17 @@ function parserObjectLoadFunction(
       { name: "handle", type: "u32" },
     ],
     locals: [
-      { name: "kind", type: "u32" },
+      { name: "discard", type: "u32" },
     ],
     result: "u32",
     body: [
-      setLocal("kind", call("runtimeObjectKind", [local("handle")])),
-      {
-        kind: "if",
-        condition: eq(local("kind"), u32(expectedKind)),
-        consequent: [],
-        alternate: [{ kind: "trap" }],
-      },
+      setLocal(
+        "discard",
+        call("runtimeExpectObjectKind", [
+          local("handle"),
+          u32(expectedKind),
+        ]),
+      ),
       {
         kind: "return",
         expression: loadScratch(add(local("handle"), u32(wordOffset))),

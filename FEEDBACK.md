@@ -120,6 +120,10 @@ runtime language:
   conformance coverage, and included the Stage-0 runtime-language compiler in
   generated runtime implementation identity now that generated parser runtime
   helpers depend on compiler output.
+- Added a shared `runtimeExpectObjectKind(handle, expectedKind)` provenance gate
+  for arena-backed runtime handles. Array, record, vector, parser object, and
+  parser field-capture accessors now validate stale/out-of-range and wrong-kind
+  handles through that single runtime-language helper.
 - Added read-only `u32` runtime-language tables with checked TypeScript/Wasm
   table-load conformance coverage, moving the language toward table-driven
   lexer/parser runtime code.
@@ -321,11 +325,13 @@ Still unresolved:
   checked resettable arena plus tagged arena-backed `u32` arrays, fixed records,
   growable vectors, and initial parser fragment/field/rule-node/token/diagnostic
   layouts plus reduction-shaped fragment assembly helpers that generated replay
-  is beginning to use, but it still lacks opaque typed handle provenance and
-  complete generated parser-runtime lowering. The compiler now has a shared
-  lowered control-flow/value IR and checked helper artifact hashes, but it still
-  needs broader parser-runtime lowering before the release can fully satisfy
-  "one runtime implementation, two execution targets."
+  is beginning to use. It now has a shared in-runtime object-kind provenance
+  gate for arena handles, but it still lacks a complete host-boundary ownership
+  and handle capability contract plus complete generated parser-runtime
+  lowering. The compiler now has a shared lowered control-flow/value IR and
+  checked helper artifact hashes, but it still needs broader parser-runtime
+  lowering before the release can fully satisfy "one runtime implementation, two
+  execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a
