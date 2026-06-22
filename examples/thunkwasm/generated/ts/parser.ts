@@ -72,8 +72,13 @@ const REDUCER_SEPARATED_APPEND = 14;
 const REDUCER_FIELD = 15;
 const NO_REDUCER_PAYLOAD = 4294967295;
 const NO_FIELD = 4294967295;
-const FIELD_ARRAY = 1;
-const FIELD_NULLABLE = 2;
+const FIELD_VALUE_ARRAY = 3;
+const FIELD_VALUE_NULLABLE = 2;
+const FIELD_CAPTURE_ARRAY = 2;
+const FIELD_CAPTURE_SCALAR = 1;
+const FIELD_CAPTURE_TOO_MANY = 3;
+const FIELD_FINAL_REQUIRED_MISSING = 1;
+const FIELD_FINAL_TOO_MANY = 2;
 const TOKEN_TRIVIA = 2;
 
 class RuntimeLanguageTrap extends Error {
@@ -664,6 +669,65 @@ function parserFieldIndex(ruleId: number, fieldId: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserFieldValueClass(entry: number): number {
+  let flags = 0;
+  if (((((entry) | 0) < ((41) | 0) ? 1 : 0)) !== 0) {
+    flags = (parserFieldFlags(entry) >>> 0) >>> 0;
+    if (((((((flags) & (1)) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      if (((((((flags) & (2)) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+        return (1) >>> 0;
+      } else {
+        return (2) >>> 0;
+      }
+    } else {
+      return (3) >>> 0;
+    }
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldCaptureStatus(entry: number, count: number): number {
+  let valueClass = 0;
+  if (((((entry) | 0) < ((41) | 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (0) >>> 0;
+  }
+  valueClass = (parserFieldValueClass(entry) >>> 0) >>> 0;
+  if (((((valueClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((1) | 0) < ((count) | 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldFinalStatus(entry: number, count: number): number {
+  let valueClass = 0;
+  if (((((entry) | 0) < ((41) | 0) ? 1 : 0)) !== 0) {
+  } else {
+    return (0) >>> 0;
+  }
+  valueClass = (parserFieldValueClass(entry) >>> 0) >>> 0;
+  if (((((valueClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((valueClass) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((1) | 0) < ((count) | 0) ? 1 : 0)) !== 0) {
+      return (2) >>> 0;
+    } else {
+      return (0) >>> 0;
+    }
+  }
+  if (((((count) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  return (1) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 export function parse(
   source: string,
   options: ParseOptions = {},
@@ -1184,11 +1248,11 @@ function buildFields(
   const counts = Object.create(null) as Record<number, number>;
   for (let entry = start; entry < end; entry++) {
     const fieldId = parserFieldId(entry);
-    const flags = parserFieldFlags(entry);
+    const valueClass = parserFieldValueClass(entry);
     const name = fieldName(fieldId);
-    fields[name] = (flags & FIELD_ARRAY) !== 0
+    fields[name] = valueClass === FIELD_VALUE_ARRAY
       ? []
-      : (flags & FIELD_NULLABLE) !== 0
+      : valueClass === FIELD_VALUE_NULLABLE
       ? null
       : undefined;
     counts[fieldId] = 0;
@@ -1198,37 +1262,42 @@ function buildFields(
     if (entry === NO_FIELD) {
       throw new Error(`Unknown field capture '${fieldName(capture.fieldId)}'.`);
     }
-    const flags = parserFieldFlags(entry);
     const name = fieldName(capture.fieldId);
     counts[capture.fieldId] = (counts[capture.fieldId] ?? 0) + 1;
-    if ((flags & FIELD_ARRAY) !== 0) {
+    const status = parserFieldCaptureStatus(
+      entry,
+      counts[capture.fieldId] ?? 0,
+    );
+    if (status === FIELD_CAPTURE_ARRAY) {
       const values = fields[name];
       if (!Array.isArray(values)) {
         throw new Error(`Array field '${name}' was not initialized as an array.`);
       }
       values.push(capture.value);
-    } else {
-      if ((counts[capture.fieldId] ?? 0) > 1) {
-        throw new Error(`Scalar field '${name}' was captured more than once.`);
-      }
+    } else if (status === FIELD_CAPTURE_SCALAR) {
       fields[name] = capture.value;
+    } else if (status === FIELD_CAPTURE_TOO_MANY) {
+      throw new Error(`Scalar field '${name}' was captured more than once.`);
+    } else {
+      throw new Error(`Unknown field capture '${fieldName(capture.fieldId)}'.`);
     }
   }
   for (let entry = start; entry < end; entry++) {
     const fieldId = parserFieldId(entry);
-    const flags = parserFieldFlags(entry);
     const name = fieldName(fieldId);
     const count = counts[fieldId] ?? 0;
-    if ((flags & FIELD_ARRAY) !== 0) {
+    const valueClass = parserFieldValueClass(entry);
+    if (valueClass === FIELD_VALUE_ARRAY) {
       if (!Array.isArray(fields[name])) {
         throw new Error(`Array field '${name}' was not initialized as an array.`);
       }
       continue;
     }
-    if ((flags & FIELD_NULLABLE) === 0 && count !== 1) {
+    const status = parserFieldFinalStatus(entry, count);
+    if (status === FIELD_FINAL_REQUIRED_MISSING) {
       throw new Error(`Required field '${name}' was captured ${count} times.`);
     }
-    if ((flags & FIELD_NULLABLE) !== 0 && count > 1) {
+    if (status === FIELD_FINAL_TOO_MANY) {
       throw new Error(`Nullable field '${name}' was captured more than once.`);
     }
   }

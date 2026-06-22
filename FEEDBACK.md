@@ -145,6 +145,10 @@ runtime language:
   `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/`parserFieldFlags`/
   `parserFieldIndex` helpers backed by numeric field rows, replacing generated
   `RULE_FIELD_SCHEMAS` object tables during CST field assembly.
+- Moved generated field assembly value-class and cardinality validation onto
+  runtime-language `parserFieldValueClass`/`parserFieldCaptureStatus`/
+  `parserFieldFinalStatus` helpers. Generated TypeScript still allocates field
+  objects and arrays.
 - Moved generated TypeScript lexer spec classification and terminal mapping onto
   runtime-language `lexerSpecTokenClass`/`lexerSpecPayload`/`lexerSpecTerminal`
   helpers backed by numeric lexer spec tables. Generated lexed tokens carry an
@@ -172,15 +176,17 @@ Still unresolved:
   runtime-language-backed, and generated Wasm adapters now call a
   runtime-language Wasm parser trace module instead of a core `parse_trace`
   export. Reducer descriptor lookup and field schema lookup are now
-  runtime-language-backed, and generated TypeScript lexing now reads token
-  class, payload, and terminal metadata from runtime-language helpers before
-  emitting public token objects. External `parseTokens()` mapping still accepts
-  public strings/literals at the API boundary, but terminal/channel
-  classification now goes through runtime-language lexer spec helpers. Parser
-  replay span and token-range merge arithmetic is runtime-language-backed, and
-  trailing-input diagnostic code selection uses runtime-language expected-state
-  flags, but the reducer operations that allocate/assemble fragments, fields,
-  and CST nodes plus generated token/diagnostic object emission are still not
+  runtime-language-backed, and generated field assembly now gets value-class and
+  count-validation decisions from runtime-language helpers. Generated TypeScript
+  lexing now reads token class, payload, and terminal metadata from
+  runtime-language helpers before emitting public token objects. External
+  `parseTokens()` mapping still accepts public strings/literals at the API
+  boundary, but terminal/channel classification now goes through
+  runtime-language lexer spec helpers. Parser replay span and token-range merge
+  arithmetic is runtime-language-backed, and trailing-input diagnostic code
+  selection uses runtime-language expected-state flags, but the reducer
+  operations that allocate/assemble fragments, field objects/arrays, and CST
+  nodes plus generated token/diagnostic object emission are still not
   mechanically emitted from one runtime-language implementation. The compiler
   now has a shared lowered control-flow/value IR and checked helper artifact
   hashes, but it still needs broader parser-runtime lowering before the release

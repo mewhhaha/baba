@@ -101,6 +101,9 @@
 - Generated parsers now read CST field schema rows/config through
   runtime-language `parserField*` helpers instead of generated field-schema
   lookup object tables.
+- Generated parser field assembly now uses runtime-language field value-class,
+  capture-status, and final-status helpers for required/nullable/array
+  cardinality decisions.
 - Generated TypeScript lexers now read token spec classification, payload, and
   terminal metadata through runtime-language `lexerSpec*` helpers instead of a
   generated JavaScript spec-discriminant table.

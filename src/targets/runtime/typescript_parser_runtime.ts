@@ -22,7 +22,14 @@ import {
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
   RUNTIME_FIELD_ARRAY,
+  RUNTIME_FIELD_CAPTURE_ARRAY,
+  RUNTIME_FIELD_CAPTURE_SCALAR,
+  RUNTIME_FIELD_CAPTURE_TOO_MANY,
+  RUNTIME_FIELD_FINAL_REQUIRED_MISSING,
+  RUNTIME_FIELD_FINAL_TOO_MANY,
   RUNTIME_FIELD_NULLABLE,
+  RUNTIME_FIELD_VALUE_ARRAY,
+  RUNTIME_FIELD_VALUE_NULLABLE,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_TRIVIA,
   RUNTIME_LEXER_TOKEN_TRIVIA,
@@ -317,8 +324,13 @@ const REDUCER_SEPARATED_APPEND = ${RUNTIME_REDUCER_SEPARATED_APPEND};
 const REDUCER_FIELD = ${RUNTIME_REDUCER_FIELD};
 const NO_REDUCER_PAYLOAD = ${RUNTIME_NO_REDUCER_PAYLOAD};
 const NO_FIELD = ${RUNTIME_NO_FIELD};
-const FIELD_ARRAY = ${RUNTIME_FIELD_ARRAY};
-const FIELD_NULLABLE = ${RUNTIME_FIELD_NULLABLE};
+const FIELD_VALUE_ARRAY = ${RUNTIME_FIELD_VALUE_ARRAY};
+const FIELD_VALUE_NULLABLE = ${RUNTIME_FIELD_VALUE_NULLABLE};
+const FIELD_CAPTURE_ARRAY = ${RUNTIME_FIELD_CAPTURE_ARRAY};
+const FIELD_CAPTURE_SCALAR = ${RUNTIME_FIELD_CAPTURE_SCALAR};
+const FIELD_CAPTURE_TOO_MANY = ${RUNTIME_FIELD_CAPTURE_TOO_MANY};
+const FIELD_FINAL_REQUIRED_MISSING = ${RUNTIME_FIELD_FINAL_REQUIRED_MISSING};
+const FIELD_FINAL_TOO_MANY = ${RUNTIME_FIELD_FINAL_TOO_MANY};
 const TOKEN_TRIVIA = ${RUNTIME_LEXER_TOKEN_TRIVIA};
 
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
@@ -988,11 +1000,11 @@ function buildFields(
   const counts = Object.create(null) as Record<number, number>;
   for (let entry = start; entry < end; entry++) {
     const fieldId = parserFieldId(entry);
-    const flags = parserFieldFlags(entry);
+    const valueClass = parserFieldValueClass(entry);
     const name = fieldName(fieldId);
-    fields[name] = (flags & FIELD_ARRAY) !== 0
+    fields[name] = valueClass === FIELD_VALUE_ARRAY
       ? []
-      : (flags & FIELD_NULLABLE) !== 0
+      : valueClass === FIELD_VALUE_NULLABLE
       ? null
       : undefined;
     counts[fieldId] = 0;
@@ -1002,37 +1014,42 @@ function buildFields(
     if (entry === NO_FIELD) {
       throw new Error(\`Unknown field capture '\${fieldName(capture.fieldId)}'.\`);
     }
-    const flags = parserFieldFlags(entry);
     const name = fieldName(capture.fieldId);
     counts[capture.fieldId] = (counts[capture.fieldId] ?? 0) + 1;
-    if ((flags & FIELD_ARRAY) !== 0) {
+    const status = parserFieldCaptureStatus(
+      entry,
+      counts[capture.fieldId] ?? 0,
+    );
+    if (status === FIELD_CAPTURE_ARRAY) {
       const values = fields[name];
       if (!Array.isArray(values)) {
         throw new Error(\`Array field '\${name}' was not initialized as an array.\`);
       }
       values.push(capture.value);
-    } else {
-      if ((counts[capture.fieldId] ?? 0) > 1) {
-        throw new Error(\`Scalar field '\${name}' was captured more than once.\`);
-      }
+    } else if (status === FIELD_CAPTURE_SCALAR) {
       fields[name] = capture.value;
+    } else if (status === FIELD_CAPTURE_TOO_MANY) {
+      throw new Error(\`Scalar field '\${name}' was captured more than once.\`);
+    } else {
+      throw new Error(\`Unknown field capture '\${fieldName(capture.fieldId)}'.\`);
     }
   }
   for (let entry = start; entry < end; entry++) {
     const fieldId = parserFieldId(entry);
-    const flags = parserFieldFlags(entry);
     const name = fieldName(fieldId);
     const count = counts[fieldId] ?? 0;
-    if ((flags & FIELD_ARRAY) !== 0) {
+    const valueClass = parserFieldValueClass(entry);
+    if (valueClass === FIELD_VALUE_ARRAY) {
       if (!Array.isArray(fields[name])) {
         throw new Error(\`Array field '\${name}' was not initialized as an array.\`);
       }
       continue;
     }
-    if ((flags & FIELD_NULLABLE) === 0 && count !== 1) {
+    const status = parserFieldFinalStatus(entry, count);
+    if (status === FIELD_FINAL_REQUIRED_MISSING) {
       throw new Error(\`Required field '\${name}' was captured \${count} times.\`);
     }
-    if ((flags & FIELD_NULLABLE) !== 0 && count > 1) {
+    if (status === FIELD_FINAL_TOO_MANY) {
       throw new Error(\`Nullable field '\${name}' was captured more than once.\`);
     }
   }

@@ -45,6 +45,16 @@ export const RUNTIME_NO_REDUCER_PAYLOAD = 0xffff_ffff;
 export const RUNTIME_NO_FIELD = 0xffff_ffff;
 export const RUNTIME_FIELD_ARRAY = 1;
 export const RUNTIME_FIELD_NULLABLE = 2;
+export const RUNTIME_FIELD_VALUE_REQUIRED = 1;
+export const RUNTIME_FIELD_VALUE_NULLABLE = 2;
+export const RUNTIME_FIELD_VALUE_ARRAY = 3;
+export const RUNTIME_FIELD_CAPTURE_UNKNOWN = 0;
+export const RUNTIME_FIELD_CAPTURE_SCALAR = 1;
+export const RUNTIME_FIELD_CAPTURE_ARRAY = 2;
+export const RUNTIME_FIELD_CAPTURE_TOO_MANY = 3;
+export const RUNTIME_FIELD_FINAL_OK = 0;
+export const RUNTIME_FIELD_FINAL_REQUIRED_MISSING = 1;
+export const RUNTIME_FIELD_FINAL_TOO_MANY = 2;
 
 const TRACE_STATUS = 0;
 const TRACE_ERROR_STATE = 1;
@@ -937,6 +947,9 @@ function parserFieldFunctions(
     ),
     parserFieldEntryFunction("parserFieldFlags", fieldEntryCount, 1, 0),
     parserFieldIndexFunction(ruleCount),
+    parserFieldValueClassFunction(fieldEntryCount),
+    parserFieldCaptureStatusFunction(fieldEntryCount),
+    parserFieldFinalStatusFunction(fieldEntryCount),
   ];
 }
 
@@ -1048,6 +1061,169 @@ function parserFieldIndexFunction(
         ],
       },
       { kind: "return", expression: u32(RUNTIME_NO_FIELD) },
+    ],
+  };
+}
+
+function parserFieldValueClassFunction(
+  fieldEntryCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldValueClass",
+    parameters: [
+      { name: "entry", type: "u32" },
+    ],
+    locals: [
+      { name: "flags", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("entry"), u32(fieldEntryCount)),
+        consequent: [
+          setLocal("flags", call("parserFieldFlags", [local("entry")])),
+          {
+            kind: "if",
+            condition: eq(
+              and(local("flags"), u32(RUNTIME_FIELD_ARRAY)),
+              u32(0),
+            ),
+            consequent: [{
+              kind: "if",
+              condition: eq(
+                and(local("flags"), u32(RUNTIME_FIELD_NULLABLE)),
+                u32(0),
+              ),
+              consequent: [{
+                kind: "return",
+                expression: u32(RUNTIME_FIELD_VALUE_REQUIRED),
+              }],
+              alternate: [{
+                kind: "return",
+                expression: u32(RUNTIME_FIELD_VALUE_NULLABLE),
+              }],
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(RUNTIME_FIELD_VALUE_ARRAY),
+            }],
+          },
+        ],
+      },
+      { kind: "return", expression: u32(RUNTIME_FIELD_VALUE_REQUIRED) },
+    ],
+  };
+}
+
+function parserFieldCaptureStatusFunction(
+  fieldEntryCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldCaptureStatus",
+    parameters: [
+      { name: "entry", type: "u32" },
+      { name: "count", type: "u32" },
+    ],
+    locals: [
+      { name: "valueClass", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("entry"), u32(fieldEntryCount)),
+        consequent: [],
+        alternate: [
+          { kind: "return", expression: u32(RUNTIME_FIELD_CAPTURE_UNKNOWN) },
+        ],
+      },
+      setLocal("valueClass", call("parserFieldValueClass", [local("entry")])),
+      {
+        kind: "if",
+        condition: eq(
+          local("valueClass"),
+          u32(RUNTIME_FIELD_VALUE_ARRAY),
+        ),
+        consequent: [
+          { kind: "return", expression: u32(RUNTIME_FIELD_CAPTURE_ARRAY) },
+        ],
+      },
+      {
+        kind: "if",
+        condition: lt(u32(1), local("count")),
+        consequent: [
+          { kind: "return", expression: u32(RUNTIME_FIELD_CAPTURE_TOO_MANY) },
+        ],
+      },
+      { kind: "return", expression: u32(RUNTIME_FIELD_CAPTURE_SCALAR) },
+    ],
+  };
+}
+
+function parserFieldFinalStatusFunction(
+  fieldEntryCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldFinalStatus",
+    parameters: [
+      { name: "entry", type: "u32" },
+      { name: "count", type: "u32" },
+    ],
+    locals: [
+      { name: "valueClass", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("entry"), u32(fieldEntryCount)),
+        consequent: [],
+        alternate: [
+          { kind: "return", expression: u32(RUNTIME_FIELD_FINAL_OK) },
+        ],
+      },
+      setLocal("valueClass", call("parserFieldValueClass", [local("entry")])),
+      {
+        kind: "if",
+        condition: eq(
+          local("valueClass"),
+          u32(RUNTIME_FIELD_VALUE_ARRAY),
+        ),
+        consequent: [
+          { kind: "return", expression: u32(RUNTIME_FIELD_FINAL_OK) },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("valueClass"),
+          u32(RUNTIME_FIELD_VALUE_NULLABLE),
+        ),
+        consequent: [{
+          kind: "if",
+          condition: lt(u32(1), local("count")),
+          consequent: [{
+            kind: "return",
+            expression: u32(RUNTIME_FIELD_FINAL_TOO_MANY),
+          }],
+          alternate: [{
+            kind: "return",
+            expression: u32(RUNTIME_FIELD_FINAL_OK),
+          }],
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("count"), u32(1)),
+        consequent: [
+          { kind: "return", expression: u32(RUNTIME_FIELD_FINAL_OK) },
+        ],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_FIELD_FINAL_REQUIRED_MISSING),
+      },
     ],
   };
 }

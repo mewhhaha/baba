@@ -32,7 +32,16 @@ import {
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
   RUNTIME_FIELD_ARRAY,
+  RUNTIME_FIELD_CAPTURE_ARRAY,
+  RUNTIME_FIELD_CAPTURE_SCALAR,
+  RUNTIME_FIELD_CAPTURE_TOO_MANY,
+  RUNTIME_FIELD_FINAL_OK,
+  RUNTIME_FIELD_FINAL_REQUIRED_MISSING,
+  RUNTIME_FIELD_FINAL_TOO_MANY,
   RUNTIME_FIELD_NULLABLE,
+  RUNTIME_FIELD_VALUE_ARRAY,
+  RUNTIME_FIELD_VALUE_NULLABLE,
+  RUNTIME_FIELD_VALUE_REQUIRED,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_TRIVIA,
   RUNTIME_LEXER_TOKEN_LITERAL,
@@ -282,18 +291,63 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         body: [{
           kind: "return",
           expression: add(
-            mul(call("parserFieldEnd", [u32(0)]), u32(10000)),
+            mul(call("parserFieldEnd", [u32(0)]), u32(1_000_000_000)),
             add(
-              mul(call("parserFieldId", [u32(1)]), u32(1000)),
+              mul(call("parserFieldId", [u32(1)]), u32(100_000_000)),
               add(
-                mul(call("parserFieldFlags", [u32(1)]), u32(100)),
+                mul(call("parserFieldFlags", [u32(1)]), u32(10_000_000)),
                 add(
-                  mul(call("parserFieldIndex", [u32(2), u32(7)]), u32(10)),
+                  mul(
+                    call("parserFieldValueClass", [u32(0)]),
+                    u32(1_000_000),
+                  ),
                   add(
-                    call("parserFieldStart", [u32(0)]),
-                    eq(
-                      call("parserFieldIndex", [u32(1), u32(7)]),
-                      u32(RUNTIME_NO_FIELD),
+                    mul(
+                      call("parserFieldValueClass", [u32(1)]),
+                      u32(100_000),
+                    ),
+                    add(
+                      mul(
+                        call("parserFieldValueClass", [u32(2)]),
+                        u32(10_000),
+                      ),
+                      add(
+                        mul(
+                          call("parserFieldCaptureStatus", [u32(0), u32(2)]),
+                          u32(1_000),
+                        ),
+                        add(
+                          mul(
+                            call("parserFieldCaptureStatus", [
+                              u32(2),
+                              u32(1),
+                            ]),
+                            u32(100),
+                          ),
+                          add(
+                            mul(
+                              call("parserFieldCaptureStatus", [
+                                u32(2),
+                                u32(2),
+                              ]),
+                              u32(10),
+                            ),
+                            add(
+                              call("parserFieldFinalStatus", [u32(2), u32(0)]),
+                              add(
+                                call("parserFieldFinalStatus", [
+                                  u32(1),
+                                  u32(2),
+                                ]),
+                                call("parserFieldFinalStatus", [
+                                  u32(1),
+                                  u32(1),
+                                ]),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1162,7 +1216,20 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     {
       name: "parser field lookup returns row and config metadata",
       program: parserFieldRuntimeProgram,
-      expected: { kind: "value", value: 25221 },
+      expected: {
+        kind: "value",
+        value: 2 * 1_000_000_000 + 5 * 100_000_000 +
+          RUNTIME_FIELD_NULLABLE * 10_000_000 +
+          RUNTIME_FIELD_VALUE_ARRAY * 1_000_000 +
+          RUNTIME_FIELD_VALUE_NULLABLE * 100_000 +
+          RUNTIME_FIELD_VALUE_REQUIRED * 10_000 +
+          RUNTIME_FIELD_CAPTURE_ARRAY * 1_000 +
+          RUNTIME_FIELD_CAPTURE_SCALAR * 100 +
+          RUNTIME_FIELD_CAPTURE_TOO_MANY * 10 +
+          RUNTIME_FIELD_FINAL_REQUIRED_MISSING +
+          RUNTIME_FIELD_FINAL_TOO_MANY +
+          RUNTIME_FIELD_FINAL_OK,
+      },
     },
     {
       name: "parser production lookup returns row fields",
