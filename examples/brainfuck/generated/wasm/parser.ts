@@ -90,7 +90,7 @@ const REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING = 3;
 const REPLAY_REDUCTION_STACK_UNDERFLOW = 4;
 const RULE_NODE_CHILD_LIST_EMPTY = 0;
 const SHIFTED_TOKEN_OK = 0;
-const NO_FIELD = 4294967295;
+const FIELD_ENTRY_MISSING = 1;
 const FIELD_ARRAY_VALUE_MISSING = 1;
 const FIELD_STORAGE_ARRAY = 1;
 const FIELD_CAPTURE_ARRAY = 2;
@@ -752,6 +752,14 @@ function parserFieldIndex(ruleId: number, fieldId: number): number {
     entry = (((entry) + (1)) >>> 0) >>> 0;
   }
   return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserFieldEntryStatus(entry: number): number {
+  if (((((entry) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  return (0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -2760,7 +2768,7 @@ function buildFields(
     const fieldId = parserFieldCaptureFieldId(capture);
     const value = parserFieldCaptureValue(capture);
     const entry = parserFieldIndex(ruleId, fieldId);
-    if (entry === NO_FIELD) {
+    if (parserFieldEntryStatus(entry) === FIELD_ENTRY_MISSING) {
       throw new Error(`Unknown field capture '${fieldName(fieldId)}'.`);
     }
     const name = fieldName(fieldId);

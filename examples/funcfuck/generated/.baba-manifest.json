@@ -19,11 +19,11 @@
       "ownership": "generated"
     },
     "ts/mod.ts": {
-      "hash": "04e87a01d0b56f4417ceda848c356548c80793b87e1e3d23b4e516643aa60cf6",
+      "hash": "9b8714419b82333e5a745b821c5852e31020571c87b034c7e52812ec88514dc1",
       "ownership": "generated"
     },
     "ts/parser.ts": {
-      "hash": "5f00bbb245958757589ed85fb85aaa059943e4165d54485d992889d13fb64cd3",
+      "hash": "ec5b843d4f1d86d8c2b464f78583f6c13b45db0386a3faf299dc61aabff8cc5c",
       "ownership": "generated"
     },
     "ts/syntax.ts": {
@@ -31,7 +31,7 @@
       "ownership": "generated"
     },
     "wasm/abi.json": {
-      "hash": "ea08c6e828c66c92f0efae75933f590eb97d9059dd42329a25af26e72df92061",
+      "hash": "159a931bc5dfc3a8875754f882ef2ae58d6e5aa32ec78eb0db41fc62e617cf79",
       "ownership": "generated"
     },
     "wasm/lexer.ts": {
@@ -43,7 +43,7 @@
       "ownership": "generated"
     },
     "wasm/parser.ts": {
-      "hash": "a522f87dbb8f220247384ea12578b7e5c3381f3f058580c36f6ca18d74f43d22",
+      "hash": "5be9f274e4f9bd905bc7b928f411a915daab67ac6732c888e027459eb7138f1a",
       "ownership": "generated"
     },
     "wasm/syntax.ts": {
@@ -51,7 +51,7 @@
       "ownership": "generated"
     },
     "wasm/wasm.ts": {
-      "hash": "4d2663c5587e5374d9b51e167224cf07cf52bb93b7d0eff1674e19210f154834",
+      "hash": "ac0c02c987d707762b96acfabb98c103678413cc4b4e4e2d4fa1d8a3d519fb8d",
       "ownership": "generated"
     }
   }

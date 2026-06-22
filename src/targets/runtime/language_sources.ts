@@ -154,6 +154,8 @@ export const RUNTIME_FIELD_SCHEMA_STATUS_CAPTURE_WITHOUT_SCHEMA = 1;
 export const RUNTIME_FIELD_BUILD_EMPTY = 0;
 export const RUNTIME_FIELD_BUILD_PRESENT = 1;
 export const RUNTIME_FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA = 2;
+export const RUNTIME_FIELD_ENTRY_PRESENT = 0;
+export const RUNTIME_FIELD_ENTRY_MISSING = 1;
 export const RUNTIME_FIELD_STORAGE_SCALAR = 0;
 export const RUNTIME_FIELD_STORAGE_ARRAY = 1;
 export const RUNTIME_FIELD_ARRAY_VALUE_OK = 0;
@@ -4532,6 +4534,7 @@ function parserFieldFunctions(
     ),
     parserFieldEntryFunction("parserFieldFlags", fieldEntryCount, 1, 0),
     parserFieldIndexFunction(ruleCount),
+    parserFieldEntryStatusFunction(),
     parserFieldValueClassFunction(fieldEntryCount),
     parserFieldStorageStatusFunction(),
     parserFieldSchemaStatusFunction(),
@@ -4651,6 +4654,27 @@ function parserFieldIndexFunction(
         ],
       },
       { kind: "return", expression: u32(RUNTIME_NO_FIELD) },
+    ],
+  };
+}
+
+function parserFieldEntryStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserFieldEntryStatus",
+    parameters: [
+      { name: "entry", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("entry"), u32(RUNTIME_NO_FIELD)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_FIELD_ENTRY_MISSING),
+        }],
+      },
+      { kind: "return", expression: u32(RUNTIME_FIELD_ENTRY_PRESENT) },
     ],
   };
 }

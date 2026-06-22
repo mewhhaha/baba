@@ -43,6 +43,8 @@ import {
   RUNTIME_FIELD_CAPTURE_ARRAY,
   RUNTIME_FIELD_CAPTURE_SCALAR,
   RUNTIME_FIELD_CAPTURE_TOO_MANY,
+  RUNTIME_FIELD_ENTRY_MISSING,
+  RUNTIME_FIELD_ENTRY_PRESENT,
   RUNTIME_FIELD_FINAL_OK,
   RUNTIME_FIELD_FINAL_REQUIRED_MISSING,
   RUNTIME_FIELD_FINAL_TOO_MANY,
@@ -700,6 +702,25 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
               mul(call("parserFieldStorageStatus", [u32(1)]), u32(10)),
               call("parserFieldStorageStatus", [u32(999)]),
             ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserFieldEntryStatusProgram: RuntimeLanguageProgram = {
+    ...parserFieldBaseProgram,
+    name: "parser_field_entry_status_conformance",
+    entry: "main",
+    functions: [
+      ...parserFieldBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserFieldEntryStatus", [u32(0)]), u32(10)),
+            call("parserFieldEntryStatus", [u32(RUNTIME_NO_FIELD)]),
           ),
         }],
       },
@@ -4036,6 +4057,15 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         value: RUNTIME_FIELD_STORAGE_ARRAY * 100 +
           RUNTIME_FIELD_STORAGE_SCALAR * 10 +
           RUNTIME_FIELD_STORAGE_SCALAR,
+      },
+    },
+    {
+      name: "parser field entry status classifies missing schema entries",
+      program: parserFieldEntryStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_FIELD_ENTRY_PRESENT * 10 +
+          RUNTIME_FIELD_ENTRY_MISSING,
       },
     },
     {
