@@ -115,6 +115,7 @@ import { emitPublicDiagnosticMaterializer } from "./public_diagnostic_materializ
 import { emitPublicFieldMaterializer } from "./public_field_materializer.ts";
 import { emitPublicParseResultMaterializer } from "./public_parse_result_materializer.ts";
 import { emitPublicRuleNodeMaterializer } from "./public_rule_node_materializer.ts";
+import { emitPublicSourceTextBoundary } from "./public_source_text.ts";
 import { emitPublicEofTokenMaterializer } from "./public_token_materializer.ts";
 
 export type ParserEmitMode = "typescript" | "wasm";
@@ -278,6 +279,7 @@ ${
   }
 
 ${parserTableRuntime(runtimeWithFields)}
+${emitPublicSourceTextBoundary()}
 ${emitPublicEofTokenMaterializer()}
 ${emitPublicDiagnosticMaterializer()}
 ${emitPublicFieldMaterializer()}
@@ -1403,8 +1405,7 @@ function validateTokenStream(
       ));
     }
 
-    const sourceText = source.slice(span.start, span.end);
-    if (token.text !== sourceText) {
+    if (!sourceTextMatches(source, span, token.text)) {
       diagnostics.push(invalidTokenStream(
         \`Token at index \${index} text does not match the source slice.\`,
         span,

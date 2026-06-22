@@ -16,6 +16,7 @@ import {
 } from "./language_sources.ts";
 import { emitPublicLexDiagnosticMaterializer } from "./public_lex_diagnostic_materializer.ts";
 import { emitPublicLexResultMaterializer } from "./public_lex_result_materializer.ts";
+import { emitPublicSourceTextBoundary } from "./public_source_text.ts";
 import { emitPublicTokenMaterializer } from "./public_token_materializer.ts";
 
 export interface TypeScriptLexerNamedSpec {
@@ -78,6 +79,7 @@ import type {
   LexOptions,
   LexResult,
   NamedTokenKind,
+  Span,
   Token,
 } from "./syntax.ts";
 
@@ -119,6 +121,7 @@ ${
     emitRuntimeLanguageTypeScriptFunction(runtimeProgram)
       .trimEnd()
   }
+${emitPublicSourceTextBoundary()}
 ${emitPublicTokenMaterializer({ label: "Lexer" })}
 ${emitPublicLexDiagnosticMaterializer()}
 ${emitPublicLexResultMaterializer()}

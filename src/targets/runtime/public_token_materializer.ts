@@ -40,7 +40,7 @@ function materializeToken(source: string, handle: number): Token {
     return attachRuntimeTerminal({
       type: "named",
       kind: spec.kind as never,
-      text: source.slice(span.start, span.end),
+      text: sourceTextSlice(source, span),
       span,
       channel: tokenClass === PUBLIC_TOKEN_TRIVIA ? "trivia" : "main",
     } as Token, terminal);
@@ -48,7 +48,7 @@ function materializeToken(source: string, handle: number): Token {
   if (tokenClass === PUBLIC_TOKEN_ERROR) {
     return {
       type: "error",
-      text: source.slice(span.start, span.end),
+      text: sourceTextSlice(source, span),
       span,
       channel: "error",
     };

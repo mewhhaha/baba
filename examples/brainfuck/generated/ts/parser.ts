@@ -1783,6 +1783,13 @@ function parserRuleNodeFieldCount(handle: number): number {
   return (runtimeVectorLength(parserRuleNodeFields(handle) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
+function sourceTextSlice(source: string, span: Span): string {
+  return source.slice(span.start, span.end);
+}
+
+function sourceTextMatches(source: string, span: Span, text: string): boolean {
+  return text === sourceTextSlice(source, span);
+}
 
 function materializeEofToken(offset: number): Token {
   const handle = parserTokenNew(
@@ -2953,8 +2960,7 @@ function validateTokenStream(
       ));
     }
 
-    const sourceText = source.slice(span.start, span.end);
-    if (token.text !== sourceText) {
+    if (!sourceTextMatches(source, span, token.text)) {
       diagnostics.push(invalidTokenStream(
         `Token at index ${index} text does not match the source slice.`,
         span,

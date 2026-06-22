@@ -11,6 +11,7 @@ import {
 } from "../runtime/language_sources.ts";
 import { emitPublicLexDiagnosticMaterializer } from "../runtime/public_lex_diagnostic_materializer.ts";
 import { emitPublicLexResultMaterializer } from "../runtime/public_lex_result_materializer.ts";
+import { emitPublicSourceTextBoundary } from "../runtime/public_source_text.ts";
 import { emitPublicTokenMaterializer } from "../runtime/public_token_materializer.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
 
@@ -53,6 +54,7 @@ import type {
   LexOptions,
   LexResult,
   NamedTokenKind,
+  Span,
   Token,
 } from "./syntax.ts";
 import {
@@ -82,6 +84,7 @@ const LITERAL_SPECS: readonly {
 }[] = ${JSON.stringify(literalSpecs, null, 2)} as const;
 
 ${emitRuntimeLanguageTypeScriptFunction(runtimeProgram).trimEnd()}
+${emitPublicSourceTextBoundary()}
 ${emitPublicTokenMaterializer({ label: "Wasm lexer" })}
 ${emitPublicLexDiagnosticMaterializer()}
 ${emitPublicLexResultMaterializer()}

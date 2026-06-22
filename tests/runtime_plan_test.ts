@@ -82,6 +82,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const publicLexResultMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_lex_result_materializer.ts",
   );
+  const publicSourceTextBoundarySource = await Deno.readTextFile(
+    "src/targets/runtime/public_source_text.ts",
+  );
   const publicTokenMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_token_materializer.ts",
   );
@@ -96,10 +99,22 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(lexerRuntimeSource, "emitPublicTokenMaterializer");
   assertIncludes(lexerRuntimeSource, "emitPublicLexDiagnosticMaterializer");
   assertIncludes(lexerRuntimeSource, "emitPublicLexResultMaterializer");
+  assertIncludes(lexerRuntimeSource, "emitPublicSourceTextBoundary");
+  assertIncludes(
+    publicSourceTextBoundarySource,
+    "function sourceTextSlice",
+  );
+  assertIncludes(
+    publicSourceTextBoundarySource,
+    "function sourceTextMatches",
+  );
+  assertIncludes(publicSourceTextBoundarySource, "source.slice");
   assertIncludes(publicTokenMaterializerSource, "function materializeToken");
   assertIncludes(publicTokenMaterializerSource, "function materializeEofToken");
   assertIncludes(publicTokenMaterializerSource, "parserTokenSpanStart");
   assertIncludes(publicTokenMaterializerSource, "PUBLIC_TOKEN_EOF");
+  assertIncludes(publicTokenMaterializerSource, "sourceTextSlice");
+  assertNotIncludes(publicTokenMaterializerSource, "source.slice");
   assertIncludes(publicTokenMaterializerSource, "Object.defineProperty");
   assertIncludes(
     publicLexDiagnosticMaterializerSource,
@@ -180,6 +195,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "emitPublicDiagnosticMaterializer");
   assertIncludes(parserRuntimeSource, "emitPublicParseResultMaterializer");
   assertIncludes(parserRuntimeSource, "emitPublicEofTokenMaterializer");
+  assertIncludes(parserRuntimeSource, "emitPublicSourceTextBoundary");
+  assertIncludes(parserRuntimeSource, "sourceTextMatches");
+  assertNotIncludes(parserRuntimeSource, "source.slice");
   assertIncludes(parserRuntimeSource, "materializeEofToken(source.length)");
   assertIncludes(
     publicDiagnosticMaterializerSource,
@@ -332,10 +350,11 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 15);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 16);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
+  assert(roles.includes("public-source-text-boundary"));
   assert(roles.includes("parser-diagnostic-codes"));
   assert(roles.includes("wasm-abi-constants"));
 

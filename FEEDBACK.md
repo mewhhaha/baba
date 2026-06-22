@@ -38,6 +38,11 @@ runtime language:
 - Added public `ParseDiagnostic.runtimeDetailKind` so generated TypeScript and
   Wasm adapter diagnostics identify whether `runtimeDetail` is currently a
   parser state or an unused payload without requiring consumers to consult docs.
+- Centralized generated host source-text slicing behind one shared source-text
+  boundary helper used by TypeScript lexers, Wasm adapter lexers, and
+  `parseTokens()` validation. Dynamic host source buffers are still not lowered
+  into runtime-language text handles, but the remaining host source decoding now
+  has a single generated boundary.
 - Added core Wasm ABI metadata exports for host ownership and result lifetime,
   plus a generated adapter handle capability model constant for the current
   epoch-checked JavaScript-owned `WasmSourceBuffer` and `ParseTraceInput`
@@ -401,10 +406,11 @@ Still unresolved:
   tokens, adapter-owned `WasmSourceBuffer` and `ParseTraceInput`
   provenance/epoch gates for the current JavaScript-hosted Wasm adapter, and
   core Wasm metadata for host-owned linear-memory buffers plus caller-owned
-  result-buffer lifetimes and a generated host-neutral ABI descriptor, but it
-  still lacks executable non-JS host helpers and opaque host-neutral handle
-  capabilities beyond that descriptor, host source-text handles plus source
-  decoding fully lowered into the runtime language, complete generated
+  result-buffer lifetimes and a generated host-neutral ABI descriptor. Host
+  source text slicing now routes through one shared generated boundary helper,
+  but it still lacks executable non-JS host helpers and opaque host-neutral
+  handle capabilities beyond that descriptor, host source-text handles plus
+  source decoding fully lowered into the runtime language, complete generated
   parser-runtime lowering for remaining host public object materialization
   outside the shared wrapper helpers, and richer executable host-neutral error
   payload variants beyond the current trace status metadata plus descriptor

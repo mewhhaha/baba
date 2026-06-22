@@ -195,6 +195,10 @@ execute both outputs and compare returned values or traps.
   standalone parser runtimes still treat host source text as an immutable UTF-16
   code-unit sequence at the host boundary; turning host source buffers into
   runtime-language text handles remains a future lowering step.
+- Generated token materialization and token-stream validation route host source
+  slicing through one shared source-text boundary helper. That helper is still a
+  JavaScript host wrapper, but it is the single generated boundary to replace
+  when dynamic host source buffers are lowered into runtime-language handles.
 - Generated JavaScript-hosted Wasm adapters treat `WasmSourceBuffer` values
   returned by `writeSource()` as adapter-owned source capabilities. The adapter
   tracks those buffers by object provenance and input epoch, rejects forged
