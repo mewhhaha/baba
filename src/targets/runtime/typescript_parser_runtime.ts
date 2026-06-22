@@ -42,6 +42,7 @@ import {
   RUNTIME_NO_PRODUCTION,
   RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_TERMINAL,
+  RUNTIME_PUBLIC_TOKEN_EOF,
   RUNTIME_PUBLIC_TOKEN_ERROR,
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
@@ -399,6 +400,7 @@ const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
 const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
 const PUBLIC_TOKEN_ERROR = ${RUNTIME_PUBLIC_TOKEN_ERROR};
+const PUBLIC_TOKEN_EOF = ${RUNTIME_PUBLIC_TOKEN_EOF};
 const SPEC_STATUS_OK = ${RUNTIME_LEXER_SPEC_STATUS_OK};
 const SPEC_STATUS_NOT_LITERAL = ${RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL};
 const SPEC_STATUS_NOT_MAIN = ${RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN};
@@ -1831,10 +1833,20 @@ function lexicalDiagnostic(diagnostic: LexDiagnostic): ParseDiagnostic {
 }
 
 function eofToken(offset: number): Token {
+  const handle = parserTokenNew(
+    PUBLIC_TOKEN_EOF,
+    0,
+    EOF_TERMINAL,
+    offset,
+    offset,
+  );
   return {
     type: "eof",
     text: "",
-    span: { start: offset, end: offset },
+    span: {
+      start: parserTokenSpanStart(handle),
+      end: parserTokenSpanEnd(handle),
+    },
     channel: "main",
   };
 }

@@ -8,6 +8,7 @@ import {
   RUNTIME_NO_ACCEPT,
   RUNTIME_NO_LEXER_SPEC,
   RUNTIME_NO_TERMINAL,
+  RUNTIME_PUBLIC_TOKEN_EOF,
   RUNTIME_PUBLIC_TOKEN_ERROR,
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
@@ -104,6 +105,7 @@ const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
 const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
 const PUBLIC_TOKEN_ERROR = ${RUNTIME_PUBLIC_TOKEN_ERROR};
+const PUBLIC_TOKEN_EOF = ${RUNTIME_PUBLIC_TOKEN_EOF};
 
 interface Candidate {
   specIndex: number;
@@ -167,12 +169,14 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
     });
   }
 
-  tokens.push({
-    type: "eof",
-    text: "",
-    span: { start: source.length, end: source.length },
-    channel: "main",
-  });
+  const eofHandle = parserTokenNew(
+    PUBLIC_TOKEN_EOF,
+    0,
+    NO_TERMINAL,
+    source.length,
+    source.length,
+  );
+  tokens.push(materializeToken(source, eofHandle));
   return { source, tokens, diagnostics };
 }
 
@@ -222,6 +226,14 @@ function materializeToken(source: string, handle: number): Token {
       text: source.slice(span.start, span.end),
       span,
       channel: "error",
+    };
+  }
+  if (tokenClass === PUBLIC_TOKEN_EOF) {
+    return {
+      type: "eof",
+      text: "",
+      span,
+      channel: "main",
     };
   }
   throw new Error("Lexer runtime emitted an unknown public token class.");

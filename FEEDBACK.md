@@ -130,6 +130,9 @@ runtime language:
   lexer ABI still returns spec/span records, and the JavaScript adapter now
   allocates runtime token handles from those records before wrapping public
   token objects.
+- Added a runtime public EOF token class and routed generated TypeScript lexer,
+  Wasm JavaScript adapter, and parser fallback EOF token materialization through
+  runtime-language token records before public object wrapping.
 - Moved generated deterministic TypeScript parser action/goto table lookup onto
   a runtime-language source program backed by read-only `u32` tables, replacing
   the previous generated `findAction()`/`findGoto()` table scans for unambiguous
@@ -271,8 +274,8 @@ Still unresolved:
   count-validation decisions from runtime-language helpers. Generated TypeScript
   lexing and Wasm JavaScript adapter token wrapping now read token class,
   payload, terminal, and span metadata through runtime-language token records
-  before wrapping public non-EOF token objects. External `parseTokens()` mapping
-  still accepts public strings/literals at the API boundary, but
+  before wrapping public token objects, including EOF. External `parseTokens()`
+  mapping still accepts public strings/literals at the API boundary, but
   terminal/channel classification and public token class compatibility plus
   token-level lexical diagnostic classification now go through runtime-language
   lexer spec helpers. Parser replay span and token-range merge arithmetic is
@@ -288,10 +291,10 @@ Still unresolved:
   child vectors instead of a parallel JavaScript child list. Public parse
   diagnostics now pass through runtime-language diagnostic handles before public
   object materialization. Public JavaScript field objects/arrays, CST node
-  objects, final public token object wrapping, and EOF token wrapping are still
-  not mechanically emitted from one runtime-language implementation. The runtime
-  language now has a checked resettable arena plus tagged arena-backed `u32`
-  arrays, fixed records, growable vectors, and initial parser
+  objects and final public token object wrapping are still not mechanically
+  emitted from one runtime-language implementation. The runtime language now has
+  a checked resettable arena plus tagged arena-backed `u32` arrays, fixed
+  records, growable vectors, and initial parser
   fragment/field/rule-node/token/diagnostic layouts plus reduction-shaped
   fragment assembly helpers that generated replay is beginning to use, but it
   still lacks opaque typed handle provenance and complete generated

@@ -100,6 +100,7 @@ const PUBLIC_TOKEN_LITERAL = 1;
 const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
 const PUBLIC_TOKEN_ERROR = 4;
+const PUBLIC_TOKEN_EOF = 5;
 const SPEC_STATUS_OK = 0;
 const SPEC_STATUS_NOT_LITERAL = 2;
 const SPEC_STATUS_NOT_MAIN = 3;
@@ -2861,10 +2862,20 @@ function lexicalDiagnostic(diagnostic: LexDiagnostic): ParseDiagnostic {
 }
 
 function eofToken(offset: number): Token {
+  const handle = parserTokenNew(
+    PUBLIC_TOKEN_EOF,
+    0,
+    EOF_TERMINAL,
+    offset,
+    offset,
+  );
   return {
     type: "eof",
     text: "",
-    span: { start: offset, end: offset },
+    span: {
+      start: parserTokenSpanStart(handle),
+      end: parserTokenSpanEnd(handle),
+    },
     channel: "main",
   };
 }

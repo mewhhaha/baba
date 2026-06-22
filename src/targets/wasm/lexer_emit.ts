@@ -3,6 +3,7 @@ import { emitRuntimeLanguageTypeScriptFunction } from "../runtime/language.ts";
 import {
   createParserTokenRecordRuntimeProgram,
   RUNTIME_NO_TERMINAL,
+  RUNTIME_PUBLIC_TOKEN_EOF,
   RUNTIME_PUBLIC_TOKEN_ERROR,
   RUNTIME_PUBLIC_TOKEN_LITERAL,
   RUNTIME_PUBLIC_TOKEN_MAIN,
@@ -68,6 +69,7 @@ const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
 const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
 const PUBLIC_TOKEN_ERROR = ${RUNTIME_PUBLIC_TOKEN_ERROR};
+const PUBLIC_TOKEN_EOF = ${RUNTIME_PUBLIC_TOKEN_EOF};
 
 const SPECS: readonly (
   | {
@@ -188,12 +190,14 @@ function lexInternal(
     });
   }
 
-  const eofToken: Token = {
-    type: "eof",
-    text: "",
-    span: { start: source.length, end: source.length },
-    channel: "main",
-  };
+  const eofHandle = parserTokenNew(
+    PUBLIC_TOKEN_EOF,
+    0,
+    NO_TERMINAL,
+    source.length,
+    source.length,
+  );
+  const eofToken = materializeToken(source, eofHandle);
   tokens[tokenCount] = eofToken;
   if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
   tokenCount++;
@@ -270,6 +274,14 @@ function materializeToken(source: string, handle: number): Token {
       text: source.slice(span.start, span.end),
       span,
       channel: "error",
+    };
+  }
+  if (tokenClass === PUBLIC_TOKEN_EOF) {
+    return {
+      type: "eof",
+      text: "",
+      span,
+      channel: "main",
     };
   }
   throw new Error("Wasm lexer runtime emitted an unknown public token class.");

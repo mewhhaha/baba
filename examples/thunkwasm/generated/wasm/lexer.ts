@@ -19,6 +19,7 @@ const PUBLIC_TOKEN_LITERAL = 1;
 const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
 const PUBLIC_TOKEN_ERROR = 4;
+const PUBLIC_TOKEN_EOF = 5;
 
 const SPECS: readonly (
   | {
@@ -459,12 +460,14 @@ function lexInternal(
     });
   }
 
-  const eofToken: Token = {
-    type: "eof",
-    text: "",
-    span: { start: source.length, end: source.length },
-    channel: "main",
-  };
+  const eofHandle = parserTokenNew(
+    PUBLIC_TOKEN_EOF,
+    0,
+    NO_TERMINAL,
+    source.length,
+    source.length,
+  );
+  const eofToken = materializeToken(source, eofHandle);
   tokens[tokenCount] = eofToken;
   if (includeParseStream) streamTokenIndices[terminalCount] = tokenCount;
   tokenCount++;
@@ -541,6 +544,14 @@ function materializeToken(source: string, handle: number): Token {
       text: source.slice(span.start, span.end),
       span,
       channel: "error",
+    };
+  }
+  if (tokenClass === PUBLIC_TOKEN_EOF) {
+    return {
+      type: "eof",
+      text: "",
+      span,
+      channel: "main",
     };
   }
   throw new Error("Wasm lexer runtime emitted an unknown public token class.");

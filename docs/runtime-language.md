@@ -42,11 +42,11 @@ classification data and parser terminal ids for generated TypeScript
 `parse(source)`, while `lexerSpecFlags` remains the lower-level table helper.
 Standalone TypeScript lexers and generated Wasm JavaScript adapters allocate
 runtime-language token records for matched literals, named tokens, preserved
-trivia, and lexical error tokens, then read class, payload, terminal, and span
-data back through `parserToken*` accessors before wrapping public API token
-objects. External token streams keep public token-kind/literal spelling at the
-API boundary, but generated parsers map those spellings to lexer spec indexes
-and use the same runtime-language helpers for channel and terminal
+trivia, lexical error tokens, and EOF tokens, then read class, payload,
+terminal, and span data back through `parserToken*` accessors before wrapping
+public API token objects. External token streams keep public token-kind/literal
+spelling at the API boundary, but generated parsers map those spellings to lexer
+spec indexes and use the same runtime-language helpers for channel and terminal
 classification. `lexerSpecPublicTokenStatus` decides whether a mapped public
 literal/main/trivia token is compatible with the spec row; TypeScript still
 validates object shape/text/spans and emits public diagnostics.
@@ -203,8 +203,11 @@ execute both outputs and compare returned values or traps.
   for wrong object kind and delegate vector bounds checks to the arena-backed
   vector helpers.
 - Generated TypeScript lexers and Wasm JavaScript adapters allocate runtime
-  token records for public non-EOF tokens and read those records through runtime
-  token accessors before materializing public JavaScript token objects.
+  token records for public tokens, including EOF, and read those records through
+  runtime token accessors before materializing public JavaScript token objects.
+- Generated parser fallback EOF tokens allocate runtime token records and read
+  span data through runtime token accessors before materializing public
+  JavaScript token objects.
 - Parser fragment assembly helpers represent reducer list values as arena
   vectors and preserve child/field vectors plus span/token-range extents across
   sequence, append, and separated-append operations.
