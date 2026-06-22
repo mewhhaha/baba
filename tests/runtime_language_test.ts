@@ -224,6 +224,7 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
   });
   const parserExpectedBaseProgram = createParserExpectedRuntimeProgram({
     rowLengths: [2, 0, 3],
+    rowHasEof: [true, false, true],
   });
   const parserExpectedRuntimeProgram: RuntimeLanguageProgram = {
     ...parserExpectedBaseProgram,
@@ -237,14 +238,17 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
         body: [{
           kind: "return",
           expression: add(
-            mul(call("parserExpectedEnd", [u32(0)]), u32(100)),
+            mul(call("parserExpectedHasEof", [u32(0)]), u32(10000)),
             add(
-              mul(call("parserExpectedStart", [u32(2)]), u32(10)),
+              mul(call("parserExpectedEnd", [u32(0)]), u32(1000)),
               add(
-                call("parserExpectedEnd", [u32(2)]),
+                mul(call("parserExpectedHasEof", [u32(1)]), u32(100)),
                 add(
-                  call("parserExpectedStart", [u32(99)]),
-                  call("parserExpectedEnd", [u32(99)]),
+                  mul(call("parserExpectedStart", [u32(2)]), u32(10)),
+                  add(
+                    call("parserExpectedEnd", [u32(2)]),
+                    call("parserExpectedHasEof", [u32(2)]),
+                  ),
                 ),
               ),
             ),
@@ -1140,9 +1144,9 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: RUNTIME_NO_GOTO },
     },
     {
-      name: "parser expected lookup returns flattened row ranges",
+      name: "parser expected lookup returns row ranges and EOF flags",
       program: parserExpectedRuntimeProgram,
-      expected: { kind: "value", value: 225 },
+      expected: { kind: "value", value: 12026 },
     },
     {
       name: "parser field lookup returns row and config metadata",

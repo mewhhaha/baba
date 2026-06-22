@@ -109,6 +109,9 @@
   metadata instead of generated terminal/channel lookup tables.
 - Generated parser replay now uses runtime-language `parserMergeStart`/
   `parserMergeEnd` helpers for CST span and token-range merging.
+- Generated parse diagnostics now use runtime-language `parserExpectedHasEof`
+  state flags to choose trailing-input diagnostics instead of scanning expected
+  display strings.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical

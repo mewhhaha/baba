@@ -104,9 +104,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "createParserRangeRuntimeProgram");
   assertIncludes(parserRuntimeSource, "lexerSpecFlags");
   assertIncludes(parserRuntimeSource, "lexerSpecTerminal");
+  assertIncludes(parserRuntimeSource, "parserExpectedHasEof");
   assertIncludes(parserRuntimeSource, "parserMergeStart");
   assertIncludes(parserRuntimeSource, "parserMergeEnd");
   assertIncludes(parserRuntimeSource, "function replayTrace");
+  assertNotIncludes(parserRuntimeSource, 'expected.includes("EOF")');
   assertNotIncludes(parserRuntimeSource, "NAMED_TERMINALS");
   assertNotIncludes(parserRuntimeSource, "LITERAL_TERMINALS");
   assertNotIncludes(parserRuntimeSource, "MAIN_TOKEN_KINDS");

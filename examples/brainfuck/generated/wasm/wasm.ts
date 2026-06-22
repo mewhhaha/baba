@@ -2173,7 +2173,7 @@ export const parserPlanHash = "fnv1a64:ad8054ac7d9f20ab" as const;
 export const runtimeImplementationFormat = "baba-runtime-implementation" as const;
 export const runtimeImplementationVersion = 1;
 export const runtimeImplementationSemantics = "baba-runtime-portable-v1" as const;
-export const runtimeImplementationHash = "fnv1a64:d573c5213d118f6a" as const;
+export const runtimeImplementationHash = "fnv1a64:234981f06cf9a68b" as const;
 
 export interface WasmSourceBuffer {
   sourcePtr: number;

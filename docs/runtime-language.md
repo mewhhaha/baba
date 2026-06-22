@@ -47,13 +47,15 @@ table lookup, and conflict parsers use generated
 `parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
 fan-out and goto lookup. Generated parsers also use `parserExpectedStart`/
 `parserExpectedEnd` helpers to map parser states to flattened expected-terminal
-display ranges for diagnostics. Reduction replay uses `parserProductionLhs`/
-`parserProductionRhsLength` helpers for production metadata lookups while
-generated TypeScript still owns reducer descriptor execution and CST
-construction. Generated parser replay now gets reducer descriptor kind/payload
-metadata from `parserReducerKind`/`parserReducerPayload` helpers backed by
-numeric reducer tables, and CST field assembly now reads field row/config
-metadata through `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
+display ranges for diagnostics, and `parserExpectedHasEof` flags choose
+trailing-input diagnostic codes without scanning display strings. Reduction
+replay uses `parserProductionLhs`/`parserProductionRhsLength` helpers for
+production metadata lookups while generated TypeScript still owns reducer
+descriptor execution and CST construction. Generated parser replay now gets
+reducer descriptor kind/payload metadata from
+`parserReducerKind`/`parserReducerPayload` helpers backed by numeric reducer
+tables, and CST field assembly now reads field row/config metadata through
+`parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
 `parserFieldFlags`/`parserFieldIndex` helpers. JavaScript still executes reducer
 fragment assembly and builds public CST objects, but span/token-range merge
 arithmetic now uses `parserMergeStart`/`parserMergeEnd` helpers. Generated

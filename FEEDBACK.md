@@ -154,6 +154,9 @@ runtime language:
 - Moved generated parser replay span/token-range merge arithmetic onto
   runtime-language `parserMergeStart`/`parserMergeEnd` helpers. Generated
   TypeScript still allocates JavaScript fragment, field, and CST objects.
+- Moved the trailing-input diagnostic decision onto runtime-language
+  `parserExpectedHasEof` state flags, replacing a generated scan of expected
+  display strings.
 
 Still unresolved:
 
@@ -174,13 +177,14 @@ Still unresolved:
   public token objects. External `parseTokens()` mapping still accepts public
   strings/literals at the API boundary, but terminal/channel classification now
   goes through runtime-language lexer spec helpers. Parser replay span and
-  token-range merge arithmetic is runtime-language-backed, but the reducer
-  operations that allocate/assemble fragments, fields, and CST nodes plus
-  generated token/diagnostic object emission are still not mechanically emitted
-  from one runtime-language implementation. The compiler now has a shared
-  lowered control-flow/value IR and checked helper artifact hashes, but it still
-  needs broader parser-runtime lowering before the release can fully satisfy
-  "one runtime implementation, two execution targets."
+  token-range merge arithmetic is runtime-language-backed, and trailing-input
+  diagnostic code selection uses runtime-language expected-state flags, but the
+  reducer operations that allocate/assemble fragments, fields, and CST nodes
+  plus generated token/diagnostic object emission are still not mechanically
+  emitted from one runtime-language implementation. The compiler now has a
+  shared lowered control-flow/value IR and checked helper artifact hashes, but
+  it still needs broader parser-runtime lowering before the release can fully
+  satisfy "one runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

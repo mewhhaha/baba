@@ -189,6 +189,7 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
       name: "parser_expected_runtime",
       program: createParserExpectedRuntimeProgram({
         rowLengths: [2, 0, 3],
+        rowHasEof: [true, false, true],
       }),
     },
     {
@@ -305,9 +306,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_expected_runtime",
       entry: "parserExpectedStart",
-      sourceHash: "fnv1a64:f25dda65b1620774",
-      typescriptHash: "fnv1a64:c87c76fe3f7d14fd",
-      wasmHash: "fnv1a64:d0e99b8fb067ed2d",
+      sourceHash: "fnv1a64:89f55cdd4f77a331",
+      typescriptHash: "fnv1a64:93e84d53b07efbfe",
+      wasmHash: "fnv1a64:fdbb881bce00ae7d",
     },
     {
       name: "parser_range_runtime",
@@ -347,7 +348,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:577d95716c09f85c" as const;
+  "fnv1a64:59a8844faef960cf" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

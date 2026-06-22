@@ -92,6 +92,7 @@ function divU32(left: number, right: number): number {
 
 const __baba_table_parserProductions: readonly number[] = [0,1,12,1,12,2,1,1,15,0,15,1,14,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,13,2,2,1,17,1,3,1,18,1,4,1,19,1,5,1,20,1,6,1,21,1,7,1,22,1,8,1,25,0,25,2,24,1,23,3,9,1,28,0,28,2,27,1,26,3,10,1,29,1,11,1];
 const __baba_table_parserExpectedRows: readonly number[] = [0,10,19,20,31,42,53,62,71,82,93,104,115,126,137,148,159,170,181,192,203,214,225,236,247,258,269,280,291,302,313,324,335,346,357,368,379,390,391,402,403,414,425,436,447,456,467,478,489,498,509,520,531,542,553,564,575,586,597,608,619,630,641,652,663,674,685,696,707,718,729,740,751,762,773,784,795,806,817,828,839,850,861,872,883,894,905,916,927,938,949,960,971,982,993,1004,1015,1026,1037,1048,1059,1070,1081,1092,1103,1114,1115,1116,1117,1118,1129,1140,1151,1162];
+const __baba_table_parserExpectedFlags: readonly number[] = [0,0,1,1,1,1,0,0,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
 const __baba_table_parserReducers: readonly number[] = [1,4294967295,11,4294967295,12,4294967295,2,0,7,4294967295,8,4294967295,15,1,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,6,4294967295,2,1,3,4294967295,2,2,3,4294967295,2,3,3,4294967295,2,4,3,4294967295,2,5,3,4294967295,2,6,3,4294967295,2,7,9,4294967295,10,4294967295,15,0,6,4294967295,2,8,9,4294967295,10,4294967295,15,0,6,4294967295,2,9,3,4294967295,2,10];
 const __baba_table_lexerSpecs: readonly number[] = [0,0,1,2,1,4294967295,1,0,2,1,1,3,1,2,4,1,3,5,1,4,6,1,5,7,1,6,8,1,7,9,1,8,10,1,9,11,1,10,12];
 const __baba_table_parserFieldRows: readonly number[] = [0,0,1,1,1,1,1,1,1,2,3,3];
@@ -110,6 +111,14 @@ function __baba_load_parserExpectedRows(index: number): number {
     throw new RuntimeLanguageTrap("table index out of bounds");
   }
   return __baba_table_parserExpectedRows[normalized] >>> 0;
+}
+
+function __baba_load_parserExpectedFlags(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_table_parserExpectedFlags.length) {
+    throw new RuntimeLanguageTrap("table index out of bounds");
+  }
+  return __baba_table_parserExpectedFlags[normalized] >>> 0;
 }
 
 function __baba_load_parserReducers(index: number): number {
@@ -189,6 +198,14 @@ function parserExpectedEnd(state: number): number {
   if (((((state) | 0) < ((113) | 0) ? 1 : 0)) !== 0) {
     index = (((state) + (1)) >>> 0) >>> 0;
     return (__baba_load_parserExpectedRows(index) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserExpectedHasEof(state: number): number {
+  if (((((state) | 0) < ((113) | 0) ? 1 : 0)) !== 0) {
+    return (__baba_load_parserExpectedFlags(state) >>> 0) >>> 0;
   }
   return (0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -925,7 +942,7 @@ function expectedTerminals(state: number): readonly string[] {
 function unexpectedTokenDiagnostic(token: Token, state: number): ParseDiagnostic {
   const expected = expectedTerminals(state);
   const found = tokenDisplay(token);
-  const code = expected.includes("EOF") && found !== "EOF"
+  const code = parserExpectedHasEof(state) !== 0 && token.type !== "eof"
     ? "PARSE_TRAILING_INPUT"
     : "PARSE_UNEXPECTED_TOKEN";
   return {

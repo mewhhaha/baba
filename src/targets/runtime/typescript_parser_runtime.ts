@@ -130,6 +130,7 @@ export function emitParser(
   const expectedRows = expectedTerminalRows(bnf, lr);
   const expectedRuntimeProgram = createParserExpectedRuntimeProgram({
     rowLengths: expectedRows.map((row) => row.length),
+    rowHasEof: expectedRows.map((row) => row.includes("EOF")),
   });
   const namedTerminalIds = new Map<number, number>();
   const literalTerminalIds = new Map<number, number>();
@@ -1083,7 +1084,7 @@ function expectedTerminals(state: number): readonly string[] {
 function unexpectedTokenDiagnostic(token: Token, state: number): ParseDiagnostic {
   const expected = expectedTerminals(state);
   const found = tokenDisplay(token);
-  const code = expected.includes("EOF") && found !== "EOF"
+  const code = parserExpectedHasEof(state) !== 0 && token.type !== "eof"
     ? "PARSE_TRAILING_INPUT"
     : "PARSE_UNEXPECTED_TOKEN";
   return {

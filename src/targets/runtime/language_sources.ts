@@ -128,6 +128,7 @@ export interface ParserGotoRuntimeProgramInput {
 
 export interface ParserExpectedRuntimeProgramInput {
   readonly rowLengths: readonly number[];
+  readonly rowHasEof?: readonly boolean[];
 }
 
 const UTF16_CODE_POINT_WIDTH_FUNCTION: RuntimeLanguageFunction = {
@@ -467,14 +468,24 @@ export function createParserExpectedRuntimeProgram(
   return {
     name: "parser_expected_runtime",
     entry: "parserExpectedStart",
-    tables: [{
-      name: "parserExpectedRows",
-      type: "u32",
-      values: rows,
-    }],
+    tables: [
+      {
+        name: "parserExpectedRows",
+        type: "u32",
+        values: rows,
+      },
+      {
+        name: "parserExpectedFlags",
+        type: "u32",
+        values: input.rowLengths.map((_, index) =>
+          input.rowHasEof?.[index] ? 1 : 0
+        ),
+      },
+    ],
     functions: [
       parserExpectedStartFunction(input.rowLengths.length),
       parserExpectedEndFunction(input.rowLengths.length),
+      parserExpectedHasEofFunction(input.rowLengths.length),
     ],
   };
 }
@@ -1864,6 +1875,29 @@ function parserExpectedEndFunction(
             expression: load("parserExpectedRows", local("index")),
           },
         ],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserExpectedHasEofFunction(
+  rowCount: number,
+): RuntimeLanguageFunction {
+  return {
+    name: "parserExpectedHasEof",
+    parameters: [
+      { name: "state", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("state"), u32(rowCount)),
+        consequent: [{
+          kind: "return",
+          expression: load("parserExpectedFlags", local("state")),
+        }],
       },
       { kind: "return", expression: u32(0) },
     ],
