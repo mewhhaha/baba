@@ -2324,6 +2324,52 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserTokenStreamFinalStatusProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_token_stream_final_status",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("parserTokenStreamFinalStatus", [
+                u32(1),
+                u32(2),
+                u32(3),
+                u32(5),
+                u32(5),
+              ]),
+              u32(100),
+            ),
+            add(
+              mul(
+                call("parserTokenStreamFinalStatus", [
+                  u32(1),
+                  u32(1),
+                  u32(3),
+                  u32(5),
+                  u32(5),
+                ]),
+                u32(10),
+              ),
+              call("parserTokenStreamFinalStatus", [
+                u32(0),
+                u32(0),
+                u32(2),
+                u32(4),
+                u32(5),
+              ]),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserTraceTokenStreamStatusProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_trace_token_stream_status",
@@ -3242,6 +3288,16 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
           RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH * 100 +
           RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH * 10 +
           RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH,
+      },
+    },
+    {
+      name: "runtime token-stream final status classifies EOF and gaps",
+      program: parserTokenStreamFinalStatusProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_TOKEN_STREAM_STATUS_OK * 100 +
+          RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF * 10 +
+          RUNTIME_TOKEN_STREAM_STATUS_GAP,
       },
     },
     {

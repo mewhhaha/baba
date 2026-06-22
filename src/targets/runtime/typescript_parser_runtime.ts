@@ -1566,7 +1566,14 @@ function validateTokenStream(
     }
   }
 
-  if (eofIndex !== -1 && eofIndex !== tokens.length - 1) {
+  const finalStatus = parserTokenStreamFinalStatus(
+    eofIndex === -1 ? 0 : 1,
+    eofIndex === -1 ? 0 : eofIndex,
+    tokens.length,
+    previousEnd,
+    sourceText.length,
+  );
+  if (finalStatus === TOKEN_STREAM_INVALID_EOF) {
     diagnostics.push(invalidTokenStream(
       "EOF must be the final token in the stream.",
       tokens[eofIndex]?.span ?? {
@@ -1575,7 +1582,7 @@ function validateTokenStream(
       },
     ));
   }
-  if (previousEnd < sourceText.length && eofIndex === -1) {
+  if (finalStatus === TOKEN_STREAM_GAP) {
     const gapDiagnostic = validateSourceGap(
       canonicalTokens,
       previousEnd,

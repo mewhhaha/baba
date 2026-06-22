@@ -1722,6 +1722,7 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTokenStreamEofStatusFunction(),
     parserTokenStreamGapTokenStatusFunction(),
     parserTokenStreamTokenMatchStatusFunction(),
+    parserTokenStreamFinalStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
     parserTraceTerminalFunction(),
     parserShiftedTokenStatusFunction(),
@@ -2913,6 +2914,52 @@ function parserTokenStreamTokenMatchStatusFunction(): RuntimeLanguageFunction {
         alternate: [{
           kind: "return",
           expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamFinalStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamFinalStatus",
+    parameters: [
+      { name: "hasEof", type: "u32" },
+      { name: "eofIndex", type: "u32" },
+      { name: "tokenCount", type: "u32" },
+      { name: "previousEnd", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("hasEof"), u32(1)),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(add(local("eofIndex"), u32(1)), local("tokenCount")),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("previousEnd"), local("sourceLength")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_GAP),
         }],
       },
       {

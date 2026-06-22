@@ -1603,6 +1603,21 @@ function parserTokenStreamTokenMatchStatus(leftClass: number, rightClass: number
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTokenStreamFinalStatus(hasEof: number, eofIndex: number, tokenCount: number, previousEnd: number, sourceLength: number): number {
+  if (((((hasEof) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((((eofIndex) + (1)) >>> 0) >>> 0) === ((tokenCount) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    } else {
+      return (5) >>> 0;
+    }
+  }
+  if (((((previousEnd) >>> 0) < ((sourceLength) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserTraceTokenStreamStatus(publicClass: number): number {
   if (((((publicClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
     return (1) >>> 0;
@@ -3033,7 +3048,14 @@ function validateTokenStream(
     }
   }
 
-  if (eofIndex !== -1 && eofIndex !== tokens.length - 1) {
+  const finalStatus = parserTokenStreamFinalStatus(
+    eofIndex === -1 ? 0 : 1,
+    eofIndex === -1 ? 0 : eofIndex,
+    tokens.length,
+    previousEnd,
+    sourceText.length,
+  );
+  if (finalStatus === TOKEN_STREAM_INVALID_EOF) {
     diagnostics.push(invalidTokenStream(
       "EOF must be the final token in the stream.",
       tokens[eofIndex]?.span ?? {
@@ -3042,7 +3064,7 @@ function validateTokenStream(
       },
     ));
   }
-  if (previousEnd < sourceText.length && eofIndex === -1) {
+  if (finalStatus === TOKEN_STREAM_GAP) {
     const gapDiagnostic = validateSourceGap(
       canonicalTokens,
       previousEnd,
