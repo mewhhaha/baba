@@ -24,6 +24,7 @@ import {
   createParserExpectedRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserProductionRuntimeProgram,
+  createParserReducerRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
@@ -31,7 +32,12 @@ import {
   RUNTIME_ACTION_SHIFT,
   RUNTIME_NO_GOTO,
   RUNTIME_NO_PRODUCTION,
+  RUNTIME_NO_REDUCER_PAYLOAD,
   RUNTIME_NO_TRANSITION,
+  RUNTIME_REDUCER_FIELD,
+  RUNTIME_REDUCER_RULE,
+  RUNTIME_REDUCER_SEQUENCE,
+  RUNTIME_REDUCER_UNKNOWN,
   UTF16_CODE_POINT_WIDTH_PROGRAM,
 } from "../src/targets/runtime/language_sources.ts";
 import { assertEquals } from "./helpers.ts";
@@ -226,6 +232,44 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
                   eq(
                     call("parserProductionLhs", [u32(99)]),
                     u32(RUNTIME_NO_PRODUCTION),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const parserReducerBaseProgram = createParserReducerRuntimeProgram({
+    reducers: [
+      [RUNTIME_REDUCER_RULE, 4],
+      [RUNTIME_REDUCER_FIELD, 2],
+      [RUNTIME_REDUCER_SEQUENCE, RUNTIME_NO_REDUCER_PAYLOAD],
+    ],
+  });
+  const parserReducerRuntimeProgram: RuntimeLanguageProgram = {
+    ...parserReducerBaseProgram,
+    name: "parser_reducer_conformance",
+    entry: "main",
+    functions: [
+      ...parserReducerBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(call("parserReducerKind", [u32(0)]), u32(1000)),
+            add(
+              mul(call("parserReducerPayload", [u32(0)]), u32(100)),
+              add(
+                mul(call("parserReducerKind", [u32(1)]), u32(10)),
+                add(
+                  call("parserReducerPayload", [u32(1)]),
+                  eq(
+                    call("parserReducerKind", [u32(99)]),
+                    u32(RUNTIME_REDUCER_UNKNOWN),
                   ),
                 ),
               ),
@@ -1009,6 +1053,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "parser production lookup returns row fields",
       program: parserProductionRuntimeProgram,
       expected: { kind: "value", value: 4073 },
+    },
+    {
+      name: "parser reducer lookup returns kind and payload fields",
+      program: parserReducerRuntimeProgram,
+      expected: { kind: "value", value: 2553 },
     },
     {
       name: "parser trace runtime emits deterministic action traces",

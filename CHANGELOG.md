@@ -95,6 +95,9 @@
 - The core Wasm bytecode runtime no longer emits or exports the legacy
   `parse_trace` LR execution function; generated adapters use the
   runtime-language trace module instead.
+- Generated parsers now read reducer descriptor kind/payload metadata through
+  runtime-language `parserReducerKind`/`parserReducerPayload` helpers instead of
+  generated reducer-object tables.
 - Portable regex validation now uses Baba's regex parser instead of JavaScript
   `RegExp`, and Tree-sitter regexes are emitted from the parsed Baba regex AST.
 - `parseTokens()` now validates external token streams against one canonical

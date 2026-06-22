@@ -14,23 +14,6 @@ import type {
   Token,
 } from "./syntax.ts";
 
-type ReducerSpec =
-  | { kind: "start" }
-  | { kind: "rule"; ruleId: number }
-  | { kind: "terminal" }
-  | { kind: "ruleRef" }
-  | { kind: "identity" }
-  | { kind: "sequence" }
-  | { kind: "optionalEmpty" }
-  | { kind: "optionalSome" }
-  | { kind: "repeatEmpty" }
-  | { kind: "repeatAppend" }
-  | { kind: "repeat1First" }
-  | { kind: "repeat1Append" }
-  | { kind: "separatedFirst" }
-  | { kind: "separatedAppend" }
-  | { kind: "field"; name: string };
-
 interface Fragment {
   value: unknown;
   children: SyntaxElement[];
@@ -40,7 +23,7 @@ interface Fragment {
 }
 
 interface FieldCapture {
-  name: string;
+  fieldId: number;
   value: unknown;
 }
 
@@ -60,33 +43,34 @@ interface FieldConfig {
 }
 
 interface RuntimeRuleFieldSchema {
-  entries: readonly (readonly [name: string, config: FieldConfig])[];
-  byName: Record<string, FieldConfig>;
+  entries: readonly (readonly [fieldId: number, name: string, config: FieldConfig])[];
+  byFieldId: Record<number, readonly [name: string, config: FieldConfig]>;
 }
 const EOF_TERMINAL = 0;
-const PRODUCTION_REDUCERS: readonly ReducerSpec[] = [{"kind":"start"},{"kind":"repeat1First"},{"kind":"repeat1Append"},{"kind":"rule","ruleId":0},{"kind":"optionalEmpty"},{"kind":"optionalSome"},{"kind":"field","name":"count"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"sequence"},{"kind":"rule","ruleId":1},{"kind":"terminal"},{"kind":"rule","ruleId":2},{"kind":"terminal"},{"kind":"rule","ruleId":3},{"kind":"terminal"},{"kind":"rule","ruleId":4},{"kind":"terminal"},{"kind":"rule","ruleId":5},{"kind":"terminal"},{"kind":"rule","ruleId":6},{"kind":"terminal"},{"kind":"rule","ruleId":7},{"kind":"repeatEmpty"},{"kind":"repeatAppend"},{"kind":"field","name":"body"},{"kind":"sequence"},{"kind":"rule","ruleId":8},{"kind":"repeatEmpty"},{"kind":"repeatAppend"},{"kind":"field","name":"body"},{"kind":"sequence"},{"kind":"rule","ruleId":9},{"kind":"terminal"},{"kind":"rule","ruleId":10}];
 const EXPECTED_TERMINALS: readonly string[] = ["\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"]\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"}\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","EOF","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"]\"","\"}\"","\"]\"","\"}\"","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"]\"","\"{\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER","\"!\"","\"+\"","\",\"","\"-\"","\".\"","\"<\"","\">\"","\"[\"","\"{\"","\"}\"","INTEGER"];
 const NAMED_TERMINALS = new Map<string, number>([["INTEGER",1]]);
 const LITERAL_TERMINALS = new Map<string, number>([["+",2],["-",3],["<",4],[">",5],[".",6],[",",7],["[",8],["]",9],["{",10],["}",11],["!",12]]);
 const MAIN_TOKEN_KINDS = new Set<string>(["INTEGER"]);
 const TRIVIA_TOKEN_KINDS = new Set<string>(["ignored"]);
 const RULE_NAMES: readonly string[] = ["module","instruction","increment","decrement","move_left","move_right","output","input","loop","fork","join"];
+const FIELD_NAMES: readonly string[] = ["body","count"];
 const EMPTY_PARSE_DIAGNOSTICS: readonly ParseDiagnostic[] = [];
 const RULE_FIELD_SCHEMA_ENTRIES: readonly (
   readonly [
     ruleId: number,
     fields: readonly (readonly [
+      fieldId: number,
       name: string,
       config: FieldConfig,
     ])[],
   ]
-)[] = [[0,[]],[1,[["count",{"array":false,"nullable":false}]]],[2,[]],[3,[]],[4,[]],[5,[]],[6,[]],[7,[]],[8,[["body",{"array":false,"nullable":false}]]],[9,[["body",{"array":false,"nullable":false}]]],[10,[]]];
+)[] = [[0,[]],[1,[[1,"count",{"array":false,"nullable":false}]]],[2,[]],[3,[]],[4,[]],[5,[]],[6,[]],[7,[]],[8,[[0,"body",{"array":false,"nullable":false}]]],[9,[[0,"body",{"array":false,"nullable":false}]]],[10,[]]];
 const RULE_FIELD_SCHEMAS: readonly (RuntimeRuleFieldSchema | undefined)[] = (() => {
   const schemas: (RuntimeRuleFieldSchema | undefined)[] = [];
   for (const [ruleId, entries] of RULE_FIELD_SCHEMA_ENTRIES) {
-    const byName = Object.create(null) as Record<string, FieldConfig>;
-    for (const [name, config] of entries) byName[name] = config;
-    schemas[ruleId] = { entries, byName };
+    const byFieldId = Object.create(null) as Record<number, readonly [string, FieldConfig]>;
+    for (const [fieldId, name, config] of entries) byFieldId[fieldId] = [name, config];
+    schemas[ruleId] = { entries, byFieldId };
   }
   return schemas;
 })();
@@ -97,6 +81,23 @@ const ACTION_REDUCE = 33554432;
 const ACTION_ACCEPT = 50331648;
 const NO_GOTO = 4294967295;
 const NO_PRODUCTION = 4294967295;
+const REDUCER_UNKNOWN = 0;
+const REDUCER_START = 1;
+const REDUCER_RULE = 2;
+const REDUCER_TERMINAL = 3;
+const REDUCER_RULE_REF = 4;
+const REDUCER_IDENTITY = 5;
+const REDUCER_SEQUENCE = 6;
+const REDUCER_OPTIONAL_EMPTY = 7;
+const REDUCER_OPTIONAL_SOME = 8;
+const REDUCER_REPEAT_EMPTY = 9;
+const REDUCER_REPEAT_APPEND = 10;
+const REDUCER_REPEAT1_FIRST = 11;
+const REDUCER_REPEAT1_APPEND = 12;
+const REDUCER_SEPARATED_FIRST = 13;
+const REDUCER_SEPARATED_APPEND = 14;
+const REDUCER_FIELD = 15;
+const NO_REDUCER_PAYLOAD = 4294967295;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -117,6 +118,7 @@ const __baba_table_parserGotoRows: readonly number[] = [0,6,6,6,6,10,10,29,29,29
 const __baba_table_parserGotoEntries: readonly number[] = [1,2,2,3,12,4,13,5,14,6,15,7,2,8,13,5,14,6,15,7,3,18,4,19,5,20,6,21,7,22,8,23,9,24,10,25,11,26,16,27,17,28,18,29,19,30,20,31,21,32,22,33,23,34,26,35,29,36,24,37,25,38,27,39,28,40,2,42,13,43,14,44,15,7,2,46,13,47,14,48,15,7,3,58,4,59,5,60,6,61,7,62,8,63,9,64,10,65,11,66,16,67,17,68,18,69,19,70,20,71,21,72,22,73,23,74,26,75,29,76,3,86,4,87,5,88,6,89,7,90,8,91,9,92,10,93,11,94,16,95,17,96,18,97,19,98,20,99,21,100,22,101,23,102,26,103,29,104,24,105,25,38,27,106,28,40,24,107,25,38,27,108,28,40];
 const __baba_table_parserProductions: readonly number[] = [0,1,12,1,12,2,1,1,15,0,15,1,14,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1,13,2,2,1,17,1,3,1,18,1,4,1,19,1,5,1,20,1,6,1,21,1,7,1,22,1,8,1,25,0,25,2,24,1,23,3,9,1,28,0,28,2,27,1,26,3,10,1,29,1,11,1];
 const __baba_table_parserExpectedRows: readonly number[] = [0,10,19,20,31,42,53,62,71,82,93,104,115,126,137,148,159,170,181,192,203,214,225,236,247,258,269,280,291,302,313,324,335,346,357,368,379,390,391,402,403,414,425,436,447,456,467,478,489,498,509,520,531,542,553,564,575,586,597,608,619,630,641,652,663,674,685,696,707,718,729,740,751,762,773,784,795,806,817,828,839,850,861,872,883,894,905,916,927,938,949,960,971,982,993,1004,1015,1026,1037,1048,1059,1070,1081,1092,1103,1114,1115,1116,1117,1118,1129,1140,1151,1162];
+const __baba_table_parserReducers: readonly number[] = [1,4294967295,11,4294967295,12,4294967295,2,0,7,4294967295,8,4294967295,15,1,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,6,4294967295,2,1,3,4294967295,2,2,3,4294967295,2,3,3,4294967295,2,4,3,4294967295,2,5,3,4294967295,2,6,3,4294967295,2,7,9,4294967295,10,4294967295,15,0,6,4294967295,2,8,9,4294967295,10,4294967295,15,0,6,4294967295,2,9,3,4294967295,2,10];
 function __baba_load_parserActionRows(index: number): number {
   const normalized = index >>> 0;
   if (normalized >= __baba_table_parserActionRows.length) {
@@ -163,6 +165,14 @@ function __baba_load_parserExpectedRows(index: number): number {
     throw new RuntimeLanguageTrap("table index out of bounds");
   }
   return __baba_table_parserExpectedRows[normalized] >>> 0;
+}
+
+function __baba_load_parserReducers(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_table_parserReducers.length) {
+    throw new RuntimeLanguageTrap("table index out of bounds");
+  }
+  return __baba_table_parserReducers[normalized] >>> 0;
 }
 
 
@@ -476,6 +486,26 @@ function parserExpectedEnd(state: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserReducerKind(production: number): number {
+  let offset = 0;
+  if (((((production) | 0) < ((42) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((production) >>> 0, (2) >>> 0) >>> 0) + (0)) >>> 0) >>> 0;
+    return (__baba_load_parserReducers(offset) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReducerPayload(production: number): number {
+  let offset = 0;
+  if (((((production) | 0) < ((42) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((production) >>> 0, (2) >>> 0) >>> 0) + (1)) >>> 0) >>> 0;
+    return (__baba_load_parserReducers(offset) >>> 0) >>> 0;
+  }
+  return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 export function parse(
   source: string,
   options: ParseOptions = {},
@@ -676,8 +706,9 @@ function replayTrace(
     }
 
     const rhsLength = parserProductionRhsLength(payload);
-    const reducer = PRODUCTION_REDUCERS[payload];
-    if (rhsLength === NO_PRODUCTION || !reducer) {
+    const reducerKind = parserReducerKind(payload);
+    const reducerPayload = parserReducerPayload(payload);
+    if (rhsLength === NO_PRODUCTION || reducerKind === REDUCER_UNKNOWN) {
       return {
         ok: false,
         root: null,
@@ -709,7 +740,8 @@ function replayTrace(
     let reduced: unknown;
     try {
       reduced = reduceProduction(
-        reducer,
+        reducerKind,
+        reducerPayload,
         rhsValues,
         token.span.start,
         streamTokenIndices[index] ?? tokens.length,
@@ -740,63 +772,72 @@ function replayTrace(
 }
 
 function reduceProduction(
-  reducer: ReducerSpec,
+  reducerKind: number,
+  reducerPayload: number,
   rhs: readonly unknown[],
   offset: number,
   tokenIndex: number,
 ): unknown {
-  switch (reducer.kind) {
-    case "start":
+  switch (reducerKind) {
+    case REDUCER_START:
       return rhs[0];
-    case "rule": {
+    case REDUCER_RULE: {
       const fragment = toFragment(rhs[0]);
+      if (reducerPayload === NO_REDUCER_PAYLOAD) {
+        throw new Error("Rule reducer is missing its rule id payload.");
+      }
       const node = {
         type: "rule",
-        name: RULE_NAMES[reducer.ruleId],
+        name: RULE_NAMES[reducerPayload],
         span: fragment.span ?? spanFromChildren(fragment.children) ?? { start: 0, end: 0 },
         tokenRange: fragment.tokenRange ?? tokenRangeFromChildren(fragment.children) ?? { start: tokenIndex, end: tokenIndex },
         children: fragment.children,
-        fields: buildFields(reducer.ruleId, fragment.fields),
+        fields: buildFields(reducerPayload, fragment.fields),
       };
       return node as unknown as AnyRuleNode;
     }
-    case "terminal":
+    case REDUCER_TERMINAL:
       return tokenFragment(rhs[0] as ShiftedToken);
-    case "ruleRef":
+    case REDUCER_RULE_REF:
       return ruleFragment(rhs[0] as AnyRuleNode);
-    case "identity":
-    case "optionalSome":
+    case REDUCER_IDENTITY:
+    case REDUCER_OPTIONAL_SOME:
       return toFragment(rhs[0]);
-    case "sequence":
+    case REDUCER_SEQUENCE:
       return sequenceFragment(rhs, offset, tokenIndex);
-    case "optionalEmpty":
+    case REDUCER_OPTIONAL_EMPTY:
       return emptyFragment(null, offset, tokenIndex);
-    case "repeatEmpty":
+    case REDUCER_REPEAT_EMPTY:
       return emptyFragment([], offset, tokenIndex);
-    case "repeatAppend":
-    case "repeat1Append":
+    case REDUCER_REPEAT_APPEND:
+    case REDUCER_REPEAT1_APPEND:
       return appendFragment(toFragment(rhs[0]), toFragment(rhs[1]));
-    case "repeat1First": {
+    case REDUCER_REPEAT1_FIRST: {
       const item = toFragment(rhs[0]);
       item.value = [item.value];
       return item;
     }
-    case "separatedFirst": {
+    case REDUCER_SEPARATED_FIRST: {
       const item = toFragment(rhs[0]);
       item.value = [item.value];
       return item;
     }
-    case "separatedAppend":
+    case REDUCER_SEPARATED_APPEND:
       return appendSeparatedFragment(
         toFragment(rhs[0]),
         toFragment(rhs[1]),
         toFragment(rhs[2]),
       );
-    case "field": {
+    case REDUCER_FIELD: {
       const fragment = toFragment(rhs[0]);
-      fragment.fields.push({ name: reducer.name, value: fragment.value });
+      if (reducerPayload === NO_REDUCER_PAYLOAD) {
+        throw new Error("Field reducer is missing its field id payload.");
+      }
+      fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;
     }
+    default:
+      throw new Error("Unknown parser reducer kind.");
   }
 }
 
@@ -968,32 +1009,34 @@ function buildFields(
     return Object.create(null) as Record<string, unknown>;
   }
   const fields = Object.create(null) as Record<string, unknown>;
-  const counts = Object.create(null) as Record<string, number>;
-  for (const [name, config] of schema.entries) {
+  const counts = Object.create(null) as Record<number, number>;
+  for (const [fieldId, name, config] of schema.entries) {
     fields[name] = config.array ? [] : config.nullable ? null : undefined;
-    counts[name] = 0;
+    counts[fieldId] = 0;
   }
   for (const capture of captures) {
-    const config = schema.byName[capture.name];
-    if (!config) {
-      throw new Error(`Unknown field capture '${capture.name}'.`);
+    const entry = schema.byFieldId[capture.fieldId];
+    if (!entry) {
+      const fieldName = FIELD_NAMES[capture.fieldId] ?? `#${capture.fieldId}`;
+      throw new Error(`Unknown field capture '${fieldName}'.`);
     }
-    counts[capture.name] = (counts[capture.name] ?? 0) + 1;
+    const [name, config] = entry;
+    counts[capture.fieldId] = (counts[capture.fieldId] ?? 0) + 1;
     if (config.array) {
-      const values = fields[capture.name];
+      const values = fields[name];
       if (!Array.isArray(values)) {
-        throw new Error(`Array field '${capture.name}' was not initialized as an array.`);
+        throw new Error(`Array field '${name}' was not initialized as an array.`);
       }
       values.push(capture.value);
     } else {
-      if ((counts[capture.name] ?? 0) > 1) {
-        throw new Error(`Scalar field '${capture.name}' was captured more than once.`);
+      if ((counts[capture.fieldId] ?? 0) > 1) {
+        throw new Error(`Scalar field '${name}' was captured more than once.`);
       }
-      fields[capture.name] = capture.value;
+      fields[name] = capture.value;
     }
   }
-  for (const [name, config] of schema.entries) {
-    const count = counts[name] ?? 0;
+  for (const [fieldId, name, config] of schema.entries) {
+    const count = counts[fieldId] ?? 0;
     if (config.array) {
       if (!Array.isArray(fields[name])) {
         throw new Error(`Array field '${name}' was not initialized as an array.`);

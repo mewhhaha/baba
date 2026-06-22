@@ -14,11 +14,16 @@ import {
   createParserExpectedRuntimeProgram,
   createParserGotoRuntimeProgram,
   createParserProductionRuntimeProgram,
+  createParserReducerRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
+  RUNTIME_NO_REDUCER_PAYLOAD,
+  RUNTIME_REDUCER_FIELD,
+  RUNTIME_REDUCER_RULE,
+  RUNTIME_REDUCER_SEQUENCE,
   UTF16_CODE_POINT_WIDTH_PROGRAM,
 } from "./language_sources.ts";
 
@@ -185,6 +190,16 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
       }),
     },
     {
+      name: "parser_reducer_runtime",
+      program: createParserReducerRuntimeProgram({
+        reducers: [
+          [RUNTIME_REDUCER_RULE, 4],
+          [RUNTIME_REDUCER_FIELD, 2],
+          [RUNTIME_REDUCER_SEQUENCE, RUNTIME_NO_REDUCER_PAYLOAD],
+        ],
+      }),
+    },
+    {
       name: "parser_trace_runtime",
       program: createParserTraceRuntimeProgram({
         actionRows: [
@@ -277,6 +292,13 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
       wasmHash: "fnv1a64:721ca386078cc4b8",
     },
     {
+      name: "parser_reducer_runtime",
+      entry: "parserReducerKind",
+      sourceHash: "fnv1a64:b885ea369439eb30",
+      typescriptHash: "fnv1a64:fa3cfc33de3d2471",
+      wasmHash: "fnv1a64:7d9de496c6583b7d",
+    },
+    {
       name: "parser_trace_runtime",
       entry: "parserTrace",
       sourceHash: "fnv1a64:29fb59c7deb7469c",
@@ -286,7 +308,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:4fd9b2a3d0140b7a" as const;
+  "fnv1a64:2bc775f365d27b70" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

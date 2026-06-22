@@ -14,23 +14,6 @@ import type {
   Token,
 } from "./syntax.ts";
 
-type ReducerSpec =
-  | { kind: "start" }
-  | { kind: "rule"; ruleId: number }
-  | { kind: "terminal" }
-  | { kind: "ruleRef" }
-  | { kind: "identity" }
-  | { kind: "sequence" }
-  | { kind: "optionalEmpty" }
-  | { kind: "optionalSome" }
-  | { kind: "repeatEmpty" }
-  | { kind: "repeatAppend" }
-  | { kind: "repeat1First" }
-  | { kind: "repeat1Append" }
-  | { kind: "separatedFirst" }
-  | { kind: "separatedAppend" }
-  | { kind: "field"; name: string };
-
 interface Fragment {
   value: unknown;
   children: SyntaxElement[];
@@ -40,7 +23,7 @@ interface Fragment {
 }
 
 interface FieldCapture {
-  name: string;
+  fieldId: number;
   value: unknown;
 }
 
@@ -60,33 +43,34 @@ interface FieldConfig {
 }
 
 interface RuntimeRuleFieldSchema {
-  entries: readonly (readonly [name: string, config: FieldConfig])[];
-  byName: Record<string, FieldConfig>;
+  entries: readonly (readonly [fieldId: number, name: string, config: FieldConfig])[];
+  byFieldId: Record<number, readonly [name: string, config: FieldConfig]>;
 }
 const EOF_TERMINAL = 0;
-const PRODUCTION_REDUCERS: readonly ReducerSpec[] = [{"kind":"start"},{"kind":"repeat1First"},{"kind":"repeat1Append"},{"kind":"rule","ruleId":0},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"rule","ruleId":1},{"kind":"terminal"},{"kind":"field","name":"name"},{"kind":"ruleRef"},{"kind":"field","name":"body"},{"kind":"sequence"},{"kind":"rule","ruleId":2},{"kind":"ruleRef"},{"kind":"field","name":"input"},{"kind":"ruleRef"},{"kind":"field","name":"body"},{"kind":"sequence"},{"kind":"rule","ruleId":3},{"kind":"ruleRef"},{"kind":"field","name":"first"},{"kind":"repeatEmpty"},{"kind":"repeatAppend"},{"kind":"field","name":"rest"},{"kind":"sequence"},{"kind":"rule","ruleId":4},{"kind":"ruleRef"},{"kind":"field","name":"next"},{"kind":"sequence"},{"kind":"rule","ruleId":5},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"rule","ruleId":6},{"kind":"ruleRef"},{"kind":"field","name":"body"},{"kind":"sequence"},{"kind":"rule","ruleId":7},{"kind":"terminal"},{"kind":"field","name":"name"},{"kind":"rule","ruleId":8},{"kind":"ruleRef"},{"kind":"field","name":"head"},{"kind":"repeatEmpty"},{"kind":"repeatAppend"},{"kind":"field","name":"tail"},{"kind":"sequence"},{"kind":"rule","ruleId":9},{"kind":"ruleRef"},{"kind":"field","name":"value"},{"kind":"sequence"},{"kind":"rule","ruleId":10},{"kind":"terminal"},{"kind":"field","name":"count"},{"kind":"ruleRef"},{"kind":"field","name":"body"},{"kind":"sequence"},{"kind":"rule","ruleId":11},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"ruleRef"},{"kind":"rule","ruleId":12},{"kind":"terminal"},{"kind":"rule","ruleId":13},{"kind":"terminal"},{"kind":"rule","ruleId":14},{"kind":"terminal"},{"kind":"rule","ruleId":15},{"kind":"terminal"},{"kind":"rule","ruleId":16},{"kind":"terminal"},{"kind":"rule","ruleId":17},{"kind":"terminal"},{"kind":"rule","ruleId":18},{"kind":"terminal"},{"kind":"rule","ruleId":19},{"kind":"terminal"},{"kind":"rule","ruleId":20},{"kind":"terminal"},{"kind":"rule","ruleId":21},{"kind":"terminal"},{"kind":"rule","ruleId":22},{"kind":"terminal"},{"kind":"field","name":"amount"},{"kind":"sequence"},{"kind":"rule","ruleId":23},{"kind":"terminal"},{"kind":"field","name":"factor"},{"kind":"sequence"},{"kind":"rule","ruleId":24},{"kind":"terminal"},{"kind":"field","name":"count"},{"kind":"sequence"},{"kind":"rule","ruleId":25},{"kind":"terminal"},{"kind":"field","name":"count"},{"kind":"sequence"},{"kind":"rule","ruleId":26},{"kind":"optionalEmpty"},{"kind":"optionalSome"},{"kind":"field","name":"values"},{"kind":"sequence"},{"kind":"rule","ruleId":27},{"kind":"terminal"},{"kind":"field","name":"head"},{"kind":"repeatEmpty"},{"kind":"repeatAppend"},{"kind":"field","name":"tail"},{"kind":"sequence"},{"kind":"rule","ruleId":28},{"kind":"terminal"},{"kind":"field","name":"value"},{"kind":"sequence"},{"kind":"rule","ruleId":29}];
 const EXPECTED_TERMINALS: readonly string[] = ["\"def\"","\"emit\"","IDENT","\"[\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"=\"","\"=\"","\"=\"","\"]\"","INTEGER","\"=>\"","\"=>\"","\"=>\"","\"=>\"","\"def\"","\"emit\"","EOF","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\",\"","\"]\"","\"]\"","\"]\"","\"]\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\";\"","\">>\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\"(\"","\"(\"","\"(\"","\"(\"","\";\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\";\"","\";\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\"=>\"","\"]\"","\",\"","\"]\"","\";\"","\";\"","\";\"","\")\"","\">>\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\"(\"","\"(\"","\"(\"","\"(\"","\")\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\")\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\",\"","\">>\"","\"]\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\"(\"","\"(\"","\"(\"","\"(\"","\",\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","\"def\"","\"emit\"","EOF","\";\"","\";\"","\">>\"","INTEGER","\",\"","\"]\"","\",\"","\"]\"","\"def\"","\"emit\"","EOF","\")\"","\",\"","\"]\"","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","\")\"","\")\"","\">>\"","\";\"","\">>\"","\")\"","\",\"","\"]\"","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","\",\"","\"]\"","\",\"","\">>\"","\"]\"","\"]\"","\",\"","\"]\"","\",\"","\",\"","\",\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\";\"","\">>\"","\";\"","\">>\"","\",\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\")\"","\">>\"","\"]\"","\",\"","\")\"","\")\"","\")\"","\")\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\")\"","\">>\"","\")\"","\">>\"","\",\"","\">>\"","\"]\"","\"]\"","\",\"","\")\"","\")\"","\")\"","\")\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\";\"","\">>\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\",\"","\"]\"","\",\"","\"]\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\")\"","\">>\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\",\"","\">>\"","\"]\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\")\"","\")\"","\")\"","\")\"","\")\"","\";\"","\">>\"","\")\"","\">>\"","\",\"","\">>\"","\"]\""];
 const NAMED_TERMINALS = new Map<string, number>([["IDENT",1],["INTEGER",2]]);
 const LITERAL_TERMINALS = new Map<string, number>([["def",3],["=",4],[";",5],["emit",6],["=>",7],[">>",8],["(",9],[")",10],["[",11],["]",12],[",",13],["repeat",14],["id",15],["inc",16],["dec",17],["double",18],["square",19],["neg",20],["sum",21],["product",22],["first",23],["last",24],["add",25],["mul",26],["take",27],["drop",28]]);
 const MAIN_TOKEN_KINDS = new Set<string>(["IDENT","INTEGER"]);
 const TRIVIA_TOKEN_KINDS = new Set<string>(["WS"]);
 const RULE_NAMES: readonly string[] = ["module","item","definition","emit","composition","composition_tail","term","group","reference","fanout","fanout_tail","repeat","builtin","id","inc","dec","double","square","neg","sum","product","first","last","add","mul","take","drop","stream","integer_values","integer_tail"];
+const FIELD_NAMES: readonly string[] = ["amount","body","count","factor","first","head","input","name","next","rest","tail","value","values"];
 const EMPTY_PARSE_DIAGNOSTICS: readonly ParseDiagnostic[] = [];
 const RULE_FIELD_SCHEMA_ENTRIES: readonly (
   readonly [
     ruleId: number,
     fields: readonly (readonly [
+      fieldId: number,
       name: string,
       config: FieldConfig,
     ])[],
   ]
-)[] = [[0,[]],[1,[]],[2,[["body",{"array":false,"nullable":false}],["name",{"array":false,"nullable":false}]]],[3,[["body",{"array":false,"nullable":false}],["input",{"array":false,"nullable":false}]]],[4,[["first",{"array":false,"nullable":false}],["rest",{"array":false,"nullable":false}]]],[5,[["next",{"array":false,"nullable":false}]]],[6,[]],[7,[["body",{"array":false,"nullable":false}]]],[8,[["name",{"array":false,"nullable":false}]]],[9,[["head",{"array":false,"nullable":false}],["tail",{"array":false,"nullable":false}]]],[10,[["value",{"array":false,"nullable":false}]]],[11,[["body",{"array":false,"nullable":false}],["count",{"array":false,"nullable":false}]]],[12,[]],[13,[]],[14,[]],[15,[]],[16,[]],[17,[]],[18,[]],[19,[]],[20,[]],[21,[]],[22,[]],[23,[["amount",{"array":false,"nullable":false}]]],[24,[["factor",{"array":false,"nullable":false}]]],[25,[["count",{"array":false,"nullable":false}]]],[26,[["count",{"array":false,"nullable":false}]]],[27,[["values",{"array":false,"nullable":false}]]],[28,[["head",{"array":false,"nullable":false}],["tail",{"array":false,"nullable":false}]]],[29,[["value",{"array":false,"nullable":false}]]]];
+)[] = [[0,[]],[1,[]],[2,[[1,"body",{"array":false,"nullable":false}],[7,"name",{"array":false,"nullable":false}]]],[3,[[1,"body",{"array":false,"nullable":false}],[6,"input",{"array":false,"nullable":false}]]],[4,[[4,"first",{"array":false,"nullable":false}],[9,"rest",{"array":false,"nullable":false}]]],[5,[[8,"next",{"array":false,"nullable":false}]]],[6,[]],[7,[[1,"body",{"array":false,"nullable":false}]]],[8,[[7,"name",{"array":false,"nullable":false}]]],[9,[[5,"head",{"array":false,"nullable":false}],[10,"tail",{"array":false,"nullable":false}]]],[10,[[11,"value",{"array":false,"nullable":false}]]],[11,[[1,"body",{"array":false,"nullable":false}],[2,"count",{"array":false,"nullable":false}]]],[12,[]],[13,[]],[14,[]],[15,[]],[16,[]],[17,[]],[18,[]],[19,[]],[20,[]],[21,[]],[22,[]],[23,[[0,"amount",{"array":false,"nullable":false}]]],[24,[[3,"factor",{"array":false,"nullable":false}]]],[25,[[2,"count",{"array":false,"nullable":false}]]],[26,[[2,"count",{"array":false,"nullable":false}]]],[27,[[12,"values",{"array":false,"nullable":false}]]],[28,[[5,"head",{"array":false,"nullable":false}],[10,"tail",{"array":false,"nullable":false}]]],[29,[[11,"value",{"array":false,"nullable":false}]]]];
 const RULE_FIELD_SCHEMAS: readonly (RuntimeRuleFieldSchema | undefined)[] = (() => {
   const schemas: (RuntimeRuleFieldSchema | undefined)[] = [];
   for (const [ruleId, entries] of RULE_FIELD_SCHEMA_ENTRIES) {
-    const byName = Object.create(null) as Record<string, FieldConfig>;
-    for (const [name, config] of entries) byName[name] = config;
-    schemas[ruleId] = { entries, byName };
+    const byFieldId = Object.create(null) as Record<number, readonly [string, FieldConfig]>;
+    for (const [fieldId, name, config] of entries) byFieldId[fieldId] = [name, config];
+    schemas[ruleId] = { entries, byFieldId };
   }
   return schemas;
 })();
@@ -97,6 +81,23 @@ const ACTION_REDUCE = 33554432;
 const ACTION_ACCEPT = 50331648;
 const NO_GOTO = 4294967295;
 const NO_PRODUCTION = 4294967295;
+const REDUCER_UNKNOWN = 0;
+const REDUCER_START = 1;
+const REDUCER_RULE = 2;
+const REDUCER_TERMINAL = 3;
+const REDUCER_RULE_REF = 4;
+const REDUCER_IDENTITY = 5;
+const REDUCER_SEQUENCE = 6;
+const REDUCER_OPTIONAL_EMPTY = 7;
+const REDUCER_OPTIONAL_SOME = 8;
+const REDUCER_REPEAT_EMPTY = 9;
+const REDUCER_REPEAT_APPEND = 10;
+const REDUCER_REPEAT1_FIRST = 11;
+const REDUCER_REPEAT1_APPEND = 12;
+const REDUCER_SEPARATED_FIRST = 13;
+const REDUCER_SEPARATED_APPEND = 14;
+const REDUCER_FIELD = 15;
+const NO_REDUCER_PAYLOAD = 4294967295;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -117,6 +118,7 @@ const __baba_table_parserGotoRows: readonly number[] = [0,8,10,14,14,14,14,14,20
 const __baba_table_parserGotoEntries: readonly number[] = [1,3,2,4,3,5,4,6,31,7,32,8,33,9,38,10,34,12,35,13,28,15,39,16,40,17,93,18,2,19,3,5,4,6,32,8,33,9,38,10,29,22,94,23,95,24,96,25,97,26,98,27,5,47,7,48,8,49,9,50,10,51,12,52,13,53,14,54,15,55,16,56,17,57,18,58,19,59,20,60,21,61,22,62,23,63,24,64,25,65,26,66,27,67,36,68,37,69,43,70,44,71,45,72,51,73,52,74,55,75,56,76,57,77,65,78,70,79,71,80,72,81,73,82,74,83,75,84,76,85,77,86,78,87,79,88,80,89,81,90,84,91,87,92,90,93,99,95,100,96,5,97,7,48,8,49,9,50,10,51,12,52,13,53,14,54,15,55,16,56,17,57,18,58,19,59,20,60,21,61,22,62,23,63,24,64,25,65,26,66,27,67,41,98,42,99,43,70,44,71,45,72,51,73,52,74,55,75,56,76,57,77,65,78,70,79,71,80,72,81,73,82,74,83,75,84,76,85,77,86,78,87,79,88,80,89,81,90,84,91,87,92,90,93,5,118,7,119,8,120,9,121,10,122,12,123,13,124,14,125,15,126,16,127,17,128,18,129,19,130,20,131,21,132,22,133,23,134,24,135,25,136,26,137,27,138,43,139,44,140,45,141,51,142,52,143,53,144,54,145,55,146,56,147,57,148,65,149,70,150,71,151,72,152,73,153,74,154,75,155,76,156,77,157,78,158,79,159,80,160,81,161,84,162,87,163,90,164,5,183,7,184,8,185,9,186,10,187,12,188,13,189,14,190,15,191,16,192,17,193,18,194,19,195,20,196,21,197,22,198,23,199,24,200,25,201,26,202,27,203,43,204,44,205,45,206,51,207,52,208,55,209,56,210,57,211,58,212,59,213,65,214,70,215,71,216,72,217,73,218,74,219,75,220,76,221,77,222,78,223,79,224,80,225,81,226,84,227,87,228,90,229,46,236,47,237,30,239,101,240,5,118,7,119,8,120,9,121,10,122,12,123,13,124,14,125,15,126,16,127,17,128,18,129,19,130,20,131,21,132,22,133,23,134,24,135,25,136,26,137,27,138,43,139,44,140,45,141,51,142,52,143,53,242,54,145,55,146,56,147,57,148,65,149,70,150,71,151,72,152,73,153,74,154,75,155,76,156,77,157,78,158,79,159,80,160,81,161,84,162,87,163,90,164,5,183,7,184,8,185,9,186,10,187,12,188,13,189,14,190,15,191,16,192,17,193,18,194,19,195,20,196,21,197,22,198,23,199,24,200,25,201,26,202,27,203,43,204,44,205,45,206,51,207,52,208,55,209,56,210,57,211,58,243,59,213,65,214,70,215,71,216,72,217,73,218,74,219,75,220,76,221,77,222,78,223,79,224,80,225,81,226,84,227,87,228,90,229,46,249,47,250,5,118,7,119,8,120,9,121,10,122,12,123,13,124,14,125,15,126,16,127,17,128,18,129,19,130,20,131,21,132,22,133,23,134,24,135,25,136,26,137,27,138,43,139,44,140,45,141,51,142,52,143,53,252,54,145,55,146,56,147,57,148,65,149,70,150,71,151,72,152,73,153,74,154,75,155,76,156,77,157,78,158,79,159,80,160,81,161,84,162,87,163,90,164,5,183,7,184,8,185,9,186,10,187,12,188,13,189,14,190,15,191,16,192,17,193,18,194,19,195,20,196,21,197,22,198,23,199,24,200,25,201,26,202,27,203,43,204,44,205,45,206,51,207,52,208,55,209,56,210,57,211,58,253,59,213,65,214,70,215,71,216,72,217,73,218,74,219,75,220,76,221,77,222,78,223,79,224,80,225,81,226,84,227,87,228,90,229,46,259,47,260,60,261,61,262,66,264,67,265,82,267,83,268,85,270,86,271,88,273,89,274,91,276,92,277,6,279,48,280,102,282,103,283,60,285,61,262,66,286,67,265,82,287,83,268,85,288,86,271,88,289,89,274,91,290,92,277,6,292,48,293,60,295,61,262,66,296,67,265,82,297,83,268,85,298,86,271,88,299,89,274,91,300,92,277,6,302,48,303,11,306,62,307,7,313,8,49,9,50,10,51,12,52,13,53,14,54,15,55,16,56,17,57,18,58,19,59,20,60,21,61,22,62,23,63,24,64,25,65,26,66,27,67,49,314,50,315,51,73,52,74,55,75,56,76,57,77,65,78,70,79,71,80,72,81,73,82,74,83,75,84,76,85,77,86,78,87,79,88,80,89,81,90,84,91,87,92,90,93,7,322,8,120,9,121,10,122,12,123,13,124,14,125,15,126,16,127,17,128,18,129,19,130,20,131,21,132,22,133,23,134,24,135,25,136,26,137,27,138,49,323,50,324,51,142,52,143,55,146,56,147,57,148,65,149,70,150,71,151,72,152,73,153,74,154,75,155,76,156,77,157,78,158,79,159,80,160,81,161,84,162,87,163,90,164,7,331,8,185,9,186,10,187,12,188,13,189,14,190,15,191,16,192,17,193,18,194,19,195,20,196,21,197,22,198,23,199,24,200,25,201,26,202,27,203,49,332,50,333,51,207,52,208,55,209,56,210,57,211,65,214,70,215,71,216,72,217,73,218,74,219,75,220,76,221,77,222,78,223,79,224,80,225,81,226,84,227,87,228,90,229,5,334,7,184,8,185,9,186,10,187,12,188,13,189,14,190,15,191,16,192,17,193,18,194,19,195,20,196,21,197,22,198,23,199,24,200,25,201,26,202,27,203,43,204,44,205,45,206,51,207,52,208,55,209,56,210,57,211,63,335,64,336,65,214,70,215,71,216,72,217,73,218,74,219,75,220,76,221,77,222,78,223,79,224,80,225,81,226,84,227,87,228,90,229,5,337,7,119,8,120,9,121,10,122,12,123,13,124,14,125,15,126,16,127,17,128,18,129,19,130,20,131,21,132,22,133,23,134,24,135,25,136,26,137,27,138,43,139,44,140,45,141,51,142,52,143,55,146,56,147,57,148,65,149,68,338,69,339,70,150,71,151,72,152,73,153,74,154,75,155,76,156,77,157,78,158,79,159,80,160,81,161,84,162,87,163,90,164,5,337,7,119,8,120,9,121,10,122,12,123,13,124,14,125,15,126,16,127,17,128,18,129,19,130,20,131,21,132,22,133,23,134,24,135,25,136,26,137,27,138,43,139,44,140,45,141,51,142,52,143,55,146,56,147,57,148,65,149,68,340,69,339,70,150,71,151,72,152,73,153,74,154,75,155,76,156,77,157,78,158,79,159,80,160,81,161,84,162,87,163,90,164,5,337,7,119,8,120,9,121,10,122,12,123,13,124,14,125,15,126,16,127,17,128,18,129,19,130,20,131,21,132,22,133,23,134,24,135,25,136,26,137,27,138,43,139,44,140,45,141,51,142,52,143,55,146,56,147,57,148,65,149,68,341,69,339,70,150,71,151,72,152,73,153,74,154,75,155,76,156,77,157,78,158,79,159,80,160,81,161,84,162,87,163,90,164];
 const __baba_table_parserProductions: readonly number[] = [0,1,31,1,31,2,1,1,32,1,32,1,2,1,35,1,34,1,37,1,36,1,33,5,3,1,40,1,39,1,42,1,41,1,38,5,4,1,45,1,44,1,47,0,47,2,46,1,43,2,5,1,50,1,49,1,48,2,6,1,51,1,51,1,51,1,51,1,51,1,7,1,54,1,53,1,52,3,8,1,56,1,55,1,9,1,59,1,58,1,61,0,61,2,60,1,57,4,10,1,64,1,63,1,62,2,11,1,67,1,66,1,69,1,68,1,65,6,12,1,70,1,70,1,70,1,70,1,70,1,70,1,70,1,70,1,70,1,70,1,70,1,70,1,70,1,70,1,13,1,71,1,14,1,72,1,15,1,73,1,16,1,74,1,17,1,75,1,18,1,76,1,19,1,77,1,20,1,78,1,21,1,79,1,22,1,80,1,23,1,83,1,82,1,81,4,24,1,86,1,85,1,84,4,25,1,89,1,88,1,87,4,26,1,92,1,91,1,90,4,27,1,95,0,95,1,94,1,93,3,28,1,98,1,97,1,100,0,100,2,99,1,96,2,29,1,103,1,102,1,101,2,30,1];
 const __baba_table_parserExpectedRows: readonly number[] = [0,2,3,4,5,8,11,14,17,20,23,26,27,28,29,31,32,33,34,35,38,56,58,59,60,61,62,64,66,84,86,104,122,123,125,127,129,131,133,135,137,139,141,143,144,145,146,147,148,150,152,154,156,158,160,162,164,166,168,170,172,174,176,178,180,182,184,186,188,189,190,191,193,195,197,199,201,203,205,207,209,211,213,215,217,219,221,223,225,227,229,231,233,235,237,238,239,241,242,243,244,246,264,282,283,285,287,289,291,293,295,297,299,301,303,304,305,306,307,308,310,312,314,316,318,320,322,324,326,328,330,332,334,336,338,340,342,344,346,348,349,351,353,355,357,358,359,361,363,365,367,369,371,373,375,377,379,381,383,385,387,389,391,393,395,397,400,418,436,437,440,443,446,449,452,455,458,461,464,467,468,469,470,471,473,476,479,482,485,488,491,494,497,500,503,506,509,512,515,518,521,524,527,530,533,535,538,541,544,547,550,553,556,558,560,563,566,569,572,575,578,581,584,587,590,593,596,599,602,605,608,609,610,611,612,613,616,617,619,620,622,624,627,628,630,631,632,633,634,635,636,638,640,641,643,644,645,646,647,648,650,653,654,656,657,658,659,660,661,662,663,664,665,666,667,668,669,670,671,689,691,693,695,697,699,701,702,703,704,705,706,707,725,727,729,732,733,734,735,736,737,738,756,759,762,764,782,784,786,804,806,808,810,812,814,816,818,820,838,840,842,844,846,848,850,852,855,873,876,879,882,885,888,891,894,896,898,900,901,902,903,904,905,907,909,912];
+const __baba_table_parserReducers: readonly number[] = [1,4294967295,11,4294967295,12,4294967295,2,0,4,4294967295,4,4294967295,2,1,3,4294967295,15,7,4,4294967295,15,1,6,4294967295,2,2,4,4294967295,15,6,4,4294967295,15,1,6,4294967295,2,3,4,4294967295,15,4,9,4294967295,10,4294967295,15,9,6,4294967295,2,4,4,4294967295,15,8,6,4294967295,2,5,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,2,6,4,4294967295,15,1,6,4294967295,2,7,3,4294967295,15,7,2,8,4,4294967295,15,5,9,4294967295,10,4294967295,15,10,6,4294967295,2,9,4,4294967295,15,11,6,4294967295,2,10,3,4294967295,15,2,4,4294967295,15,1,6,4294967295,2,11,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,4,4294967295,2,12,3,4294967295,2,13,3,4294967295,2,14,3,4294967295,2,15,3,4294967295,2,16,3,4294967295,2,17,3,4294967295,2,18,3,4294967295,2,19,3,4294967295,2,20,3,4294967295,2,21,3,4294967295,2,22,3,4294967295,15,0,6,4294967295,2,23,3,4294967295,15,3,6,4294967295,2,24,3,4294967295,15,2,6,4294967295,2,25,3,4294967295,15,2,6,4294967295,2,26,7,4294967295,8,4294967295,15,12,6,4294967295,2,27,3,4294967295,15,5,9,4294967295,10,4294967295,15,10,6,4294967295,2,28,3,4294967295,15,11,6,4294967295,2,29];
 function __baba_load_parserActionRows(index: number): number {
   const normalized = index >>> 0;
   if (normalized >= __baba_table_parserActionRows.length) {
@@ -163,6 +165,14 @@ function __baba_load_parserExpectedRows(index: number): number {
     throw new RuntimeLanguageTrap("table index out of bounds");
   }
   return __baba_table_parserExpectedRows[normalized] >>> 0;
+}
+
+function __baba_load_parserReducers(index: number): number {
+  const normalized = index >>> 0;
+  if (normalized >= __baba_table_parserReducers.length) {
+    throw new RuntimeLanguageTrap("table index out of bounds");
+  }
+  return __baba_table_parserReducers[normalized] >>> 0;
 }
 
 
@@ -476,6 +486,26 @@ function parserExpectedEnd(state: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserReducerKind(production: number): number {
+  let offset = 0;
+  if (((((production) | 0) < ((127) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((production) >>> 0, (2) >>> 0) >>> 0) + (0)) >>> 0) >>> 0;
+    return (__baba_load_parserReducers(offset) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReducerPayload(production: number): number {
+  let offset = 0;
+  if (((((production) | 0) < ((127) | 0) ? 1 : 0)) !== 0) {
+    offset = (((Math.imul((production) >>> 0, (2) >>> 0) >>> 0) + (1)) >>> 0) >>> 0;
+    return (__baba_load_parserReducers(offset) >>> 0) >>> 0;
+  }
+  return (4294967295) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 export function parse(
   source: string,
   options: ParseOptions = {},
@@ -676,8 +706,9 @@ function replayTrace(
     }
 
     const rhsLength = parserProductionRhsLength(payload);
-    const reducer = PRODUCTION_REDUCERS[payload];
-    if (rhsLength === NO_PRODUCTION || !reducer) {
+    const reducerKind = parserReducerKind(payload);
+    const reducerPayload = parserReducerPayload(payload);
+    if (rhsLength === NO_PRODUCTION || reducerKind === REDUCER_UNKNOWN) {
       return {
         ok: false,
         root: null,
@@ -709,7 +740,8 @@ function replayTrace(
     let reduced: unknown;
     try {
       reduced = reduceProduction(
-        reducer,
+        reducerKind,
+        reducerPayload,
         rhsValues,
         token.span.start,
         streamTokenIndices[index] ?? tokens.length,
@@ -740,63 +772,72 @@ function replayTrace(
 }
 
 function reduceProduction(
-  reducer: ReducerSpec,
+  reducerKind: number,
+  reducerPayload: number,
   rhs: readonly unknown[],
   offset: number,
   tokenIndex: number,
 ): unknown {
-  switch (reducer.kind) {
-    case "start":
+  switch (reducerKind) {
+    case REDUCER_START:
       return rhs[0];
-    case "rule": {
+    case REDUCER_RULE: {
       const fragment = toFragment(rhs[0]);
+      if (reducerPayload === NO_REDUCER_PAYLOAD) {
+        throw new Error("Rule reducer is missing its rule id payload.");
+      }
       const node = {
         type: "rule",
-        name: RULE_NAMES[reducer.ruleId],
+        name: RULE_NAMES[reducerPayload],
         span: fragment.span ?? spanFromChildren(fragment.children) ?? { start: 0, end: 0 },
         tokenRange: fragment.tokenRange ?? tokenRangeFromChildren(fragment.children) ?? { start: tokenIndex, end: tokenIndex },
         children: fragment.children,
-        fields: buildFields(reducer.ruleId, fragment.fields),
+        fields: buildFields(reducerPayload, fragment.fields),
       };
       return node as unknown as AnyRuleNode;
     }
-    case "terminal":
+    case REDUCER_TERMINAL:
       return tokenFragment(rhs[0] as ShiftedToken);
-    case "ruleRef":
+    case REDUCER_RULE_REF:
       return ruleFragment(rhs[0] as AnyRuleNode);
-    case "identity":
-    case "optionalSome":
+    case REDUCER_IDENTITY:
+    case REDUCER_OPTIONAL_SOME:
       return toFragment(rhs[0]);
-    case "sequence":
+    case REDUCER_SEQUENCE:
       return sequenceFragment(rhs, offset, tokenIndex);
-    case "optionalEmpty":
+    case REDUCER_OPTIONAL_EMPTY:
       return emptyFragment(null, offset, tokenIndex);
-    case "repeatEmpty":
+    case REDUCER_REPEAT_EMPTY:
       return emptyFragment([], offset, tokenIndex);
-    case "repeatAppend":
-    case "repeat1Append":
+    case REDUCER_REPEAT_APPEND:
+    case REDUCER_REPEAT1_APPEND:
       return appendFragment(toFragment(rhs[0]), toFragment(rhs[1]));
-    case "repeat1First": {
+    case REDUCER_REPEAT1_FIRST: {
       const item = toFragment(rhs[0]);
       item.value = [item.value];
       return item;
     }
-    case "separatedFirst": {
+    case REDUCER_SEPARATED_FIRST: {
       const item = toFragment(rhs[0]);
       item.value = [item.value];
       return item;
     }
-    case "separatedAppend":
+    case REDUCER_SEPARATED_APPEND:
       return appendSeparatedFragment(
         toFragment(rhs[0]),
         toFragment(rhs[1]),
         toFragment(rhs[2]),
       );
-    case "field": {
+    case REDUCER_FIELD: {
       const fragment = toFragment(rhs[0]);
-      fragment.fields.push({ name: reducer.name, value: fragment.value });
+      if (reducerPayload === NO_REDUCER_PAYLOAD) {
+        throw new Error("Field reducer is missing its field id payload.");
+      }
+      fragment.fields.push({ fieldId: reducerPayload, value: fragment.value });
       return fragment;
     }
+    default:
+      throw new Error("Unknown parser reducer kind.");
   }
 }
 
@@ -968,32 +1009,34 @@ function buildFields(
     return Object.create(null) as Record<string, unknown>;
   }
   const fields = Object.create(null) as Record<string, unknown>;
-  const counts = Object.create(null) as Record<string, number>;
-  for (const [name, config] of schema.entries) {
+  const counts = Object.create(null) as Record<number, number>;
+  for (const [fieldId, name, config] of schema.entries) {
     fields[name] = config.array ? [] : config.nullable ? null : undefined;
-    counts[name] = 0;
+    counts[fieldId] = 0;
   }
   for (const capture of captures) {
-    const config = schema.byName[capture.name];
-    if (!config) {
-      throw new Error(`Unknown field capture '${capture.name}'.`);
+    const entry = schema.byFieldId[capture.fieldId];
+    if (!entry) {
+      const fieldName = FIELD_NAMES[capture.fieldId] ?? `#${capture.fieldId}`;
+      throw new Error(`Unknown field capture '${fieldName}'.`);
     }
-    counts[capture.name] = (counts[capture.name] ?? 0) + 1;
+    const [name, config] = entry;
+    counts[capture.fieldId] = (counts[capture.fieldId] ?? 0) + 1;
     if (config.array) {
-      const values = fields[capture.name];
+      const values = fields[name];
       if (!Array.isArray(values)) {
-        throw new Error(`Array field '${capture.name}' was not initialized as an array.`);
+        throw new Error(`Array field '${name}' was not initialized as an array.`);
       }
       values.push(capture.value);
     } else {
-      if ((counts[capture.name] ?? 0) > 1) {
-        throw new Error(`Scalar field '${capture.name}' was captured more than once.`);
+      if ((counts[capture.fieldId] ?? 0) > 1) {
+        throw new Error(`Scalar field '${name}' was captured more than once.`);
       }
-      fields[capture.name] = capture.value;
+      fields[name] = capture.value;
     }
   }
-  for (const [name, config] of schema.entries) {
-    const count = counts[name] ?? 0;
+  for (const [fieldId, name, config] of schema.entries) {
+    const count = counts[fieldId] ?? 0;
     if (config.array) {
       if (!Array.isArray(fields[name])) {
         throw new Error(`Array field '${name}' was not initialized as an array.`);

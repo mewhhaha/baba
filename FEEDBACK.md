@@ -137,6 +137,10 @@ runtime language:
   bytecode emitter. Generated Wasm adapters now keep parse-trace terminal input
   in a JavaScript `Int32Array` and use the runtime-language Wasm trace module
   for parser control flow.
+- Moved generated parser reducer descriptor lookup onto runtime-language
+  `parserReducerKind`/`parserReducerPayload` helpers backed by numeric reducer
+  tables, replacing generated `PRODUCTION_REDUCERS` object tables during trace
+  replay.
 
 Still unresolved:
 
@@ -151,12 +155,13 @@ Still unresolved:
   counting and generated TypeScript conflict branch scheduling are now
   runtime-language-backed, and generated Wasm adapters now call a
   runtime-language Wasm parser trace module instead of a core `parse_trace`
-  export. Generated token object emission/diagnostics plus reducer/CST
-  algorithms are still not mechanically emitted from one runtime-language
-  implementation. The compiler now has a shared lowered control-flow/value IR
-  and checked helper artifact hashes, but it still needs broader parser-runtime
-  lowering before the release can fully satisfy "one runtime implementation, two
-  execution targets."
+  export. Reducer descriptor lookup is now runtime-language-backed, but the
+  reducer operations that assemble fragments/fields/CST nodes and generated
+  token object emission/diagnostics are still not mechanically emitted from one
+  runtime-language implementation. The compiler now has a shared lowered
+  control-flow/value IR and checked helper artifact hashes, but it still needs
+  broader parser-runtime lowering before the release can fully satisfy "one
+  runtime implementation, two execution targets."
 
 Baba has made the right strategic move: the internal runtime language and Wasm
 target are defensible extensions of “bootstrap the predictable parts of a

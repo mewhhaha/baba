@@ -16,6 +16,23 @@ export const RUNTIME_ACTION_KIND_MASK = 0xff_00_00_00;
 export const RUNTIME_ACTION_PAYLOAD_MASK = 0x00_ff_ff_ff;
 export const RUNTIME_NO_GOTO = 0xffff_ffff;
 export const RUNTIME_NO_PRODUCTION = 0xffff_ffff;
+export const RUNTIME_REDUCER_UNKNOWN = 0;
+export const RUNTIME_REDUCER_START = 1;
+export const RUNTIME_REDUCER_RULE = 2;
+export const RUNTIME_REDUCER_TERMINAL = 3;
+export const RUNTIME_REDUCER_RULE_REF = 4;
+export const RUNTIME_REDUCER_IDENTITY = 5;
+export const RUNTIME_REDUCER_SEQUENCE = 6;
+export const RUNTIME_REDUCER_OPTIONAL_EMPTY = 7;
+export const RUNTIME_REDUCER_OPTIONAL_SOME = 8;
+export const RUNTIME_REDUCER_REPEAT_EMPTY = 9;
+export const RUNTIME_REDUCER_REPEAT_APPEND = 10;
+export const RUNTIME_REDUCER_REPEAT1_FIRST = 11;
+export const RUNTIME_REDUCER_REPEAT1_APPEND = 12;
+export const RUNTIME_REDUCER_SEPARATED_FIRST = 13;
+export const RUNTIME_REDUCER_SEPARATED_APPEND = 14;
+export const RUNTIME_REDUCER_FIELD = 15;
+export const RUNTIME_NO_REDUCER_PAYLOAD = 0xffff_ffff;
 
 const TRACE_STATUS = 0;
 const TRACE_ERROR_STATE = 1;
@@ -52,6 +69,10 @@ export type ParserRuntimeProductionEntry = readonly [
   lhs: number,
   rhsLength: number,
 ];
+export type ParserRuntimeReducerEntry = readonly [
+  kind: number,
+  payload: number,
+];
 
 export interface ParserTableRuntimeProgramInput {
   readonly actionRows: readonly (readonly ParserRuntimeLookupEntry[])[];
@@ -60,6 +81,10 @@ export interface ParserTableRuntimeProgramInput {
 
 export interface ParserProductionRuntimeProgramInput {
   readonly productions: readonly ParserRuntimeProductionEntry[];
+}
+
+export interface ParserReducerRuntimeProgramInput {
+  readonly reducers: readonly ParserRuntimeReducerEntry[];
 }
 
 export interface ParserTraceRuntimeProgramInput
@@ -323,6 +348,19 @@ export function createParserProductionRuntimeProgram(
       parserProductionsTable(input.productions),
     ],
     functions: parserProductionFunctions(input.productions.length),
+  };
+}
+
+export function createParserReducerRuntimeProgram(
+  input: ParserReducerRuntimeProgramInput,
+): RuntimeLanguageProgram {
+  return {
+    name: "parser_reducer_runtime",
+    entry: "parserReducerKind",
+    tables: [
+      parserReducersTable(input.reducers),
+    ],
+    functions: parserReducerFunctions(input.reducers.length),
   };
 }
 
@@ -598,6 +636,70 @@ function parserProductionLoadFunction(
         ],
       },
       { kind: "return", expression: u32(RUNTIME_NO_PRODUCTION) },
+    ],
+  };
+}
+
+function parserReducersTable(
+  reducers: readonly ParserRuntimeReducerEntry[],
+): RuntimeLanguageTable {
+  return {
+    name: "parserReducers",
+    type: "u32",
+    values: reducers.flatMap(([kind, payload]) => [kind, payload]),
+  };
+}
+
+function parserReducerFunctions(
+  reducerCount: number,
+): RuntimeLanguageFunction[] {
+  return [
+    parserReducerLoadFunction(
+      "parserReducerKind",
+      reducerCount,
+      0,
+      RUNTIME_REDUCER_UNKNOWN,
+    ),
+    parserReducerLoadFunction(
+      "parserReducerPayload",
+      reducerCount,
+      1,
+      RUNTIME_NO_REDUCER_PAYLOAD,
+    ),
+  ];
+}
+
+function parserReducerLoadFunction(
+  name: string,
+  reducerCount: number,
+  fieldOffset: number,
+  missing: number,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    parameters: [
+      { name: "production", type: "u32" },
+    ],
+    locals: [
+      { name: "offset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("production"), u32(reducerCount)),
+        consequent: [
+          setLocal(
+            "offset",
+            add(mul(local("production"), u32(2)), u32(fieldOffset)),
+          ),
+          {
+            kind: "return",
+            expression: load("parserReducers", local("offset")),
+          },
+        ],
+      },
+      { kind: "return", expression: u32(missing) },
     ],
   };
 }
