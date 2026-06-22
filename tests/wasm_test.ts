@@ -101,6 +101,8 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     assertEquals(mod.parserDiagnosticCodeParseInvalidTokenStream, 4);
     assertEquals(mod.parserDiagnosticCodeInternalError, 5);
     assertEquals(mod.parserDiagnosticCodeBranchLimit, 6);
+    assertEquals(mod.parserDiagnosticDetailKindNone, 0);
+    assertEquals(mod.parserDiagnosticDetailKindParserState, 1);
     assertEquals(abi.format, "baba-wasm-abi");
     assertEquals(abi.version, 1);
     assertEquals(abi.targetKind, mod.wasmTargetKind);
@@ -180,6 +182,14 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     );
     assertEquals(abi.parserDiagnostics.detailKinds.none, 0);
     assertEquals(abi.parserDiagnostics.detailKinds.parserState, 1);
+    assertEquals(
+      abi.parserDiagnostics.detailKinds.none,
+      mod.parserDiagnosticDetailKindNone,
+    );
+    assertEquals(
+      abi.parserDiagnostics.detailKinds.parserState,
+      mod.parserDiagnosticDetailKindParserState,
+    );
     const unexpectedSchema = abi.parserDiagnostics.schemas.find((
       schema: { name: string },
     ) => schema.name === "parseUnexpectedToken");
@@ -314,6 +324,10 @@ Deno.test("Wasm parser reports trailing input through trace replay", async () =>
       true,
     );
     assertEquals(parsed.diagnostics[0].runtimeDetailKind, "parser-state");
+    assertEquals(
+      parsed.diagnostics[0].runtimeDetailKindId,
+      mod.parserDiagnosticDetailKindParserState,
+    );
     assertEquals(parsed.diagnostics[0].found, JSON.stringify("a"));
   } finally {
     await Deno.remove(dir, { recursive: true });

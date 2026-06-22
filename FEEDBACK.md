@@ -67,6 +67,9 @@ runtime language:
   `ParseDiagnostic` objects via `runtimeCode` and `runtimeDetail`, so downstream
   hosts can consume numeric diagnostic codes and state/detail payloads without
   parsing user-facing messages.
+- Exposed generated parser diagnostic detail-kind ID constants and
+  `ParseDiagnostic.runtimeDetailKindId`, matching the numeric detail-kind schema
+  already emitted in `wasm/abi.json`.
 - Added deterministic generated Wasm output coverage. Local independent-engine
   validation remains unavailable because `wasm-tools`, `wasm-validate`, and
   `wasmtime` are not installed in this environment.
@@ -415,7 +418,7 @@ Still unresolved:
   language, complete generated parser-runtime lowering for remaining host public
   object materialization outside the shared wrapper helpers, and richer
   executable host-neutral error payload variants beyond the current trace status
-  metadata plus descriptor schemas and public detail-kind fields for parser
+  metadata plus descriptor schemas and public detail-kind ID fields for parser
   diagnostic code/detail records. The compiler now has a shared lowered
   control-flow/value IR and checked helper artifact hashes, but it still needs
   broader parser-runtime lowering before the release can fully satisfy "one

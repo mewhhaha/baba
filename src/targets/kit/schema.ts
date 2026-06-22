@@ -1,5 +1,14 @@
 export const PARSER_KIT_SCHEMA_VERSION = 1;
 
+export const parserDiagnosticCodeParseLexicalError = 1;
+export const parserDiagnosticCodeParseUnexpectedToken = 2;
+export const parserDiagnosticCodeParseTrailingInput = 3;
+export const parserDiagnosticCodeParseInvalidTokenStream = 4;
+export const parserDiagnosticCodeInternalError = 5;
+export const parserDiagnosticCodeBranchLimit = 6;
+export const parserDiagnosticDetailKindNone = 0;
+export const parserDiagnosticDetailKindParserState = 1;
+
 export interface ParserKit {
   schemaVersion: 1;
   generator: "@mewhhaha/baba";
@@ -259,6 +268,10 @@ export interface KitParseDiagnostic {
     | "PARSER_INTERNAL_ERROR";
   message: string;
   span: KitSpan;
+  runtimeCode: number;
+  runtimeDetail: number;
+  runtimeDetailKind: "none" | "parser-state";
+  runtimeDetailKindId: number;
   expected?: readonly string[];
   found?: string;
 }
@@ -849,11 +862,13 @@ function parseTokenList(
         root: null,
         source,
         tokens,
-        diagnostics: [{
-          code: "PARSER_BRANCH_LIMIT",
-          message: "Parser exceeded the branch exploration limit.",
-          span: { start: source.length, end: source.length },
-        }],
+        diagnostics: [
+          kitParseDiagnostic(
+            "PARSER_BRANCH_LIMIT",
+            "Parser exceeded the branch exploration limit.",
+            { start: source.length, end: source.length },
+          ),
+        ],
       };
     }
 
@@ -880,11 +895,12 @@ function parseTokenList(
     source,
     tokens,
     diagnostics: [
-      bestFailure?.diagnostic ?? {
-        code: "PARSER_INTERNAL_ERROR",
-        message: "Parser exhausted all branches without a diagnostic.",
-        span: { start: source.length, end: source.length },
-      },
+      bestFailure?.diagnostic ??
+        kitParseDiagnostic(
+          "PARSER_INTERNAL_ERROR",
+          "Parser exhausted all branches without a diagnostic.",
+          { start: source.length, end: source.length },
+        ),
     ],
   };
 }
@@ -1005,11 +1021,11 @@ function applyAction(
       kind: "failure",
       failure: {
         offset: token.span.start,
-        diagnostic: {
-          code: "PARSER_INTERNAL_ERROR",
-          message: "Parser table is missing a goto entry.",
-          span: token.span,
-        },
+        diagnostic: kitParseDiagnostic(
+          "PARSER_INTERNAL_ERROR",
+          "Parser table is missing a goto entry.",
+          token.span,
+        ),
       },
     };
   }
@@ -1277,11 +1293,13 @@ function acceptedParseResult(
     root: null,
     source,
     tokens,
-    diagnostics: [{
-      code: "PARSER_INTERNAL_ERROR",
-      message: "Parser accepted without producing a root node.",
-      span: { start: source.length, end: source.length },
-    }],
+    diagnostics: [
+      kitParseDiagnostic(
+        "PARSER_INTERNAL_ERROR",
+        "Parser accepted without producing a root node.",
+        { start: source.length, end: source.length },
+      ),
+    ],
   };
 }
 
@@ -1383,9 +1401,12 @@ function unexpectedTokenDiagnostic(
     ? "PARSE_TRAILING_INPUT"
     : "PARSE_UNEXPECTED_TOKEN";
   return {
-    code,
-    message: `Unexpected token ${found}.`,
-    span: token.span,
+    ...kitParseDiagnostic(
+      code,
+      `Unexpected token ${found}.`,
+      token.span,
+      state,
+    ),
     expected,
     found,
   };
@@ -1416,18 +1437,20 @@ function lexicalTokenDiagnostic(
   void kit;
   if (token.type === "error") {
     return {
-      code: "PARSE_LEXICAL_ERROR",
-      message: `Unexpected character ${JSON.stringify(token.text)}.`,
-      span: token.span,
+      ...kitParseDiagnostic(
+        "PARSE_LEXICAL_ERROR",
+        `Unexpected character ${JSON.stringify(token.text)}.`,
+        token.span,
+      ),
       found: JSON.stringify(token.text),
     };
   }
   return {
-    code: "PARSE_LEXICAL_ERROR",
-    message: `Token ${
-      tokenDisplay(token)
-    } is not part of this parser's terminal set.`,
-    span: token.span,
+    ...kitParseDiagnostic(
+      "PARSE_LEXICAL_ERROR",
+      `Token ${tokenDisplay(token)} is not part of this parser's terminal set.`,
+      token.span,
+    ),
     found: tokenDisplay(token),
   };
 }
@@ -1701,11 +1724,13 @@ function lexicalDiagnostics(
   diagnostics: readonly KitLexDiagnostic[],
 ): readonly KitParseDiagnostic[] {
   if (diagnostics.length === 0) return [];
-  return diagnostics.map((diagnostic) => ({
-    code: "PARSE_LEXICAL_ERROR",
-    message: diagnostic.message,
-    span: diagnostic.span,
-  }));
+  return diagnostics.map((diagnostic) =>
+    kitParseDiagnostic(
+      "PARSE_LEXICAL_ERROR",
+      diagnostic.message,
+      diagnostic.span,
+    )
+  );
 }
 
 function combineDiagnostics(
@@ -1721,18 +1746,75 @@ function invalidTokenStream(
   message: string,
   span: KitSpan,
 ): KitParseDiagnostic {
-  return { code: "PARSE_INVALID_TOKEN_STREAM", message, span };
+  return kitParseDiagnostic("PARSE_INVALID_TOKEN_STREAM", message, span);
 }
 
 function internalParserDiagnostic(
   error: unknown,
   span: KitSpan,
 ): KitParseDiagnostic {
-  return {
-    code: "PARSER_INTERNAL_ERROR",
-    message: error instanceof Error ? error.message : String(error),
+  return kitParseDiagnostic(
+    "PARSER_INTERNAL_ERROR",
+    error instanceof Error ? error.message : String(error),
     span,
+  );
+}
+
+function kitParseDiagnostic(
+  code: KitParseDiagnostic["code"],
+  message: string,
+  span: KitSpan,
+  detail = 0,
+): KitParseDiagnostic {
+  const runtimeCode = kitDiagnosticCodeId(code);
+  return {
+    code,
+    message,
+    span,
+    runtimeCode,
+    runtimeDetail: detail,
+    runtimeDetailKind: kitDiagnosticDetailKind(runtimeCode),
+    runtimeDetailKindId: kitDiagnosticDetailKindId(runtimeCode),
   };
+}
+
+function kitDiagnosticCodeId(code: KitParseDiagnostic["code"]): number {
+  switch (code) {
+    case "PARSE_LEXICAL_ERROR":
+      return parserDiagnosticCodeParseLexicalError;
+    case "PARSE_UNEXPECTED_TOKEN":
+      return parserDiagnosticCodeParseUnexpectedToken;
+    case "PARSE_TRAILING_INPUT":
+      return parserDiagnosticCodeParseTrailingInput;
+    case "PARSE_INVALID_TOKEN_STREAM":
+      return parserDiagnosticCodeParseInvalidTokenStream;
+    case "PARSER_INTERNAL_ERROR":
+      return parserDiagnosticCodeInternalError;
+    case "PARSER_BRANCH_LIMIT":
+      return parserDiagnosticCodeBranchLimit;
+  }
+}
+
+function kitDiagnosticDetailKind(
+  runtimeCode: number,
+): KitParseDiagnostic["runtimeDetailKind"] {
+  switch (runtimeCode) {
+    case parserDiagnosticCodeParseUnexpectedToken:
+    case parserDiagnosticCodeParseTrailingInput:
+      return "parser-state";
+    default:
+      return "none";
+  }
+}
+
+function kitDiagnosticDetailKindId(runtimeCode: number): number {
+  switch (runtimeCode) {
+    case parserDiagnosticCodeParseUnexpectedToken:
+    case parserDiagnosticCodeParseTrailingInput:
+      return parserDiagnosticDetailKindParserState;
+    default:
+      return parserDiagnosticDetailKindNone;
+  }
 }
 
 function tokenDisplay(token: KitToken): string {

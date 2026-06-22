@@ -31,6 +31,7 @@ function parseDiagnostic(
     runtimeCode: parserDiagnosticCode(handle),
     runtimeDetail: parserDiagnosticDetail(handle),
     runtimeDetailKind: diagnosticDetailKind(expectedCode),
+    runtimeDetailKindId: diagnosticDetailKindId(expectedCode),
   };
 }
 
@@ -60,6 +61,16 @@ function diagnosticDetailKind(
       return "parser-state";
     default:
       return "none";
+  }
+}
+
+function diagnosticDetailKindId(runtimeCode: number): number {
+  switch (runtimeCode) {
+    case DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN:
+    case DIAGNOSTIC_PARSE_TRAILING_INPUT:
+      return DIAGNOSTIC_DETAIL_PARSER_STATE;
+    default:
+      return DIAGNOSTIC_DETAIL_NONE;
   }
 }
 

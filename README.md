@@ -125,13 +125,15 @@ Both generated parser runtimes export the same main TypeScript API:
   wanted;
 - parser diagnostic numeric ID constants such as
   `parserDiagnosticCodeParseLexicalError` and
-  `parserDiagnosticCodeInternalError`, matching the runtime diagnostic record
-  taxonomy while public diagnostics continue to use string `code` values.
-  `ParseDiagnostic` objects also expose `runtimeCode`, `runtimeDetail`, and
-  `runtimeDetailKind`; `runtimeCode` matches the exported numeric ID, and
-  `runtimeDetail` carries the runtime payload such as parser state for
-  unexpected/trailing tokens. The Wasm target's `abi.json` includes
-  `parserDiagnostics.schemas` describing the `runtimeDetail` kind and public
+  `parserDiagnosticCodeInternalError` and detail-kind constants such as
+  `parserDiagnosticDetailKindParserState`, matching the runtime diagnostic
+  record taxonomy while public diagnostics continue to use string `code` values.
+  `ParseDiagnostic` objects also expose `runtimeCode`, `runtimeDetail`,
+  `runtimeDetailKind`, and `runtimeDetailKindId`; `runtimeCode` and
+  `runtimeDetailKindId` match the exported numeric IDs, and `runtimeDetail`
+  carries the runtime payload such as parser state for unexpected/trailing
+  tokens. The Wasm target's `abi.json` includes `parserDiagnostics.schemas`
+  describing the `runtimeDetail` kind, numeric detail-kind id, and public
   payload fields for each numeric code;
 - `positionAt(source, offset)` and `createSourceMap(source)` for UTF-16
   offset-to-line/column diagnostics;
@@ -257,6 +259,10 @@ deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
 The runtime profile emits minified JSON and omits LR item/lookahead detail,
 production source spans, and production origins while keeping the tables needed
 by the reference helpers.
+
+Parser-kit parse helpers expose the same numeric diagnostic `runtimeCode`,
+`runtimeDetail`, `runtimeDetailKind`, and `runtimeDetailKindId` fields as the
+generated TypeScript and Wasm parser APIs.
 
 Parser-kit schema version 1 follows normal semver compatibility. Semver-minor
 releases may add optional fields, helper APIs, target options, diagnostics, or

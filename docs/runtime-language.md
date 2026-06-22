@@ -331,14 +331,19 @@ execute both outputs and compare returned values or traps.
   `parserDiagnosticCodeParseTrailingInput` (`3`),
   `parserDiagnosticCodeParseInvalidTokenStream` (`4`),
   `parserDiagnosticCodeInternalError` (`5`), and
-  `parserDiagnosticCodeBranchLimit` (`6`). Public diagnostics still expose
+  `parserDiagnosticCodeBranchLimit` (`6`), plus detail-kind constants
+  `parserDiagnosticDetailKindNone` (`0`) and
+  `parserDiagnosticDetailKindParserState` (`1`). Public diagnostics still expose
   string `code` values for JavaScript consumers, and also expose `runtimeCode`,
-  `runtimeDetail`, and `runtimeDetailKind` fields copied from or derived from
-  the runtime diagnostic record. Unexpected-token and trailing-input diagnostics
-  use `runtimeDetail` for the parser state that produced the expected-terminal
-  set and set `runtimeDetailKind` to `"parser-state"`. Generated `wasm/abi.json`
-  descriptors include `parserDiagnostics.schemas`, which maps each runtime code
-  to its public string code, `runtimeDetail` kind, and public payload fields.
+  `runtimeDetail`, `runtimeDetailKind`, and `runtimeDetailKindId` fields copied
+  from or derived from the runtime diagnostic record. Unexpected-token and
+  trailing-input diagnostics use `runtimeDetail` for the parser state that
+  produced the expected-terminal set and set `runtimeDetailKind` to
+  `"parser-state"` with `runtimeDetailKindId` equal to
+  `parserDiagnosticDetailKindParserState`. Generated `wasm/abi.json` descriptors
+  include `parserDiagnostics.schemas`, which maps each runtime code to its
+  public string code, `runtimeDetail` kind, numeric detail-kind id, and public
+  payload fields.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
 ## Not Yet In The Executable Subset

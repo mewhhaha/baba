@@ -112,12 +112,16 @@ const DIAGNOSTIC_PARSE_TRAILING_INPUT = 3;
 const DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM = 4;
 const DIAGNOSTIC_PARSER_INTERNAL_ERROR = 5;
 const DIAGNOSTIC_PARSER_BRANCH_LIMIT = 6;
+const DIAGNOSTIC_DETAIL_NONE = 0;
+const DIAGNOSTIC_DETAIL_PARSER_STATE = 1;
 export const parserDiagnosticCodeParseLexicalError = DIAGNOSTIC_PARSE_LEXICAL_ERROR;
 export const parserDiagnosticCodeParseUnexpectedToken = DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN;
 export const parserDiagnosticCodeParseTrailingInput = DIAGNOSTIC_PARSE_TRAILING_INPUT;
 export const parserDiagnosticCodeParseInvalidTokenStream = DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM;
 export const parserDiagnosticCodeInternalError = DIAGNOSTIC_PARSER_INTERNAL_ERROR;
 export const parserDiagnosticCodeBranchLimit = DIAGNOSTIC_PARSER_BRANCH_LIMIT;
+export const parserDiagnosticDetailKindNone = DIAGNOSTIC_DETAIL_NONE;
+export const parserDiagnosticDetailKindParserState = DIAGNOSTIC_DETAIL_PARSER_STATE;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -1590,6 +1594,7 @@ function parseDiagnostic(
     runtimeCode: parserDiagnosticCode(handle),
     runtimeDetail: parserDiagnosticDetail(handle),
     runtimeDetailKind: diagnosticDetailKind(expectedCode),
+    runtimeDetailKindId: diagnosticDetailKindId(expectedCode),
   };
 }
 
@@ -1619,6 +1624,16 @@ function diagnosticDetailKind(
       return "parser-state";
     default:
       return "none";
+  }
+}
+
+function diagnosticDetailKindId(runtimeCode: number): number {
+  switch (runtimeCode) {
+    case DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN:
+    case DIAGNOSTIC_PARSE_TRAILING_INPUT:
+      return DIAGNOSTIC_DETAIL_PARSER_STATE;
+    default:
+      return DIAGNOSTIC_DETAIL_NONE;
   }
 }
 

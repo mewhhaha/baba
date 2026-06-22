@@ -8,11 +8,14 @@ import {
 } from "./helpers.ts";
 import {
   compileParserKit,
+  type KitParseDiagnostic,
   type KitParseResult,
   type KitRuleNode,
   type KitSyntaxElement,
   type KitToken,
   lexWithKit,
+  parserDiagnosticCodeParseTrailingInput,
+  parserDiagnosticDetailKindParserState,
   type ParserKit,
   parseTokensUncheckedWithKit,
   parseTokensWithKit,
@@ -395,6 +398,18 @@ Deno.test("parser-kit helpers match generated TypeScript runtime behavior", asyn
       );
     }
 
+    const trailing = parseWithKit(kit, "let alpha = 42; extra");
+    assertEquals(trailing.ok, false);
+    assertEquals(
+      trailing.diagnostics[0].runtimeCode,
+      parserDiagnosticCodeParseTrailingInput,
+    );
+    assertEquals(trailing.diagnostics[0].runtimeDetailKind, "parser-state");
+    assertEquals(
+      trailing.diagnostics[0].runtimeDetailKindId,
+      parserDiagnosticDetailKindParserState,
+    );
+
     const source = "// trivia\nlet value = 7;";
     assertJsonEquals(
       normalizeLexResult(lexWithKit(kit, source, { preserveTrivia: false })),
@@ -481,7 +496,7 @@ function normalizeLexResult(result: RuntimeLexResult): unknown {
   return {
     source: result.source,
     tokens: result.tokens.map(normalizeToken),
-    diagnostics: result.diagnostics.map(normalizeDiagnostic),
+    diagnostics: result.diagnostics.map(normalizeLexDiagnostic),
   };
 }
 
@@ -493,7 +508,7 @@ function normalizeParseResult(
     root: result.root ? normalizeNode(result.root) : null,
     source: result.source,
     tokens: result.tokens.map(normalizeToken),
-    diagnostics: result.diagnostics.map(normalizeDiagnostic),
+    diagnostics: result.diagnostics.map(normalizeParseDiagnostic),
   };
 }
 
@@ -550,11 +565,25 @@ function normalizeToken(token: RuntimeToken | KitToken): unknown {
   };
 }
 
-function normalizeDiagnostic(diagnostic: RuntimeDiagnostic): unknown {
+function normalizeLexDiagnostic(diagnostic: RuntimeLexDiagnostic): unknown {
   return {
     code: diagnostic.code,
     message: diagnostic.message,
     span: diagnostic.span,
+  };
+}
+
+function normalizeParseDiagnostic(
+  diagnostic: RuntimeDiagnostic | KitParseDiagnostic,
+): unknown {
+  return {
+    code: diagnostic.code,
+    message: diagnostic.message,
+    span: diagnostic.span,
+    runtimeCode: diagnostic.runtimeCode,
+    runtimeDetail: diagnostic.runtimeDetail,
+    runtimeDetailKind: diagnostic.runtimeDetailKind,
+    runtimeDetailKindId: diagnostic.runtimeDetailKindId,
     expected: diagnostic.expected,
     found: diagnostic.found,
   };
@@ -597,7 +626,7 @@ interface RuntimeModule {
 interface RuntimeLexResult {
   source: string;
   tokens: readonly KitToken[];
-  diagnostics: readonly RuntimeDiagnostic[];
+  diagnostics: readonly RuntimeLexDiagnostic[];
 }
 
 interface RuntimeParseResult {
@@ -632,6 +661,16 @@ interface RuntimeDiagnostic {
   code: string;
   message: string;
   span: { start: number; end: number };
+  runtimeCode: number;
+  runtimeDetail: number;
+  runtimeDetailKind: "none" | "parser-state";
+  runtimeDetailKindId: number;
   expected?: readonly string[];
   found?: string;
+}
+
+interface RuntimeLexDiagnostic {
+  code: string;
+  message: string;
+  span: { start: number; end: number };
 }

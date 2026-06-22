@@ -76,6 +76,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const lexerRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_lexer_runtime.ts",
   );
+  const syntaxRuntimeSource = await Deno.readTextFile(
+    "src/targets/typescript/syntax_emit.ts",
+  );
   const publicLexDiagnosticMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_lex_diagnostic_materializer.ts",
   );
@@ -219,6 +222,15 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(publicFieldMaterializerSource, "Object.create(null)");
   assertIncludes(publicFieldMaterializerSource, "fields[name] = value");
   assertIncludes(parserRuntimeSource, "emitPublicDiagnosticMaterializer");
+  assertIncludes(
+    parserRuntimeSource,
+    "PARSER_DIAGNOSTIC_DETAIL_PARSER_STATE",
+  );
+  assertIncludes(parserRuntimeSource, "parserDiagnosticDetailKindNone");
+  assertIncludes(
+    parserRuntimeSource,
+    "parserDiagnosticDetailKindParserState",
+  );
   assertIncludes(parserRuntimeSource, "emitPublicParseResultMaterializer");
   assertIncludes(parserRuntimeSource, "emitPublicEofTokenMaterializer");
   assertIncludes(parserRuntimeSource, "emitPublicSourceTextBoundary");
@@ -249,6 +261,19 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "parserExpectedHasEof",
   );
   assertIncludes(publicDiagnosticMaterializerSource, "parserDiagnosticNew");
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "runtimeDetailKindId: diagnosticDetailKindId(expectedCode)",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "function diagnosticDetailKindId",
+  );
+  assertIncludes(
+    publicDiagnosticMaterializerSource,
+    "DIAGNOSTIC_DETAIL_PARSER_STATE",
+  );
+  assertIncludes(syntaxRuntimeSource, "runtimeDetailKindId: number");
   assertIncludes(
     publicDiagnosticMaterializerSource,
     "lexerTokenDiagnosticStatus",

@@ -76,6 +76,7 @@ export interface ParseDiagnostic {
   runtimeCode: number;
   runtimeDetail: number;
   runtimeDetailKind: "none" | "parser-state";
+  runtimeDetailKindId: number;
   expected?: readonly string[];
   found?: string;
 }
