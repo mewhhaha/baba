@@ -74,3 +74,22 @@ deno publish --dry-run --allow-dirty
   only when the source-of-truth cutline is satisfied.
 - Do not hide remaining runtime duplication in docs.
 - Do not remove optional hardening backlog items from task `160`.
+
+## Completion Notes
+
+Completed on 2026-06-23.
+
+- Re-ran the task `170` source-of-truth audit and updated
+  `docs/runtime-language.md`, `FEEDBACK.md`, `tasks/README.md`, and
+  `tasks/status.md` so Requirement 1 and all 21 FEEDBACK rows are marked done
+  only after the generated TypeScript/Wasm runtime cutline was satisfied.
+- Added final runtime-plan coverage for the closed cutline, including
+  source-of-truth docs/status checks, old TypeScript target algorithm marker
+  rejection, shared runtime source packaging, and runtime implementation
+  manifest drift checks.
+- Regenerated checked example artifacts and manifests with
+  `deno task
+  bootstrap`; `deno task bootstrap:check`, `deno fmt --check`,
+  `git diff --check`, `deno lint`, `deno task check`, and `deno task test`
+  passed locally. The publish dry run was completed outside this agent after the
+  command was blocked here as a publish-facing registry action.

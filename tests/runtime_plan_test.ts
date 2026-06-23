@@ -53,7 +53,7 @@ Deno.test("runtime planner exposes a versioned portable parser plan", () => {
   assertEquals(plan.cst.rules[0].fields[0].name, "name");
 });
 
-Deno.test("runtime source-of-truth cutline tracks remaining work", async () => {
+Deno.test("runtime source-of-truth cutline tracks final gate", async () => {
   const docs = await Deno.readTextFile("docs/runtime-language.md");
   const status = await Deno.readTextFile("tasks/status.md");
   const taskIndex = await Deno.readTextFile("tasks/README.md");
@@ -63,16 +63,18 @@ Deno.test("runtime source-of-truth cutline tracks remaining work", async () => {
   assertIncludes(docs, "Host-owned boundaries:");
   assertIncludes(
     docs,
-    "Forbidden after the remaining source-of-truth work closes:",
+    "Forbidden source-of-truth duplication:",
   );
   assertIncludes(docs, "170-runtime-source-of-truth-cutline.md");
   assertIncludes(docs, "178-final-runtime-source-of-truth-gate.md");
+  assertIncludes(docs, "Parser-kit");
+  assertIncludes(docs, "tooling/convenience");
 
   assertIncludes(
     status,
-    "Continue with `173-runtime-token-stream-normalization-lowering.md` through `178-final-runtime-source-of-truth-gate.md`",
+    "| 1. Make the runtime language the actual source of truth",
   );
-  assertIncludes(taskIndex, "## Remaining Runtime Source-Of-Truth Work");
+  assertIncludes(status, "| done   | none");
   assertIncludes(taskIndex, "Completed FEEDBACK P0.1 cutline: `170`");
   assertIncludes(
     taskIndex,
@@ -81,6 +83,10 @@ Deno.test("runtime source-of-truth cutline tracks remaining work", async () => {
   assertIncludes(
     taskIndex,
     "Completed FEEDBACK P0.1 lexer driver lowering: `172`",
+  );
+  assertIncludes(
+    taskIndex,
+    "Completed full FEEDBACK P0.1 runtime-source-of-truth work: `173` through `178`",
   );
   assertIncludes(taskIndex, "178-final-runtime-source-of-truth-gate.md");
 });
@@ -271,7 +277,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "src/targets/runtime/public_rule_node_materializer.ts",
   );
   assertIncludes(parserRuntimeSource, "function parseTokenList");
-  assertIncludes(parserRuntimeSource, "function reduceProduction");
+  assertIncludes(parserRuntimeSource, "createParserReplayRuntimeProgram");
+  assertIncludes(parserRuntimeSource, "parserReplayVm");
+  assertIncludes(parserRuntimeSource, "parserReplayResultStatus");
+  assertNotIncludes(parserRuntimeSource, "function reduceProduction");
   assertIncludes(
     parserRuntimeSource,
     "createParserConflictTraceRuntimeProgram",
@@ -282,30 +291,37 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "createLexerSpecRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createParserObjectRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createSourceTextRuntimeProgram");
-  assertIncludes(parserRuntimeSource, "parserReducerOperation");
-  assertIncludes(parserRuntimeSource, "parserReducerPayloadStatus");
-  assertIncludes(parserRuntimeSource, "parserReducerChildRole");
+  assertIncludes(runtimeLanguageSourcesSource, "parserReducerOperation");
+  assertIncludes(runtimeLanguageSourcesSource, "parserReducerPayloadStatus");
+  assertIncludes(runtimeLanguageSourcesSource, "parserReducerChildRole");
   assertIncludes(parserRuntimeSource, "catch (error)");
   assertIncludes(parserRuntimeSource, "internalParserDiagnostic(error");
-  assertIncludes(parserRuntimeSource, "parserReducerResultKind");
-  assertIncludes(parserRuntimeSource, "parserReplayReductionStatus");
-  assertIncludes(parserRuntimeSource, "parserReplayRhsStart");
-  assertIncludes(parserRuntimeSource, "parserReplayStackDepth");
-  assertIncludes(parserRuntimeSource, "parserReplayActionStatus");
+  assertIncludes(runtimeLanguageSourcesSource, "parserReducerResultKind");
+  assertIncludes(runtimeLanguageSourcesSource, "parserReplayReductionStatus");
+  assertIncludes(runtimeLanguageSourcesSource, "parserReplayRhsStart");
+  assertIncludes(runtimeLanguageSourcesSource, "parserReplayStackDepth");
+  assertIncludes(runtimeLanguageSourcesSource, "parserReplayActionStatus");
   assertNotIncludes(parserRuntimeSource, "rhsLength === 0");
   assertNotIncludes(parserRuntimeSource, "values.length - rhsLength");
   assertNotIncludes(parserRuntimeSource, "values.length - 1");
+  assertNotIncludes(parserRuntimeSource, "let streamIndex");
+  assertNotIncludes(parserRuntimeSource, "values.splice");
+  assertNotIncludes(parserRuntimeSource, "switch (reducerResultKind)");
+  assertNotIncludes(parserRuntimeSource, "function tokenFragment");
   assertIncludes(parserRuntimeSource, "lexerSpecTerminal");
   assertIncludes(parserRuntimeSource, "lexerSpecPublicTokenStatus");
-  assertIncludes(parserRuntimeSource, "parserFieldStorageStatus");
-  assertIncludes(parserRuntimeSource, "parserFieldSchemaStatus");
-  assertIncludes(parserRuntimeSource, "parserFieldBuildStatus");
-  assertIncludes(parserRuntimeSource, "parserFieldEntryStatus");
+  assertIncludes(publicRuleNodeMaterializerSource, "parserFieldStorageStatus");
+  assertIncludes(publicRuleNodeMaterializerSource, "parserFieldSchemaStatus");
+  assertIncludes(publicRuleNodeMaterializerSource, "parserFieldBuildStatus");
+  assertIncludes(publicRuleNodeMaterializerSource, "parserFieldEntryStatus");
   assertIncludes(runtimeLanguageSourcesSource, "parserFieldValueClass");
   assertIncludes(runtimeLanguageSourcesSource, "parserFieldStorageStatus");
-  assertIncludes(parserRuntimeSource, "parserFieldCaptureStatus");
+  assertIncludes(publicRuleNodeMaterializerSource, "parserFieldCaptureStatus");
   assertIncludes(runtimeLanguageSourcesSource, "parserFieldFinalStatus");
-  assertIncludes(parserRuntimeSource, "parserFieldFinalBuildStatus");
+  assertIncludes(
+    publicRuleNodeMaterializerSource,
+    "parserFieldFinalBuildStatus",
+  );
   assertNotIncludes(parserRuntimeSource, "captureCount > 0");
   assertNotIncludes(
     parserRuntimeSource,
@@ -337,14 +353,26 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "parserRuleNodeChildListStatus",
   );
   assertNotIncludes(publicRuleNodeMaterializerSource, "if (count === 0)");
-  assertIncludes(parserRuntimeSource, "const counts = runtimeArrayNew");
-  assertIncludes(parserRuntimeSource, "runtimeArrayStore(counts");
-  assertIncludes(parserRuntimeSource, "const fieldValues = runtimeRecordNew");
-  assertIncludes(parserRuntimeSource, "runtimeRecordStore(fieldValues");
-  assertIncludes(parserRuntimeSource, "runtimeVectorAppend(values, value)");
+  assertIncludes(
+    publicRuleNodeMaterializerSource,
+    "const counts = runtimeArrayNew",
+  );
+  assertIncludes(publicRuleNodeMaterializerSource, "runtimeArrayStore(counts");
+  assertIncludes(
+    publicRuleNodeMaterializerSource,
+    "const fieldValues = runtimeRecordNew",
+  );
+  assertIncludes(
+    publicRuleNodeMaterializerSource,
+    "runtimeRecordStore(fieldValues",
+  );
+  assertIncludes(
+    publicRuleNodeMaterializerSource,
+    "runtimeVectorAppend(values, value)",
+  );
   assertIncludes(parserRuntimeSource, "emitPublicFieldMaterializer");
-  assertIncludes(parserRuntimeSource, "createPublicFieldObject");
-  assertIncludes(parserRuntimeSource, "storePublicField");
+  assertIncludes(publicFieldMaterializerSource, "createPublicFieldObject");
+  assertIncludes(publicFieldMaterializerSource, "storePublicField");
   assertIncludes(
     publicFieldMaterializerSource,
     "function materializeFieldArray",
@@ -406,7 +434,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "parserTokenStreamPublicTokenStatus",
   );
   assertIncludes(
-    parserRuntimeSource,
+    runtimeLanguageSourcesSource,
     "parserTraceTokenStreamStatus",
   );
   assertIncludes(
@@ -414,8 +442,20 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "parserTraceTokenStreamPublicIndex",
   );
   assertIncludes(
-    parserRuntimeSource,
+    runtimeLanguageSourcesSource,
     "parserTraceTerminal",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTraceTokenStreamStep",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTraceTokenStreamStepStatus",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTraceTokenStreamStepTerminal",
   );
   assertIncludes(
     parserRuntimeSource,
@@ -447,6 +487,11 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertNotIncludes(parserRuntimeSource, 'token.channel !== "error"');
   assertNotIncludes(parserRuntimeSource, "function isTraceTriviaToken");
+  assertNotIncludes(parserRuntimeSource, "function skipTraceTrivia");
+  assertNotIncludes(
+    parserRuntimeSource,
+    "traceTokenStreamStatus(tokens[index])",
+  );
   assertNotIncludes(
     parserRuntimeSource,
     "index < tokens.length ? index : tokens.length",
@@ -541,7 +586,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(publicParseResultMaterializerSource, "ok: true");
   assertIncludes(publicParseResultMaterializerSource, "ok: false");
   assertIncludes(parserRuntimeSource, "emitPublicRuleNodeMaterializer");
-  assertIncludes(parserRuntimeSource, "hostRuleNodeRuntimeHandle");
+  assertIncludes(publicRuleNodeMaterializerSource, "hostRuleNodeRuntimeHandle");
   assertIncludes(parserRuntimeSource, "resetPublicSyntaxMaterialization");
   assertIncludes(
     publicRuleNodeMaterializerSource,

@@ -63,3 +63,19 @@ deno test -A tests/runtime_language_test.ts tests/runtime_plan_test.ts tests/par
 - Do not rename public diagnostic string codes.
 - Do not remove source spans or related locations.
 - Do not collapse structured numeric payloads into display strings.
+
+## Completion Notes
+
+Completed on 2026-06-23.
+
+- Runtime diagnostic code, detail-kind, span, expected-range, and numeric
+  payload decisions are backed by runtime-language helpers and runtime
+  diagnostic records; host code only renders public `message`, `expected`, and
+  `found` strings from those records.
+- `ParseDiagnostic` keeps backward-compatible public string codes while also
+  exposing `runtimeCode`, `runtimeDetail`, `runtimeDetailKind`, and
+  `runtimeDetailKindId`; generated Wasm `abi.json` descriptors expose matching
+  diagnostic schemas.
+- `tests/runtime_plan_test.ts`, `tests/runtime_language_test.ts`, and parser
+  diagnostics tests cover the split between runtime-owned payload semantics and
+  host-owned presentation.

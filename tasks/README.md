@@ -32,10 +32,9 @@ split it further. Assign only one task file per Spark run.
 
 ## Completed Closure Tasks
 
-These cards were added after the audit showed the release gate passing with two
-partial/future-work areas still worth tracking. They now have focused runtime
-helper coverage and status evidence; rerun
-`130-equivalence-fuzz-release-gate.md` after touching this area again.
+These cards were added after the audit showed two follow-up areas worth
+tracking. They now have focused runtime helper coverage and status evidence;
+rerun `130-equivalence-fuzz-release-gate.md` after touching this area again.
 
 18. `140-runtime-source-text-boundary-closure.md`
 19. `141-runtime-token-stream-boundary-closure.md`
@@ -52,19 +51,11 @@ unfinished release blockers.
 
 ## Completed Runtime Source-Of-Truth Follow-Ups
 
-These cards narrow the final FEEDBACK P0.1 source-of-truth boundary after the
+These cards close the final FEEDBACK P0.1 source-of-truth boundary after the
 cutline task.
 
 24. `171-runtime-dynamic-source-text-handles.md`
 25. `172-runtime-lexer-driver-lowering.md`
-
-## Remaining Runtime Source-Of-Truth Work
-
-These cards cover the last partial FEEDBACK item after the source-text boundary
-task: full mechanical lowering of the parser runtime through the runtime
-language. They are intentionally sequenced because each one narrows the
-host/runtime boundary for the next.
-
 26. `173-runtime-token-stream-normalization-lowering.md`
 27. `174-runtime-replay-vm-lowering.md`
 28. `175-runtime-public-materialization-boundary.md`
@@ -91,13 +82,13 @@ host/runtime boundary for the next.
 - Completed FEEDBACK P0.1 cutline: `170`
 - Completed FEEDBACK P0.1 source text handles: `171`
 - Completed FEEDBACK P0.1 lexer driver lowering: `172`
-- Remaining full FEEDBACK P0.1 runtime-source-of-truth work: `173` through `178`
+- Completed full FEEDBACK P0.1 runtime-source-of-truth work: `173` through `178`
 - Completed FEEDBACK P1.17 environment/CI closure: `150`
 - Non-blocking hardening follow-ups from `tasks/status.md`: `160`
 
-Many items are partially implemented. Each task starts with an audit step. If
-the current code already proves the requirement, add or tighten regression
-coverage and update `FEEDBACK.md` with the evidence rather than rewriting it.
+Many historical cards started with an audit step. If a future change touches the
+same area, re-run the listed evidence rather than assuming earlier closure still
+holds.
 
 ## Parallelization Notes
 

@@ -28,6 +28,7 @@ import {
   createParserObjectRuntimeProgram,
   createParserProductionRuntimeProgram,
   createParserReducerRuntimeProgram,
+  createParserReplayRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
   createSourceTextRuntimeProgram,
@@ -140,6 +141,7 @@ import {
   RUNTIME_REDUCER_RESULT_UNKNOWN,
   RUNTIME_REDUCER_RULE,
   RUNTIME_REDUCER_SEQUENCE,
+  RUNTIME_REDUCER_START,
   RUNTIME_REDUCER_UNKNOWN,
   RUNTIME_REPLAY_ACTION_STATUS_ACCEPT,
   RUNTIME_REPLAY_ACTION_STATUS_REDUCE,
@@ -2346,6 +2348,162 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
     ],
   };
   const parserObjectBaseProgram = createParserObjectRuntimeProgram();
+  const parserReplayProductionProgram = createParserProductionRuntimeProgram({
+    productions: [
+      [0, 1],
+      [7, 1],
+    ],
+  });
+  const parserReplayReducerProgram = createParserReducerRuntimeProgram({
+    reducers: [
+      [RUNTIME_REDUCER_START, RUNTIME_NO_REDUCER_PAYLOAD],
+      [RUNTIME_REDUCER_RULE, 7],
+    ],
+  });
+  const parserReplayRuntimeProgram = createParserReplayRuntimeProgram();
+  const parserReplayActionProgram = createParserActionRuntimeProgram();
+  const parserReplayVmProgram: RuntimeLanguageProgram = {
+    name: "parser_replay_vm_conformance",
+    entry: "main",
+    scratchMemoryWords: parserObjectBaseProgram.scratchMemoryWords,
+    tables: [
+      ...(parserObjectBaseProgram.tables ?? []),
+      ...(parserReplayProductionProgram.tables ?? []),
+      ...(parserReplayReducerProgram.tables ?? []),
+      ...(parserReplayActionProgram.tables ?? []),
+      ...(parserReplayRuntimeProgram.tables ?? []),
+    ],
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      ...parserReplayProductionProgram.functions,
+      ...parserReplayReducerProgram.functions,
+      ...parserReplayActionProgram.functions,
+      ...parserReplayRuntimeProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "trace", type: "u32" },
+          { name: "tokens", type: "u32" },
+          { name: "indices", type: "u32" },
+          { name: "token", type: "u32" },
+          { name: "eof", type: "u32" },
+          { name: "result", type: "u32" },
+          { name: "status", type: "u32" },
+          { name: "root", type: "u32" },
+          { name: "discard", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("runtimeArenaReset", [])),
+          setLocal("trace", call("runtimeVectorNew", [u32(4)])),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [
+              local("trace"),
+              u32(RUNTIME_ACTION_SHIFT),
+            ]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [
+              local("trace"),
+              u32(RUNTIME_ACTION_REDUCE + 1),
+            ]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [
+              local("trace"),
+              u32(RUNTIME_ACTION_REDUCE),
+            ]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [
+              local("trace"),
+              u32(RUNTIME_ACTION_ACCEPT),
+            ]),
+          ),
+          setLocal("tokens", call("runtimeVectorNew", [u32(2)])),
+          setLocal("indices", call("runtimeVectorNew", [u32(2)])),
+          setLocal(
+            "token",
+            call("parserTokenNew", [
+              u32(RUNTIME_PUBLIC_TOKEN_LITERAL),
+              u32(0),
+              u32(1),
+              u32(0),
+              u32(1),
+            ]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [local("tokens"), local("token")]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [local("indices"), u32(0)]),
+          ),
+          setLocal(
+            "eof",
+            call("parserTokenNew", [
+              u32(RUNTIME_PUBLIC_TOKEN_EOF),
+              u32(0),
+              u32(0),
+              u32(1),
+              u32(1),
+            ]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [local("tokens"), local("eof")]),
+          ),
+          setLocal(
+            "discard",
+            call("runtimeVectorAppend", [local("indices"), u32(1)]),
+          ),
+          setLocal(
+            "result",
+            call("parserReplayVm", [
+              local("trace"),
+              local("tokens"),
+              local("indices"),
+            ]),
+          ),
+          setLocal(
+            "status",
+            call("parserReplayResultStatus", [local("result")]),
+          ),
+          {
+            kind: "if",
+            condition: eq(local("status"), u32(0)),
+            consequent: [],
+            alternate: [{
+              kind: "return",
+              expression: mul(local("status"), u32(10_000)),
+            }],
+          },
+          setLocal("root", call("parserReplayResultRoot", [local("result")])),
+          {
+            kind: "return",
+            expression: add(
+              mul(local("status"), u32(10_000)),
+              add(
+                mul(call("parserRuleNodeRuleId", [local("root")]), u32(100)),
+                add(
+                  mul(
+                    call("parserRuleNodeChildCount", [local("root")]),
+                    u32(10),
+                  ),
+                  call("parserRuleNodeTokenEnd", [local("root")]),
+                ),
+              ),
+            ),
+          },
+        ],
+      },
+    ],
+  };
   const parserObjectProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_object_conformance",
@@ -3250,6 +3408,112 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       },
     ],
   };
+  const parserTraceTokenStreamStepProgram: RuntimeLanguageProgram = {
+    ...parserObjectBaseProgram,
+    name: "parser_trace_token_stream_step",
+    entry: "main",
+    functions: [
+      ...parserObjectBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              eq(
+                call("parserTraceTokenStreamStepStatus", [
+                  call("parserTraceTokenStreamStep", [
+                    u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                    u32(7),
+                    u32(8),
+                    u32(9),
+                  ]),
+                ]),
+                u32(RUNTIME_TRACE_TOKEN_STREAM_EMIT),
+              ),
+              u32(100_000),
+            ),
+            add(
+              mul(
+                eq(
+                  call("parserTraceTokenStreamStepTerminal", [
+                    call("parserTraceTokenStreamStep", [
+                      u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                      u32(7),
+                      u32(8),
+                      u32(9),
+                    ]),
+                  ]),
+                  u32(7),
+                ),
+                u32(10_000),
+              ),
+              add(
+                mul(
+                  eq(
+                    call("parserTraceTokenStreamStepStatus", [
+                      call("parserTraceTokenStreamStep", [
+                        u32(RUNTIME_PUBLIC_TOKEN_TRIVIA),
+                        u32(RUNTIME_NO_TERMINAL),
+                        u32(8),
+                        u32(9),
+                      ]),
+                    ]),
+                    u32(RUNTIME_TRACE_TOKEN_STREAM_SKIP),
+                  ),
+                  u32(1_000),
+                ),
+                add(
+                  mul(
+                    eq(
+                      call("parserTraceTokenStreamStepStatus", [
+                        call("parserTraceTokenStreamStep", [
+                          u32(RUNTIME_PUBLIC_TOKEN_EOF),
+                          u32(RUNTIME_NO_TERMINAL),
+                          u32(8),
+                          u32(9),
+                        ]),
+                      ]),
+                      u32(RUNTIME_TRACE_TOKEN_STREAM_STOP),
+                    ),
+                    u32(100),
+                  ),
+                  add(
+                    mul(
+                      eq(
+                        call("parserTraceTokenStreamStepTerminal", [
+                          call("parserTraceTokenStreamStep", [
+                            u32(RUNTIME_PUBLIC_TOKEN_EOF),
+                            u32(RUNTIME_NO_TERMINAL),
+                            u32(8),
+                            u32(9),
+                          ]),
+                        ]),
+                        u32(9),
+                      ),
+                      u32(10),
+                    ),
+                    eq(
+                      call("parserTraceTokenStreamStepTerminal", [
+                        call("parserTraceTokenStreamStep", [
+                          u32(RUNTIME_PUBLIC_TOKEN_MAIN),
+                          u32(RUNTIME_NO_TERMINAL),
+                          u32(RUNTIME_NO_TERMINAL),
+                          u32(9),
+                        ]),
+                      ]),
+                      u32(RUNTIME_NO_TERMINAL),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
   const parserShiftedTokenStatusProgram: RuntimeLanguageProgram = {
     ...parserObjectBaseProgram,
     name: "parser_shifted_token_status",
@@ -4017,6 +4281,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       expected: { kind: "value", value: 411_425_139 },
     },
     {
+      name: "runtime parser replay VM builds accepted rule-node handles",
+      program: parserReplayVmProgram,
+      expected: { kind: "value", value: 711 },
+    },
+    {
       name: "runtime parser rule-node child list status classifies empty lists",
       program: parserRuleNodeChildListStatusProgram,
       expected: {
@@ -4140,6 +4409,11 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "runtime trace terminal helper selects parser terminals",
       program: parserTraceTerminalProgram,
       expected: { kind: "value", value: 1_111 },
+    },
+    {
+      name: "runtime trace token-stream step packs status and terminal",
+      program: parserTraceTokenStreamStepProgram,
+      expected: { kind: "value", value: 111_111 },
     },
     {
       name: "runtime shifted-token helper classifies syntax tokens",

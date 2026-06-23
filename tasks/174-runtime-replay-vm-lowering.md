@@ -65,3 +65,19 @@ deno test -A tests/runtime_language_test.ts tests/runtime_plan_test.ts tests/par
 - Do not change public CST object shapes.
 - Do not rewrite parser planning in this task.
 - Do not remove current internal-error diagnostic behavior at public boundaries.
+
+## Completion Notes
+
+Completed on 2026-06-23.
+
+- Added `createParserReplayRuntimeProgram()` and the runtime-language
+  `parserReplayVm` contract for accepted trace replay, including replay result
+  handles and structured VM statuses for unknown actions, unknown productions,
+  missing payloads, stack underflow, stream underflow, and reductions.
+- Replaced generated TypeScript host reduction dispatch/value-stack replay with
+  a bridge that passes accepted trace actions and runtime token handles into the
+  VM, then materializes the accepted runtime root through shared host
+  materializers.
+- Tightened runtime-plan guards against `reduceProduction`, host replay stack
+  mutation, and legacy token/fragment helpers; added runtime-language
+  TypeScript/Wasm conformance for the replay VM.

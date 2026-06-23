@@ -66,3 +66,19 @@ deno test -A tests/runtime_language_test.ts tests/runtime_plan_test.ts tests/par
 - Do not require callers to include trivia tokens.
 - Do not change public token names or parser API signatures.
 - Do not remove public diagnostics for invalid external token streams.
+
+## Completion Notes
+
+Completed on 2026-06-23.
+
+- Added packed runtime-language trace-token stream step helpers
+  (`parserTraceTokenStreamStep`, `parserTraceTokenStreamStepStatus`, and
+  `parserTraceTokenStreamStepTerminal`) so generated parser adapters consume one
+  runtime-owned token-stream normalization decision for status and terminal
+  selection.
+- Removed the old generated `skipTraceTrivia` path and tightened
+  `tests/runtime_plan_test.ts` against reintroducing host-side trivia skipping
+  or direct token-stream status checks.
+- Added TypeScript/Wasm runtime-language conformance for the packed step helper
+  and kept `parseTokens()` strict validation/parity coverage across generated
+  TypeScript, Wasm, and parser-kit tests.

@@ -64,3 +64,19 @@ deno test -A tests/wasm_test.ts tests/ts_wasm_parity_test.ts
 - Do not claim WASI or Component Model support unless implemented.
 - Do not remove or break the JavaScript-hosted adapter.
 - Do not require Wasmtime for ordinary generated parser consumers.
+
+## Completion Notes
+
+Completed on 2026-06-23.
+
+- Generated `wasm/abi.json` descriptors and core exports document the
+  JavaScript-hosted core-Wasm ABI surface, including source encoding, span
+  units, input/result buffer ownership, trace statuses, parser-plan identity,
+  runtime implementation identity, diagnostic schemas, and adapter handle
+  lifetime rules.
+- `tests/wasm_test.ts` includes independent-tooling validation for `wasm-tools`
+  and Wasmtime when those binaries are installed; CI provisions both before
+  `deno task test`, while ordinary local consumers do not need Wasmtime.
+- README and runtime-language docs keep the support boundary explicit: Baba
+  emits JavaScript-hosted core Wasm adapters today, not WASI, Component Model,
+  WIT, or browser-only packages.

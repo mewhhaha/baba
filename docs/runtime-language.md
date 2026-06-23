@@ -1,9 +1,9 @@
 # Runtime Language Semantics
 
 Baba's runtime language is private compiler infrastructure for standalone parser
-runtimes. Its current executable subset is intentionally small: it exists to
-make runtime semantics testable while the parser runtime is being lowered
-through the language.
+runtimes. Its current executable subset is intentionally focused: it makes
+runtime semantics testable and backs the generated TypeScript/Wasm parser
+runtime boundary.
 
 ## Version
 
@@ -54,7 +54,7 @@ Host-owned boundaries:
 - target packaging: imports, generated type declarations, table data, manifest
   metadata, and runtime artifact reexports.
 
-Forbidden after the remaining source-of-truth work closes:
+Forbidden source-of-truth duplication:
 
 - target-specific DFA, token-stream, LR trace, replay, reducer, field,
   diagnostic-payload, or accepted-root algorithms that duplicate
@@ -64,12 +64,15 @@ Forbidden after the remaining source-of-truth work closes:
 - generated TypeScript/Wasm adapter branches that decide parser semantics while
   bypassing the runtime-language source.
 
-Task `170-runtime-source-of-truth-cutline.md` records this cutline. Task `171`
-closed the explicit source-text helper boundary, and task `172` closed the
-generated TypeScript lexer-driver loop; tasks `173` through `178` track the
-remaining implementation work needed to satisfy it. Requirement 1 should stay
-partial until `178-final-runtime-source-of-truth-gate.md` can mark this proof
-complete with tests and regenerated artifacts.
+Task `170-runtime-source-of-truth-cutline.md` records this cutline, and tasks
+`171` through `178-final-runtime-source-of-truth-gate.md` closed it for the
+generated TypeScript and JavaScript-hosted Wasm parser runtimes. The remaining
+JavaScript code in those targets is the documented host boundary: source/string
+capabilities, public object allocation, diagnostic rendering, adapter handle
+provenance, and packaging. Parser-kit helpers remain tooling/convenience
+interpreters for `parser-kit.json`, not one of the two generated runtime targets
+in this proof; they are covered by parity tests and may be lowered or split into
+a separate helper runtime in a future compatibility task.
 
 `deno task bootstrap:check` verifies the Stage-0 runtime-language compiler
 source hash before it checks regenerated example artifacts. This catches
@@ -82,26 +85,25 @@ resolved `RuntimeLanguageIrProgram` before emitting TypeScript or Wasm. That IR
 records the entry function, function/table lookup maps, scratch-memory shape,
 original typed source program, and lowered control-flow/value nodes with
 resolved local, function, and table indexes. Target-specific byte/source
-emission still happens in each backend; checked generated runtime artifacts
-remain a future step before Baba can claim the full parser runtime is emitted
-from one runtime-language implementation.
+emission still happens in each backend, and canonical runtime-language helper
+artifacts are checked by the artifact manifest.
 
-The first runtime-language-backed parser helpers are used by generated
-TypeScript lexers and parsers: `sourceTextOffsetStatus` and
-`sourceTextSpanStatus` classify dynamic source offsets/spans,
-`sourceTextHasTrailUnit` and `sourceTextCodePointFromUnits` classify UTF-16
-source-unit availability and decode code points, `sourceTextNextOffset` advances
-over UTF-16 code points, `dfaTransition` performs DFA transition lookup from
-generated read-only tables, and `lexerScan*` helpers track longest-match
-accepting candidates from generated DFA accept tables. Generated TypeScript
-lexer source access still reads host-owned strings, but `SourceTextBoundary`
-calls runtime-language source helpers for bounds, trail, code-point,
-next-offset, and accepted-length decisions. The runtime-language `lexerDriver*`
-helpers own the generated TypeScript lexer driver state: the host wrapper only
-feeds the code point at `lexerDriverReadOffset()` and then wraps `TOKEN` or
-`ERROR` events reported by the driver. The driver performs maximal-munch scan
-iteration, accepted-spec selection, preserve-trivia emission decisions, public
-token class/payload/terminal selection, and lexical-error fallback advancement.
+Runtime-language-backed parser helpers are used by generated TypeScript lexers
+and parsers: `sourceTextOffsetStatus` and `sourceTextSpanStatus` classify
+dynamic source offsets/spans, `sourceTextHasTrailUnit` and
+`sourceTextCodePointFromUnits` classify UTF-16 source-unit availability and
+decode code points, `sourceTextNextOffset` advances over UTF-16 code points,
+`dfaTransition` performs DFA transition lookup from generated read-only tables,
+and `lexerScan*` helpers track longest-match accepting candidates from generated
+DFA accept tables. Generated TypeScript lexer source access still reads
+host-owned strings, but `SourceTextBoundary` calls runtime-language source
+helpers for bounds, trail, code-point, next-offset, and accepted-length
+decisions. The runtime-language `lexerDriver*` helpers own the generated
+TypeScript lexer driver state: the host wrapper only feeds the code point at
+`lexerDriverReadOffset()` and then wraps `TOKEN` or `ERROR` events reported by
+the driver. The driver performs maximal-munch scan iteration, accepted-spec
+selection, preserve-trivia emission decisions, public token
+class/payload/terminal selection, and lexical-error fallback advancement.
 `lexerSpecTokenClass`, `lexerSpecPayload`, and `lexerSpecTerminal` map accepted
 lexer spec indexes to token object classification data and parser terminal ids
 for generated TypeScript `parse(source)`, while `lexerSpecFlags` remains the
@@ -143,33 +145,37 @@ literal/named/error token shape after host type/channel/text spelling is mapped
 to numeric classes. `lexerTokenDiagnosticStatus` classifies external tokens as
 diagnostically accepted, lexical error tokens, or not in the parser terminal set
 before TypeScript allocates the public diagnostic object.
-`parserTraceTokenStreamStatus` classifies public token records as parser-trace
-input, skippable trivia, or EOF stop tokens before generated TypeScript parsers
-and Wasm adapters compact public tokens into terminal streams.
-`parserTraceTokenStreamPublicIndex` owns the public-token-index sentinel used
-when the compacted trace reaches synthetic EOF. Deterministic parsers also call
-`parserTraceTerminal` to select EOF, trusted runtime, spec, or missing parser
-terminals before tracing. `parserShiftedTokenStatus` classifies literal/main
-public tokens as valid shifted CST token fragments and rejects trivia, lexical
-error, and EOF records before generated replay allocates runtime token
-fragments. Deterministic parsers use `parserAction`/`parserGoto` for parser
-table lookup, and conflict parsers use generated
-`parserActionAt`/`parserActionCount`/`parserGoto` helpers for multi-action
-fan-out and goto lookup. Generated parsers also use the `parserExpectedStart`
-and `parserExpectedEnd` helpers to map parser states to flattened
-expected-terminal display ranges for diagnostics, and
+`parserTraceTokenStreamStep` classifies public token records as parser-trace
+input, skippable trivia, or EOF stop tokens and packs the selected trace
+terminal for generated TypeScript parsers and Wasm adapters. The helper uses the
+runtime-language `parserTraceTerminal` taxonomy internally to select EOF,
+trusted runtime, spec, or missing parser terminals.
+`parserTraceTokenStreamStepStatus` and `parserTraceTokenStreamStepTerminal`
+unpack the trace decision, and `parserTraceTokenStreamPublicIndex` owns the
+public-token-index sentinel used when the compacted trace reaches synthetic EOF.
+`parserShiftedTokenStatus` classifies literal/main public tokens as valid
+shifted CST token fragments and rejects trivia, lexical error, and EOF records
+before generated replay allocates runtime token fragments. Deterministic parsers
+use `parserAction`/`parserGoto` for parser table lookup, and conflict parsers
+use generated `parserActionAt`/`parserActionCount`/`parserGoto` helpers for
+multi-action fan-out and goto lookup. Generated parsers also use the
+`parserExpectedStart` and `parserExpectedEnd` helpers to map parser states to
+flattened expected-terminal display ranges for diagnostics, and
 `parserUnexpectedDiagnosticCode` uses runtime EOF flags to choose
 unexpected-token versus trailing-input runtime diagnostic codes without scanning
-display strings. Reduction replay uses
-`parserProductionLhs`/`parserProductionRhsLength` helpers for production
-metadata lookups while generated TypeScript still owns reducer descriptor
-execution and CST construction. Generated parser replay now gets reducer
-descriptor kind/payload metadata from `parserReducerKind`/`parserReducerPayload`
-helpers, reducer operation classes from `parserReducerOperation`, and required
-payload status from `parserReducerPayloadStatus`, plus child-role requirements
-from `parserReducerChildRole`; reducer result-shape classification comes from
+display strings. Accepted parser traces are replayed by the runtime-language
+`parserReplayVm`, which owns action iteration, value-stack operations,
+production metadata lookup, reduction dispatch, fragment construction, field
+capture attachment, child-list construction, accepted-root selection, and
+structured replay failure statuses. The generated TypeScript/Wasm adapters pass
+runtime token handles and accepted trace vectors into that VM, then materialize
+the accepted runtime root through shared public object wrappers. The replay VM
+uses reducer descriptor metadata from `parserReducerKind`/
+`parserReducerPayload`, reducer operation classes from `parserReducerOperation`,
+payload validation from `parserReducerPayloadStatus`, child-role requirements
+from `parserReducerChildRole`, and reducer result-shape classification from
 `parserReducerResultKind`, all backed by numeric reducer tables. CST field
-assembly now reads field row/config metadata through
+assembly reads field row/config metadata through
 `parserFieldStart`/`parserFieldEnd`/`parserFieldId`/
 `parserFieldFlags`/`parserFieldIndex` helpers. JavaScript still materializes the
 public CST object shape, but replay now carries runtime-language parser object
@@ -468,22 +474,19 @@ execute both outputs and compare returned values or traps.
   numeric detail-kind id, and public payload fields.
 - `if` and `while` conditions treat zero as false and any nonzero `u32` as true.
 
-## Not Yet In The Executable Subset
+## Future Runtime-Language Growth
 
-These rules must be specified before the parser runtime can be fully lowered:
+These areas are deliberately outside the current generated TypeScript/Wasm
+source-of-truth proof and remain future runtime-language or host-neutral ABI
+work:
 
 - executable host-boundary ownership helpers and opaque handle capability
   lifetimes for future non-JS Wasm hosts beyond the current ABI descriptor,
   linear-memory ownership metadata, and JavaScript-hosted
   `WasmSourceBuffer`/`ParseTraceInput` provenance gates;
-- host source-text handles fully lowered into the runtime language, including a
-  future non-JavaScript dynamic source-buffer ABI;
+- host source-text handles fully lowered into the runtime language for a future
+  non-JavaScript dynamic source-buffer ABI;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
-- complete generated-parser lowering for remaining host public object
-  materialization that still sits outside the shared token, lex diagnostic,
-  lex-result, parse diagnostic, parse-result, field, and rule-node public
-  wrapper helpers.
-
-Until the parser runtime is lowered through this language, Baba does not claim
-that the full TypeScript and Wasm parser runtimes are mechanically emitted from
-one runtime-language implementation.
+- optional parser-kit helper lowering, if Baba later wants `parser-kit.json`
+  convenience execution to share the same runtime-language artifact path as the
+  generated TypeScript and Wasm targets.

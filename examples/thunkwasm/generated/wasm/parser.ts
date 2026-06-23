@@ -4,8 +4,6 @@ import { createParseTraceInput, parseTrace, type ParseTraceInput } from "./wasm.
 import type {
   AnyRuleNode,
   LexDiagnostic,
-  LiteralToken,
-  MainNamedToken,
   ParseDiagnostic,
   ParseOptions,
   ParseResult,
@@ -15,21 +13,9 @@ import type {
   Token,
 } from "./syntax.ts";
 
-interface Fragment {
-  runtimeHandle: number;
-  value: unknown;
-  span: Span | null;
-  tokenRange: TokenRange | null;
-}
-
 interface TokenRange {
   start: number;
   end: number;
-}
-
-interface ShiftedToken {
-  token: Token;
-  tokenIndex: number;
 }
 
 
@@ -90,7 +76,20 @@ const REPLAY_REDUCTION_UNKNOWN_PRODUCTION = 1;
 const REPLAY_REDUCTION_RULE_PAYLOAD_MISSING = 2;
 const REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING = 3;
 const REPLAY_REDUCTION_STACK_UNDERFLOW = 4;
+const REPLAY_VM_OK = 0;
+const REPLAY_VM_UNKNOWN_ACTION = 1;
+const REPLAY_VM_UNKNOWN_PRODUCTION = 2;
+const REPLAY_VM_RULE_PAYLOAD_MISSING = 3;
+const REPLAY_VM_FIELD_PAYLOAD_MISSING = 4;
+const REPLAY_VM_STACK_UNDERFLOW = 5;
+const REPLAY_VM_REDUCTION_FAILED = 6;
+const REPLAY_VM_STREAM_UNDERFLOW = 7;
+const REPLAY_VM_ENDED_WITHOUT_ACCEPT = 8;
 const RULE_NODE_CHILD_LIST_EMPTY = 0;
+const RUNTIME_VALUE_TOKEN = 1;
+const RUNTIME_VALUE_RULE_NODE = 2;
+const RUNTIME_VALUE_VECTOR = 3;
+const RUNTIME_VALUE_FRAGMENT = 4;
 const SHIFTED_TOKEN_OK = 0;
 const FIELD_ENTRY_MISSING = 1;
 const FIELD_ARRAY_VALUE_MISSING = 1;
@@ -1814,6 +1813,30 @@ function parserTraceTerminal(publicClass: number, trustedTerminal: number, specT
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function parserTraceTokenStreamStep(publicClass: number, trustedTerminal: number, specTerminal: number, eofTerminal: number): number {
+  let status = 0;
+  let terminal = 0;
+  status = (parserTraceTokenStreamStatus(publicClass) >>> 0) >>> 0;
+  terminal = (parserTraceTerminal(publicClass, trustedTerminal, specTerminal, eofTerminal) >>> 0) >>> 0;
+  return (((Math.imul((status) >>> 0, (16777216) >>> 0) >>> 0) + (((terminal) & (16777215)) >>> 0)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTraceTokenStreamStepStatus(step: number): number {
+  return (((step) >>> ((24) & 31)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserTraceTokenStreamStepTerminal(step: number): number {
+  let terminal = 0;
+  terminal = (((step) & (16777215)) >>> 0) >>> 0;
+  if (((((terminal) >>> 0) === ((16777215) >>> 0) ? 1 : 0)) !== 0) {
+    return (4294967295) >>> 0;
+  }
+  return (terminal) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function parserShiftedTokenStatus(publicClass: number): number {
   if (((((publicClass) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
     return (0) >>> 0;
@@ -1917,6 +1940,280 @@ function parserRuleNodeChildListStatus(count: number): number {
 
 function parserRuleNodeFieldCount(handle: number): number {
   return (runtimeVectorLength(parserRuleNodeFields(handle) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuntimeValueStatus(handle: number): number {
+  let kindValue = 0;
+  if (((((handle) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  kindValue = (runtimeObjectKind(handle) >>> 0) >>> 0;
+  if (((((kindValue) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (3) >>> 0;
+  }
+  if (((((kindValue) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    return (4) >>> 0;
+  }
+  return (5) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayResultNew(status: number, root: number, streamIndex: number): number {
+  let handle = 0;
+  handle = (runtimeArenaAlloc(4) >>> 0) >>> 0;
+  __baba_store_scratch(handle, 9);
+  __baba_store_scratch(((handle) + (1)) >>> 0, status);
+  __baba_store_scratch(((handle) + (2)) >>> 0, root);
+  __baba_store_scratch(((handle) + (3)) >>> 0, streamIndex);
+  return (handle) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayResultStatus(handle: number): number {
+  let discard = 0;
+  discard = (runtimeExpectObjectKind(handle, 9) >>> 0) >>> 0;
+  return (__baba_load_scratch(((handle) + (1)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayResultRoot(handle: number): number {
+  let discard = 0;
+  discard = (runtimeExpectObjectKind(handle, 9) >>> 0) >>> 0;
+  return (__baba_load_scratch(((handle) + (2)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayResultStreamIndex(handle: number): number {
+  let discard = 0;
+  discard = (runtimeExpectObjectKind(handle, 9) >>> 0) >>> 0;
+  return (__baba_load_scratch(((handle) + (3)) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserRuleNodeFragment(ruleNode: number): number {
+  let fragment = 0;
+  let discard = 0;
+  fragment = (parserFragmentNew(ruleNode, parserRuleNodeSpanStart(ruleNode) >>> 0, parserRuleNodeSpanEnd(ruleNode) >>> 0, parserRuleNodeTokenStart(ruleNode) >>> 0, parserRuleNodeTokenEnd(ruleNode) >>> 0) >>> 0) >>> 0;
+  discard = (parserFragmentAppendChild(fragment, ruleNode) >>> 0) >>> 0;
+  return (fragment) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayValueToFragment(value: number): number {
+  let status = 0;
+  status = (parserRuntimeValueStatus(value) >>> 0) >>> 0;
+  if (((((status) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    return (value) >>> 0;
+  }
+  if (((((status) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (parserRuleNodeFragment(value) >>> 0) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayReducerChild(values: number, rhsStart: number, operation: number, slot: number): number {
+  let value = 0;
+  let role = 0;
+  value = (runtimeVectorLoad(values, ((rhsStart) + (slot)) >>> 0) >>> 0) >>> 0;
+  role = (parserReducerChildRole(operation, slot) >>> 0) >>> 0;
+  if (((((role) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (value) >>> 0;
+  }
+  if (((((role) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    return (parserReplayValueToFragment(value) >>> 0) >>> 0;
+  }
+  if (((((role) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (parserReplayValueToFragment(value) >>> 0) >>> 0;
+  }
+  if (((((role) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    if (((((parserRuntimeValueStatus(value) >>> 0) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+      return (parserRuleNodeFragment(value) >>> 0) >>> 0;
+    }
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayReduce(operation: number, payload: number, values: number, rhsStart: number, rhsLength: number, offset: number, tokenIndex: number): number {
+  let resultKind = 0;
+  let left = 0;
+  let middle = 0;
+  let right = 0;
+  let fragment = 0;
+  let index = 0;
+  let discard = 0;
+  resultKind = (parserReducerResultKind(operation) >>> 0) >>> 0;
+  if (((((resultKind) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    return (parserReplayReducerChild(values, rhsStart, operation, 0) >>> 0) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+    fragment = (parserReplayReducerChild(values, rhsStart, operation, 0) >>> 0) >>> 0;
+    if (((((fragment) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    return (parserRuleNodeFromFragment(payload, fragment) >>> 0) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+    return (parserReplayReducerChild(values, rhsStart, operation, 0) >>> 0) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+    fragment = (parserFragmentSequenceNew(offset, tokenIndex) >>> 0) >>> 0;
+    index = (0) >>> 0;
+    while (((((index) >>> 0) < ((rhsLength) >>> 0) ? 1 : 0)) !== 0) {
+      left = (parserReplayReducerChild(values, rhsStart, operation, index) >>> 0) >>> 0;
+      if (((((left) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+        return (0) >>> 0;
+      }
+      discard = (parserFragmentSequenceAppend(fragment, left) >>> 0) >>> 0;
+      index = (((index) + (1)) >>> 0) >>> 0;
+    }
+    return (fragment) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((5) >>> 0) ? 1 : 0)) !== 0) {
+    return (parserFragmentEmpty(0, offset, tokenIndex) >>> 0) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((6) >>> 0) ? 1 : 0)) !== 0) {
+    return (parserFragmentSequenceNew(offset, tokenIndex) >>> 0) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((7) >>> 0) ? 1 : 0)) !== 0) {
+    left = (parserReplayReducerChild(values, rhsStart, operation, 0) >>> 0) >>> 0;
+    right = (parserReplayReducerChild(values, rhsStart, operation, 1) >>> 0) >>> 0;
+    if (((((left) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    if (((((right) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    return (parserFragmentAppendValue(left, right) >>> 0) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((8) >>> 0) ? 1 : 0)) !== 0) {
+    left = (parserReplayReducerChild(values, rhsStart, operation, 0) >>> 0) >>> 0;
+    if (((((left) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    discard = (parserFragmentWrapValueVector(left) >>> 0) >>> 0;
+    return (left) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((9) >>> 0) ? 1 : 0)) !== 0) {
+    left = (parserReplayReducerChild(values, rhsStart, operation, 0) >>> 0) >>> 0;
+    middle = (parserReplayReducerChild(values, rhsStart, operation, 1) >>> 0) >>> 0;
+    right = (parserReplayReducerChild(values, rhsStart, operation, 2) >>> 0) >>> 0;
+    if (((((left) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    if (((((middle) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    if (((((right) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    return (parserFragmentAppendSeparatedValue(left, middle, right) >>> 0) >>> 0;
+  }
+  if (((((resultKind) >>> 0) === ((10) >>> 0) ? 1 : 0)) !== 0) {
+    fragment = (parserReplayReducerChild(values, rhsStart, operation, 0) >>> 0) >>> 0;
+    if (((((fragment) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+      return (0) >>> 0;
+    }
+    left = (parserFieldCaptureNew(payload, fragment) >>> 0) >>> 0;
+    discard = (parserFragmentAppendField(fragment, left) >>> 0) >>> 0;
+    return (fragment) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function parserReplayVm(traceActions: number, streamTokens: number, streamTokenIndices: number): number {
+  let values = 0;
+  let traceIndex = 0;
+  let traceCount = 0;
+  let streamIndex = 0;
+  let streamCount = 0;
+  let action = 0;
+  let actionStatus = 0;
+  let payload = 0;
+  let rhsLength = 0;
+  let operation = 0;
+  let payloadStatus = 0;
+  let reductionStatus = 0;
+  let rhsStart = 0;
+  let token = 0;
+  let tokenIndex = 0;
+  let reduced = 0;
+  let discard = 0;
+  values = (runtimeVectorNew(0) >>> 0) >>> 0;
+  discard = (runtimeVectorAppend(values, 0) >>> 0) >>> 0;
+  traceIndex = (0) >>> 0;
+  streamIndex = (0) >>> 0;
+  traceCount = (runtimeVectorLength(traceActions) >>> 0) >>> 0;
+  streamCount = (runtimeVectorLength(streamTokens) >>> 0) >>> 0;
+  while (((((traceIndex) >>> 0) < ((traceCount) >>> 0) ? 1 : 0)) !== 0) {
+    action = (runtimeVectorLoad(traceActions, traceIndex) >>> 0) >>> 0;
+    actionStatus = (parserReplayActionStatus(parserActionKind(action) >>> 0) >>> 0) >>> 0;
+    payload = (parserActionPayload(action) >>> 0) >>> 0;
+    if (((((actionStatus) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+      if (((((streamIndex) >>> 0) < ((streamCount) >>> 0) ? 1 : 0)) !== 0) {
+      } else {
+        return (parserReplayResultNew(7, 0, streamIndex) >>> 0) >>> 0;
+      }
+      token = (runtimeVectorLoad(streamTokens, streamIndex) >>> 0) >>> 0;
+      tokenIndex = (runtimeVectorLoad(streamTokenIndices, streamIndex) >>> 0) >>> 0;
+      discard = (runtimeVectorAppend(values, parserFragmentFromToken(token, tokenIndex) >>> 0) >>> 0) >>> 0;
+      streamIndex = (((streamIndex) + (1)) >>> 0) >>> 0;
+      traceIndex = (((traceIndex) + (1)) >>> 0) >>> 0;
+    } else {
+      if (((((actionStatus) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+        return (parserReplayResultNew(0, runtimeVectorLoad(values, parserReplayStackDepth(runtimeVectorLength(values) >>> 0) >>> 0) >>> 0, streamIndex) >>> 0) >>> 0;
+      } else {
+        if (((((actionStatus) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+        } else {
+          return (parserReplayResultNew(1, 0, streamIndex) >>> 0) >>> 0;
+        }
+        rhsLength = (parserProductionRhsLength(payload) >>> 0) >>> 0;
+        operation = (parserReducerOperation(payload) >>> 0) >>> 0;
+        payloadStatus = (parserReducerPayloadStatus(payload) >>> 0) >>> 0;
+        reductionStatus = (parserReplayReductionStatus(rhsLength, operation, payloadStatus, parserReplayStackDepth(runtimeVectorLength(values) >>> 0) >>> 0) >>> 0) >>> 0;
+        if (((((reductionStatus) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+          return (parserReplayResultNew(2, 0, streamIndex) >>> 0) >>> 0;
+        }
+        if (((((reductionStatus) >>> 0) === ((2) >>> 0) ? 1 : 0)) !== 0) {
+          return (parserReplayResultNew(3, 0, streamIndex) >>> 0) >>> 0;
+        }
+        if (((((reductionStatus) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
+          return (parserReplayResultNew(4, 0, streamIndex) >>> 0) >>> 0;
+        }
+        if (((((reductionStatus) >>> 0) === ((4) >>> 0) ? 1 : 0)) !== 0) {
+          return (parserReplayResultNew(5, 0, streamIndex) >>> 0) >>> 0;
+        }
+        if (((((reductionStatus) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+        } else {
+          return (parserReplayResultNew(6, 0, streamIndex) >>> 0) >>> 0;
+        }
+        if (((((streamIndex) >>> 0) < ((streamCount) >>> 0) ? 1 : 0)) !== 0) {
+        } else {
+          return (parserReplayResultNew(7, 0, streamIndex) >>> 0) >>> 0;
+        }
+        rhsStart = (parserReplayRhsStart(runtimeVectorLength(values) >>> 0, rhsLength) >>> 0) >>> 0;
+        token = (runtimeVectorLoad(streamTokens, streamIndex) >>> 0) >>> 0;
+        tokenIndex = (runtimeVectorLoad(streamTokenIndices, streamIndex) >>> 0) >>> 0;
+        reduced = (parserReplayReduce(operation, parserReducerPayload(payload) >>> 0, values, rhsStart, rhsLength, parserTokenSpanStart(token) >>> 0, tokenIndex) >>> 0) >>> 0;
+        if (((((reduced) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+          return (parserReplayResultNew(6, 0, streamIndex) >>> 0) >>> 0;
+        }
+        discard = (runtimeVectorTruncate(values, rhsStart) >>> 0) >>> 0;
+        discard = (runtimeVectorAppend(values, reduced) >>> 0) >>> 0;
+        traceIndex = (((traceIndex) + (1)) >>> 0) >>> 0;
+      }
+    }
+  }
+  return (parserReplayResultNew(8, 0, streamIndex) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -2284,7 +2581,11 @@ function storePublicField(
   fields[name] = value;
 }
 
-function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
+function materializeFieldArray(
+  sourceText: SourceTextBoundary,
+  name: string,
+  vectorHandle: number,
+): unknown[] {
   const status = parserFieldArrayValueStatus(vectorHandle);
   if (status === FIELD_ARRAY_VALUE_MISSING) {
     throw new Error(`Array field '${name}' was not initialized as a runtime vector.`);
@@ -2292,14 +2593,23 @@ function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
   const length = runtimeVectorLength(vectorHandle);
   const values: unknown[] = [];
   for (let index = 0; index < length; index++) {
-    values.push(hostFragmentValue(runtimeVectorLoad(vectorHandle, index)));
+    values.push(hostFragmentValue(
+      sourceText,
+      runtimeVectorLoad(vectorHandle, index),
+    ));
   }
   return values;
 }
 
-function materializeFieldScalar(count: number, valueHandle: number): unknown {
+function materializeFieldScalar(
+  sourceText: SourceTextBoundary,
+  count: number,
+  valueHandle: number,
+): unknown {
   const status = parserFieldScalarValueStatus(count);
-  return status === FIELD_SCALAR_VALUE_NULL ? null : hostFragmentValue(valueHandle);
+  return status === FIELD_SCALAR_VALUE_NULL
+    ? null
+    : hostFragmentValue(sourceText, valueHandle);
 }
 let RUNTIME_NODE_HANDLES: WeakMap<object, number> = new WeakMap();
 const RUNTIME_SYNTAX_VALUES = new Map<number, SyntaxElement>();
@@ -2313,15 +2623,18 @@ function hostRuleNodeRuntimeHandle(node: AnyRuleNode): number | undefined {
   return RUNTIME_NODE_HANDLES.get(node as object);
 }
 
-function materializeRuleNode(runtimeHandle: number): AnyRuleNode {
+function materializeRuleNode(
+  sourceText: SourceTextBoundary,
+  runtimeHandle: number,
+): AnyRuleNode {
   const ruleId = parserRuleNodeRuleId(runtimeHandle);
   const node = {
     type: "rule",
     name: RULE_NAMES[ruleId],
     span: ruleNodeSpan(runtimeHandle),
     tokenRange: ruleNodeTokenRange(runtimeHandle),
-    children: buildChildren(runtimeHandle),
-    fields: buildFields(ruleId, runtimeHandle),
+    children: buildChildren(sourceText, runtimeHandle),
+    fields: buildFields(sourceText, ruleId, runtimeHandle),
   };
   rememberRuleNodeRuntimeHandle(node as unknown as AnyRuleNode, runtimeHandle);
   rememberSyntaxValue(runtimeHandle, node as unknown as SyntaxElement);
@@ -2347,16 +2660,115 @@ function hostSyntaxValue(handle: number): SyntaxElement {
   return value;
 }
 
-function buildChildren(ruleNodeHandle: number): SyntaxElement[] {
+function buildChildren(
+  sourceText: SourceTextBoundary,
+  ruleNodeHandle: number,
+): SyntaxElement[] {
   const count = parserRuleNodeChildCount(ruleNodeHandle);
   const status = parserRuleNodeChildListStatus(count);
   if (status === RULE_NODE_CHILD_LIST_EMPTY) return [];
   const children = parserRuleNodeChildren(ruleNodeHandle);
   const values: SyntaxElement[] = [];
   for (let index = 0; index < count; index++) {
-    values.push(hostSyntaxValue(runtimeVectorLoad(children, index)));
+    const child = runtimeVectorLoad(children, index);
+    const existing = RUNTIME_SYNTAX_VALUES.get(child);
+    values.push(
+      existing ?? materializeRuntimeValue(sourceText, child) as SyntaxElement,
+    );
   }
   return values;
+}
+
+function buildFields(
+  sourceText: SourceTextBoundary,
+  ruleId: number,
+  ruleNodeHandle: number,
+): Record<string, unknown> {
+  const start = parserFieldStart(ruleId);
+  const end = parserFieldEnd(ruleId);
+  const captureCount = parserRuleNodeFieldCount(ruleNodeHandle);
+  const schemaStatus = parserFieldSchemaStatus(start, end, captureCount);
+  const buildStatus = parserFieldBuildStatus(start, end, schemaStatus);
+  if (buildStatus === FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA) {
+    throw new Error("Rule has field captures but no field schema.");
+  }
+  if (buildStatus === FIELD_BUILD_EMPTY) {
+    return createPublicFieldObject();
+  }
+  const counts = runtimeArrayNew(end - start);
+  const fieldValues = runtimeRecordNew(ruleId, end - start);
+  for (let entry = start; entry < end; entry++) {
+    if (parserFieldStorageStatus(entry) === FIELD_STORAGE_ARRAY) {
+      runtimeRecordStore(fieldValues, entry - start, runtimeVectorNew(0));
+    }
+  }
+  const captures = parserRuleNodeFields(ruleNodeHandle);
+  for (let index = 0; index < captureCount; index++) {
+    const capture = runtimeVectorLoad(captures, index);
+    const fieldId = parserFieldCaptureFieldId(capture);
+    const value = parserFieldCaptureValue(capture);
+    const entry = parserFieldIndex(ruleId, fieldId);
+    if (parserFieldEntryStatus(entry) === FIELD_ENTRY_MISSING) {
+      throw new Error(`Unknown field capture '${fieldName(fieldId)}'.`);
+    }
+    const name = fieldName(fieldId);
+    const countIndex = entry - start;
+    const count = runtimeArrayLoad(counts, countIndex) + 1;
+    runtimeArrayStore(counts, countIndex, count);
+    const status = parserFieldCaptureStatus(
+      entry,
+      count,
+    );
+    if (status === FIELD_CAPTURE_ARRAY) {
+      const values = runtimeRecordLoad(fieldValues, countIndex);
+      if (parserFieldArrayValueStatus(values) === FIELD_ARRAY_VALUE_MISSING) {
+        throw new Error(`Array field '${name}' was not initialized as a runtime vector.`);
+      }
+      runtimeVectorAppend(values, value);
+    } else if (status === FIELD_CAPTURE_SCALAR) {
+      runtimeRecordStore(fieldValues, countIndex, value);
+    } else if (status === FIELD_CAPTURE_TOO_MANY) {
+      throw new Error(`Scalar field '${name}' was captured more than once.`);
+    } else {
+      throw new Error(`Unknown field capture '${fieldName(fieldId)}'.`);
+    }
+  }
+  const fields = createPublicFieldObject();
+  for (let entry = start; entry < end; entry++) {
+    const fieldId = parserFieldId(entry);
+    const name = fieldName(fieldId);
+    const valueIndex = entry - start;
+    const count = runtimeArrayLoad(counts, valueIndex);
+    const finalBuildStatus = parserFieldFinalBuildStatus(entry, count);
+    if (finalBuildStatus === FIELD_FINAL_BUILD_ARRAY) {
+      storePublicField(fields, name, materializeFieldArray(
+        sourceText,
+        name,
+        runtimeRecordLoad(fieldValues, valueIndex),
+      ));
+      continue;
+    }
+    if (finalBuildStatus === FIELD_FINAL_BUILD_REQUIRED_MISSING) {
+      throw new Error(`Required field '${name}' was captured ${count} times.`);
+    }
+    if (finalBuildStatus === FIELD_FINAL_BUILD_TOO_MANY) {
+      throw new Error(`Nullable field '${name}' was captured more than once.`);
+    }
+    storePublicField(
+      fields,
+      name,
+      materializeFieldScalar(
+        sourceText,
+        count,
+        runtimeRecordLoad(fieldValues, valueIndex),
+      ),
+    );
+  }
+  return fields;
+}
+
+function fieldName(fieldId: number): string {
+  return FIELD_NAMES[fieldId] ?? `#${fieldId}`;
 }
 
 function ruleNodeSpan(handle: number): Span {
@@ -2491,8 +2903,7 @@ function parseTokenList(
   return replayTrace(
     sourceText,
     tokens,
-    stream.tokens,
-    stream.tokenIndices,
+    stream,
     traced.trace,
   );
 }
@@ -2516,16 +2927,21 @@ function compactTokenStream(
   let terminalCount = 0;
   let index = 0;
   while (true) {
-    index = skipTraceTrivia(tokens, index);
     const token = tokens[index] ?? materializeSourceEofToken(sourceText);
-    const traceTokenStatus = traceTokenStreamStatus(token);
-    streamTokens[streamTokenCount] = token;
-    streamTokenIndices[streamTokenCount] = parserTraceTokenStreamPublicIndex(
+    const traceStep = traceTokenStreamStep(token, trustRuntimeTerminals);
+    const traceTokenStatus = parserTraceTokenStreamStepStatus(traceStep);
+    if (traceTokenStatus === TRACE_TOKEN_STREAM_SKIP) {
+      index++;
+      continue;
+    }
+    const publicIndex = parserTraceTokenStreamPublicIndex(
       index,
       tokens.length,
     );
+    streamTokens[streamTokenCount] = token;
+    streamTokenIndices[streamTokenCount] = publicIndex;
     streamTokenCount++;
-    terminalIds[terminalCount] = tokenToTerminal(token, trustRuntimeTerminals);
+    terminalIds[terminalCount] = traceTokenStreamTerminal(traceStep);
     terminalCount++;
     if (traceTokenStatus === TRACE_TOKEN_STREAM_STOP || index >= tokens.length) break;
     index++;
@@ -2534,518 +2950,145 @@ function compactTokenStream(
   streamTokenIndices.length = streamTokenCount;
   const input = createParseTraceInput(terminalCount);
   input.terminals.set(terminalIds.subarray(0, terminalCount));
-  return { tokens: streamTokens, tokenIndices: streamTokenIndices, input, terminalCount };
+  return {
+    tokens: streamTokens,
+    tokenIndices: streamTokenIndices,
+    input,
+    terminalCount,
+  };
+}
+
+interface RuntimeReplayTokenStream {
+  tokens: readonly Token[];
+  tokenIndices: readonly number[];
 }
 
 function replayTrace(
   sourceText: SourceTextBoundary,
   tokens: readonly Token[],
-  streamTokens: readonly Token[],
-  streamTokenIndices: readonly number[],
+  stream: RuntimeReplayTokenStream,
   trace: Int32Array,
 ): ParseResult<RootNode> {
-  runtimeArenaReset();
   RUNTIME_FRAGMENT_VALUES.clear();
   resetPublicSyntaxMaterialization();
-  const values: unknown[] = [null];
-  let index = 0;
-
+  const traceActions = runtimeVectorNew(trace.length);
   for (let traceIndex = 0; traceIndex < trace.length; traceIndex++) {
-    const encoded = trace[traceIndex];
-    const kind = parserActionKind(encoded);
-    const payload = parserActionPayload(encoded);
-    const actionStatus = parserReplayActionStatus(kind);
-
-    if (actionStatus === REPLAY_ACTION_SHIFT) {
-      values.push(shiftedToken(
-        streamTokens[index] ?? materializeSourceEofToken(sourceText),
-        streamTokenIndices[index] ?? tokens.length,
-      ));
-      index++;
-      continue;
-    }
-
-    if (actionStatus === REPLAY_ACTION_ACCEPT) {
-      return acceptedParseResult(
-        sourceText,
-        tokens,
-        values[parserReplayStackDepth(values.length)],
-      );
-    }
-
-    const token = streamTokens[index] ?? materializeSourceEofToken(sourceText);
-    if (actionStatus !== REPLAY_ACTION_REDUCE) {
-      return failedParseResult(
-        sourceText.source,
-        tokens,
-        [parserInternalMessageDiagnostic(
-          "Wasm parser trace contained an unknown action kind.",
-          currentSpan(token),
-        )],
-      );
-    }
-
-    const rhsLength = parserProductionRhsLength(payload);
-    const reducerOperation = parserReducerOperation(payload);
-    const reducerPayload = parserReducerPayload(payload);
-    const reducerPayloadStatus = parserReducerPayloadStatus(payload);
-    const replayReductionStatus = parserReplayReductionStatus(
-      rhsLength,
-      reducerOperation,
-      reducerPayloadStatus,
-      parserReplayStackDepth(values.length),
+    runtimeVectorAppend(traceActions, trace[traceIndex]);
+  }
+  const runtimeTokens = runtimeVectorNew(stream.tokens.length);
+  const runtimeTokenIndices = runtimeVectorNew(stream.tokenIndices.length);
+  for (let index = 0; index < stream.tokens.length; index++) {
+    const token = stream.tokens[index];
+    runtimeVectorAppend(
+      runtimeTokens,
+      runtimeTokenHandle(token, traceTokenStreamStep(token)),
     );
-    if (replayReductionStatus === REPLAY_REDUCTION_UNKNOWN_PRODUCTION) {
-      return failedParseResult(
-        sourceText.source,
-        tokens,
-        [parserInternalMessageDiagnostic(
-          "Wasm parser trace referenced an unknown production.",
-          currentSpan(token),
-        )],
-      );
-    }
-    if (
-      replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING ||
-      replayReductionStatus === REPLAY_REDUCTION_FIELD_PAYLOAD_MISSING
-    ) {
-      return failedParseResult(
-        sourceText.source,
-        tokens,
-        [parserInternalMessageDiagnostic(
-          replayReductionStatus === REPLAY_REDUCTION_RULE_PAYLOAD_MISSING
-            ? "Rule reducer is missing its rule id payload."
-            : "Field reducer is missing its field id payload.",
-          currentSpan(token),
-        )],
-      );
-    }
-    if (replayReductionStatus === REPLAY_REDUCTION_STACK_UNDERFLOW) {
-      return failedParseResult(
-        sourceText.source,
-        tokens,
-        [parserInternalMessageDiagnostic(
-          "Wasm parser trace underflowed the replay stack.",
-          currentSpan(token),
-        )],
-      );
-    }
-    if (replayReductionStatus !== REPLAY_REDUCTION_OK) {
-      return failedParseResult(
-        sourceText.source,
-        tokens,
-        [parserInternalMessageDiagnostic(
-          "Wasm parser trace reduction validation failed.",
-          currentSpan(token),
-        )],
-      );
-    }
-    const rhsStart = parserReplayRhsStart(values.length, rhsLength);
-    const rhsValues = values.splice(rhsStart, rhsLength);
-    let reduced: unknown;
-    try {
-      reduced = reduceProduction(
-        reducerOperation,
-        reducerPayload,
-        rhsValues,
-        token.span.start,
-        streamTokenIndices[index] ?? tokens.length,
-      );
-    } catch (error) {
-      return failedParseResult(
-        sourceText.source,
-        tokens,
-        [internalParserDiagnostic(error, token.span)],
-      );
-    }
-    values.push(reduced);
+    runtimeVectorAppend(runtimeTokenIndices, stream.tokenIndices[index]);
+  }
+  const result = parserReplayVm(
+    traceActions,
+    runtimeTokens,
+    runtimeTokenIndices,
+  );
+  const status = parserReplayResultStatus(result);
+  if (status === REPLAY_VM_OK) {
+    return acceptedRuntimeParseResult(
+      sourceText,
+      tokens,
+      parserReplayResultRoot(result),
+    );
   }
 
+  const streamIndex = parserReplayResultStreamIndex(result);
+  const token = stream.tokens[streamIndex] ?? materializeSourceEofToken(sourceText);
   return failedParseResult(
     sourceText.source,
     tokens,
     [parserInternalMessageDiagnostic(
-      "Wasm parser trace ended without accepting.",
-      { start: sourceText.length, end: sourceText.length },
+      replayVmStatusMessage(status, "Wasm"),
+      currentSpan(token),
     )],
   );
 }
 
+function replayVmStatusMessage(status: number, label: string): string {
+  if (status === REPLAY_VM_UNKNOWN_ACTION) {
+    return label + " parser trace contained an unknown action kind.";
+  }
+  if (status === REPLAY_VM_UNKNOWN_PRODUCTION) {
+    return label + " parser trace referenced an unknown production.";
+  }
+  if (status === REPLAY_VM_RULE_PAYLOAD_MISSING) {
+    return "Rule reducer is missing its rule id payload.";
+  }
+  if (status === REPLAY_VM_FIELD_PAYLOAD_MISSING) {
+    return "Field reducer is missing its field id payload.";
+  }
+  if (status === REPLAY_VM_STACK_UNDERFLOW) {
+    return label + " parser trace underflowed the replay stack.";
+  }
+  if (status === REPLAY_VM_STREAM_UNDERFLOW) {
+    return label + " parser trace advanced past the compact token stream.";
+  }
+  if (status === REPLAY_VM_ENDED_WITHOUT_ACCEPT) {
+    return label + " parser trace ended without accepting.";
+  }
+  if (status === REPLAY_VM_REDUCTION_FAILED) {
+    return label + " parser trace reduction validation failed.";
+  }
+  return label + " parser trace failed in the runtime replay VM.";
+}
+
 const RUNTIME_FRAGMENT_VALUES = new Map<number, unknown>();
-
-function reduceProduction(
-  reducerOperation: number,
-  reducerPayload: number,
-  rhs: readonly unknown[],
-  offset: number,
-  tokenIndex: number,
-): unknown {
-  const reducerResultKind = parserReducerResultKind(reducerOperation);
-  switch (reducerResultKind) {
-    case REDUCER_RESULT_RAW_CHILD:
-      return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_RESULT_RULE_NODE: {
-      const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
-      const runtimeHandle = parserRuleNodeFromFragment(
-        reducerPayload,
-        fragment.runtimeHandle,
-      );
-      return materializeRuleNode(runtimeHandle);
-    }
-    case REDUCER_RESULT_CHILD_FRAGMENT:
-      return reducerChild(reducerOperation, rhs, 0);
-    case REDUCER_RESULT_SEQUENCE_FRAGMENT:
-      return sequenceFragment(reducerOperation, rhs, offset, tokenIndex);
-    case REDUCER_RESULT_EMPTY_NULL_FRAGMENT:
-      return emptyFragment(null, offset, tokenIndex);
-    case REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT:
-      return emptyFragment([], offset, tokenIndex);
-    case REDUCER_RESULT_APPEND_FRAGMENT:
-      return appendFragment(
-        reducerFragmentChild(reducerOperation, rhs, 0),
-        reducerFragmentChild(reducerOperation, rhs, 1),
-      );
-    case REDUCER_RESULT_FIRST_ARRAY_FRAGMENT: {
-      const item = reducerFragmentChild(reducerOperation, rhs, 0);
-      parserFragmentWrapValueVector(item.runtimeHandle);
-      item.value = [item.value];
-      rememberFragmentValue(item.runtimeHandle, item.value);
-      item.span = fragmentSpan(item.runtimeHandle);
-      item.tokenRange = fragmentTokenRange(item.runtimeHandle);
-      return item;
-    }
-    case REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT:
-      return appendSeparatedFragment(
-        reducerFragmentChild(reducerOperation, rhs, 0),
-        reducerFragmentChild(reducerOperation, rhs, 1),
-        reducerFragmentChild(reducerOperation, rhs, 2),
-      );
-    case REDUCER_RESULT_FIELD_FRAGMENT: {
-      const fragment = reducerFragmentChild(reducerOperation, rhs, 0);
-      const captureHandle = parserFieldCaptureNew(
-        reducerPayload,
-        fragment.runtimeHandle,
-      );
-      parserFragmentAppendField(fragment.runtimeHandle, captureHandle);
-      return fragment;
-    }
-    default:
-      throw new Error("Unknown parser reducer kind.");
-  }
-}
-
-function tokenFragment(shifted: ShiftedToken): Fragment {
-  const token = shifted.token;
-  const status = parserShiftedTokenStatus(publicTokenClass(token));
-  if (status !== SHIFTED_TOKEN_OK) {
-    throw new Error("Expected shifted main syntax token.");
-  }
-  const syntaxToken = token as MainNamedToken | LiteralToken;
-  const tokenHandle = parserTokenNew(
-    publicTokenClass(syntaxToken),
-    tokenSpecIndex(syntaxToken),
-    tokenToTerminal(syntaxToken),
-    syntaxToken.span.start,
-    syntaxToken.span.end,
-  );
-  rememberSyntaxValue(tokenHandle, syntaxToken);
-  const runtimeHandle = parserFragmentFromToken(
-    tokenHandle,
-    shifted.tokenIndex,
-  );
-  rememberFragmentValue(runtimeHandle, syntaxToken);
-  return {
-    runtimeHandle,
-    value: syntaxToken,
-    span: syntaxToken.span,
-    tokenRange: { start: shifted.tokenIndex, end: shifted.tokenIndex + 1 },
-  };
-}
-
-function ruleFragment(node: AnyRuleNode): Fragment {
-  const runtimeHandle = runtimeRuleNodeFragmentHandle(node);
-  rememberFragmentValue(runtimeHandle, node);
-  return {
-    runtimeHandle,
-    value: node,
-    span: fragmentSpan(runtimeHandle),
-    tokenRange: fragmentTokenRange(runtimeHandle),
-  };
-}
-
-function runtimeRuleNodeFragmentHandle(node: AnyRuleNode): number {
-  const existing = hostRuleNodeRuntimeHandle(node);
-  if (existing !== undefined) {
-    const fragment = parserFragmentNew(
-      existing,
-      parserRuleNodeSpanStart(existing),
-      parserRuleNodeSpanEnd(existing),
-      parserRuleNodeTokenStart(existing),
-      parserRuleNodeTokenEnd(existing),
-    );
-    parserFragmentAppendChild(fragment, existing);
-    return fragment;
-  }
-  const fragment = parserFragmentNew(
-    0,
-    node.span.start,
-    node.span.end,
-    node.tokenRange.start,
-    node.tokenRange.end,
-  );
-  return fragment;
-}
-
-function reducerChild(
-  reducerOperation: number,
-  values: readonly unknown[],
-  slot: number,
-): unknown {
-  const role = parserReducerChildRole(reducerOperation, slot);
-  const value = values[slot];
-  if (role === REDUCER_CHILD_RAW) {
-    return value;
-  }
-  if (role === REDUCER_CHILD_FRAGMENT) {
-    return toFragment(value);
-  }
-  if (role === REDUCER_CHILD_SHIFTED_TOKEN) {
-    return tokenFragment(value as ShiftedToken);
-  }
-  if (role === REDUCER_CHILD_RULE_NODE) {
-    return ruleFragment(value as AnyRuleNode);
-  }
-  throw new Error("Unexpected parser reducer child role.");
-}
-
-function reducerFragmentChild(
-  reducerOperation: number,
-  values: readonly unknown[],
-  slot: number,
-): Fragment {
-  const child = reducerChild(reducerOperation, values, slot);
-  if (isFragment(child)) return child;
-  throw new Error("Expected parser reducer child to produce a fragment.");
-}
-
-function sequenceFragment(
-  reducerOperation: number,
-  values: readonly unknown[],
-  offset: number,
-  tokenIndex: number,
-): Fragment {
-  const runtimeHandle = parserFragmentSequenceNew(offset, tokenIndex);
-  const fragmentValues: unknown[] = [];
-  for (let index = 0; index < values.length; index++) {
-    const part = reducerFragmentChild(reducerOperation, values, index);
-    parserFragmentSequenceAppend(runtimeHandle, part.runtimeHandle);
-    fragmentValues.push(part.value);
-  }
-  rememberFragmentValue(runtimeHandle, fragmentValues);
-  return {
-    runtimeHandle,
-    value: fragmentValues,
-    span: fragmentSpan(runtimeHandle),
-    tokenRange: fragmentTokenRange(runtimeHandle),
-  };
-}
-
-function emptyFragment(
-  value: unknown,
-  offset: number,
-  tokenIndex: number,
-): Fragment {
-  const runtimeHandle = Array.isArray(value)
-    ? parserFragmentSequenceNew(offset, tokenIndex)
-    : parserFragmentEmpty(0, offset, tokenIndex);
-  rememberFragmentValue(runtimeHandle, value);
-  return {
-    runtimeHandle,
-    value,
-    span: fragmentSpan(runtimeHandle),
-    tokenRange: fragmentTokenRange(runtimeHandle),
-  };
-}
-
-function appendFragment(list: Fragment, item: Fragment): Fragment {
-  parserFragmentAppendValue(list.runtimeHandle, item.runtimeHandle);
-  const values = asMutableArray(list.value);
-  values.push(item.value);
-  rememberFragmentValue(list.runtimeHandle, values);
-  return {
-    runtimeHandle: list.runtimeHandle,
-    value: values,
-    span: fragmentSpan(list.runtimeHandle),
-    tokenRange: fragmentTokenRange(list.runtimeHandle),
-  };
-}
-
-function appendSeparatedFragment(
-  list: Fragment,
-  separator: Fragment,
-  item: Fragment,
-): Fragment {
-  parserFragmentAppendSeparatedValue(
-    list.runtimeHandle,
-    separator.runtimeHandle,
-    item.runtimeHandle,
-  );
-  const values = asMutableArray(list.value);
-  values.push(item.value);
-  rememberFragmentValue(list.runtimeHandle, values);
-  return {
-    runtimeHandle: list.runtimeHandle,
-    value: values,
-    span: fragmentSpan(list.runtimeHandle),
-    tokenRange: fragmentTokenRange(list.runtimeHandle),
-  };
-}
-
-function toFragment(value: unknown): Fragment {
-  if (isFragment(value)) return value;
-  if (isRuleNode(value)) return ruleFragment(value);
-  if (isShiftedToken(value)) return tokenFragment(value);
-  throw new Error("Expected parser reduction fragment, rule node, or token.");
-}
-
-function asMutableArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
-  throw new Error("Expected parser reduction array.");
-}
 
 function rememberFragmentValue(handle: number, value: unknown): void {
   RUNTIME_FRAGMENT_VALUES.set(handle, value);
 }
 
-function hostFragmentValue(handle: number): unknown {
-  if (!RUNTIME_FRAGMENT_VALUES.has(handle)) {
-    throw new Error("Runtime fragment is missing its host value.");
+function hostFragmentValue(
+  sourceText: SourceTextBoundary,
+  handle: number,
+): unknown {
+  if (RUNTIME_FRAGMENT_VALUES.has(handle)) {
+    return RUNTIME_FRAGMENT_VALUES.get(handle);
   }
-  return RUNTIME_FRAGMENT_VALUES.get(handle);
+  const value = materializeRuntimeValue(
+    sourceText,
+    parserFragmentValue(handle),
+  );
+  rememberFragmentValue(handle, value);
+  return value;
 }
 
-function fragmentSpan(handle: number): Span {
-  return {
-    start: parserFragmentSpanStart(handle),
-    end: parserFragmentSpanEnd(handle),
-  };
-}
-
-function fragmentTokenRange(handle: number): TokenRange {
-  return {
-    start: parserFragmentTokenStart(handle),
-    end: parserFragmentTokenEnd(handle),
-  };
-}
-
-function buildFields(
-  ruleId: number,
-  ruleNodeHandle: number,
-): Record<string, unknown> {
-  const start = parserFieldStart(ruleId);
-  const end = parserFieldEnd(ruleId);
-  const captureCount = parserRuleNodeFieldCount(ruleNodeHandle);
-  const schemaStatus = parserFieldSchemaStatus(start, end, captureCount);
-  const buildStatus = parserFieldBuildStatus(start, end, schemaStatus);
-  if (buildStatus === FIELD_BUILD_CAPTURE_WITHOUT_SCHEMA) {
-    throw new Error("Rule has field captures but no field schema.");
-  }
-  if (buildStatus === FIELD_BUILD_EMPTY) {
-    return createPublicFieldObject();
-  }
-  const counts = runtimeArrayNew(end - start);
-  const fieldValues = runtimeRecordNew(ruleId, end - start);
-  for (let entry = start; entry < end; entry++) {
-    if (parserFieldStorageStatus(entry) === FIELD_STORAGE_ARRAY) {
-      runtimeRecordStore(fieldValues, entry - start, runtimeVectorNew(0));
-    }
-  }
-  const captures = parserRuleNodeFields(ruleNodeHandle);
-  for (let index = 0; index < captureCount; index++) {
-    const capture = runtimeVectorLoad(captures, index);
-    const fieldId = parserFieldCaptureFieldId(capture);
-    const value = parserFieldCaptureValue(capture);
-    const entry = parserFieldIndex(ruleId, fieldId);
-    if (parserFieldEntryStatus(entry) === FIELD_ENTRY_MISSING) {
-      throw new Error(`Unknown field capture '${fieldName(fieldId)}'.`);
-    }
-    const name = fieldName(fieldId);
-    const countIndex = entry - start;
-    const count = runtimeArrayLoad(counts, countIndex) + 1;
-    runtimeArrayStore(counts, countIndex, count);
-    const status = parserFieldCaptureStatus(
-      entry,
-      count,
-    );
-    if (status === FIELD_CAPTURE_ARRAY) {
-      const values = runtimeRecordLoad(fieldValues, countIndex);
-      if (parserFieldArrayValueStatus(values) === FIELD_ARRAY_VALUE_MISSING) {
-        throw new Error(`Array field '${name}' was not initialized as a runtime vector.`);
-      }
-      runtimeVectorAppend(values, value);
-    } else if (status === FIELD_CAPTURE_SCALAR) {
-      runtimeRecordStore(fieldValues, countIndex, value);
-    } else if (status === FIELD_CAPTURE_TOO_MANY) {
-      throw new Error(`Scalar field '${name}' was captured more than once.`);
-    } else {
-      throw new Error(`Unknown field capture '${fieldName(fieldId)}'.`);
-    }
-  }
-  const fields = createPublicFieldObject();
-  for (let entry = start; entry < end; entry++) {
-    const fieldId = parserFieldId(entry);
-    const name = fieldName(fieldId);
-    const valueIndex = entry - start;
-    const count = runtimeArrayLoad(counts, valueIndex);
-    const finalBuildStatus = parserFieldFinalBuildStatus(entry, count);
-    if (finalBuildStatus === FIELD_FINAL_BUILD_ARRAY) {
-      storePublicField(fields, name, materializeFieldArray(
-        name,
-        runtimeRecordLoad(fieldValues, valueIndex),
-      ));
-      continue;
-    }
-    if (finalBuildStatus === FIELD_FINAL_BUILD_REQUIRED_MISSING) {
-      throw new Error(`Required field '${name}' was captured ${count} times.`);
-    }
-    if (finalBuildStatus === FIELD_FINAL_BUILD_TOO_MANY) {
-      throw new Error(`Nullable field '${name}' was captured more than once.`);
-    }
-    storePublicField(
-      fields,
-      name,
-      materializeFieldScalar(
-        count,
-        runtimeRecordLoad(fieldValues, valueIndex),
-      ),
-    );
-  }
-  return fields;
-}
-
-function fieldName(fieldId: number): string {
-  return FIELD_NAMES[fieldId] ?? `#${fieldId}`;
-}
-
-function acceptedParseResult(
+function acceptedRuntimeParseResult(
   sourceText: SourceTextBoundary,
   tokens: readonly Token[],
-  accepted: unknown,
+  rootHandle: number,
 ): ParseResult<RootNode> {
-  const acceptedFragment = isFragment(accepted) ? accepted : null;
+  const rootStatus = parserRuntimeValueStatus(rootHandle);
+  const fragmentValueStatus = rootStatus === RUNTIME_VALUE_FRAGMENT
+    ? parserRuntimeValueStatus(parserFragmentValue(rootHandle))
+    : 0;
   const status = parserAcceptedRootStatus(
-    isRuleNode(accepted) ? 1 : 0,
-    acceptedFragment ? 1 : 0,
-    acceptedFragment && isRuleNode(acceptedFragment.value) ? 1 : 0,
+    rootStatus === RUNTIME_VALUE_RULE_NODE ? 1 : 0,
+    rootStatus === RUNTIME_VALUE_FRAGMENT ? 1 : 0,
+    fragmentValueStatus === RUNTIME_VALUE_RULE_NODE ? 1 : 0,
   );
   if (status === ACCEPTED_ROOT_DIRECT) {
-    return successfulParseResult(sourceText.source, tokens, accepted as RootNode);
+    return successfulParseResult(
+      sourceText.source,
+      tokens,
+      materializeRuleNode(sourceText, rootHandle) as RootNode,
+    );
   }
   if (status === ACCEPTED_ROOT_FRAGMENT_VALUE) {
     return successfulParseResult(
       sourceText.source,
       tokens,
-      acceptedFragment!.value as RootNode,
+      materializeRuleNode(
+        sourceText,
+        parserFragmentValue(rootHandle),
+      ) as RootNode,
     );
   }
   return failedParseResult(
@@ -3058,18 +3101,81 @@ function acceptedParseResult(
   );
 }
 
+function materializeRuntimeValue(
+  sourceText: SourceTextBoundary,
+  handle: number,
+): unknown {
+  const status = parserRuntimeValueStatus(handle);
+  if (status === RUNTIME_VALUE_TOKEN) {
+    return hostSyntaxValue(handle);
+  }
+  if (status === RUNTIME_VALUE_RULE_NODE) {
+    return materializeRuleNode(sourceText, handle);
+  }
+  if (status === RUNTIME_VALUE_VECTOR) {
+    return materializeRuntimeVectorValue(sourceText, handle);
+  }
+  if (status === RUNTIME_VALUE_FRAGMENT) {
+    return hostFragmentValue(sourceText, handle);
+  }
+  if (handle === 0) return null;
+  throw new Error("Runtime replay produced an unsupported value handle.");
+}
+
+function materializeRuntimeVectorValue(
+  sourceText: SourceTextBoundary,
+  vectorHandle: number,
+): unknown[] {
+  const length = runtimeVectorLength(vectorHandle);
+  const values: unknown[] = [];
+  for (let index = 0; index < length; index++) {
+    values.push(materializeRuntimeValue(
+      sourceText,
+      runtimeVectorLoad(vectorHandle, index),
+    ));
+  }
+  return values;
+}
+
 function tokenToTerminal(token: Token, trustRuntimeTerminal = false): number {
+  return traceTokenStreamTerminal(traceTokenStreamStep(token, trustRuntimeTerminal));
+}
+
+function runtimeTokenHandle(token: Token, traceStep: number): number {
+  const specIndex = tokenSpecIndex(token);
+  const handle = parserTokenNew(
+    publicTokenClass(token),
+    specIndex < 0 ? 0 : specIndex,
+    parserTraceTokenStreamStepTerminal(traceStep),
+    token.span.start,
+    token.span.end,
+  );
+  const status = parserShiftedTokenStatus(publicTokenClass(token));
+  if (status === SHIFTED_TOKEN_OK) {
+    rememberSyntaxValue(handle, token as SyntaxElement);
+  }
+  return handle;
+}
+
+function traceTokenStreamStep(
+  token: Token,
+  trustRuntimeTerminal = false,
+): number {
   const trustedTerminal = trustRuntimeTerminal
     ? runtimeTokenTerminal(token)
     : NO_TERMINAL;
   const specIndex = tokenSpecIndex(token);
   const specTerminal = specIndex < 0 ? NO_TERMINAL : lexerSpecTerminal(specIndex);
-  const terminal = parserTraceTerminal(
+  return parserTraceTokenStreamStep(
     publicTokenClass(token),
     trustedTerminal,
     specTerminal,
     EOF_TERMINAL,
   );
+}
+
+function traceTokenStreamTerminal(traceStep: number): number {
+  const terminal = parserTraceTokenStreamStepTerminal(traceStep);
   return terminal === NO_TERMINAL ? -1 : terminal;
 }
 
@@ -3114,35 +3220,6 @@ function runtimeTokenTerminal(token: Token): number {
       terminal >= 0
     ? terminal
     : -1;
-}
-
-function traceTokenStreamStatus(token: Token): number {
-  return parserTraceTokenStreamStatus(publicTokenClass(token));
-}
-
-function shiftedToken(token: Token, tokenIndex: number): ShiftedToken {
-  return { token, tokenIndex };
-}
-
-function isRuleNode(value: unknown): value is AnyRuleNode {
-  return !!value &&
-    typeof value === "object" &&
-    (value as { type?: unknown }).type === "rule";
-}
-
-function isShiftedToken(value: unknown): value is ShiftedToken {
-  return !!value &&
-    typeof value === "object" &&
-    "token" in value &&
-    "tokenIndex" in value;
-}
-
-function isFragment(value: unknown): value is Fragment {
-  return !!value &&
-    typeof value === "object" &&
-    "runtimeHandle" in value &&
-    "value" in value &&
-    "tokenRange" in value;
 }
 
 function validateTokenStream(
@@ -3467,15 +3544,4 @@ function clampSpan(span: Span, sourceLength: number): Span {
   const start = Math.min(Math.max(0, span.start), sourceLength);
   const end = Math.min(Math.max(start, span.end), sourceLength);
   return { start, end };
-}
-
-function skipTraceTrivia(tokens: readonly Token[], start: number): number {
-  let index = start;
-  while (
-    index < tokens.length &&
-    traceTokenStreamStatus(tokens[index]) === TRACE_TOKEN_STREAM_SKIP
-  ) {
-    index++;
-  }
-  return index;
 }

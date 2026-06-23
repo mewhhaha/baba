@@ -71,6 +71,8 @@ export const RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH = 2;
 export const RUNTIME_TRACE_TOKEN_STREAM_EMIT = 0;
 export const RUNTIME_TRACE_TOKEN_STREAM_SKIP = 1;
 export const RUNTIME_TRACE_TOKEN_STREAM_STOP = 2;
+export const RUNTIME_TRACE_TOKEN_STREAM_STEP_FACTOR = 0x01_00_00_00;
+export const RUNTIME_TRACE_TOKEN_STREAM_STEP_TERMINAL_MASK = 0x00_ff_ff_ff;
 export const RUNTIME_SHIFTED_TOKEN_STATUS_OK = 0;
 export const RUNTIME_SHIFTED_TOKEN_STATUS_INVALID = 1;
 export const RUNTIME_RULE_NODE_CHILD_LIST_EMPTY = 0;
@@ -149,6 +151,21 @@ export const RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION = 1;
 export const RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING = 2;
 export const RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING = 3;
 export const RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW = 4;
+export const RUNTIME_REPLAY_VM_STATUS_OK = 0;
+export const RUNTIME_REPLAY_VM_STATUS_UNKNOWN_ACTION = 1;
+export const RUNTIME_REPLAY_VM_STATUS_UNKNOWN_PRODUCTION = 2;
+export const RUNTIME_REPLAY_VM_STATUS_RULE_PAYLOAD_MISSING = 3;
+export const RUNTIME_REPLAY_VM_STATUS_FIELD_PAYLOAD_MISSING = 4;
+export const RUNTIME_REPLAY_VM_STATUS_STACK_UNDERFLOW = 5;
+export const RUNTIME_REPLAY_VM_STATUS_REDUCTION_FAILED = 6;
+export const RUNTIME_REPLAY_VM_STATUS_STREAM_UNDERFLOW = 7;
+export const RUNTIME_REPLAY_VM_STATUS_ENDED_WITHOUT_ACCEPT = 8;
+export const RUNTIME_RUNTIME_VALUE_NULL = 0;
+export const RUNTIME_RUNTIME_VALUE_TOKEN = 1;
+export const RUNTIME_RUNTIME_VALUE_RULE_NODE = 2;
+export const RUNTIME_RUNTIME_VALUE_VECTOR = 3;
+export const RUNTIME_RUNTIME_VALUE_FRAGMENT = 4;
+export const RUNTIME_RUNTIME_VALUE_UNKNOWN = 5;
 export const RUNTIME_NO_FIELD = 0xffff_ffff;
 export const RUNTIME_FIELD_ARRAY = 1;
 export const RUNTIME_FIELD_NULLABLE = 2;
@@ -229,6 +246,7 @@ const RUNTIME_OBJECT_PARSER_FIELD_CAPTURE = 5;
 const RUNTIME_OBJECT_PARSER_RULE_NODE = 6;
 const RUNTIME_OBJECT_PARSER_TOKEN = 7;
 const RUNTIME_OBJECT_PARSER_DIAGNOSTIC = 8;
+const RUNTIME_OBJECT_PARSER_REPLAY_RESULT = 9;
 const RUNTIME_ARRAY_LENGTH_WORD_OFFSET = 1;
 const RUNTIME_ARRAY_DATA_WORD_OFFSET = 2;
 const RUNTIME_RECORD_TAG_WORD_OFFSET = 1;
@@ -268,6 +286,10 @@ const RUNTIME_PARSER_DIAGNOSTIC_SPAN_START_WORD_OFFSET = 2;
 const RUNTIME_PARSER_DIAGNOSTIC_SPAN_END_WORD_OFFSET = 3;
 const RUNTIME_PARSER_DIAGNOSTIC_DETAIL_WORD_OFFSET = 4;
 const RUNTIME_PARSER_DIAGNOSTIC_HEADER_WORDS = 5;
+const RUNTIME_PARSER_REPLAY_RESULT_STATUS_WORD_OFFSET = 1;
+const RUNTIME_PARSER_REPLAY_RESULT_ROOT_WORD_OFFSET = 2;
+const RUNTIME_PARSER_REPLAY_RESULT_STREAM_INDEX_WORD_OFFSET = 3;
+const RUNTIME_PARSER_REPLAY_RESULT_HEADER_WORDS = 4;
 
 export type LexerRuntimeTransition = readonly [
   start: number,
@@ -871,6 +893,14 @@ export function createParserReducerRuntimeProgram(
       parserReducersTable(input.reducers),
     ],
     functions: parserReducerFunctions(input.reducers.length),
+  };
+}
+
+export function createParserReplayRuntimeProgram(): RuntimeLanguageProgram {
+  return {
+    name: "parser_replay_vm_runtime",
+    entry: "parserReplayVm",
+    functions: parserReplayVmFunctions(),
   };
 }
 
@@ -1952,6 +1982,9 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserTraceTokenStreamStatusFunction(),
     parserTraceTokenStreamPublicIndexFunction(),
     parserTraceTerminalFunction(),
+    parserTraceTokenStreamStepFunction(),
+    parserTraceTokenStreamStepStatusFunction(),
+    parserTraceTokenStreamStepTerminalFunction(),
     parserShiftedTokenStatusFunction(),
     parserAcceptedRootStatusFunction(),
     parserRuleNodeFromFragmentFunction(),
@@ -3589,6 +3622,96 @@ function parserShiftedTokenStatusFunction(): RuntimeLanguageFunction {
   };
 }
 
+function parserTraceTokenStreamStepFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceTokenStreamStep",
+    parameters: [
+      { name: "publicClass", type: "u32" },
+      { name: "trustedTerminal", type: "u32" },
+      { name: "specTerminal", type: "u32" },
+      { name: "eofTerminal", type: "u32" },
+    ],
+    locals: [
+      { name: "status", type: "u32" },
+      { name: "terminal", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "status",
+        call("parserTraceTokenStreamStatus", [local("publicClass")]),
+      ),
+      setLocal(
+        "terminal",
+        call("parserTraceTerminal", [
+          local("publicClass"),
+          local("trustedTerminal"),
+          local("specTerminal"),
+          local("eofTerminal"),
+        ]),
+      ),
+      {
+        kind: "return",
+        expression: add(
+          mul(
+            local("status"),
+            u32(RUNTIME_TRACE_TOKEN_STREAM_STEP_FACTOR),
+          ),
+          and(
+            local("terminal"),
+            u32(RUNTIME_TRACE_TOKEN_STREAM_STEP_TERMINAL_MASK),
+          ),
+        ),
+      },
+    ],
+  };
+}
+
+function parserTraceTokenStreamStepStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceTokenStreamStepStatus",
+    parameters: [
+      { name: "step", type: "u32" },
+    ],
+    result: "u32",
+    body: [{
+      kind: "return",
+      expression: shr(local("step"), u32(24)),
+    }],
+  };
+}
+
+function parserTraceTokenStreamStepTerminalFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceTokenStreamStepTerminal",
+    parameters: [
+      { name: "step", type: "u32" },
+    ],
+    locals: [
+      { name: "terminal", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "terminal",
+        and(local("step"), u32(RUNTIME_TRACE_TOKEN_STREAM_STEP_TERMINAL_MASK)),
+      ),
+      {
+        kind: "if",
+        condition: eq(
+          local("terminal"),
+          u32(RUNTIME_TRACE_TOKEN_STREAM_STEP_TERMINAL_MASK),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_NO_TERMINAL),
+        }],
+      },
+      { kind: "return", expression: local("terminal") },
+    ],
+  };
+}
+
 function parserAcceptedRootStatusFunction(): RuntimeLanguageFunction {
   return {
     name: "parserAcceptedRootStatus",
@@ -4821,6 +4944,21 @@ function parserReducerFunctions(
   ];
 }
 
+function parserReplayVmFunctions(): RuntimeLanguageFunction[] {
+  return [
+    parserRuntimeValueStatusFunction(),
+    parserReplayResultNewFunction(),
+    parserReplayResultStatusFunction(),
+    parserReplayResultRootFunction(),
+    parserReplayResultStreamIndexFunction(),
+    parserRuleNodeFragmentFunction(),
+    parserReplayValueToFragmentFunction(),
+    parserReplayReducerChildFunction(),
+    parserReplayReduceFunction(),
+    parserReplayVmFunction(),
+  ];
+}
+
 function parserReducerOperationFunction(
   reducerCount: number,
 ): RuntimeLanguageFunction {
@@ -5251,6 +5389,952 @@ function parserReplayReductionStatusFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_REPLAY_REDUCTION_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserRuntimeValueStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserRuntimeValueStatus",
+    parameters: [
+      { name: "handle", type: "u32" },
+    ],
+    locals: [
+      { name: "kindValue", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("handle"), u32(0)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_RUNTIME_VALUE_NULL),
+        }],
+      },
+      setLocal("kindValue", call("runtimeObjectKind", [local("handle")])),
+      {
+        kind: "if",
+        condition: eq(local("kindValue"), u32(RUNTIME_OBJECT_PARSER_TOKEN)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_RUNTIME_VALUE_TOKEN),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("kindValue"),
+          u32(RUNTIME_OBJECT_PARSER_RULE_NODE),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_RUNTIME_VALUE_RULE_NODE),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("kindValue"), u32(RUNTIME_OBJECT_VECTOR)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_RUNTIME_VALUE_VECTOR),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("kindValue"),
+          u32(RUNTIME_OBJECT_PARSER_FRAGMENT),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_RUNTIME_VALUE_FRAGMENT),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_RUNTIME_VALUE_UNKNOWN),
+      },
+    ],
+  };
+}
+
+function parserReplayResultNewFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserReplayResultNew",
+    parameters: [
+      { name: "status", type: "u32" },
+      { name: "root", type: "u32" },
+      { name: "streamIndex", type: "u32" },
+    ],
+    locals: [
+      { name: "handle", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "handle",
+        call("runtimeArenaAlloc", [
+          u32(RUNTIME_PARSER_REPLAY_RESULT_HEADER_WORDS),
+        ]),
+      ),
+      storeScratch(local("handle"), u32(RUNTIME_OBJECT_PARSER_REPLAY_RESULT)),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_REPLAY_RESULT_STATUS_WORD_OFFSET),
+        ),
+        local("status"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_REPLAY_RESULT_ROOT_WORD_OFFSET),
+        ),
+        local("root"),
+      ),
+      storeScratch(
+        add(
+          local("handle"),
+          u32(RUNTIME_PARSER_REPLAY_RESULT_STREAM_INDEX_WORD_OFFSET),
+        ),
+        local("streamIndex"),
+      ),
+      { kind: "return", expression: local("handle") },
+    ],
+  };
+}
+
+function parserReplayResultStatusFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserReplayResultStatus",
+    RUNTIME_OBJECT_PARSER_REPLAY_RESULT,
+    RUNTIME_PARSER_REPLAY_RESULT_STATUS_WORD_OFFSET,
+  );
+}
+
+function parserReplayResultRootFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserReplayResultRoot",
+    RUNTIME_OBJECT_PARSER_REPLAY_RESULT,
+    RUNTIME_PARSER_REPLAY_RESULT_ROOT_WORD_OFFSET,
+  );
+}
+
+function parserReplayResultStreamIndexFunction(): RuntimeLanguageFunction {
+  return parserObjectLoadFunction(
+    "parserReplayResultStreamIndex",
+    RUNTIME_OBJECT_PARSER_REPLAY_RESULT,
+    RUNTIME_PARSER_REPLAY_RESULT_STREAM_INDEX_WORD_OFFSET,
+  );
+}
+
+function parserRuleNodeFragmentFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserRuleNodeFragment",
+    parameters: [
+      { name: "ruleNode", type: "u32" },
+    ],
+    locals: [
+      { name: "fragment", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "fragment",
+        call("parserFragmentNew", [
+          local("ruleNode"),
+          call("parserRuleNodeSpanStart", [local("ruleNode")]),
+          call("parserRuleNodeSpanEnd", [local("ruleNode")]),
+          call("parserRuleNodeTokenStart", [local("ruleNode")]),
+          call("parserRuleNodeTokenEnd", [local("ruleNode")]),
+        ]),
+      ),
+      setLocal(
+        "discard",
+        call("parserFragmentAppendChild", [
+          local("fragment"),
+          local("ruleNode"),
+        ]),
+      ),
+      { kind: "return", expression: local("fragment") },
+    ],
+  };
+}
+
+function parserReplayValueToFragmentFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserReplayValueToFragment",
+    parameters: [
+      { name: "value", type: "u32" },
+    ],
+    locals: [
+      { name: "status", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("status", call("parserRuntimeValueStatus", [local("value")])),
+      {
+        kind: "if",
+        condition: eq(local("status"), u32(RUNTIME_RUNTIME_VALUE_FRAGMENT)),
+        consequent: [{ kind: "return", expression: local("value") }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("status"), u32(RUNTIME_RUNTIME_VALUE_RULE_NODE)),
+        consequent: [{
+          kind: "return",
+          expression: call("parserRuleNodeFragment", [local("value")]),
+        }],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserReplayReducerChildFunction(): RuntimeLanguageFunction {
+  const roleIs = (
+    role: number,
+    expression: RuntimeExpression,
+  ): RuntimeStatement => ({
+    kind: "if",
+    condition: eq(local("role"), u32(role)),
+    consequent: [{ kind: "return", expression }],
+  });
+  return {
+    name: "parserReplayReducerChild",
+    parameters: [
+      { name: "values", type: "u32" },
+      { name: "rhsStart", type: "u32" },
+      { name: "operation", type: "u32" },
+      { name: "slot", type: "u32" },
+    ],
+    locals: [
+      { name: "value", type: "u32" },
+      { name: "role", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "value",
+        call("runtimeVectorLoad", [
+          local("values"),
+          add(local("rhsStart"), local("slot")),
+        ]),
+      ),
+      setLocal(
+        "role",
+        call("parserReducerChildRole", [local("operation"), local("slot")]),
+      ),
+      roleIs(RUNTIME_REDUCER_CHILD_RAW, local("value")),
+      roleIs(
+        RUNTIME_REDUCER_CHILD_FRAGMENT,
+        call("parserReplayValueToFragment", [local("value")]),
+      ),
+      roleIs(
+        RUNTIME_REDUCER_CHILD_SHIFTED_TOKEN,
+        call("parserReplayValueToFragment", [local("value")]),
+      ),
+      {
+        kind: "if",
+        condition: eq(
+          local("role"),
+          u32(RUNTIME_REDUCER_CHILD_RULE_NODE),
+        ),
+        consequent: [{
+          kind: "if",
+          condition: eq(
+            call("parserRuntimeValueStatus", [local("value")]),
+            u32(RUNTIME_RUNTIME_VALUE_RULE_NODE),
+          ),
+          consequent: [{
+            kind: "return",
+            expression: call("parserRuleNodeFragment", [local("value")]),
+          }],
+        }],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserReplayReduceFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserReplayReduce",
+    parameters: [
+      { name: "operation", type: "u32" },
+      { name: "payload", type: "u32" },
+      { name: "values", type: "u32" },
+      { name: "rhsStart", type: "u32" },
+      { name: "rhsLength", type: "u32" },
+      { name: "offset", type: "u32" },
+      { name: "tokenIndex", type: "u32" },
+    ],
+    locals: [
+      { name: "resultKind", type: "u32" },
+      { name: "left", type: "u32" },
+      { name: "middle", type: "u32" },
+      { name: "right", type: "u32" },
+      { name: "fragment", type: "u32" },
+      { name: "index", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal(
+        "resultKind",
+        call("parserReducerResultKind", [local("operation")]),
+      ),
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_RAW_CHILD),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: call("parserReplayReducerChild", [
+            local("values"),
+            local("rhsStart"),
+            local("operation"),
+            u32(0),
+          ]),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_RULE_NODE),
+        ),
+        consequent: [
+          setLocal(
+            "fragment",
+            call("parserReplayReducerChild", [
+              local("values"),
+              local("rhsStart"),
+              local("operation"),
+              u32(0),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(local("fragment"), u32(0)),
+            consequent: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "return",
+            expression: call("parserRuleNodeFromFragment", [
+              local("payload"),
+              local("fragment"),
+            ]),
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_CHILD_FRAGMENT),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: call("parserReplayReducerChild", [
+            local("values"),
+            local("rhsStart"),
+            local("operation"),
+            u32(0),
+          ]),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_SEQUENCE_FRAGMENT),
+        ),
+        consequent: [
+          setLocal(
+            "fragment",
+            call("parserFragmentSequenceNew", [
+              local("offset"),
+              local("tokenIndex"),
+            ]),
+          ),
+          setLocal("index", u32(0)),
+          {
+            kind: "while",
+            condition: ltu(local("index"), local("rhsLength")),
+            body: [
+              setLocal(
+                "left",
+                call("parserReplayReducerChild", [
+                  local("values"),
+                  local("rhsStart"),
+                  local("operation"),
+                  local("index"),
+                ]),
+              ),
+              {
+                kind: "if",
+                condition: eq(local("left"), u32(0)),
+                consequent: [{ kind: "return", expression: u32(0) }],
+              },
+              setLocal(
+                "discard",
+                call("parserFragmentSequenceAppend", [
+                  local("fragment"),
+                  local("left"),
+                ]),
+              ),
+              setLocal("index", add(local("index"), u32(1))),
+            ],
+          },
+          { kind: "return", expression: local("fragment") },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_EMPTY_NULL_FRAGMENT),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: call("parserFragmentEmpty", [
+            u32(0),
+            local("offset"),
+            local("tokenIndex"),
+          ]),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_EMPTY_ARRAY_FRAGMENT),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: call("parserFragmentSequenceNew", [
+            local("offset"),
+            local("tokenIndex"),
+          ]),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_APPEND_FRAGMENT),
+        ),
+        consequent: [
+          setLocal(
+            "left",
+            call("parserReplayReducerChild", [
+              local("values"),
+              local("rhsStart"),
+              local("operation"),
+              u32(0),
+            ]),
+          ),
+          setLocal(
+            "right",
+            call("parserReplayReducerChild", [
+              local("values"),
+              local("rhsStart"),
+              local("operation"),
+              u32(1),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(local("left"), u32(0)),
+            consequent: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(local("right"), u32(0)),
+            consequent: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "return",
+            expression: call("parserFragmentAppendValue", [
+              local("left"),
+              local("right"),
+            ]),
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_FIRST_ARRAY_FRAGMENT),
+        ),
+        consequent: [
+          setLocal(
+            "left",
+            call("parserReplayReducerChild", [
+              local("values"),
+              local("rhsStart"),
+              local("operation"),
+              u32(0),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(local("left"), u32(0)),
+            consequent: [{ kind: "return", expression: u32(0) }],
+          },
+          setLocal(
+            "discard",
+            call("parserFragmentWrapValueVector", [local("left")]),
+          ),
+          { kind: "return", expression: local("left") },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_SEPARATED_APPEND_FRAGMENT),
+        ),
+        consequent: [
+          setLocal(
+            "left",
+            call("parserReplayReducerChild", [
+              local("values"),
+              local("rhsStart"),
+              local("operation"),
+              u32(0),
+            ]),
+          ),
+          setLocal(
+            "middle",
+            call("parserReplayReducerChild", [
+              local("values"),
+              local("rhsStart"),
+              local("operation"),
+              u32(1),
+            ]),
+          ),
+          setLocal(
+            "right",
+            call("parserReplayReducerChild", [
+              local("values"),
+              local("rhsStart"),
+              local("operation"),
+              u32(2),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(local("left"), u32(0)),
+            consequent: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(local("middle"), u32(0)),
+            consequent: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "if",
+            condition: eq(local("right"), u32(0)),
+            consequent: [{ kind: "return", expression: u32(0) }],
+          },
+          {
+            kind: "return",
+            expression: call("parserFragmentAppendSeparatedValue", [
+              local("left"),
+              local("middle"),
+              local("right"),
+            ]),
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("resultKind"),
+          u32(RUNTIME_REDUCER_RESULT_FIELD_FRAGMENT),
+        ),
+        consequent: [
+          setLocal(
+            "fragment",
+            call("parserReplayReducerChild", [
+              local("values"),
+              local("rhsStart"),
+              local("operation"),
+              u32(0),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(local("fragment"), u32(0)),
+            consequent: [{ kind: "return", expression: u32(0) }],
+          },
+          setLocal(
+            "left",
+            call("parserFieldCaptureNew", [
+              local("payload"),
+              local("fragment"),
+            ]),
+          ),
+          setLocal(
+            "discard",
+            call("parserFragmentAppendField", [
+              local("fragment"),
+              local("left"),
+            ]),
+          ),
+          { kind: "return", expression: local("fragment") },
+        ],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserReplayVmFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserReplayVm",
+    parameters: [
+      { name: "traceActions", type: "u32" },
+      { name: "streamTokens", type: "u32" },
+      { name: "streamTokenIndices", type: "u32" },
+    ],
+    locals: [
+      { name: "values", type: "u32" },
+      { name: "traceIndex", type: "u32" },
+      { name: "traceCount", type: "u32" },
+      { name: "streamIndex", type: "u32" },
+      { name: "streamCount", type: "u32" },
+      { name: "action", type: "u32" },
+      { name: "actionStatus", type: "u32" },
+      { name: "payload", type: "u32" },
+      { name: "rhsLength", type: "u32" },
+      { name: "operation", type: "u32" },
+      { name: "payloadStatus", type: "u32" },
+      { name: "reductionStatus", type: "u32" },
+      { name: "rhsStart", type: "u32" },
+      { name: "token", type: "u32" },
+      { name: "tokenIndex", type: "u32" },
+      { name: "reduced", type: "u32" },
+      { name: "discard", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("values", call("runtimeVectorNew", [u32(0)])),
+      setLocal(
+        "discard",
+        call("runtimeVectorAppend", [local("values"), u32(0)]),
+      ),
+      setLocal("traceIndex", u32(0)),
+      setLocal("streamIndex", u32(0)),
+      setLocal(
+        "traceCount",
+        call("runtimeVectorLength", [local("traceActions")]),
+      ),
+      setLocal(
+        "streamCount",
+        call("runtimeVectorLength", [local("streamTokens")]),
+      ),
+      {
+        kind: "while",
+        condition: ltu(local("traceIndex"), local("traceCount")),
+        body: [
+          setLocal(
+            "action",
+            call("runtimeVectorLoad", [
+              local("traceActions"),
+              local("traceIndex"),
+            ]),
+          ),
+          setLocal(
+            "actionStatus",
+            call("parserReplayActionStatus", [
+              call("parserActionKind", [local("action")]),
+            ]),
+          ),
+          setLocal("payload", call("parserActionPayload", [local("action")])),
+          {
+            kind: "if",
+            condition: eq(
+              local("actionStatus"),
+              u32(RUNTIME_REPLAY_ACTION_STATUS_SHIFT),
+            ),
+            consequent: [
+              {
+                kind: "if",
+                condition: ltu(local("streamIndex"), local("streamCount")),
+                consequent: [],
+                alternate: [{
+                  kind: "return",
+                  expression: call("parserReplayResultNew", [
+                    u32(RUNTIME_REPLAY_VM_STATUS_STREAM_UNDERFLOW),
+                    u32(0),
+                    local("streamIndex"),
+                  ]),
+                }],
+              },
+              setLocal(
+                "token",
+                call("runtimeVectorLoad", [
+                  local("streamTokens"),
+                  local("streamIndex"),
+                ]),
+              ),
+              setLocal(
+                "tokenIndex",
+                call("runtimeVectorLoad", [
+                  local("streamTokenIndices"),
+                  local("streamIndex"),
+                ]),
+              ),
+              setLocal(
+                "discard",
+                call("runtimeVectorAppend", [
+                  local("values"),
+                  call("parserFragmentFromToken", [
+                    local("token"),
+                    local("tokenIndex"),
+                  ]),
+                ]),
+              ),
+              setLocal("streamIndex", add(local("streamIndex"), u32(1))),
+              setLocal("traceIndex", add(local("traceIndex"), u32(1))),
+            ],
+            alternate: [
+              {
+                kind: "if",
+                condition: eq(
+                  local("actionStatus"),
+                  u32(RUNTIME_REPLAY_ACTION_STATUS_ACCEPT),
+                ),
+                consequent: [{
+                  kind: "return",
+                  expression: call("parserReplayResultNew", [
+                    u32(RUNTIME_REPLAY_VM_STATUS_OK),
+                    call("runtimeVectorLoad", [
+                      local("values"),
+                      call("parserReplayStackDepth", [
+                        call("runtimeVectorLength", [local("values")]),
+                      ]),
+                    ]),
+                    local("streamIndex"),
+                  ]),
+                }],
+                alternate: [
+                  {
+                    kind: "if",
+                    condition: eq(
+                      local("actionStatus"),
+                      u32(RUNTIME_REPLAY_ACTION_STATUS_REDUCE),
+                    ),
+                    consequent: [],
+                    alternate: [{
+                      kind: "return",
+                      expression: call("parserReplayResultNew", [
+                        u32(RUNTIME_REPLAY_VM_STATUS_UNKNOWN_ACTION),
+                        u32(0),
+                        local("streamIndex"),
+                      ]),
+                    }],
+                  },
+                  setLocal(
+                    "rhsLength",
+                    call("parserProductionRhsLength", [
+                      local("payload"),
+                    ]),
+                  ),
+                  setLocal(
+                    "operation",
+                    call("parserReducerOperation", [local("payload")]),
+                  ),
+                  setLocal(
+                    "payloadStatus",
+                    call("parserReducerPayloadStatus", [local("payload")]),
+                  ),
+                  setLocal(
+                    "reductionStatus",
+                    call("parserReplayReductionStatus", [
+                      local("rhsLength"),
+                      local("operation"),
+                      local("payloadStatus"),
+                      call("parserReplayStackDepth", [
+                        call("runtimeVectorLength", [local("values")]),
+                      ]),
+                    ]),
+                  ),
+                  {
+                    kind: "if",
+                    condition: eq(
+                      local("reductionStatus"),
+                      u32(RUNTIME_REPLAY_REDUCTION_STATUS_UNKNOWN_PRODUCTION),
+                    ),
+                    consequent: [{
+                      kind: "return",
+                      expression: call("parserReplayResultNew", [
+                        u32(RUNTIME_REPLAY_VM_STATUS_UNKNOWN_PRODUCTION),
+                        u32(0),
+                        local("streamIndex"),
+                      ]),
+                    }],
+                  },
+                  {
+                    kind: "if",
+                    condition: eq(
+                      local("reductionStatus"),
+                      u32(
+                        RUNTIME_REPLAY_REDUCTION_STATUS_RULE_PAYLOAD_MISSING,
+                      ),
+                    ),
+                    consequent: [{
+                      kind: "return",
+                      expression: call("parserReplayResultNew", [
+                        u32(RUNTIME_REPLAY_VM_STATUS_RULE_PAYLOAD_MISSING),
+                        u32(0),
+                        local("streamIndex"),
+                      ]),
+                    }],
+                  },
+                  {
+                    kind: "if",
+                    condition: eq(
+                      local("reductionStatus"),
+                      u32(
+                        RUNTIME_REPLAY_REDUCTION_STATUS_FIELD_PAYLOAD_MISSING,
+                      ),
+                    ),
+                    consequent: [{
+                      kind: "return",
+                      expression: call("parserReplayResultNew", [
+                        u32(RUNTIME_REPLAY_VM_STATUS_FIELD_PAYLOAD_MISSING),
+                        u32(0),
+                        local("streamIndex"),
+                      ]),
+                    }],
+                  },
+                  {
+                    kind: "if",
+                    condition: eq(
+                      local("reductionStatus"),
+                      u32(RUNTIME_REPLAY_REDUCTION_STATUS_STACK_UNDERFLOW),
+                    ),
+                    consequent: [{
+                      kind: "return",
+                      expression: call("parserReplayResultNew", [
+                        u32(RUNTIME_REPLAY_VM_STATUS_STACK_UNDERFLOW),
+                        u32(0),
+                        local("streamIndex"),
+                      ]),
+                    }],
+                  },
+                  {
+                    kind: "if",
+                    condition: eq(
+                      local("reductionStatus"),
+                      u32(RUNTIME_REPLAY_REDUCTION_STATUS_OK),
+                    ),
+                    consequent: [],
+                    alternate: [{
+                      kind: "return",
+                      expression: call("parserReplayResultNew", [
+                        u32(RUNTIME_REPLAY_VM_STATUS_REDUCTION_FAILED),
+                        u32(0),
+                        local("streamIndex"),
+                      ]),
+                    }],
+                  },
+                  {
+                    kind: "if",
+                    condition: ltu(local("streamIndex"), local("streamCount")),
+                    consequent: [],
+                    alternate: [{
+                      kind: "return",
+                      expression: call("parserReplayResultNew", [
+                        u32(RUNTIME_REPLAY_VM_STATUS_STREAM_UNDERFLOW),
+                        u32(0),
+                        local("streamIndex"),
+                      ]),
+                    }],
+                  },
+                  setLocal(
+                    "rhsStart",
+                    call("parserReplayRhsStart", [
+                      call("runtimeVectorLength", [local("values")]),
+                      local("rhsLength"),
+                    ]),
+                  ),
+                  setLocal(
+                    "token",
+                    call("runtimeVectorLoad", [
+                      local("streamTokens"),
+                      local("streamIndex"),
+                    ]),
+                  ),
+                  setLocal(
+                    "tokenIndex",
+                    call("runtimeVectorLoad", [
+                      local("streamTokenIndices"),
+                      local("streamIndex"),
+                    ]),
+                  ),
+                  setLocal(
+                    "reduced",
+                    call("parserReplayReduce", [
+                      local("operation"),
+                      call("parserReducerPayload", [local("payload")]),
+                      local("values"),
+                      local("rhsStart"),
+                      local("rhsLength"),
+                      call("parserTokenSpanStart", [local("token")]),
+                      local("tokenIndex"),
+                    ]),
+                  ),
+                  {
+                    kind: "if",
+                    condition: eq(local("reduced"), u32(0)),
+                    consequent: [{
+                      kind: "return",
+                      expression: call("parserReplayResultNew", [
+                        u32(RUNTIME_REPLAY_VM_STATUS_REDUCTION_FAILED),
+                        u32(0),
+                        local("streamIndex"),
+                      ]),
+                    }],
+                  },
+                  setLocal(
+                    "discard",
+                    call("runtimeVectorTruncate", [
+                      local("values"),
+                      local("rhsStart"),
+                    ]),
+                  ),
+                  setLocal(
+                    "discard",
+                    call("runtimeVectorAppend", [
+                      local("values"),
+                      local("reduced"),
+                    ]),
+                  ),
+                  setLocal("traceIndex", add(local("traceIndex"), u32(1))),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        kind: "return",
+        expression: call("parserReplayResultNew", [
+          u32(RUNTIME_REPLAY_VM_STATUS_ENDED_WITHOUT_ACCEPT),
+          u32(0),
+          local("streamIndex"),
+        ]),
       },
     ],
   };

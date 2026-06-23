@@ -65,3 +65,18 @@ deno test -A tests/runtime_plan_test.ts tests/parser_test.ts tests/wasm_test.ts
 - Do not remove human-readable messages unless a separate API migration is
   approved.
 - Do not move JavaScript allocation into Wasm.
+
+## Completion Notes
+
+Completed on 2026-06-23.
+
+- Centralized public rule-node materialization behind runtime-language rule-node
+  handles. The shared rule-node materializer now reads rule id, span, token
+  range, child vectors, and field vectors from runtime accessors before wrapping
+  public JavaScript objects.
+- Moved field object/array/scalar wrapping into shared materializer helpers that
+  take `SourceTextBoundary` and resolve runtime fragment handles through the
+  shared runtime value materialization path.
+- Tightened runtime-plan tests so field/replay classification lives in
+  runtime-language sources while public materializers remain host allocation and
+  rendering boundaries.

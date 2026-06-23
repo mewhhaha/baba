@@ -11,7 +11,11 @@ function storePublicField(
   fields[name] = value;
 }
 
-function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
+function materializeFieldArray(
+  sourceText: SourceTextBoundary,
+  name: string,
+  vectorHandle: number,
+): unknown[] {
   const status = parserFieldArrayValueStatus(vectorHandle);
   if (status === FIELD_ARRAY_VALUE_MISSING) {
     throw new Error(\`Array field '\${name}' was not initialized as a runtime vector.\`);
@@ -19,13 +23,22 @@ function materializeFieldArray(name: string, vectorHandle: number): unknown[] {
   const length = runtimeVectorLength(vectorHandle);
   const values: unknown[] = [];
   for (let index = 0; index < length; index++) {
-    values.push(hostFragmentValue(runtimeVectorLoad(vectorHandle, index)));
+    values.push(hostFragmentValue(
+      sourceText,
+      runtimeVectorLoad(vectorHandle, index),
+    ));
   }
   return values;
 }
 
-function materializeFieldScalar(count: number, valueHandle: number): unknown {
+function materializeFieldScalar(
+  sourceText: SourceTextBoundary,
+  count: number,
+  valueHandle: number,
+): unknown {
   const status = parserFieldScalarValueStatus(count);
-  return status === FIELD_SCALAR_VALUE_NULL ? null : hostFragmentValue(valueHandle);
+  return status === FIELD_SCALAR_VALUE_NULL
+    ? null
+    : hostFragmentValue(sourceText, valueHandle);
 }`;
 }
