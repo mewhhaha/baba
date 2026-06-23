@@ -27,8 +27,8 @@ Runtime-owned semantics:
 
 - source offset/span status, UTF-16 trail-unit availability, code-point
   decoding, next-offset arithmetic, lexer DFA transition lookup, accepted-spec
-  tracking, token class/status classification, and lexer-driver decisions once
-  source handles are fully lowered;
+  tracking, token class/status classification, maximal-munch lexer-driver
+  events, preserve-trivia emission, and lexical-error fallback advancement;
 - external token-stream normalization, canonical stream matching, omitted-trivia
   handling, trace terminal selection, and compacted trace metadata;
 - LR trace control flow, branch scheduling, action/goto lookup, production and
@@ -65,10 +65,11 @@ Forbidden after the remaining source-of-truth work closes:
   bypassing the runtime-language source.
 
 Task `170-runtime-source-of-truth-cutline.md` records this cutline. Task `171`
-closed the explicit source-text helper boundary; tasks `172` through `178` track
-the remaining implementation work needed to satisfy it. Requirement 1 should
-stay partial until `178-final-runtime-source-of-truth-gate.md` can mark this
-proof complete with tests and regenerated artifacts.
+closed the explicit source-text helper boundary, and task `172` closed the
+generated TypeScript lexer-driver loop; tasks `173` through `178` track the
+remaining implementation work needed to satisfy it. Requirement 1 should stay
+partial until `178-final-runtime-source-of-truth-gate.md` can mark this proof
+complete with tests and regenerated artifacts.
 
 `deno task bootstrap:check` verifies the Stage-0 runtime-language compiler
 source hash before it checks regenerated example artifacts. This catches
@@ -95,48 +96,53 @@ generated read-only tables, and `lexerScan*` helpers track longest-match
 accepting candidates from generated DFA accept tables. Generated TypeScript
 lexer source access still reads host-owned strings, but `SourceTextBoundary`
 calls runtime-language source helpers for bounds, trail, code-point,
-next-offset, and accepted-length decisions. `lexerSpecTokenClass`,
-`lexerSpecPayload`, and `lexerSpecTerminal` map accepted lexer spec indexes to
-token object classification data and parser terminal ids for generated
-TypeScript `parse(source)`, while `lexerSpecFlags` remains the lower-level table
-helper. Standalone TypeScript lexers and generated Wasm JavaScript adapters
-allocate runtime-language token records for matched literals, named tokens,
-preserved trivia, lexical error tokens, and EOF tokens, then read class,
-payload, terminal, and span data back through `parserToken*` accessors before
-wrapping public API token objects through one shared runtime-target materializer
-helper. `lexerPublicTokenClass` and `lexerTokenEmitStatus` own the
-literal/main/trivia public class and preserve-trivia emission decisions used by
-both generated TypeScript lexers and generated Wasm JavaScript adapters. Lexical
-unexpected-character diagnostics are allocated through one shared runtime-target
-lex diagnostic materializer in both generated TypeScript lexers and generated
-Wasm JavaScript adapters. Public lex result objects are allocated through one
-shared runtime-target lex result materializer in both lexer targets. The
-generated materializer stores the parser-terminal hint as a non-enumerable
-`__babaTerminal` property on main and literal public tokens. That hint is
-plan-local provenance for generated parser fast paths, not a public token API,
-and consumers should not serialize, mutate, or reuse it across parser plans.
-External token streams keep public token-kind/literal spelling at the API
-boundary, but generated parsers map those spellings to lexer spec indexes and
-use the same runtime-language helpers for channel and terminal classification.
-`lexerSpecPublicTokenStatus` decides whether a mapped public literal/main/trivia
-token is compatible with the spec row; TypeScript still validates object
-shape/text and emits public diagnostics. `parserTokenStreamSpanBoundsStatus`,
-`parserTokenStreamSpanPositionStatus`, `parserTokenStreamWidthStatus`, and
-`parserTokenStreamEofStatus` classify external token-stream span ordering and
-EOF-shape errors before TypeScript allocates public diagnostics.
-`parserTokenStreamGapTokenStatus` classifies canonical lexer tokens inside
-omitted source gaps as safely omitted trivia or invalid nontrivia source.
-`parserTokenStreamTokenMatchStatus` compares canonical and supplied token
-numeric identity, terminal, spec index, and span after host text/channel checks.
-`parserTokenStreamCanonicalMatchStatus` classifies canonical lexer replay
-advancement as a supplied-token match, an omitted-trivia skip, or a mismatch.
-`parserTokenStreamFinalStatus` classifies end-of-stream EOF placement and
-trailing source gaps before TypeScript allocates final token-stream diagnostics.
-`parserTokenStreamPublicTokenStatus` classifies public literal/named/error token
-shape after host type/channel/text spelling is mapped to numeric classes.
-`lexerTokenDiagnosticStatus` classifies external tokens as diagnostically
-accepted, lexical error tokens, or not in the parser terminal set before
-TypeScript allocates the public diagnostic object.
+next-offset, and accepted-length decisions. The runtime-language `lexerDriver*`
+helpers own the generated TypeScript lexer driver state: the host wrapper only
+feeds the code point at `lexerDriverReadOffset()` and then wraps `TOKEN` or
+`ERROR` events reported by the driver. The driver performs maximal-munch scan
+iteration, accepted-spec selection, preserve-trivia emission decisions, public
+token class/payload/terminal selection, and lexical-error fallback advancement.
+`lexerSpecTokenClass`, `lexerSpecPayload`, and `lexerSpecTerminal` map accepted
+lexer spec indexes to token object classification data and parser terminal ids
+for generated TypeScript `parse(source)`, while `lexerSpecFlags` remains the
+lower-level table helper. Standalone TypeScript lexers and generated Wasm
+JavaScript adapters allocate runtime-language token records for matched
+literals, named tokens, preserved trivia, lexical error tokens, and EOF tokens,
+then read class, payload, terminal, and span data back through `parserToken*`
+accessors before wrapping public API token objects through one shared
+runtime-target materializer helper. `lexerPublicTokenClass` and
+`lexerTokenEmitStatus` own the literal/main/trivia public class and
+preserve-trivia emission decisions used by both generated TypeScript lexers and
+generated Wasm JavaScript adapters. Lexical unexpected-character diagnostics are
+allocated through one shared runtime-target lex diagnostic materializer in both
+generated TypeScript lexers and generated Wasm JavaScript adapters. Public lex
+result objects are allocated through one shared runtime-target lex result
+materializer in both lexer targets. The generated materializer stores the
+parser-terminal hint as a non-enumerable `__babaTerminal` property on main and
+literal public tokens. That hint is plan-local provenance for generated parser
+fast paths, not a public token API, and consumers should not serialize, mutate,
+or reuse it across parser plans. External token streams keep public
+token-kind/literal spelling at the API boundary, but generated parsers map those
+spellings to lexer spec indexes and use the same runtime-language helpers for
+channel and terminal classification. `lexerSpecPublicTokenStatus` decides
+whether a mapped public literal/main/trivia token is compatible with the spec
+row; TypeScript still validates object shape/text and emits public diagnostics.
+`parserTokenStreamSpanBoundsStatus`, `parserTokenStreamSpanPositionStatus`,
+`parserTokenStreamWidthStatus`, and `parserTokenStreamEofStatus` classify
+external token-stream span ordering and EOF-shape errors before TypeScript
+allocates public diagnostics. `parserTokenStreamGapTokenStatus` classifies
+canonical lexer tokens inside omitted source gaps as safely omitted trivia or
+invalid nontrivia source. `parserTokenStreamTokenMatchStatus` compares canonical
+and supplied token numeric identity, terminal, spec index, and span after host
+text/channel checks. `parserTokenStreamCanonicalMatchStatus` classifies
+canonical lexer replay advancement as a supplied-token match, an omitted-trivia
+skip, or a mismatch. `parserTokenStreamFinalStatus` classifies end-of-stream EOF
+placement and trailing source gaps before TypeScript allocates final
+token-stream diagnostics. `parserTokenStreamPublicTokenStatus` classifies public
+literal/named/error token shape after host type/channel/text spelling is mapped
+to numeric classes. `lexerTokenDiagnosticStatus` classifies external tokens as
+diagnostically accepted, lexical error tokens, or not in the parser terminal set
+before TypeScript allocates the public diagnostic object.
 `parserTraceTokenStreamStatus` classifies public token records as parser-trace
 input, skippable trivia, or EOF stop tokens before generated TypeScript parsers
 and Wasm adapters compact public tokens into terminal streams.

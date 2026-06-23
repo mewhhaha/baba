@@ -65,3 +65,20 @@ deno test -A tests/runtime_language_test.ts tests/runtime_plan_test.ts tests/lex
 - Do not change lexical priority semantics.
 - Do not change public `lex()` return shapes.
 - Do not remove the JavaScript-hosted Wasm adapter API.
+
+## Completion Notes
+
+Completed on 2026-06-23.
+
+- Added runtime-language `lexerDriver*` helpers that own maximal-munch scan
+  state, accepted-spec selection, preserve-trivia emission, public token
+  class/payload/terminal event fields, and lexical-error fallback advancement.
+- Rewrote generated TypeScript lexers so host code only feeds source code points
+  requested by `lexerDriverReadOffset()` and materializes `TOKEN`/`ERROR` events
+  through shared public token and diagnostic materializers.
+- Reserved the driver scratch prefix before generated token-record allocation so
+  public wrapping cannot corrupt runtime driver state.
+- Added TypeScript/Wasm runtime-language conformance for token, skipped trivia,
+  preserved trivia, and lexical-error driver events.
+- Tightened `tests/runtime_plan_test.ts` to reject `bestCandidate`, the old
+  host-side candidate helper, and direct host lexer-scan/token-emission markers.

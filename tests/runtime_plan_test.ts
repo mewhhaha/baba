@@ -70,13 +70,17 @@ Deno.test("runtime source-of-truth cutline tracks remaining work", async () => {
 
   assertIncludes(
     status,
-    "Continue with `172-runtime-lexer-driver-lowering.md` through `178-final-runtime-source-of-truth-gate.md`",
+    "Continue with `173-runtime-token-stream-normalization-lowering.md` through `178-final-runtime-source-of-truth-gate.md`",
   );
   assertIncludes(taskIndex, "## Remaining Runtime Source-Of-Truth Work");
   assertIncludes(taskIndex, "Completed FEEDBACK P0.1 cutline: `170`");
   assertIncludes(
     taskIndex,
     "Completed FEEDBACK P0.1 source text handles: `171`",
+  );
+  assertIncludes(
+    taskIndex,
+    "Completed FEEDBACK P0.1 lexer driver lowering: `172`",
   );
   assertIncludes(taskIndex, "178-final-runtime-source-of-truth-gate.md");
 });
@@ -122,15 +126,22 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   const publicTokenMaterializerSource = await Deno.readTextFile(
     "src/targets/runtime/public_token_materializer.ts",
   );
-  assertIncludes(lexerRuntimeSource, "function bestCandidate");
-  assertIncludes(lexerRuntimeSource, "lexerScanAdvance");
-  assertIncludes(lexerRuntimeSource, "lexerScanNextOffset");
-  assertIncludes(lexerRuntimeSource, "lexerScanCandidateEnd");
-  assertIncludes(lexerRuntimeSource, "lexerSpecTokenClass");
-  assertIncludes(lexerRuntimeSource, "lexerSpecPayload");
-  assertIncludes(lexerRuntimeSource, "lexerSpecTerminal");
-  assertIncludes(lexerRuntimeSource, "lexerPublicTokenClass");
-  assertIncludes(lexerRuntimeSource, "lexerTokenEmitStatus");
+  assertIncludes(lexerRuntimeSource, "lexerDriverStart");
+  assertIncludes(lexerRuntimeSource, "lexerDriverReadOffset");
+  assertIncludes(lexerRuntimeSource, "lexerDriverAdvance");
+  assertIncludes(lexerRuntimeSource, "lexerDriverTokenClass");
+  assertIncludes(lexerRuntimeSource, "lexerDriverTokenPayload");
+  assertIncludes(lexerRuntimeSource, "lexerDriverTokenTerminal");
+  assertIncludes(lexerRuntimeSource, "lexerDriverConsume");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerScanAdvance");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerScanNextOffset");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerScanCandidateEnd");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerSpecTokenClass");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerSpecPayload");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerSpecTerminal");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerPublicTokenClass");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerTokenEmitStatus");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerDriverFinalize");
   assertIncludes(lexerRuntimeSource, "createLexerRuntimeProgram");
   assertIncludes(lexerRuntimeSource, "emitRuntimeLanguageTypeScriptFunction");
   assertIncludes(lexerRuntimeSource, "parserTokenNew");
@@ -142,7 +153,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     lexerRuntimeSource,
     "const sourceText = createSourceTextBoundary(source)",
   );
-  assertIncludes(lexerRuntimeSource, "sourceTextCodePointAt(sourceText");
+  assertIncludes(lexerRuntimeSource, "sourceTextCodePointAt(");
   assertIncludes(lexerRuntimeSource, "materializeToken(sourceText, handle)");
   assertIncludes(
     publicSourceTextBoundarySource,
@@ -224,6 +235,14 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(lexerRuntimeSource, "function codePointLength");
   assertNotIncludes(lexerRuntimeSource, "function transition");
   assertNotIncludes(lexerRuntimeSource, "function publicTokenClass");
+  assertNotIncludes(lexerRuntimeSource, "interface Candidate");
+  assertNotIncludes(lexerRuntimeSource, "function bestCandidate");
+  assertNotIncludes(lexerRuntimeSource, "const candidate =");
+  assertNotIncludes(lexerRuntimeSource, "lexerScanAdvance(codePoint)");
+  assertNotIncludes(
+    lexerRuntimeSource,
+    "lexerTokenEmitStatus(tokenClass, preserveTrivia",
+  );
   assertNotIncludes(lexerRuntimeSource, "index += utf16CodePointWidth");
   assertNotIncludes(lexerRuntimeSource, "offset + lexerScanBestEnd()");
   assertNotIncludes(

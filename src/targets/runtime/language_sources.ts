@@ -52,6 +52,11 @@ export const RUNTIME_LEXICAL_TOKEN_STATUS_ERROR_TOKEN = 1;
 export const RUNTIME_LEXICAL_TOKEN_STATUS_NOT_TERMINAL = 2;
 export const RUNTIME_LEXER_TOKEN_EMIT_SKIP = 0;
 export const RUNTIME_LEXER_TOKEN_EMIT_TOKEN = 1;
+export const RUNTIME_LEXER_DRIVER_EVENT_DONE = 0;
+export const RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT = 1;
+export const RUNTIME_LEXER_DRIVER_EVENT_TOKEN = 2;
+export const RUNTIME_LEXER_DRIVER_EVENT_ERROR = 3;
+export const RUNTIME_LEXER_DRIVER_SCRATCH_WORDS = 16;
 export const RUNTIME_TOKEN_STREAM_STATUS_OK = 0;
 export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN = 1;
 export const RUNTIME_TOKEN_STREAM_STATUS_GAP = 2;
@@ -203,6 +208,17 @@ const LEXER_SCAN_LENGTH = 1;
 const LEXER_SCAN_BEST_SPEC = 2;
 const LEXER_SCAN_BEST_END = 3;
 const LEXER_SCAN_DONE = 4;
+const LEXER_DRIVER_EVENT = 5;
+const LEXER_DRIVER_SOURCE_LENGTH = 6;
+const LEXER_DRIVER_PRESERVE_TRIVIA = 7;
+const LEXER_DRIVER_TOKEN_START = 8;
+const LEXER_DRIVER_TOKEN_END = 9;
+const LEXER_DRIVER_TOKEN_SPEC = 10;
+const LEXER_DRIVER_TOKEN_CLASS = 11;
+const LEXER_DRIVER_TOKEN_PAYLOAD = 12;
+const LEXER_DRIVER_TOKEN_TERMINAL = 13;
+const LEXER_DRIVER_READ_OFFSET = 14;
+const LEXER_DRIVER_ERROR_END = 15;
 const RUNTIME_ARENA_NEXT_WORD = 0;
 const RUNTIME_ARENA_FIRST_WORD = 1;
 const RUNTIME_OBJECT_ARRAY = 1;
@@ -634,9 +650,16 @@ export function createLexerRuntimeProgram(
     name: "lexer_runtime",
     entry: "dfaTransition",
     scratchMemoryWords: input.includeTokenRecords
-      ? Math.max(input.accepts ? 5 : 0, RUNTIME_ARENA_FIRST_WORD)
+      ? Math.max(
+        input.accepts && input.specs
+          ? RUNTIME_LEXER_DRIVER_SCRATCH_WORDS
+          : input.accepts
+          ? 5
+          : 0,
+        RUNTIME_ARENA_FIRST_WORD,
+      )
       : input.accepts
-      ? 5
+      ? input.specs ? RUNTIME_LEXER_DRIVER_SCRATCH_WORDS : 5
       : undefined,
     tables,
     functions: [
@@ -653,6 +676,7 @@ export function createLexerRuntimeProgram(
         ]
         : []),
       ...(input.specs ? lexerSpecFunctions(input.specs.length) : []),
+      ...(input.accepts && input.specs ? lexerDriverFunctions() : []),
       ...(input.includeTokenRecords ? parserTokenRecordFunctions() : []),
     ],
   };
@@ -4008,6 +4032,301 @@ function lexerScanCandidateEndFunction(): RuntimeLanguageFunction {
           call("lexerScanBestEnd", []),
         ),
       },
+    ],
+  };
+}
+
+function lexerDriverFunctions(): RuntimeLanguageFunction[] {
+  return [
+    lexerDriverStartFunction(),
+    lexerDriverBeginScanFunction(),
+    lexerDriverAdvanceFunction(),
+    lexerDriverFinalizeFunction(),
+    lexerDriverConsumeFunction(),
+    lexerDriverLoadFunction("lexerDriverEvent", LEXER_DRIVER_EVENT),
+    lexerDriverLoadFunction("lexerDriverReadOffset", LEXER_DRIVER_READ_OFFSET),
+    lexerDriverLoadFunction("lexerDriverTokenStart", LEXER_DRIVER_TOKEN_START),
+    lexerDriverLoadFunction("lexerDriverTokenEnd", LEXER_DRIVER_TOKEN_END),
+    lexerDriverLoadFunction("lexerDriverTokenSpec", LEXER_DRIVER_TOKEN_SPEC),
+    lexerDriverLoadFunction("lexerDriverTokenClass", LEXER_DRIVER_TOKEN_CLASS),
+    lexerDriverLoadFunction(
+      "lexerDriverTokenPayload",
+      LEXER_DRIVER_TOKEN_PAYLOAD,
+    ),
+    lexerDriverLoadFunction(
+      "lexerDriverTokenTerminal",
+      LEXER_DRIVER_TOKEN_TERMINAL,
+    ),
+  ];
+}
+
+function lexerDriverStartFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerDriverStart",
+    parameters: [
+      { name: "sourceLength", type: "u32" },
+      { name: "preserveTrivia", type: "u32" },
+    ],
+    locals: [{ name: "discard", type: "u32" }],
+    result: "u32",
+    body: [
+      setLocal(
+        "discard",
+        ensureScratch(u32(RUNTIME_LEXER_DRIVER_SCRATCH_WORDS)),
+      ),
+      storeScratch(u32(LEXER_DRIVER_SOURCE_LENGTH), local("sourceLength")),
+      storeScratch(u32(LEXER_DRIVER_PRESERVE_TRIVIA), local("preserveTrivia")),
+      {
+        kind: "return",
+        expression: call("lexerDriverBeginScan", [u32(0)]),
+      },
+    ],
+  };
+}
+
+function lexerDriverBeginScanFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerDriverBeginScan",
+    parameters: [
+      { name: "offset", type: "u32" },
+    ],
+    locals: [{ name: "discard", type: "u32" }],
+    result: "u32",
+    body: [
+      setLocal("discard", call("lexerScanReset", [])),
+      storeScratch(u32(LEXER_DRIVER_TOKEN_START), local("offset")),
+      storeScratch(u32(LEXER_DRIVER_TOKEN_END), local("offset")),
+      storeScratch(u32(LEXER_DRIVER_TOKEN_SPEC), u32(RUNTIME_NO_ACCEPT)),
+      storeScratch(
+        u32(LEXER_DRIVER_TOKEN_CLASS),
+        u32(RUNTIME_PUBLIC_TOKEN_ERROR),
+      ),
+      storeScratch(u32(LEXER_DRIVER_TOKEN_PAYLOAD), u32(0)),
+      storeScratch(u32(LEXER_DRIVER_TOKEN_TERMINAL), u32(RUNTIME_NO_TERMINAL)),
+      storeScratch(u32(LEXER_DRIVER_READ_OFFSET), local("offset")),
+      storeScratch(u32(LEXER_DRIVER_ERROR_END), local("offset")),
+      {
+        kind: "if",
+        condition: lt(
+          local("offset"),
+          loadScratch(u32(LEXER_DRIVER_SOURCE_LENGTH)),
+        ),
+        consequent: [
+          storeScratch(
+            u32(LEXER_DRIVER_EVENT),
+            u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+          ),
+          {
+            kind: "return",
+            expression: u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+          },
+        ],
+      },
+      storeScratch(
+        u32(LEXER_DRIVER_EVENT),
+        u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
+      ),
+      { kind: "return", expression: u32(RUNTIME_LEXER_DRIVER_EVENT_DONE) },
+    ],
+  };
+}
+
+function lexerDriverAdvanceFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerDriverAdvance",
+    parameters: [
+      { name: "codePoint", type: "u32" },
+    ],
+    locals: [
+      { name: "advanced", type: "u32" },
+      { name: "nextOffset", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          loadScratch(u32(LEXER_DRIVER_EVENT)),
+          u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+        ),
+        consequent: [],
+        alternate: [{ kind: "trap" }],
+      },
+      setLocal(
+        "nextOffset",
+        call("sourceTextNextOffset", [
+          loadScratch(u32(LEXER_DRIVER_READ_OFFSET)),
+          local("codePoint"),
+        ]),
+      ),
+      storeScratch(u32(LEXER_DRIVER_ERROR_END), local("nextOffset")),
+      setLocal("advanced", call("lexerScanAdvance", [local("codePoint")])),
+      {
+        kind: "if",
+        condition: eq(local("advanced"), u32(1)),
+        consequent: [
+          storeScratch(u32(LEXER_DRIVER_READ_OFFSET), local("nextOffset")),
+          {
+            kind: "if",
+            condition: lt(
+              local("nextOffset"),
+              loadScratch(u32(LEXER_DRIVER_SOURCE_LENGTH)),
+            ),
+            consequent: [
+              storeScratch(
+                u32(LEXER_DRIVER_EVENT),
+                u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+              ),
+              {
+                kind: "return",
+                expression: u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+              },
+            ],
+          },
+        ],
+      },
+      {
+        kind: "return",
+        expression: call("lexerDriverFinalize", []),
+      },
+    ],
+  };
+}
+
+function lexerDriverFinalizeFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerDriverFinalize",
+    locals: [
+      { name: "specIndex", type: "u32" },
+      { name: "tokenClass", type: "u32" },
+      { name: "payload", type: "u32" },
+      { name: "end", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      setLocal("specIndex", call("lexerScanBestSpec", [])),
+      {
+        kind: "if",
+        condition: eq(local("specIndex"), u32(RUNTIME_NO_ACCEPT)),
+        consequent: [
+          storeScratch(
+            u32(LEXER_DRIVER_TOKEN_END),
+            loadScratch(u32(LEXER_DRIVER_ERROR_END)),
+          ),
+          storeScratch(
+            u32(LEXER_DRIVER_TOKEN_CLASS),
+            u32(RUNTIME_PUBLIC_TOKEN_ERROR),
+          ),
+          storeScratch(u32(LEXER_DRIVER_TOKEN_PAYLOAD), u32(0)),
+          storeScratch(
+            u32(LEXER_DRIVER_TOKEN_TERMINAL),
+            u32(RUNTIME_NO_TERMINAL),
+          ),
+          storeScratch(
+            u32(LEXER_DRIVER_EVENT),
+            u32(RUNTIME_LEXER_DRIVER_EVENT_ERROR),
+          ),
+          {
+            kind: "return",
+            expression: u32(RUNTIME_LEXER_DRIVER_EVENT_ERROR),
+          },
+        ],
+      },
+      setLocal(
+        "end",
+        call("lexerScanCandidateEnd", [
+          loadScratch(u32(LEXER_DRIVER_TOKEN_START)),
+        ]),
+      ),
+      setLocal("tokenClass", call("lexerSpecTokenClass", [local("specIndex")])),
+      {
+        kind: "if",
+        condition: eq(
+          call("lexerTokenEmitStatus", [
+            local("tokenClass"),
+            loadScratch(u32(LEXER_DRIVER_PRESERVE_TRIVIA)),
+          ]),
+          u32(RUNTIME_LEXER_TOKEN_EMIT_TOKEN),
+        ),
+        consequent: [
+          storeScratch(u32(LEXER_DRIVER_TOKEN_SPEC), local("specIndex")),
+          storeScratch(u32(LEXER_DRIVER_TOKEN_END), local("end")),
+          storeScratch(
+            u32(LEXER_DRIVER_TOKEN_CLASS),
+            call("lexerPublicTokenClass", [local("tokenClass")]),
+          ),
+          setLocal("payload", call("lexerSpecPayload", [local("specIndex")])),
+          {
+            kind: "if",
+            condition: eq(local("payload"), u32(RUNTIME_NO_LEXER_SPEC)),
+            consequent: [{ kind: "trap" }],
+          },
+          storeScratch(u32(LEXER_DRIVER_TOKEN_PAYLOAD), local("payload")),
+          storeScratch(
+            u32(LEXER_DRIVER_TOKEN_TERMINAL),
+            call("lexerSpecTerminal", [local("specIndex")]),
+          ),
+          storeScratch(
+            u32(LEXER_DRIVER_EVENT),
+            u32(RUNTIME_LEXER_DRIVER_EVENT_TOKEN),
+          ),
+          {
+            kind: "return",
+            expression: u32(RUNTIME_LEXER_DRIVER_EVENT_TOKEN),
+          },
+        ],
+      },
+      {
+        kind: "return",
+        expression: call("lexerDriverBeginScan", [local("end")]),
+      },
+    ],
+  };
+}
+
+function lexerDriverConsumeFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerDriverConsume",
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          loadScratch(u32(LEXER_DRIVER_EVENT)),
+          u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          loadScratch(u32(LEXER_DRIVER_EVENT)),
+          u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+        ),
+        consequent: [{ kind: "trap" }],
+      },
+      {
+        kind: "return",
+        expression: call("lexerDriverBeginScan", [
+          loadScratch(u32(LEXER_DRIVER_TOKEN_END)),
+        ]),
+      },
+    ],
+  };
+}
+
+function lexerDriverLoadFunction(
+  name: string,
+  slot: number,
+): RuntimeLanguageFunction {
+  return {
+    name,
+    result: "u32",
+    body: [
+      { kind: "return", expression: loadScratch(u32(slot)) },
     ],
   };
 }

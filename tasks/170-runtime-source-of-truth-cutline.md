@@ -83,5 +83,5 @@ Completed on 2026-06-23.
   forbidden post-closure duplication.
 - Added `tests/runtime_plan_test.ts` coverage so the cutline and `170`-`178`
   sequence stay visible in docs/status.
-- Left `172`-`178` open because they require real runtime/ABI lowering work and
+- Left `173`-`178` open because they require real runtime/ABI lowering work and
   must not be marked complete by documentation alone.

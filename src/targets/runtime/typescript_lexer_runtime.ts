@@ -1,11 +1,13 @@
 import { emitRuntimeLanguageTypeScriptFunction } from "./language.ts";
 import {
   createLexerRuntimeProgram,
+  RUNTIME_LEXER_DRIVER_EVENT_DONE,
+  RUNTIME_LEXER_DRIVER_EVENT_ERROR,
+  RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT,
+  RUNTIME_LEXER_DRIVER_EVENT_TOKEN,
+  RUNTIME_LEXER_DRIVER_SCRATCH_WORDS,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_TRIVIA,
-  RUNTIME_LEXER_TOKEN_EMIT_TOKEN,
-  RUNTIME_NO_ACCEPT,
-  RUNTIME_NO_LEXER_SPEC,
   RUNTIME_NO_TERMINAL,
   RUNTIME_PUBLIC_TOKEN_EOF,
   RUNTIME_PUBLIC_TOKEN_ERROR,
@@ -100,20 +102,17 @@ const LITERAL_SPECS: readonly {
   order: number;
 }[] = ${JSON.stringify(plan.literalSpecs, null, 2)} as const;
 
-const NO_ACCEPT = ${RUNTIME_NO_ACCEPT};
-const NO_LEXER_SPEC = ${RUNTIME_NO_LEXER_SPEC};
 const NO_TERMINAL = ${RUNTIME_NO_TERMINAL};
-const LEXER_TOKEN_EMIT_TOKEN = ${RUNTIME_LEXER_TOKEN_EMIT_TOKEN};
 const PUBLIC_TOKEN_LITERAL = ${RUNTIME_PUBLIC_TOKEN_LITERAL};
 const PUBLIC_TOKEN_MAIN = ${RUNTIME_PUBLIC_TOKEN_MAIN};
 const PUBLIC_TOKEN_TRIVIA = ${RUNTIME_PUBLIC_TOKEN_TRIVIA};
 const PUBLIC_TOKEN_ERROR = ${RUNTIME_PUBLIC_TOKEN_ERROR};
 const PUBLIC_TOKEN_EOF = ${RUNTIME_PUBLIC_TOKEN_EOF};
-
-interface Candidate {
-  specIndex: number;
-  end: number;
-}
+const LEXER_DRIVER_DONE = ${RUNTIME_LEXER_DRIVER_EVENT_DONE};
+const LEXER_DRIVER_NEED_CODE_POINT = ${RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT};
+const LEXER_DRIVER_TOKEN = ${RUNTIME_LEXER_DRIVER_EVENT_TOKEN};
+const LEXER_DRIVER_ERROR = ${RUNTIME_LEXER_DRIVER_EVENT_ERROR};
+const LEXER_DRIVER_SCRATCH_WORDS = ${RUNTIME_LEXER_DRIVER_SCRATCH_WORDS};
 
 ${
     emitRuntimeLanguageTypeScriptFunction(runtimeProgram)
@@ -130,48 +129,43 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
   const tokens: Token[] = [];
   const diagnostics: LexDiagnostic[] = [];
-  let offset = 0;
 
-  while (offset < sourceText.length) {
-    const candidate = bestCandidate(sourceText, offset);
-    if (candidate) {
-      const start = offset;
-      const end = candidate.end;
-      const tokenClass = lexerSpecTokenClass(candidate.specIndex);
-      const specPayload = runtimeSpecPayload(candidate.specIndex);
-      const terminal = runtimeTerminal(candidate.specIndex);
-      if (
-        lexerTokenEmitStatus(tokenClass, preserveTrivia ? 1 : 0) ===
-          LEXER_TOKEN_EMIT_TOKEN
-      ) {
-        const handle = parserTokenNew(
-          lexerPublicTokenClass(tokenClass),
-          specPayload,
-          terminal < 0 ? NO_TERMINAL : terminal,
-          start,
-          end,
-        );
-        tokens.push(materializeToken(sourceText, handle));
-      }
-      offset = end;
-      continue;
+  lexerDriverStart(sourceText.length, preserveTrivia ? 1 : 0);
+  while (lexerDriverEvent() !== LEXER_DRIVER_DONE) {
+    while (lexerDriverEvent() === LEXER_DRIVER_NEED_CODE_POINT) {
+      const codePoint = sourceTextCodePointAt(
+        sourceText,
+        lexerDriverReadOffset(),
+      );
+      lexerDriverAdvance(codePoint);
     }
 
-    const start = offset;
-    const codePoint = sourceTextCodePointAt(sourceText, offset);
-    offset += utf16CodePointWidth(codePoint);
+    const event = lexerDriverEvent();
+    if (event === LEXER_DRIVER_DONE) break;
+    runtimeArenaResetTo(LEXER_DRIVER_SCRATCH_WORDS);
     const handle = parserTokenNew(
-      PUBLIC_TOKEN_ERROR,
-      0,
-      NO_TERMINAL,
-      start,
-      offset,
+      lexerDriverTokenClass(),
+      lexerDriverTokenPayload(),
+      lexerDriverTokenTerminal(),
+      lexerDriverTokenStart(),
+      lexerDriverTokenEnd(),
     );
     const token = materializeToken(sourceText, handle);
-    tokens.push(token);
-    diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
+    if (event === LEXER_DRIVER_TOKEN) {
+      tokens.push(token);
+      lexerDriverConsume();
+      continue;
+    }
+    if (event === LEXER_DRIVER_ERROR) {
+      tokens.push(token);
+      diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
+      lexerDriverConsume();
+      continue;
+    }
+    throw new Error("Lexer driver produced an unknown event.");
   }
 
+  runtimeArenaResetTo(LEXER_DRIVER_SCRATCH_WORDS);
   const eofHandle = parserTokenNew(
     PUBLIC_TOKEN_EOF,
     0,
@@ -181,37 +175,6 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
   );
   tokens.push(materializeToken(sourceText, eofHandle));
   return lexResult(sourceText.source, tokens, diagnostics);
-}
-
-function runtimeSpecPayload(specIndex: number): number {
-  const payload = lexerSpecPayload(specIndex);
-  if (payload === NO_LEXER_SPEC) {
-    throw new Error("Lexer accepted an unknown spec index.");
-  }
-  return payload;
-}
-
-function runtimeTerminal(specIndex: number): number {
-  const terminal = lexerSpecTerminal(specIndex);
-  return terminal === NO_TERMINAL ? -1 : terminal;
-}
-
-function bestCandidate(
-  sourceText: SourceTextBoundary,
-  offset: number,
-): Candidate | null {
-  let index = offset;
-  lexerScanReset();
-
-  while (index < sourceText.length) {
-    const codePoint = sourceTextCodePointAt(sourceText, index);
-    if (lexerScanAdvance(codePoint) === 0) break;
-    index = lexerScanNextOffset(index, codePoint);
-  }
-
-  const specIndex = lexerScanBestSpec();
-  if (specIndex === NO_ACCEPT) return null;
-  return { specIndex, end: lexerScanCandidateEnd(offset) };
 }
 `;
 }

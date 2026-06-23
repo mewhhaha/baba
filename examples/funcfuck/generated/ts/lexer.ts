@@ -208,20 +208,17 @@ const LITERAL_SPECS: readonly {
   }
 ] as const;
 
-const NO_ACCEPT = 4294967295;
-const NO_LEXER_SPEC = 4294967295;
 const NO_TERMINAL = 4294967295;
-const LEXER_TOKEN_EMIT_TOKEN = 1;
 const PUBLIC_TOKEN_LITERAL = 1;
 const PUBLIC_TOKEN_MAIN = 2;
 const PUBLIC_TOKEN_TRIVIA = 3;
 const PUBLIC_TOKEN_ERROR = 4;
 const PUBLIC_TOKEN_EOF = 5;
-
-interface Candidate {
-  specIndex: number;
-  end: number;
-}
+const LEXER_DRIVER_DONE = 0;
+const LEXER_DRIVER_NEED_CODE_POINT = 1;
+const LEXER_DRIVER_TOKEN = 2;
+const LEXER_DRIVER_ERROR = 3;
+const LEXER_DRIVER_SCRATCH_WORDS = 16;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -282,7 +279,7 @@ function __baba_load_lexerSpecs(index: number): number {
 }
 
 
-let __baba_scratch = new Uint32Array(5);
+let __baba_scratch = new Uint32Array(16);
 
 function __baba_ensure_scratch(words: number): number {
   const normalized = words >>> 0;
@@ -554,6 +551,140 @@ function lexerTokenEmitStatus(tokenClass: number, preserveTrivia: number): numbe
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function lexerDriverStart(sourceLength: number, preserveTrivia: number): number {
+  let discard = 0;
+  discard = (__baba_ensure_scratch(16) >>> 0) >>> 0;
+  __baba_store_scratch(6, sourceLength);
+  __baba_store_scratch(7, preserveTrivia);
+  return (lexerDriverBeginScan(0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverBeginScan(offset: number): number {
+  let discard = 0;
+  discard = (lexerScanReset() >>> 0) >>> 0;
+  __baba_store_scratch(8, offset);
+  __baba_store_scratch(9, offset);
+  __baba_store_scratch(10, 4294967295);
+  __baba_store_scratch(11, 4);
+  __baba_store_scratch(12, 0);
+  __baba_store_scratch(13, 4294967295);
+  __baba_store_scratch(14, offset);
+  __baba_store_scratch(15, offset);
+  if (((((offset) | 0) < ((__baba_load_scratch(6) >>> 0) | 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(5, 1);
+    return (1) >>> 0;
+  }
+  __baba_store_scratch(5, 0);
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverAdvance(codePoint: number): number {
+  let advanced = 0;
+  let nextOffset = 0;
+  if (((((__baba_load_scratch(5) >>> 0) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+  } else {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  nextOffset = (sourceTextNextOffset(__baba_load_scratch(14) >>> 0, codePoint) >>> 0) >>> 0;
+  __baba_store_scratch(15, nextOffset);
+  advanced = (lexerScanAdvance(codePoint) >>> 0) >>> 0;
+  if (((((advanced) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(14, nextOffset);
+    if (((((nextOffset) | 0) < ((__baba_load_scratch(6) >>> 0) | 0) ? 1 : 0)) !== 0) {
+      __baba_store_scratch(5, 1);
+      return (1) >>> 0;
+    }
+  }
+  return (lexerDriverFinalize() >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverFinalize(): number {
+  let specIndex = 0;
+  let tokenClass = 0;
+  let payload = 0;
+  let end = 0;
+  specIndex = (lexerScanBestSpec() >>> 0) >>> 0;
+  if (((((specIndex) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(9, __baba_load_scratch(15) >>> 0);
+    __baba_store_scratch(11, 4);
+    __baba_store_scratch(12, 0);
+    __baba_store_scratch(13, 4294967295);
+    __baba_store_scratch(5, 3);
+    return (3) >>> 0;
+  }
+  end = (lexerScanCandidateEnd(__baba_load_scratch(8) >>> 0) >>> 0) >>> 0;
+  tokenClass = (lexerSpecTokenClass(specIndex) >>> 0) >>> 0;
+  if (((((lexerTokenEmitStatus(tokenClass, __baba_load_scratch(7) >>> 0) >>> 0) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    __baba_store_scratch(10, specIndex);
+    __baba_store_scratch(9, end);
+    __baba_store_scratch(11, lexerPublicTokenClass(tokenClass) >>> 0);
+    payload = (lexerSpecPayload(specIndex) >>> 0) >>> 0;
+    if (((((payload) >>> 0) === ((4294967295) >>> 0) ? 1 : 0)) !== 0) {
+      throw new RuntimeLanguageTrap("explicit trap");
+    }
+    __baba_store_scratch(12, payload);
+    __baba_store_scratch(13, lexerSpecTerminal(specIndex) >>> 0);
+    __baba_store_scratch(5, 2);
+    return (2) >>> 0;
+  }
+  return (lexerDriverBeginScan(end) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverConsume(): number {
+  if (((((__baba_load_scratch(5) >>> 0) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  }
+  if (((((__baba_load_scratch(5) >>> 0) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
+    throw new RuntimeLanguageTrap("explicit trap");
+  }
+  return (lexerDriverBeginScan(__baba_load_scratch(9) >>> 0) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverEvent(): number {
+  return (__baba_load_scratch(5) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverReadOffset(): number {
+  return (__baba_load_scratch(14) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverTokenStart(): number {
+  return (__baba_load_scratch(8) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverTokenEnd(): number {
+  return (__baba_load_scratch(9) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverTokenSpec(): number {
+  return (__baba_load_scratch(10) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverTokenClass(): number {
+  return (__baba_load_scratch(11) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverTokenPayload(): number {
+  return (__baba_load_scratch(12) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function lexerDriverTokenTerminal(): number {
+  return (__baba_load_scratch(13) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function runtimeArenaReset(): number {
   return (runtimeArenaResetTo(1) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
@@ -818,48 +949,43 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
   const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
   const tokens: Token[] = [];
   const diagnostics: LexDiagnostic[] = [];
-  let offset = 0;
 
-  while (offset < sourceText.length) {
-    const candidate = bestCandidate(sourceText, offset);
-    if (candidate) {
-      const start = offset;
-      const end = candidate.end;
-      const tokenClass = lexerSpecTokenClass(candidate.specIndex);
-      const specPayload = runtimeSpecPayload(candidate.specIndex);
-      const terminal = runtimeTerminal(candidate.specIndex);
-      if (
-        lexerTokenEmitStatus(tokenClass, preserveTrivia ? 1 : 0) ===
-          LEXER_TOKEN_EMIT_TOKEN
-      ) {
-        const handle = parserTokenNew(
-          lexerPublicTokenClass(tokenClass),
-          specPayload,
-          terminal < 0 ? NO_TERMINAL : terminal,
-          start,
-          end,
-        );
-        tokens.push(materializeToken(sourceText, handle));
-      }
-      offset = end;
-      continue;
+  lexerDriverStart(sourceText.length, preserveTrivia ? 1 : 0);
+  while (lexerDriverEvent() !== LEXER_DRIVER_DONE) {
+    while (lexerDriverEvent() === LEXER_DRIVER_NEED_CODE_POINT) {
+      const codePoint = sourceTextCodePointAt(
+        sourceText,
+        lexerDriverReadOffset(),
+      );
+      lexerDriverAdvance(codePoint);
     }
 
-    const start = offset;
-    const codePoint = sourceTextCodePointAt(sourceText, offset);
-    offset += utf16CodePointWidth(codePoint);
+    const event = lexerDriverEvent();
+    if (event === LEXER_DRIVER_DONE) break;
+    runtimeArenaResetTo(LEXER_DRIVER_SCRATCH_WORDS);
     const handle = parserTokenNew(
-      PUBLIC_TOKEN_ERROR,
-      0,
-      NO_TERMINAL,
-      start,
-      offset,
+      lexerDriverTokenClass(),
+      lexerDriverTokenPayload(),
+      lexerDriverTokenTerminal(),
+      lexerDriverTokenStart(),
+      lexerDriverTokenEnd(),
     );
     const token = materializeToken(sourceText, handle);
-    tokens.push(token);
-    diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
+    if (event === LEXER_DRIVER_TOKEN) {
+      tokens.push(token);
+      lexerDriverConsume();
+      continue;
+    }
+    if (event === LEXER_DRIVER_ERROR) {
+      tokens.push(token);
+      diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
+      lexerDriverConsume();
+      continue;
+    }
+    throw new Error("Lexer driver produced an unknown event.");
   }
 
+  runtimeArenaResetTo(LEXER_DRIVER_SCRATCH_WORDS);
   const eofHandle = parserTokenNew(
     PUBLIC_TOKEN_EOF,
     0,
@@ -869,35 +995,4 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
   );
   tokens.push(materializeToken(sourceText, eofHandle));
   return lexResult(sourceText.source, tokens, diagnostics);
-}
-
-function runtimeSpecPayload(specIndex: number): number {
-  const payload = lexerSpecPayload(specIndex);
-  if (payload === NO_LEXER_SPEC) {
-    throw new Error("Lexer accepted an unknown spec index.");
-  }
-  return payload;
-}
-
-function runtimeTerminal(specIndex: number): number {
-  const terminal = lexerSpecTerminal(specIndex);
-  return terminal === NO_TERMINAL ? -1 : terminal;
-}
-
-function bestCandidate(
-  sourceText: SourceTextBoundary,
-  offset: number,
-): Candidate | null {
-  let index = offset;
-  lexerScanReset();
-
-  while (index < sourceText.length) {
-    const codePoint = sourceTextCodePointAt(sourceText, index);
-    if (lexerScanAdvance(codePoint) === 0) break;
-    index = lexerScanNextOffset(index, codePoint);
-  }
-
-  const specIndex = lexerScanBestSpec();
-  if (specIndex === NO_ACCEPT) return null;
-  return { specIndex, end: lexerScanCandidateEnd(offset) };
 }

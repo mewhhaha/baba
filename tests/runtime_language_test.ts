@@ -72,6 +72,9 @@ import {
   RUNTIME_FIELD_VALUE_ARRAY,
   RUNTIME_FIELD_VALUE_NULLABLE,
   RUNTIME_FIELD_VALUE_REQUIRED,
+  RUNTIME_LEXER_DRIVER_EVENT_ERROR,
+  RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT,
+  RUNTIME_LEXER_DRIVER_EVENT_TOKEN,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_STATUS_NOT_LITERAL,
   RUNTIME_LEXER_SPEC_STATUS_NOT_MAIN,
@@ -283,6 +286,124 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
             ),
           ),
         }],
+      },
+    ],
+  };
+  const lexerDriverBaseProgram = createLexerRuntimeProgram({
+    transitions: [
+      [
+        [0x20, 0x20, 2],
+        [0x41, 0x41, 1],
+      ],
+      [],
+      [],
+    ],
+    asciiTransitions: [
+      asciiRow([[0x20, 2], [0x41, 1]]),
+      asciiRow([]),
+      asciiRow([]),
+    ],
+    accepts: [-1, 0, 1],
+    specs: [
+      [0, 0, 4],
+      [RUNTIME_LEXER_SPEC_TRIVIA, 1, -1],
+    ],
+  });
+  const lexerDriverRuntimeProgram: RuntimeLanguageProgram = {
+    ...lexerDriverBaseProgram,
+    name: "lexer_driver_conformance",
+    entry: "main",
+    functions: [
+      ...lexerDriverBaseProgram.functions,
+      {
+        name: "main",
+        locals: [
+          { name: "discard", type: "u32" },
+          { name: "tokenEvent", type: "u32" },
+          { name: "tokenClass", type: "u32" },
+          { name: "tokenTerminal", type: "u32" },
+          { name: "tokenEnd", type: "u32" },
+          { name: "skipReadOffset", type: "u32" },
+          { name: "errorEvent", type: "u32" },
+          { name: "errorStart", type: "u32" },
+          { name: "errorEnd", type: "u32" },
+        ],
+        result: "u32",
+        body: [
+          setLocal("discard", call("lexerDriverStart", [u32(3), u32(0)])),
+          setLocal("discard", call("lexerDriverAdvance", [u32(0x41)])),
+          setLocal("discard", call("lexerDriverAdvance", [u32(0x20)])),
+          setLocal("tokenEvent", call("lexerDriverEvent", [])),
+          setLocal("tokenClass", call("lexerDriverTokenClass", [])),
+          setLocal("tokenTerminal", call("lexerDriverTokenTerminal", [])),
+          setLocal("tokenEnd", call("lexerDriverTokenEnd", [])),
+          setLocal("discard", call("lexerDriverConsume", [])),
+          setLocal("discard", call("lexerDriverAdvance", [u32(0x20)])),
+          setLocal("discard", call("lexerDriverAdvance", [u32(0x3f)])),
+          setLocal("skipReadOffset", call("lexerDriverReadOffset", [])),
+          setLocal("discard", call("lexerDriverAdvance", [u32(0x3f)])),
+          setLocal("errorEvent", call("lexerDriverEvent", [])),
+          setLocal("errorStart", call("lexerDriverTokenStart", [])),
+          setLocal("errorEnd", call("lexerDriverTokenEnd", [])),
+          {
+            kind: "return",
+            expression: add(
+              mul(local("tokenEvent"), u32(100_000_000)),
+              add(
+                mul(local("tokenEnd"), u32(10_000_000)),
+                add(
+                  mul(local("tokenClass"), u32(1_000_000)),
+                  add(
+                    mul(local("tokenTerminal"), u32(100_000)),
+                    add(
+                      mul(local("skipReadOffset"), u32(10_000)),
+                      add(
+                        mul(local("errorEvent"), u32(1_000)),
+                        add(
+                          mul(local("errorStart"), u32(100)),
+                          local("errorEnd"),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          },
+        ],
+      },
+    ],
+  };
+  const lexerDriverPreserveTriviaRuntimeProgram: RuntimeLanguageProgram = {
+    ...lexerDriverBaseProgram,
+    name: "lexer_driver_preserve_trivia_conformance",
+    entry: "main",
+    functions: [
+      ...lexerDriverBaseProgram.functions,
+      {
+        name: "main",
+        locals: [{ name: "discard", type: "u32" }],
+        result: "u32",
+        body: [
+          setLocal("discard", call("lexerDriverStart", [u32(1), u32(1)])),
+          setLocal("discard", call("lexerDriverAdvance", [u32(0x20)])),
+          {
+            kind: "return",
+            expression: add(
+              mul(call("lexerDriverEvent", []), u32(1_000)),
+              add(
+                mul(call("lexerDriverTokenClass", []), u32(100)),
+                add(
+                  mul(call("lexerDriverTokenPayload", []), u32(10)),
+                  eq(
+                    call("lexerDriverTokenTerminal", []),
+                    u32(RUNTIME_NO_TERMINAL),
+                  ),
+                ),
+              ),
+            ),
+          },
+        ],
       },
     ],
   };
@@ -4400,6 +4521,32 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "lexer scan boundary helpers compute source offsets",
       program: lexerScanBoundaryRuntimeProgram,
       expected: { kind: "value", value: 908 },
+    },
+    {
+      name: "lexer driver emits tokens, skips trivia, and advances errors",
+      program: lexerDriverRuntimeProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_LEXER_DRIVER_EVENT_TOKEN * 100_000_000 +
+          1 * 10_000_000 +
+          RUNTIME_PUBLIC_TOKEN_MAIN * 1_000_000 +
+          4 * 100_000 +
+          2 * 10_000 +
+          RUNTIME_LEXER_DRIVER_EVENT_ERROR * 1_000 +
+          2 * 100 +
+          3,
+      },
+    },
+    {
+      name: "lexer driver owns preserve-trivia token emission",
+      program: lexerDriverPreserveTriviaRuntimeProgram,
+      expected: {
+        kind: "value",
+        value: RUNTIME_LEXER_DRIVER_EVENT_TOKEN * 1_000 +
+          RUNTIME_PUBLIC_TOKEN_TRIVIA * 100 +
+          1 * 10 +
+          1,
+      },
     },
     {
       name: "source text helpers classify spans and trail-unit availability",

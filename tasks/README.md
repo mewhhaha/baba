@@ -56,6 +56,7 @@ These cards narrow the final FEEDBACK P0.1 source-of-truth boundary after the
 cutline task.
 
 24. `171-runtime-dynamic-source-text-handles.md`
+25. `172-runtime-lexer-driver-lowering.md`
 
 ## Remaining Runtime Source-Of-Truth Work
 
@@ -64,7 +65,6 @@ task: full mechanical lowering of the parser runtime through the runtime
 language. They are intentionally sequenced because each one narrows the
 host/runtime boundary for the next.
 
-25. `172-runtime-lexer-driver-lowering.md`
 26. `173-runtime-token-stream-normalization-lowering.md`
 27. `174-runtime-replay-vm-lowering.md`
 28. `175-runtime-public-materialization-boundary.md`
@@ -90,7 +90,8 @@ host/runtime boundary for the next.
 - Completed FEEDBACK P0.1 closure: `140`, `141`, `142`, `143`
 - Completed FEEDBACK P0.1 cutline: `170`
 - Completed FEEDBACK P0.1 source text handles: `171`
-- Remaining full FEEDBACK P0.1 runtime-source-of-truth work: `172` through `178`
+- Completed FEEDBACK P0.1 lexer driver lowering: `172`
+- Remaining full FEEDBACK P0.1 runtime-source-of-truth work: `173` through `178`
 - Completed FEEDBACK P1.17 environment/CI closure: `150`
 - Non-blocking hardening follow-ups from `tasks/status.md`: `160`
 
