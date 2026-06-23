@@ -53,6 +53,34 @@ Deno.test("runtime planner exposes a versioned portable parser plan", () => {
   assertEquals(plan.cst.rules[0].fields[0].name, "name");
 });
 
+Deno.test("runtime source-of-truth cutline tracks remaining work", async () => {
+  const docs = await Deno.readTextFile("docs/runtime-language.md");
+  const status = await Deno.readTextFile("tasks/status.md");
+  const taskIndex = await Deno.readTextFile("tasks/README.md");
+
+  assertIncludes(docs, "## Runtime Source-Of-Truth Cutline");
+  assertIncludes(docs, "Runtime-owned semantics:");
+  assertIncludes(docs, "Host-owned boundaries:");
+  assertIncludes(
+    docs,
+    "Forbidden after the remaining source-of-truth work closes:",
+  );
+  assertIncludes(docs, "170-runtime-source-of-truth-cutline.md");
+  assertIncludes(docs, "178-final-runtime-source-of-truth-gate.md");
+
+  assertIncludes(
+    status,
+    "Continue with `172-runtime-lexer-driver-lowering.md` through `178-final-runtime-source-of-truth-gate.md`",
+  );
+  assertIncludes(taskIndex, "## Remaining Runtime Source-Of-Truth Work");
+  assertIncludes(taskIndex, "Completed FEEDBACK P0.1 cutline: `170`");
+  assertIncludes(
+    taskIndex,
+    "Completed FEEDBACK P0.1 source text handles: `171`",
+  );
+  assertIncludes(taskIndex, "178-final-runtime-source-of-truth-gate.md");
+});
+
 Deno.test("TypeScript target emitters package shared runtime source", async () => {
   const forbiddenRuntimeMarkers = [
     "DFA_TRANSITIONS",
@@ -138,13 +166,25 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(
     publicSourceTextBoundarySource,
-    "utf16CodePointFromUnits",
+    "sourceTextOffsetStatus",
   );
-  assertIncludes(publicSourceTextBoundarySource, "utf16HasCodeUnit");
+  assertIncludes(publicSourceTextBoundarySource, "sourceTextSpanStatus");
+  assertIncludes(publicSourceTextBoundarySource, "sourceTextTrailOffset");
+  assertIncludes(publicSourceTextBoundarySource, "sourceTextHasTrailUnit");
+  assertIncludes(
+    publicSourceTextBoundarySource,
+    "sourceTextCodePointFromUnits",
+  );
   assertNotIncludes(
     publicSourceTextBoundarySource,
     "trailOffset < sourceText.length",
   );
+  assertNotIncludes(publicSourceTextBoundarySource, "offset + 1");
+  assertNotIncludes(
+    publicSourceTextBoundarySource,
+    "normalized >= sourceText.length",
+  );
+  assertNotIncludes(publicSourceTextBoundarySource, "utf16HasCodeUnit");
   assertIncludes(
     publicSourceTextBoundarySource,
     "function sourceTextCodeUnitAt",
@@ -222,6 +262,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(parserRuntimeSource, "createParserFieldRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createLexerSpecRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createParserObjectRuntimeProgram");
+  assertIncludes(parserRuntimeSource, "createSourceTextRuntimeProgram");
   assertIncludes(parserRuntimeSource, "parserReducerOperation");
   assertIncludes(parserRuntimeSource, "parserReducerPayloadStatus");
   assertIncludes(parserRuntimeSource, "parserReducerChildRole");
@@ -586,6 +627,7 @@ Deno.test("Wasm target packages shared core runtime source", async () => {
     "src/targets/wasm/lexer_emit.ts",
   );
   assertIncludes(wasmLexerSource, "createParserTokenRecordRuntimeProgram");
+  assertIncludes(wasmLexerSource, "createSourceTextRuntimeProgram");
   assertIncludes(wasmLexerSource, "emitPublicTokenMaterializer");
   assertNotIncludes(wasmLexerSource, "const SPECS:");
 

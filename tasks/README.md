@@ -50,6 +50,28 @@ unfinished release blockers.
 
 23. `160-release-hardening-followups.md`
 
+## Completed Runtime Source-Of-Truth Follow-Ups
+
+These cards narrow the final FEEDBACK P0.1 source-of-truth boundary after the
+cutline task.
+
+24. `171-runtime-dynamic-source-text-handles.md`
+
+## Remaining Runtime Source-Of-Truth Work
+
+These cards cover the last partial FEEDBACK item after the source-text boundary
+task: full mechanical lowering of the parser runtime through the runtime
+language. They are intentionally sequenced because each one narrows the
+host/runtime boundary for the next.
+
+25. `172-runtime-lexer-driver-lowering.md`
+26. `173-runtime-token-stream-normalization-lowering.md`
+27. `174-runtime-replay-vm-lowering.md`
+28. `175-runtime-public-materialization-boundary.md`
+29. `176-runtime-diagnostic-render-boundary.md`
+30. `177-runtime-wasm-host-neutral-abi.md`
+31. `178-final-runtime-source-of-truth-gate.md`
+
 ## Coverage Map
 
 - FEEDBACK P0.1: `010`, `011`, `012`, `013`
@@ -65,8 +87,11 @@ unfinished release blockers.
 - FEEDBACK P2.18, P2.19, P2.20: `110`
 - FEEDBACK P2.21 plus P2 diagnostics: `120`
 - FEEDBACK testing priorities and final release proof: `130`
-- Remaining FEEDBACK P0.1 closure: `140`, `141`, `142`, `143`
-- Remaining FEEDBACK P1.17 environment/CI closure: `150`
+- Completed FEEDBACK P0.1 closure: `140`, `141`, `142`, `143`
+- Completed FEEDBACK P0.1 cutline: `170`
+- Completed FEEDBACK P0.1 source text handles: `171`
+- Remaining full FEEDBACK P0.1 runtime-source-of-truth work: `172` through `178`
+- Completed FEEDBACK P1.17 environment/CI closure: `150`
 - Non-blocking hardening follow-ups from `tasks/status.md`: `160`
 
 Many items are partially implemented. Each task starts with an audit step. If
@@ -101,5 +126,6 @@ sequenced carefully:
 
 Always run `130-equivalence-fuzz-release-gate.md` last.
 
-After any `140`-`160` task lands, run `130-equivalence-fuzz-release-gate.md`
-again.
+After any `140`-`178` task lands, run `130-equivalence-fuzz-release-gate.md`
+again. Run `178-final-runtime-source-of-truth-gate.md` last before declaring
+Requirement 1 complete.

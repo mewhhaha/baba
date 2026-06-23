@@ -2197,10 +2197,91 @@ function parserRuleNodeFieldCount(handle: number): number {
   return (runtimeVectorLength(parserRuleNodeFields(handle) >>> 0) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
+
+function utf16CodePointWidth(codePoint: number): number {
+  if (((((codePoint) | 0) < ((65536) | 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  } else {
+    return (2) >>> 0;
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function utf16CodePointFromUnits(leadUnit: number, trailUnit: number, hasTrail: number): number {
+  if (((((hasTrail) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  if (((((leadUnit) | 0) < ((55296) | 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  if (((((56319) | 0) < ((leadUnit) | 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  if (((((trailUnit) | 0) < ((56320) | 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  if (((((57343) | 0) < ((trailUnit) | 0) ? 1 : 0)) !== 0) {
+    return (leadUnit) >>> 0;
+  }
+  return (((65536) + (((Math.imul((((leadUnit) - (55296)) >>> 0) >>> 0, (1024) >>> 0) >>> 0) + (((trailUnit) - (56320)) >>> 0)) >>> 0)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function utf16HasCodeUnit(offset: number, length: number): number {
+  if (((((offset) | 0) < ((length) | 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  } else {
+    return (0) >>> 0;
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextOffsetStatus(offset: number, length: number): number {
+  if (((((offset) | 0) < ((length) | 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  } else {
+    return (1) >>> 0;
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextSpanStatus(start: number, end: number, length: number): number {
+  if (((((end) | 0) < ((start) | 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((length) | 0) < ((end) | 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextTrailOffset(offset: number): number {
+  return (((offset) + (1)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextHasTrailUnit(offset: number, length: number): number {
+  return (utf16HasCodeUnit(sourceTextTrailOffset(offset) >>> 0, length) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextCodePointFromUnits(leadUnit: number, trailUnit: number, hasTrail: number): number {
+  return (utf16CodePointFromUnits(leadUnit, trailUnit, hasTrail) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextNextOffset(offset: number, codePoint: number): number {
+  return (((offset) + (utf16CodePointWidth(codePoint) >>> 0)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
 interface SourceTextBoundary {
   readonly source: string;
   readonly length: number;
 }
+
+const SOURCE_TEXT_OFFSET_OK = 0;
+const SOURCE_TEXT_SPAN_OK = 0;
 
 function createSourceTextBoundary(source: string): SourceTextBoundary {
   return {
@@ -2210,6 +2291,12 @@ function createSourceTextBoundary(source: string): SourceTextBoundary {
 }
 
 function sourceTextSlice(sourceText: SourceTextBoundary, span: Span): string {
+  if (
+    sourceTextSpanStatus(span.start, span.end, sourceText.length) !==
+      SOURCE_TEXT_SPAN_OK
+  ) {
+    throw new Error("Source text span out of bounds.");
+  }
   return sourceText.source.slice(span.start, span.end);
 }
 
@@ -2218,6 +2305,12 @@ function sourceTextMatches(
   span: Span,
   text: string,
 ): boolean {
+  if (
+    sourceTextSpanStatus(span.start, span.end, sourceText.length) !==
+      SOURCE_TEXT_SPAN_OK
+  ) {
+    return false;
+  }
   return text === sourceTextSlice(sourceText, span);
 }
 
@@ -2226,7 +2319,10 @@ function sourceTextCodeUnitAt(
   offset: number,
 ): number {
   const normalized = offset >>> 0;
-  if (normalized >= sourceText.length) {
+  if (
+    sourceTextOffsetStatus(normalized, sourceText.length) !==
+      SOURCE_TEXT_OFFSET_OK
+  ) {
     throw new Error("Source text offset out of bounds.");
   }
   return sourceText.source.charCodeAt(normalized) >>> 0;

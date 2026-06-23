@@ -1,3 +1,8 @@
+import {
+  RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OK,
+  RUNTIME_SOURCE_TEXT_SPAN_STATUS_OK,
+} from "./language_sources.ts";
+
 export interface PublicSourceTextBoundaryOptions {
   readonly includeCodePoint?: boolean;
 }
@@ -10,6 +15,9 @@ export function emitPublicSourceTextBoundary(
   readonly length: number;
 }
 
+const SOURCE_TEXT_OFFSET_OK = ${RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OK};
+const SOURCE_TEXT_SPAN_OK = ${RUNTIME_SOURCE_TEXT_SPAN_STATUS_OK};
+
 function createSourceTextBoundary(source: string): SourceTextBoundary {
   return {
     source,
@@ -18,6 +26,12 @@ function createSourceTextBoundary(source: string): SourceTextBoundary {
 }
 
 function sourceTextSlice(sourceText: SourceTextBoundary, span: Span): string {
+  if (
+    sourceTextSpanStatus(span.start, span.end, sourceText.length) !==
+      SOURCE_TEXT_SPAN_OK
+  ) {
+    throw new Error("Source text span out of bounds.");
+  }
   return sourceText.source.slice(span.start, span.end);
 }
 
@@ -26,6 +40,12 @@ function sourceTextMatches(
   span: Span,
   text: string,
 ): boolean {
+  if (
+    sourceTextSpanStatus(span.start, span.end, sourceText.length) !==
+      SOURCE_TEXT_SPAN_OK
+  ) {
+    return false;
+  }
   return text === sourceTextSlice(sourceText, span);
 }
 
@@ -36,12 +56,12 @@ ${
   offset: number,
 ): number {
   const leadUnit = sourceTextCodeUnitAt(sourceText, offset);
-  const trailOffset = offset + 1;
-  const hasTrail = utf16HasCodeUnit(trailOffset, sourceText.length);
+  const trailOffset = sourceTextTrailOffset(offset);
+  const hasTrail = sourceTextHasTrailUnit(offset, sourceText.length);
   const trailUnit = hasTrail === 1
     ? sourceTextCodeUnitAt(sourceText, trailOffset)
     : 0;
-  return utf16CodePointFromUnits(leadUnit, trailUnit, hasTrail);
+  return sourceTextCodePointFromUnits(leadUnit, trailUnit, hasTrail);
 }
 
 `
@@ -51,7 +71,10 @@ ${
   offset: number,
 ): number {
   const normalized = offset >>> 0;
-  if (normalized >= sourceText.length) {
+  if (
+    sourceTextOffsetStatus(normalized, sourceText.length) !==
+      SOURCE_TEXT_OFFSET_OK
+  ) {
     throw new Error("Source text offset out of bounds.");
   }
   return sourceText.source.charCodeAt(normalized) >>> 0;

@@ -20,6 +20,7 @@ import {
   createParserReducerRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
+  createSourceTextRuntimeProgram,
   RUNTIME_ACTION_ACCEPT,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
@@ -67,6 +68,10 @@ export const RUNTIME_LANGUAGE_ARTIFACT_FIXTURES:
     {
       name: "utf16_code_point_width",
       program: UTF16_CODE_POINT_WIDTH_PROGRAM,
+    },
+    {
+      name: "source_text_runtime",
+      program: createSourceTextRuntimeProgram(),
     },
     {
       name: "runtime_arena",
@@ -272,6 +277,13 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
       wasmHash: "fnv1a64:76415b4fa17f925c",
     },
     {
+      name: "source_text_runtime",
+      entry: "sourceTextOffsetStatus",
+      sourceHash: "fnv1a64:9ad9e0248f2937be",
+      typescriptHash: "fnv1a64:098ae35ccc9c90d8",
+      wasmHash: "fnv1a64:2f646b1e0a0f9ca9",
+    },
+    {
       name: "runtime_arena",
       entry: "runtimeArenaReset",
       sourceHash: "fnv1a64:bdcb55d043072b51",
@@ -288,9 +300,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "lexer_runtime",
       entry: "dfaTransition",
-      sourceHash: "fnv1a64:1b67c225ea139ead",
-      typescriptHash: "fnv1a64:dae825d37d904894",
-      wasmHash: "fnv1a64:0da4336974278d61",
+      sourceHash: "fnv1a64:4102d5e155bb301e",
+      typescriptHash: "fnv1a64:a4658dc0dd86a78b",
+      wasmHash: "fnv1a64:147403343b6f1825",
     },
     {
       name: "parser_table_runtime",
@@ -372,7 +384,7 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:27fa4798431fd65c" as const;
+  "fnv1a64:df41059c25cc7766" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {

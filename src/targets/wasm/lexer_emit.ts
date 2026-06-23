@@ -3,6 +3,7 @@ import { emitRuntimeLanguageTypeScriptFunction } from "../runtime/language.ts";
 import {
   createLexerSpecRuntimeProgram,
   createParserTokenRecordRuntimeProgram,
+  createSourceTextRuntimeProgram,
   RUNTIME_LEXER_SPEC_LITERAL,
   RUNTIME_LEXER_SPEC_TRIVIA,
   RUNTIME_LEXER_TOKEN_EMIT_TOKEN,
@@ -70,6 +71,7 @@ export function emitWasmLexer(
       ),
     ],
   });
+  const sourceTextRuntimeProgram = createSourceTextRuntimeProgram();
   const runtimeProgram = {
     name: "wasm_lexer_adapter_runtime",
     entry: tokenRecordRuntimeProgram.entry,
@@ -77,10 +79,12 @@ export function emitWasmLexer(
     tables: [
       ...(tokenRecordRuntimeProgram.tables ?? []),
       ...(lexerSpecRuntimeProgram.tables ?? []),
+      ...(sourceTextRuntimeProgram.tables ?? []),
     ],
     functions: [
       ...tokenRecordRuntimeProgram.functions,
       ...lexerSpecRuntimeProgram.functions,
+      ...sourceTextRuntimeProgram.functions,
     ],
   };
 

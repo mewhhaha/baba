@@ -253,6 +253,46 @@ function utf16HasCodeUnit(offset: number, length: number): number {
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
+function sourceTextOffsetStatus(offset: number, length: number): number {
+  if (((((offset) | 0) < ((length) | 0) ? 1 : 0)) !== 0) {
+    return (0) >>> 0;
+  } else {
+    return (1) >>> 0;
+  }
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextSpanStatus(start: number, end: number, length: number): number {
+  if (((((end) | 0) < ((start) | 0) ? 1 : 0)) !== 0) {
+    return (1) >>> 0;
+  }
+  if (((((length) | 0) < ((end) | 0) ? 1 : 0)) !== 0) {
+    return (2) >>> 0;
+  }
+  return (0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextTrailOffset(offset: number): number {
+  return (((offset) + (1)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextHasTrailUnit(offset: number, length: number): number {
+  return (utf16HasCodeUnit(sourceTextTrailOffset(offset) >>> 0, length) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextCodePointFromUnits(leadUnit: number, trailUnit: number, hasTrail: number): number {
+  return (utf16CodePointFromUnits(leadUnit, trailUnit, hasTrail) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
+function sourceTextNextOffset(offset: number, codePoint: number): number {
+  return (((offset) + (utf16CodePointWidth(codePoint) >>> 0)) >>> 0) >>> 0;
+  throw new RuntimeLanguageTrap("function completed without a return");
+}
+
 function dfaTransition(state: number, codePoint: number): number {
   let index = 0;
   let low = 0;
@@ -328,7 +368,7 @@ function lexerScanAdvance(codePoint: number): number {
 }
 
 function lexerScanNextOffset(offset: number, codePoint: number): number {
-  return (((offset) + (utf16CodePointWidth(codePoint) >>> 0)) >>> 0) >>> 0;
+  return (sourceTextNextOffset(offset, codePoint) >>> 0) >>> 0;
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
@@ -528,6 +568,9 @@ interface SourceTextBoundary {
   readonly length: number;
 }
 
+const SOURCE_TEXT_OFFSET_OK = 0;
+const SOURCE_TEXT_SPAN_OK = 0;
+
 function createSourceTextBoundary(source: string): SourceTextBoundary {
   return {
     source,
@@ -536,6 +579,12 @@ function createSourceTextBoundary(source: string): SourceTextBoundary {
 }
 
 function sourceTextSlice(sourceText: SourceTextBoundary, span: Span): string {
+  if (
+    sourceTextSpanStatus(span.start, span.end, sourceText.length) !==
+      SOURCE_TEXT_SPAN_OK
+  ) {
+    throw new Error("Source text span out of bounds.");
+  }
   return sourceText.source.slice(span.start, span.end);
 }
 
@@ -544,6 +593,12 @@ function sourceTextMatches(
   span: Span,
   text: string,
 ): boolean {
+  if (
+    sourceTextSpanStatus(span.start, span.end, sourceText.length) !==
+      SOURCE_TEXT_SPAN_OK
+  ) {
+    return false;
+  }
   return text === sourceTextSlice(sourceText, span);
 }
 
@@ -552,12 +607,12 @@ function sourceTextCodePointAt(
   offset: number,
 ): number {
   const leadUnit = sourceTextCodeUnitAt(sourceText, offset);
-  const trailOffset = offset + 1;
-  const hasTrail = utf16HasCodeUnit(trailOffset, sourceText.length);
+  const trailOffset = sourceTextTrailOffset(offset);
+  const hasTrail = sourceTextHasTrailUnit(offset, sourceText.length);
   const trailUnit = hasTrail === 1
     ? sourceTextCodeUnitAt(sourceText, trailOffset)
     : 0;
-  return utf16CodePointFromUnits(leadUnit, trailUnit, hasTrail);
+  return sourceTextCodePointFromUnits(leadUnit, trailUnit, hasTrail);
 }
 
 function sourceTextCodeUnitAt(
@@ -565,7 +620,10 @@ function sourceTextCodeUnitAt(
   offset: number,
 ): number {
   const normalized = offset >>> 0;
-  if (normalized >= sourceText.length) {
+  if (
+    sourceTextOffsetStatus(normalized, sourceText.length) !==
+      SOURCE_TEXT_OFFSET_OK
+  ) {
     throw new Error("Source text offset out of bounds.");
   }
   return sourceText.source.charCodeAt(normalized) >>> 0;

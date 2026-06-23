@@ -30,6 +30,7 @@ import {
   createParserReducerRuntimeProgram,
   createParserTableRuntimeProgram,
   createParserTraceRuntimeProgram,
+  createSourceTextRuntimeProgram,
   RUNTIME_ACCEPTED_ROOT_STATUS_DIRECT,
   RUNTIME_ACCEPTED_ROOT_STATUS_FRAGMENT_VALUE,
   RUNTIME_ACCEPTED_ROOT_STATUS_MISSING,
@@ -150,6 +151,11 @@ import {
   RUNTIME_RULE_NODE_CHILD_LIST_PRESENT,
   RUNTIME_SHIFTED_TOKEN_STATUS_INVALID,
   RUNTIME_SHIFTED_TOKEN_STATUS_OK,
+  RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OK,
+  RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OUT_OF_BOUNDS,
+  RUNTIME_SOURCE_TEXT_SPAN_STATUS_END_BEFORE_START,
+  RUNTIME_SOURCE_TEXT_SPAN_STATUS_OK,
+  RUNTIME_SOURCE_TEXT_SPAN_STATUS_OUT_OF_BOUNDS,
   RUNTIME_TOKEN_STREAM_CANONICAL_MATCH,
   RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH,
   RUNTIME_TOKEN_STREAM_CANONICAL_SKIP,
@@ -490,6 +496,166 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
             ),
           },
         ],
+      },
+    ],
+  };
+  const sourceTextBaseProgram = createSourceTextRuntimeProgram();
+  const sourceTextStatusRuntimeProgram: RuntimeLanguageProgram = {
+    ...sourceTextBaseProgram,
+    name: "source_text_status_conformance",
+    entry: "main",
+    functions: [
+      ...sourceTextBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            call("sourceTextTrailOffset", [u32(4)]),
+            add(
+              mul(
+                call("sourceTextOffsetStatus", [u32(0), u32(1)]),
+                u32(1),
+              ),
+              add(
+                mul(
+                  call("sourceTextOffsetStatus", [u32(1), u32(1)]),
+                  u32(10),
+                ),
+                add(
+                  mul(
+                    call("sourceTextSpanStatus", [u32(2), u32(1), u32(3)]),
+                    u32(100),
+                  ),
+                  add(
+                    mul(
+                      call("sourceTextSpanStatus", [u32(0), u32(4), u32(3)]),
+                      u32(1_000),
+                    ),
+                    add(
+                      mul(
+                        call("sourceTextSpanStatus", [
+                          u32(1),
+                          u32(3),
+                          u32(3),
+                        ]),
+                        u32(10_000),
+                      ),
+                      add(
+                        mul(
+                          call("sourceTextHasTrailUnit", [u32(0), u32(2)]),
+                          u32(100_000),
+                        ),
+                        add(
+                          mul(
+                            call("sourceTextHasTrailUnit", [
+                              u32(1),
+                              u32(2),
+                            ]),
+                            u32(1_000_000),
+                          ),
+                          mul(
+                            call("sourceTextHasTrailUnit", [
+                              u32(0),
+                              u32(1),
+                            ]),
+                            u32(10_000_000),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
+      },
+    ],
+  };
+  const sourceTextCodePointRuntimeProgram: RuntimeLanguageProgram = {
+    ...sourceTextBaseProgram,
+    name: "source_text_code_point_conformance",
+    entry: "main",
+    functions: [
+      ...sourceTextBaseProgram.functions,
+      {
+        name: "main",
+        result: "u32",
+        body: [{
+          kind: "return",
+          expression: add(
+            mul(
+              call("sourceTextNextOffset", [u32(7), u32(0x1f600)]),
+              u32(1_000_000),
+            ),
+            add(
+              mul(
+                call("sourceTextNextOffset", [u32(7), u32(0xd83d)]),
+                u32(100_000),
+              ),
+              add(
+                mul(
+                  call("sourceTextNextOffset", [u32(7), u32(0x2028)]),
+                  u32(10_000),
+                ),
+                add(
+                  mul(
+                    call("sourceTextNextOffset", [u32(7), u32(0)]),
+                    u32(1_000),
+                  ),
+                  add(
+                    call("sourceTextCodePointFromUnits", [
+                      u32(0xd83d),
+                      u32(0xde00),
+                      u32(1),
+                    ]),
+                    add(
+                      call("sourceTextCodePointFromUnits", [
+                        u32(0xd83d),
+                        u32(0),
+                        u32(0),
+                      ]),
+                      add(
+                        call("sourceTextCodePointFromUnits", [
+                          u32(0x2028),
+                          u32(0),
+                          u32(0),
+                        ]),
+                        add(
+                          mul(
+                            call("sourceTextCodePointFromUnits", [
+                              u32(0x0d),
+                              u32(0x0a),
+                              u32(1),
+                            ]),
+                            u32(1_000),
+                          ),
+                          add(
+                            mul(
+                              call("sourceTextCodePointFromUnits", [
+                                u32(0x0a),
+                                u32(0),
+                                u32(0),
+                              ]),
+                              u32(100),
+                            ),
+                            call("sourceTextCodePointFromUnits", [
+                              u32(0),
+                              u32(0),
+                              u32(0),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        }],
       },
     ],
   };
@@ -4234,6 +4400,25 @@ Deno.test("runtime language TypeScript and Wasm backends agree", async () => {
       name: "lexer scan boundary helpers compute source offsets",
       program: lexerScanBoundaryRuntimeProgram,
       expected: { kind: "value", value: 908 },
+    },
+    {
+      name: "source text helpers classify spans and trail-unit availability",
+      program: sourceTextStatusRuntimeProgram,
+      expected: {
+        kind: "value",
+        value: 5 +
+          RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OK +
+          RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OUT_OF_BOUNDS * 10 +
+          RUNTIME_SOURCE_TEXT_SPAN_STATUS_END_BEFORE_START * 100 +
+          RUNTIME_SOURCE_TEXT_SPAN_STATUS_OUT_OF_BOUNDS * 1_000 +
+          RUNTIME_SOURCE_TEXT_SPAN_STATUS_OK * 10_000 +
+          100_000,
+      },
+    },
+    {
+      name: "source text helpers decode UTF-16 code points and next offsets",
+      program: sourceTextCodePointRuntimeProgram,
+      expected: { kind: "value", value: 10_094_101 },
     },
     {
       name: "parser table lookup finds shift actions",

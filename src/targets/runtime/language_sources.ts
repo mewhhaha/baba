@@ -180,6 +180,11 @@ export const RUNTIME_DIAGNOSTIC_MERGE_RIGHT = 2;
 export const RUNTIME_DIAGNOSTIC_MERGE_BOTH = 3;
 export const RUNTIME_DIAGNOSTIC_CODE_STATUS_OK = 0;
 export const RUNTIME_DIAGNOSTIC_CODE_STATUS_MISMATCH = 1;
+export const RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OK = 0;
+export const RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OUT_OF_BOUNDS = 1;
+export const RUNTIME_SOURCE_TEXT_SPAN_STATUS_OK = 0;
+export const RUNTIME_SOURCE_TEXT_SPAN_STATUS_END_BEFORE_START = 1;
+export const RUNTIME_SOURCE_TEXT_SPAN_STATUS_OUT_OF_BOUNDS = 2;
 
 const TRACE_STATUS = 1;
 const TRACE_ERROR_STATE = 2;
@@ -394,6 +399,133 @@ const UTF16_HAS_CODE_UNIT_FUNCTION: RuntimeLanguageFunction = {
   }],
 };
 
+const SOURCE_TEXT_OFFSET_STATUS_FUNCTION: RuntimeLanguageFunction = {
+  name: "sourceTextOffsetStatus",
+  parameters: [
+    { name: "offset", type: "u32" },
+    { name: "length", type: "u32" },
+  ],
+  result: "u32",
+  body: [{
+    kind: "if",
+    condition: lt(local("offset"), local("length")),
+    consequent: [{
+      kind: "return",
+      expression: u32(RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OK),
+    }],
+    alternate: [{
+      kind: "return",
+      expression: u32(RUNTIME_SOURCE_TEXT_OFFSET_STATUS_OUT_OF_BOUNDS),
+    }],
+  }],
+};
+
+const SOURCE_TEXT_SPAN_STATUS_FUNCTION: RuntimeLanguageFunction = {
+  name: "sourceTextSpanStatus",
+  parameters: [
+    { name: "start", type: "u32" },
+    { name: "end", type: "u32" },
+    { name: "length", type: "u32" },
+  ],
+  result: "u32",
+  body: [
+    {
+      kind: "if",
+      condition: lt(local("end"), local("start")),
+      consequent: [{
+        kind: "return",
+        expression: u32(RUNTIME_SOURCE_TEXT_SPAN_STATUS_END_BEFORE_START),
+      }],
+    },
+    {
+      kind: "if",
+      condition: lt(local("length"), local("end")),
+      consequent: [{
+        kind: "return",
+        expression: u32(RUNTIME_SOURCE_TEXT_SPAN_STATUS_OUT_OF_BOUNDS),
+      }],
+    },
+    {
+      kind: "return",
+      expression: u32(RUNTIME_SOURCE_TEXT_SPAN_STATUS_OK),
+    },
+  ],
+};
+
+const SOURCE_TEXT_TRAIL_OFFSET_FUNCTION: RuntimeLanguageFunction = {
+  name: "sourceTextTrailOffset",
+  parameters: [{ name: "offset", type: "u32" }],
+  result: "u32",
+  body: [{
+    kind: "return",
+    expression: add(local("offset"), u32(1)),
+  }],
+};
+
+const SOURCE_TEXT_HAS_TRAIL_UNIT_FUNCTION: RuntimeLanguageFunction = {
+  name: "sourceTextHasTrailUnit",
+  parameters: [
+    { name: "offset", type: "u32" },
+    { name: "length", type: "u32" },
+  ],
+  result: "u32",
+  body: [{
+    kind: "return",
+    expression: call("utf16HasCodeUnit", [
+      call("sourceTextTrailOffset", [local("offset")]),
+      local("length"),
+    ]),
+  }],
+};
+
+const SOURCE_TEXT_CODE_POINT_FROM_UNITS_FUNCTION: RuntimeLanguageFunction = {
+  name: "sourceTextCodePointFromUnits",
+  parameters: [
+    { name: "leadUnit", type: "u32" },
+    { name: "trailUnit", type: "u32" },
+    { name: "hasTrail", type: "u32" },
+  ],
+  result: "u32",
+  body: [{
+    kind: "return",
+    expression: call("utf16CodePointFromUnits", [
+      local("leadUnit"),
+      local("trailUnit"),
+      local("hasTrail"),
+    ]),
+  }],
+};
+
+const SOURCE_TEXT_NEXT_OFFSET_FUNCTION: RuntimeLanguageFunction = {
+  name: "sourceTextNextOffset",
+  parameters: [
+    { name: "offset", type: "u32" },
+    { name: "codePoint", type: "u32" },
+  ],
+  result: "u32",
+  body: [{
+    kind: "return",
+    expression: add(
+      local("offset"),
+      call("utf16CodePointWidth", [local("codePoint")]),
+    ),
+  }],
+};
+
+function sourceTextRuntimeFunctions(): RuntimeLanguageFunction[] {
+  return [
+    UTF16_CODE_POINT_WIDTH_FUNCTION,
+    UTF16_CODE_POINT_FROM_UNITS_FUNCTION,
+    UTF16_HAS_CODE_UNIT_FUNCTION,
+    SOURCE_TEXT_OFFSET_STATUS_FUNCTION,
+    SOURCE_TEXT_SPAN_STATUS_FUNCTION,
+    SOURCE_TEXT_TRAIL_OFFSET_FUNCTION,
+    SOURCE_TEXT_HAS_TRAIL_UNIT_FUNCTION,
+    SOURCE_TEXT_CODE_POINT_FROM_UNITS_FUNCTION,
+    SOURCE_TEXT_NEXT_OFFSET_FUNCTION,
+  ];
+}
+
 export const UTF16_CODE_POINT_WIDTH_PROGRAM: RuntimeLanguageProgram = {
   name: "utf16_code_point_width",
   entry: "utf16CodePointWidth",
@@ -403,6 +535,16 @@ export const UTF16_CODE_POINT_WIDTH_PROGRAM: RuntimeLanguageProgram = {
     UTF16_HAS_CODE_UNIT_FUNCTION,
   ],
 };
+
+export const SOURCE_TEXT_RUNTIME_PROGRAM: RuntimeLanguageProgram = {
+  name: "source_text_runtime",
+  entry: "sourceTextOffsetStatus",
+  functions: sourceTextRuntimeFunctions(),
+};
+
+export function createSourceTextRuntimeProgram(): RuntimeLanguageProgram {
+  return SOURCE_TEXT_RUNTIME_PROGRAM;
+}
 
 export const RUNTIME_ARENA_PROGRAM: RuntimeLanguageProgram = {
   name: "runtime_arena",
@@ -498,9 +640,7 @@ export function createLexerRuntimeProgram(
       : undefined,
     tables,
     functions: [
-      UTF16_CODE_POINT_WIDTH_FUNCTION,
-      UTF16_CODE_POINT_FROM_UNITS_FUNCTION,
-      UTF16_HAS_CODE_UNIT_FUNCTION,
+      ...sourceTextRuntimeFunctions(),
       dfaTransitionFunction(input.asciiTransitions !== null),
       ...(input.accepts
         ? [
@@ -3818,10 +3958,10 @@ function lexerScanNextOffsetFunction(): RuntimeLanguageFunction {
     body: [
       {
         kind: "return",
-        expression: add(
+        expression: call("sourceTextNextOffset", [
           local("offset"),
-          call("utf16CodePointWidth", [local("codePoint")]),
-        ),
+          local("codePoint"),
+        ]),
       },
     ],
   };
