@@ -55,8 +55,6 @@ Deno.test("runtime planner exposes a versioned portable parser plan", () => {
 
 Deno.test("runtime source-of-truth cutline tracks final gate", async () => {
   const docs = await Deno.readTextFile("docs/runtime-language.md");
-  const status = await Deno.readTextFile("tasks/status.md");
-  const taskIndex = await Deno.readTextFile("tasks/README.md");
 
   assertIncludes(docs, "## Runtime Source-Of-Truth Cutline");
   assertIncludes(docs, "Runtime-owned semantics:");
@@ -65,30 +63,16 @@ Deno.test("runtime source-of-truth cutline tracks final gate", async () => {
     docs,
     "Forbidden source-of-truth duplication:",
   );
-  assertIncludes(docs, "170-runtime-source-of-truth-cutline.md");
-  assertIncludes(docs, "178-final-runtime-source-of-truth-gate.md");
+  assertIncludes(
+    docs,
+    "The generated TypeScript and JavaScript-hosted Wasm parser runtimes now satisfy",
+  );
+  assertIncludes(
+    docs,
+    "remaining JavaScript code in those targets is the documented",
+  );
   assertIncludes(docs, "Parser-kit");
   assertIncludes(docs, "tooling/convenience");
-
-  assertIncludes(
-    status,
-    "| 1. Make the runtime language the actual source of truth",
-  );
-  assertIncludes(status, "| done   | none");
-  assertIncludes(taskIndex, "Completed FEEDBACK P0.1 cutline: `170`");
-  assertIncludes(
-    taskIndex,
-    "Completed FEEDBACK P0.1 source text handles: `171`",
-  );
-  assertIncludes(
-    taskIndex,
-    "Completed FEEDBACK P0.1 lexer driver lowering: `172`",
-  );
-  assertIncludes(
-    taskIndex,
-    "Completed full FEEDBACK P0.1 runtime-source-of-truth work: `173` through `178`",
-  );
-  assertIncludes(taskIndex, "178-final-runtime-source-of-truth-gate.md");
 });
 
 Deno.test("TypeScript target emitters package shared runtime source", async () => {

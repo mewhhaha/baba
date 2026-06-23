@@ -19,9 +19,9 @@ Wasm adapter ABI version.
 
 ## Runtime Source-Of-Truth Cutline
 
-The final FEEDBACK P0.1 proof is not "no JavaScript exists." The proof is that
-parser semantics have one runtime-language-owned implementation and generated
-hosts only provide capabilities, allocation, rendering, and packaging.
+The runtime source-of-truth proof is not "no JavaScript exists." The proof is
+that parser semantics have one runtime-language-owned implementation and
+generated hosts only provide capabilities, allocation, rendering, and packaging.
 
 Runtime-owned semantics:
 
@@ -64,15 +64,14 @@ Forbidden source-of-truth duplication:
 - generated TypeScript/Wasm adapter branches that decide parser semantics while
   bypassing the runtime-language source.
 
-Task `170-runtime-source-of-truth-cutline.md` records this cutline, and tasks
-`171` through `178-final-runtime-source-of-truth-gate.md` closed it for the
-generated TypeScript and JavaScript-hosted Wasm parser runtimes. The remaining
-JavaScript code in those targets is the documented host boundary: source/string
-capabilities, public object allocation, diagnostic rendering, adapter handle
-provenance, and packaging. Parser-kit helpers remain tooling/convenience
-interpreters for `parser-kit.json`, not one of the two generated runtime targets
-in this proof; they are covered by parity tests and may be lowered or split into
-a separate helper runtime in a future compatibility task.
+The generated TypeScript and JavaScript-hosted Wasm parser runtimes now satisfy
+this cutline. The remaining JavaScript code in those targets is the documented
+host boundary: source/string capabilities, public object allocation, diagnostic
+rendering, adapter handle provenance, and packaging. Parser-kit helpers remain
+tooling/convenience interpreters for `parser-kit.json`, not one of the two
+generated runtime targets in this proof; they are covered by parity tests and
+may be lowered or split into a separate helper runtime in a future compatibility
+task.
 
 `deno task bootstrap:check` verifies the Stage-0 runtime-language compiler
 source hash before it checks regenerated example artifacts. This catches
