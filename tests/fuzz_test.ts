@@ -4,6 +4,7 @@ import {
   assertEquals,
   compile,
   denoCheck,
+  generatedContentForComparison,
   parseGrammar,
 } from "./helpers.ts";
 import { buildDfa } from "../src/compiler/regex/dfa.ts";
@@ -11,7 +12,8 @@ import { buildRegexNfa } from "../src/compiler/regex/nfa.ts";
 import { parsePortableRegex } from "../src/compiler/regex/parser.ts";
 
 Deno.test("fuzz: generated EBNF sources parse and compile deterministically", () => {
-  const random = seededRandom(0xBABA);
+  const seed = 0xBABA;
+  const random = seededRandom(seed);
   for (let index = 0; index < 50; index++) {
     const terminals = ["A", "B", "C"].slice(0, 1 + randomInt(random, 3));
     const body = randomSequence(random, terminals);
@@ -21,25 +23,30 @@ Deno.test("fuzz: generated EBNF sources parse and compile deterministically", ()
       "token C = /c+/ ;",
       `module = ${body} ;`,
     ].join("\n");
-    parseGrammar(source);
-    const first = compile(source, { targets: ["typescript"] });
-    const second = compile(source, { targets: ["typescript"] });
-    assert(first.bundle, first.diagnostics.map((d) => d.message).join("\n"));
-    assert(second.bundle);
-    assertEquals(
-      first.bundle.files.map((file) => file.content).join("\n"),
-      second.bundle.files.map((file) => file.content).join("\n"),
-    );
+    withFuzzContext({ test: "generated EBNF", seed, index, source }, () => {
+      parseGrammar(source);
+      const first = compile(source, { targets: ["typescript"] });
+      const second = compile(source, { targets: ["typescript"] });
+      assert(first.bundle, first.diagnostics.map((d) => d.message).join("\n"));
+      assert(second.bundle);
+      assertEquals(
+        first.bundle.files.map(generatedContentForComparison).join("\n"),
+        second.bundle.files.map(generatedContentForComparison).join("\n"),
+      );
+    });
   }
 });
 
 Deno.test("fuzz: portable regexes parse and compile to DFAs", () => {
-  const random = seededRandom(0xC0FFEE);
+  const seed = 0xC0FFEE;
+  const random = seededRandom(seed);
   for (let index = 0; index < 100; index++) {
     const pattern = randomRegex(random, 0);
-    const ast = parsePortableRegex(pattern);
-    const dfa = buildDfa(buildRegexNfa(ast));
-    assert(dfa.states.length > 0);
+    withFuzzContext({ test: "portable regex", seed, index, pattern }, () => {
+      const ast = parsePortableRegex(pattern);
+      const dfa = buildDfa(buildRegexNfa(ast));
+      assert(dfa.states.length > 0);
+    });
   }
 });
 
@@ -59,21 +66,29 @@ Deno.test("fuzz: generated lexer advances and parse agrees with parseTokens", as
     await applyBundle(result.bundle, { root: dir });
     await denoCheck(`${dir}/typescript/mod.ts`);
     const mod = await import(`file://${dir}/typescript/mod.ts`);
-    const random = seededRandom(0x1234);
+    const seed = 0x1234;
+    const random = seededRandom(seed);
     for (let index = 0; index < 100; index++) {
       const sample = randomSource(random);
-      const lexed = mod.lex(sample);
-      assertEquals(lexed.diagnostics.length, 0);
-      let previousEnd = 0;
-      for (const token of lexed.tokens) {
-        assert(token.span.start >= previousEnd);
-        assert(token.type === "eof" || token.span.end > token.span.start);
-        previousEnd = token.span.end;
-      }
-      assertEquals(previousEnd, sample.length);
-      const parsed = mod.parse(sample);
-      const parsedTokens = mod.parseTokens(lexed.source, lexed.tokens);
-      assertEquals(parsed.ok, parsedTokens.ok);
+      withFuzzContext({
+        test: "generated lexer",
+        seed,
+        index,
+        source: sample,
+      }, () => {
+        const lexed = mod.lex(sample);
+        assertEquals(lexed.diagnostics.length, 0);
+        let previousEnd = 0;
+        for (const token of lexed.tokens) {
+          assert(token.span.start >= previousEnd);
+          assert(token.type === "eof" || token.span.end > token.span.start);
+          previousEnd = token.span.end;
+        }
+        assertEquals(previousEnd, sample.length);
+        const parsed = mod.parse(sample);
+        const parsedTokens = mod.parseTokens(lexed.source, lexed.tokens);
+        assertEquals(parsed.ok, parsedTokens.ok);
+      });
     }
   } finally {
     await Deno.remove(dir, { recursive: true });
@@ -136,4 +151,36 @@ function seededRandom(seed: number): () => number {
 
 function randomInt(random: () => number, upperExclusive: number): number {
   return Math.floor(random() * upperExclusive);
+}
+
+function withFuzzContext(
+  context: {
+    test: string;
+    seed: number;
+    index: number;
+    source?: string;
+    pattern?: string;
+  },
+  action: () => void,
+): void {
+  try {
+    action();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      [
+        `Fuzz failure in ${context.test}.`,
+        `seed: 0x${context.seed.toString(16)}`,
+        `case index: ${context.index}`,
+        context.pattern
+          ? `regex pattern: ${JSON.stringify(context.pattern)}`
+          : undefined,
+        context.source
+          ? `source: ${JSON.stringify(context.source)}`
+          : undefined,
+        "Persist this case as a minimal fixture before changing semantics.",
+        message,
+      ].filter((line): line is string => line !== undefined).join("\n"),
+    );
+  }
 }

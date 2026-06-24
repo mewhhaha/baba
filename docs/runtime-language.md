@@ -25,6 +25,8 @@ generated hosts only provide capabilities, allocation, rendering, and packaging.
 
 Runtime-owned semantics:
 
+- shared BRL source modules under `src/runtime/*.brl` define the portable
+  lexer/parser runtime source layout used by both backend migration tracks;
 - source offset/span status, UTF-16 trail-unit availability, code-point
   decoding, next-offset arithmetic, lexer DFA transition lookup, accepted-spec
   tracking, token class/status classification, maximal-munch lexer-driver

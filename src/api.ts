@@ -29,17 +29,25 @@ import {
   emitTypeScriptTarget,
   planTypeScriptTarget,
   type TypeScriptPlan,
+  typeScriptRuntimePlanningOptions,
 } from "./targets/typescript/plan.ts";
 import {
   emitWasmTarget,
   planWasmTarget,
   type WasmPlan,
+  wasmRuntimePlanningOptions,
 } from "./targets/wasm/plan.ts";
 import {
   emitKitTarget,
   type KitPlan,
+  kitRuntimePlanningOptions,
   planKitTarget,
 } from "./targets/kit/plan.ts";
+import {
+  planPortableRuntime,
+  type RuntimeParserPlan,
+  type RuntimeParserPlanningOptions,
+} from "./targets/runtime/plan.ts";
 export { applyBundle } from "./output.ts";
 
 /** Parses EBNF source into a grammar AST. */
@@ -72,13 +80,26 @@ export function validateGrammar(
     return [toBabaError(error, "VALIDATION_ERROR").toDiagnostic()];
   }
   const portability = normalizePortability(options.portability, targets);
+  const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
   const analyzed = analyzeGrammar(grammar, {
     name: "grammar",
     rootRule: options.rootRule,
     metadata: options.metadata,
+    regexLimits: {
+      sourceLengthLimit: runtimeOptions?.regexSourceLengthLimit,
+      nestingLimit: runtimeOptions?.regexNestingLimit,
+    },
   });
   const diagnostics = [...analyzed.diagnostics];
   if (hasErrors(diagnostics)) return diagnostics;
+  const runtimePlan = planSharedRuntimeForTargets(
+    analyzed,
+    targets,
+    options,
+    options.metadata ?? {},
+    portability,
+  );
+  if (runtimePlan) diagnostics.push(...runtimePlan.diagnostics);
   if (targets.includes("tree-sitter")) {
     diagnostics.push(...treeSitterValidationDiagnostics(
       grammar,
@@ -95,6 +116,7 @@ export function validateGrammar(
           options.typescript,
           options.metadata,
           portability,
+          runtimePlan,
         ).diagnostics,
       );
     } catch (error) {
@@ -111,6 +133,7 @@ export function validateGrammar(
           options.wasm,
           options.metadata,
           portability,
+          runtimePlan,
         ).diagnostics,
       );
     } catch (error) {
@@ -127,6 +150,7 @@ export function validateGrammar(
           options.kit,
           options.metadata,
           portability,
+          runtimePlan,
         ).diagnostics,
       );
     } catch (error) {
@@ -165,10 +189,15 @@ export function compile(
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
   const metadata = options.metadata ?? {};
   const portability = normalizePortability(options.portability, targets);
+  const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
   const analyzed = analyzeGrammar(grammar, {
     name: options.name ?? "grammar",
     rootRule: rootRuleName,
     metadata,
+    regexLimits: {
+      sourceLengthLimit: runtimeOptions?.regexSourceLengthLimit,
+      nestingLimit: runtimeOptions?.regexNestingLimit,
+    },
   });
   const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
   let typeScriptPlan:
@@ -177,6 +206,14 @@ export function compile(
     | undefined;
   let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
   let kitPlan: KitPlan | { diagnostics: readonly Diagnostic[] } | undefined;
+  const runtimePlan = planSharedRuntimeForTargets(
+    analyzed,
+    targets,
+    options,
+    metadata,
+    portability,
+  );
+  if (runtimePlan) diagnostics.push(...runtimePlan.diagnostics);
   if (targets.includes("typescript") && !hasErrors(diagnostics)) {
     try {
       typeScriptPlan = planTypeScriptTarget(
@@ -184,6 +221,7 @@ export function compile(
         options.typescript,
         metadata,
         portability,
+        runtimePlan,
       );
     } catch (error) {
       diagnostics.push({
@@ -200,6 +238,7 @@ export function compile(
         options.wasm,
         metadata,
         portability,
+        runtimePlan,
       );
     } catch (error) {
       diagnostics.push({
@@ -215,6 +254,7 @@ export function compile(
         options.kit,
         metadata,
         portability,
+        runtimePlan,
       );
     } catch (error) {
       diagnostics.push({
@@ -302,6 +342,10 @@ export function compileParserKit(
     name: options.name ?? "grammar",
     rootRule: rootRuleName,
     metadata,
+    regexLimits: {
+      sourceLengthLimit: options.kit?.regexSourceLengthLimit,
+      nestingLimit: options.kit?.regexNestingLimit,
+    },
   });
   const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
   let kitPlan: KitPlan | { diagnostics: readonly Diagnostic[] } | undefined;
@@ -381,6 +425,59 @@ function treeSitterValidationDiagnostics(
   return diagnostics;
 }
 
+function planSharedRuntimeForTargets(
+  analyzed: ReturnType<typeof analyzeGrammar>,
+  targets: readonly GenerateTarget[],
+  options: CompileOptions | ValidateOptions,
+  metadata: BabaMetadata,
+  portability: PortabilityMode,
+): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } | undefined {
+  const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
+  if (!runtimeOptions) return undefined;
+  return planPortableRuntime(analyzed, runtimeOptions, metadata, portability);
+}
+
+function sharedRuntimePlanningOptions(
+  targets: readonly GenerateTarget[],
+  options: CompileOptions | ValidateOptions,
+): RuntimeParserPlanningOptions | undefined {
+  const selected = [
+    targets.includes("typescript")
+      ? typeScriptRuntimePlanningOptions(options.typescript ?? {})
+      : undefined,
+    targets.includes("wasm")
+      ? wasmRuntimePlanningOptions(options.wasm ?? {})
+      : undefined,
+    targets.includes("kit")
+      ? kitRuntimePlanningOptions(options.kit ?? {})
+      : undefined,
+  ].filter((value): value is RuntimeParserPlanningOptions => !!value);
+  if (selected.length === 0) return undefined;
+  const minOption = (
+    key: keyof RuntimeParserPlanningOptions,
+  ): number | undefined => {
+    const values = selected
+      .map((entry) => entry[key])
+      .filter((value): value is number => value !== undefined);
+    return values.length === 0 ? undefined : Math.min(...values);
+  };
+  return {
+    lexerStateLimit: minOption("lexerStateLimit"),
+    regexSourceLengthLimit: minOption("regexSourceLengthLimit"),
+    regexNestingLimit: minOption("regexNestingLimit"),
+    regexAstNodeLimit: minOption("regexAstNodeLimit"),
+    regexBoundedRepeatLimit: minOption("regexBoundedRepeatLimit"),
+    regexNfaStateLimit: minOption("regexNfaStateLimit"),
+    regexDfaStateLimit: minOption("regexDfaStateLimit"),
+    regexOverlapStateLimit: minOption("regexOverlapStateLimit"),
+    regexOverlapPairLimit: minOption("regexOverlapPairLimit"),
+    parserStateLimit: minOption("parserStateLimit"),
+    parserItemLimit: minOption("parserItemLimit"),
+    parserTableEntryLimit: minOption("parserTableEntryLimit"),
+    diagnosticLimit: minOption("diagnosticLimit"),
+  };
+}
+
 function normalizeTargets(
   targets: readonly GenerateTarget[] | undefined,
 ): GenerateTarget[] {
@@ -410,10 +507,7 @@ function normalizePortability(
   ) {
     return portability;
   }
-  return targets.includes("tree-sitter") &&
-      targets.some((target) => target !== "tree-sitter")
-    ? "strict"
-    : "warn";
+  return targets.length > 1 ? "strict" : "warn";
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {

@@ -2,6 +2,8 @@
   "tasks": {
     "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name funcfuck --root module --metadata baba.json --target all --typescript-dir ts",
     "check": "deno check interpreter.ts",
+    "run": "deno task pipeline",
+    "test": "deno task check && deno task pipeline && deno task fanout && deno task window",
     "pipeline": "deno run --allow-read interpreter.ts programs/pipeline.ff",
     "fanout": "deno run --allow-read interpreter.ts programs/fanout.ff",
     "window": "deno run --allow-read interpreter.ts programs/window.ff",

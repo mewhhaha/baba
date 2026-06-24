@@ -1,0 +1,4 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = IDENT ;

@@ -1,0 +1,11 @@
+fn reducer_operation(kind: u32) -> u32 {
+  return kind % 8;
+}
+
+fn reducer_payload(value: u32) -> u32 {
+  return value / 8;
+}
+
+fn reducer_requires_child(kind: u32) -> bool {
+  return reducer_operation(kind) != 0;
+}

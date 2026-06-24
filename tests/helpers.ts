@@ -1,3 +1,4 @@
+import type { GeneratedBundle, GeneratedFile } from "../src/mod.ts";
 import { applyBundle, generate } from "../src/mod.ts";
 
 export {
@@ -55,6 +56,30 @@ export function assertNotIncludes(actual: string, expected: string): void {
     !actual.includes(expected),
     `Expected ${JSON.stringify(actual)} not to include ${expected}`,
   );
+}
+
+export function generatedTextContent(
+  bundle: GeneratedBundle,
+  path: string,
+): string {
+  const file = bundle.files.find((entry) => entry.path === path);
+  assert(file, `Expected generated file ${path}.`);
+  assert(file.encoding === "utf-8", `Expected ${path} to be UTF-8 text.`);
+  return file.content;
+}
+
+export function generatedTextContentOrEmpty(
+  bundle: GeneratedBundle,
+  path: string,
+): string {
+  const file = bundle.files.find((entry) => entry.path === path);
+  if (!file) return "";
+  assert(file.encoding === "utf-8", `Expected ${path} to be UTF-8 text.`);
+  return file.content;
+}
+
+export function generatedContentForComparison(file: GeneratedFile): string {
+  return file.encoding === "utf-8" ? file.content : [...file.content].join(",");
 }
 
 export function assertThrowsIncludes(
@@ -203,13 +228,42 @@ export async function fixtureSamples(
   fixture: string,
   kind: "valid" | "invalid",
 ): Promise<string[]> {
+  return (await fixtureSampleEntries(fixture, kind)).map((entry) =>
+    entry.source
+  );
+}
+
+export async function fixtureSampleEntries(
+  fixture: string,
+  kind: "valid" | "invalid",
+): Promise<Array<{ path: string; source: string }>> {
   const dir = `fixtures/${fixture}/${kind}`;
-  const samples: string[] = [];
+  const samples: Array<{ path: string; source: string }> = [];
   for await (const entry of Deno.readDir(dir)) {
     if (!entry.isFile) continue;
-    samples.push(await Deno.readTextFile(`${dir}/${entry.name}`));
+    const path = `${dir}/${entry.name}`;
+    samples.push({ path, source: await Deno.readTextFile(path) });
   }
-  return samples;
+  return samples.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+export async function fixtureNames(): Promise<string[]> {
+  const names: string[] = [];
+  for await (const entry of Deno.readDir("fixtures")) {
+    if (!entry.isDirectory) continue;
+    names.push(entry.name);
+  }
+  return names.sort();
+}
+
+export async function fixtureMetadata(fixture: string): Promise<unknown> {
+  try {
+    const source = await Deno.readTextFile(`fixtures/${fixture}/baba.json`);
+    return JSON.parse(source);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return undefined;
+    throw error;
+  }
 }
 
 export const explicitGrammar = `

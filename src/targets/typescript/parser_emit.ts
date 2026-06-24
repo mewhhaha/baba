@@ -1,4 +1,7 @@
-export { emitParser } from "../runtime/typescript_parser_runtime.ts";
+export {
+  emitParser,
+  emitParserFromPortablePlan,
+} from "../runtime/typescript_parser_runtime.ts";
 export type {
   ParserEmitMode,
   ParserEmitOptions,

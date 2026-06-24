@@ -1,10 +1,27 @@
-import type { GeneratedBundle, GeneratedFile } from "./ast.ts";
+import type {
+  GeneratedBundle,
+  GeneratedFile,
+  TextGeneratedFileKind,
+} from "./ast.ts";
 
 type BundleInput = GeneratedFile | readonly [path: string, content: string];
 
 /** Creates one generated file with centralized kind classification. */
 export function generatedFile(path: string, content: string): GeneratedFile {
-  return { path, content, kind: classifyGeneratedFile(path) };
+  return {
+    path,
+    content,
+    kind: classifyGeneratedTextFile(path),
+    encoding: "utf-8",
+  };
+}
+
+/** Creates one generated binary file. */
+export function generatedBinaryFile(
+  path: string,
+  content: Uint8Array,
+): GeneratedFile {
+  return { path, content, kind: "binary", encoding: "binary" };
 }
 
 /** Creates a deterministic generated bundle. */
@@ -30,6 +47,12 @@ function isPathContentPair(
 
 /** Classifies a generated output path. */
 export function classifyGeneratedFile(path: string): GeneratedFile["kind"] {
+  if (path.endsWith(".wasm")) return "binary";
+  return classifyGeneratedTextFile(path);
+}
+
+/** Classifies a generated text output path. */
+export function classifyGeneratedTextFile(path: string): TextGeneratedFileKind {
   if (path.endsWith(".scm") || path.startsWith("queries/")) return "query";
   if (
     path.endsWith(".json") ||
@@ -44,7 +67,7 @@ export function classifyGeneratedFile(path: string): GeneratedFile["kind"] {
 /** Converts a bundle to a path/content map for tests or renderers. */
 export function generatedFileMap(
   bundle: GeneratedBundle,
-): Record<string, string> {
+): Record<string, string | Uint8Array> {
   return Object.fromEntries(
     bundle.files.map((file) => [file.path, file.content]),
   );

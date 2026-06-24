@@ -1,0 +1,7 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = statement+ ;
+statement = typed | call ;
+typed = name:IDENT ":" type:IDENT ";" ;
+call = callee:IDENT "(" argument:IDENT? ")" ";" ;

@@ -14,11 +14,16 @@ import type {
   PortableParserPlanV1,
 } from "../runtime/portable_plan.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
-import { emitLexer } from "./lexer_emit.ts";
-import { emitParser } from "./parser_emit.ts";
-import { emitSyntax } from "./syntax_emit.ts";
+import { emitLexerFromPortablePlan } from "./lexer_emit.ts";
+import { emitParserFromPortablePlan } from "./parser_emit.ts";
+import { emitSyntaxFromPortablePlan } from "./syntax_emit.ts";
 import {
-  planRuntimeParserTarget,
+  portablePlanToBnf,
+  portablePlanToDfa,
+  portablePlanToLrTable,
+} from "../../compiler/portable_plan/adapters.ts";
+import {
+  planPortableRuntime,
   type RuntimeParserPlan,
   type RuntimeParserPlanningOptions,
 } from "../runtime/plan.ts";
@@ -40,24 +45,23 @@ export function planTypeScriptTarget(
   options: TypeScriptTargetOptions = {},
   metadata: BabaMetadata = {},
   portability: PortabilityMode = "warn",
+  runtimePlanInput?: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
 ): TypeScriptPlan | { diagnostics: readonly Diagnostic[] } {
   const diagnostics = [...typescriptOptionsDiagnostics(options)];
-  const runtimePlan = planRuntimeParserTarget(
-    analyzed,
-    runtimePlanningOptions(options),
-    metadata,
-    portability,
-    { backend: "typescript", codePrefix: "TS", label: "TypeScript" },
-  );
-  diagnostics.push(...runtimePlan.diagnostics);
+  const runtimePlan = runtimePlanInput ??
+    planPortableRuntimeFallback(analyzed, options, metadata, portability);
+  if (!runtimePlanInput) diagnostics.push(...runtimePlan.diagnostics);
   if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
     return { diagnostics };
   }
+  const portableBnf = portablePlanToBnf(runtimePlan.portable);
+  const portableLr = portablePlanToLrTable(runtimePlan.portable);
+  const portableDfa = portablePlanToDfa(runtimePlan.portable);
   const generatedSources = typeScriptSources(
     analyzed,
-    runtimePlan.bnf,
-    runtimePlan.lr,
-    runtimePlan.dfa,
+    portableBnf,
+    portableLr,
+    runtimePlan.portable,
     runtimePlan.portableMetadata,
     options,
   );
@@ -81,8 +85,7 @@ export function planTypeScriptTarget(
     diagnostics.push(
       parserStatsDiagnostic(
         analyzed,
-        runtimePlan.bnf,
-        runtimePlan.lr,
+        runtimePlan,
         generatedBytes,
       ),
     );
@@ -90,9 +93,9 @@ export function planTypeScriptTarget(
 
   return {
     analyzed,
-    bnf: runtimePlan.bnf,
-    lr: runtimePlan.lr,
-    dfa: runtimePlan.dfa,
+    bnf: portableBnf,
+    lr: portableLr,
+    dfa: portableDfa,
     portable: runtimePlan.portable,
     portableMetadata: runtimePlan.portableMetadata,
     directory: options.directory ?? "typescript",
@@ -110,36 +113,37 @@ export function emitTypeScriptTarget(
     plan.analyzed,
     plan.bnf,
     plan.lr,
-    plan.dfa,
+    plan.portable,
     plan.portableMetadata,
     options,
   ).map((file) => ({
     path: `${dir}/${file.path}`,
     content: file.content,
     kind: "source",
+    encoding: "utf-8",
   }));
 }
 
 function typeScriptSources(
-  analyzed: AnalyzedGrammar,
-  bnf: BnfGrammar,
-  lr: LrTable,
-  dfa: Dfa,
+  _analyzed: AnalyzedGrammar,
+  _bnf: BnfGrammar,
+  _lr: LrTable,
+  portable: PortableParserPlanV1,
   portableMetadata: PortableParserPlanMetadata,
   options: TypeScriptTargetOptions,
 ): Array<{ path: string; content: string }> {
   return [
     {
       path: "syntax.ts",
-      content: emitSyntax(analyzed),
+      content: emitSyntaxFromPortablePlan(portable),
     },
     {
       path: "lexer.ts",
-      content: emitLexer(analyzed, bnf, options, dfa),
+      content: emitLexerFromPortablePlan(portable, options),
     },
     {
       path: "parser.ts",
-      content: emitParser(analyzed, bnf, lr),
+      content: emitParserFromPortablePlan(portable),
     },
     {
       path: "mod.ts",
@@ -172,7 +176,7 @@ export const runtimeImplementationHash = ${
   } as const;
 export * from "./syntax.ts";
 export { lex } from "./lexer.ts";
-export { parse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState, parseTokens, parseTokensUnchecked } from "./parser.ts";
+export { parse, parserDiagnosticCodeAmbiguousParse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticCodeTraceLimit, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState, parseTokens, parseTokensUnchecked } from "./parser.ts";
 `;
 }
 
@@ -183,7 +187,7 @@ function typescriptOptionsDiagnostics(
   const directory = options.directory ?? "typescript";
   if (!isSafeRelativeDirectory(directory)) {
     diagnostics.push({
-      code: "TS_LEXER_GENERATION_ERROR",
+      code: "TS_INVALID_OUTPUT_DIRECTORY",
       severity: "error",
       backend: "typescript",
       message:
@@ -207,11 +211,11 @@ function typescriptOptionsDiagnostics(
 
 function parserStatsDiagnostic(
   analyzed: AnalyzedGrammar,
-  bnf: BnfGrammar,
-  lr: LrTable,
+  runtimePlan: RuntimeParserPlan,
   generatedBytes: number,
 ): Diagnostic {
-  const stats = lr.stats;
+  const stats = runtimePlan.lr.stats;
+  const portableStats = runtimePlan.portable.statistics;
   return {
     code: "TS_PARSER_STATS",
     severity: "information",
@@ -219,7 +223,15 @@ function parserStatsDiagnostic(
     message: [
       "TypeScript parser planning statistics:",
       `rules: ${analyzed.reachableRules.size}`,
-      `BNF productions: ${bnf.productions.length}`,
+      `BNF productions: ${runtimePlan.bnf.productions.length}`,
+      `lexer states: ${portableStats.lexerStates}`,
+      `lexer accept candidates: ${portableStats.lexerAcceptCandidates}`,
+      `lexer average accept candidates/state: ${
+        (portableStats.lexerAverageAcceptCandidatesPerStateMilli / 1000)
+          .toFixed(2)
+      }`,
+      `lexer max accept candidates/state: ${portableStats.lexerMaxAcceptCandidatesPerState}`,
+      `lexer ambiguous accept states: ${portableStats.lexerAmbiguousAcceptStates}`,
       `LR states: ${stats.states}`,
       `LR core items: ${stats.coreItems}`,
       `LR items: ${stats.items}`,
@@ -261,15 +273,35 @@ function runtimePlanningOptions(
 ): RuntimeParserPlanningOptions {
   return {
     lexerStateLimit: options.lexerStateLimit,
+    regexSourceLengthLimit: options.regexSourceLengthLimit,
+    regexNestingLimit: options.regexNestingLimit,
     regexAstNodeLimit: options.regexAstNodeLimit,
     regexBoundedRepeatLimit: options.regexBoundedRepeatLimit,
     regexNfaStateLimit: options.regexNfaStateLimit,
     regexDfaStateLimit: options.regexDfaStateLimit,
     regexOverlapStateLimit: options.regexOverlapStateLimit,
+    regexOverlapPairLimit: options.regexOverlapPairLimit,
     parserStateLimit: options.parserStateLimit,
     parserItemLimit: options.parserItemLimit,
     parserTableEntryLimit: options.parserTableEntryLimit,
+    diagnosticLimit: options.diagnosticLimit,
   };
+}
+
+export { runtimePlanningOptions as typeScriptRuntimePlanningOptions };
+
+function planPortableRuntimeFallback(
+  analyzed: AnalyzedGrammar,
+  options: TypeScriptTargetOptions,
+  metadata: BabaMetadata,
+  portability: PortabilityMode,
+): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } {
+  return planPortableRuntime(
+    analyzed,
+    runtimePlanningOptions(options),
+    metadata,
+    portability,
+  );
 }
 
 function isRuntimePlan(

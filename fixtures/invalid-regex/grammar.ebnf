@@ -1,0 +1,4 @@
+token BAD = /[A-Z/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = BAD ;

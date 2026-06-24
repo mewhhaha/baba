@@ -31,6 +31,7 @@ export type {
   GenerateTarget,
   KitTargetOptions,
   PortabilityMode,
+  PortableRuntimePlanningOptions,
   SourceSpan,
   TypeScriptTargetOptions,
   ValidateOptions,

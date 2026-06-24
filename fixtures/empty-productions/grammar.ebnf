@@ -1,0 +1,4 @@
+skip WS = /[ \t\r\n]+/ ;
+
+module = "begin" separator "end" ;
+separator = ;

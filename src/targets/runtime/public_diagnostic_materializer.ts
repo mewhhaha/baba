@@ -55,6 +55,10 @@ function diagnosticCodeName(runtimeCode: number): ParseDiagnostic["code"] {
       return "PARSE_INVALID_TOKEN_STREAM";
     case DIAGNOSTIC_PARSER_BRANCH_LIMIT:
       return "PARSER_BRANCH_LIMIT";
+    case DIAGNOSTIC_PARSER_TRACE_LIMIT:
+      return "PARSER_TRACE_LIMIT";
+    case DIAGNOSTIC_PARSER_AMBIGUOUS_PARSE:
+      return "PARSER_AMBIGUOUS_PARSE";
     default:
       return "PARSER_INTERNAL_ERROR";
   }
@@ -177,6 +181,22 @@ function branchLimitDiagnostic(offset: number): ParseDiagnostic {
   return parseDiagnostic(
     DIAGNOSTIC_PARSER_BRANCH_LIMIT,
     "Parser exceeded the branch exploration limit.",
+    { start: offset, end: offset },
+  );
+}
+
+function traceLimitDiagnostic(offset: number): ParseDiagnostic {
+  return parseDiagnostic(
+    DIAGNOSTIC_PARSER_TRACE_LIMIT,
+    "Parser exceeded the trace action limit.",
+    { start: offset, end: offset },
+  );
+}
+
+function ambiguousParseDiagnostic(offset: number): ParseDiagnostic {
+  return parseDiagnostic(
+    DIAGNOSTIC_PARSER_AMBIGUOUS_PARSE,
+    "Parser found multiple successful conflict branches.",
     { start: offset, end: offset },
   );
 }

@@ -554,10 +554,7 @@ Deno.test("parser-kit helpers preserve declared parser conflict branches", async
   const metadata = parseMetadata(JSON.stringify({
     version: 1,
     parser: {
-      conflicts: [
-        ["tuple", "atom"],
-        ["group", "atom"],
-      ],
+      conflicts: [["tuple", "atom"]],
     },
   }));
   const { kit, ts, cleanup } = await buildKitParityRuntime(conflictGrammar, {

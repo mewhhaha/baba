@@ -2,6 +2,8 @@
   "tasks": {
     "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name thunkwasm --root module --metadata baba.json --target all --typescript-dir ts",
     "check": "deno check aot.ts bench.ts",
+    "run": "deno task cached",
+    "test": "deno task check && deno task cached && deno task closure && deno task branch",
     "cached": "deno run --allow-read aot.ts programs/cached.tw 7",
     "closure": "deno run --allow-read aot.ts programs/closure.tw 7",
     "branch": "deno run --allow-read aot.ts programs/branch.tw 4",

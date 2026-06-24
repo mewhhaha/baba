@@ -20,6 +20,7 @@ export type {
   GenerateOptions,
   GenerateTarget,
   PortabilityMode,
+  PortableRuntimePlanningOptions,
   SourceSpan,
   TreeSitterCaptureMetadata,
   TreeSitterExtra,
@@ -35,6 +36,7 @@ export type {
   TreeSitterRuleWrap,
   TypeScriptTargetOptions,
   ValidateOptions,
+  WasmTargetOptions,
 } from "./ast.ts";
 export { analyzeGrammar } from "./compiler/analyze.ts";
 export type {
@@ -71,5 +73,23 @@ export {
   validateTreeSitterBackendCapabilities,
   validateTreeSitterGenerationMetadataSemantics,
 } from "./generate.ts";
+export { planPortableRuntime } from "./targets/runtime/plan.ts";
+export type {
+  RuntimeParserPlan,
+  RuntimeParserPlanningOptions,
+} from "./targets/runtime/plan.ts";
 export { parseTreeSitterMetadata } from "./metadata.ts";
+export { buildPortableParserPlan } from "./compiler/portable_plan/build.ts";
+export {
+  parsePortableParserPlanJson,
+  serializePortableParserPlanJson,
+} from "./compiler/portable_plan/serialize_json.ts";
+export { portablePlanStatistics } from "./compiler/portable_plan/statistics.ts";
+export { validatePortableParserPlan } from "./compiler/portable_plan/validate.ts";
+export type {
+  PortableDiagnosticPlan,
+  PortableParserPlanV1,
+  PortablePlanStatistics,
+  PortableReducerPlan,
+} from "./compiler/portable_plan/plan.ts";
 export { EbnfError, formatEbnfError, parseEbnf } from "./parser.ts";

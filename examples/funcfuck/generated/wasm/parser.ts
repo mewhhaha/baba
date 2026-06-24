@@ -18,6 +18,78 @@ interface TokenRange {
   end: number;
 }
 
+interface ContextualLexingStatsRecord {
+  ambiguousLexicalSites: number;
+  contextualCandidateChecks: number;
+  attemptedTokenSelections: number;
+  reductionsBeforeTokenSelection: number;
+}
+
+interface ParserRuntimeLimits {
+  maxExploredBranches: number;
+  maxQueuedBranches: number;
+  maxTraceActions: number;
+  ambiguityMode: number;
+}
+
+function reportContextualLexingStats(
+  reportStats: ParseOptions["contextualLexingStats"] | undefined,
+  stats: ContextualLexingStatsRecord,
+): void {
+  if (reportStats) reportStats(stats);
+}
+
+function normalizeParserRuntimeLimits(options: ParseOptions): ParserRuntimeLimits {
+  return {
+    maxExploredBranches: normalizePositiveIntegerOption(
+      "maxExploredBranches",
+      options.maxExploredBranches,
+      DEFAULT_MAX_EXPLORED_BRANCHES,
+    ),
+    maxQueuedBranches: normalizePositiveIntegerOption(
+      "maxQueuedBranches",
+      options.maxQueuedBranches,
+      DEFAULT_MAX_QUEUED_BRANCHES,
+    ),
+    maxTraceActions: normalizePositiveIntegerOption(
+      "maxTraceActions",
+      options.maxTraceActions,
+      DEFAULT_MAX_TRACE_ACTIONS,
+    ),
+    ambiguityMode: normalizeAmbiguityMode(options.ambiguityMode),
+  };
+}
+
+function normalizePositiveIntegerOption(
+  name: string,
+  value: number | undefined,
+  fallback: number,
+): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new RangeError(name + " must be a positive integer.");
+  }
+  return value;
+}
+
+function normalizeAmbiguityMode(
+  ambiguityMode: ParseOptions["ambiguityMode"] | undefined,
+): number {
+  if (ambiguityMode === undefined || ambiguityMode === "first-success") return 0;
+  if (ambiguityMode === "reject-ambiguous-success") return 1;
+  throw new RangeError(
+    "ambiguityMode must be 'first-success' or 'reject-ambiguous-success'.",
+  );
+}
+
+function countTraceReductions(trace: Int32Array): number {
+  let reductions = 0;
+  for (let index = 0; index < trace.length; index++) {
+    if ((trace[index] & ~ACTION_PAYLOAD_MASK) === ACTION_REDUCE) reductions++;
+  }
+  return reductions;
+}
+
 
 const EOF_TERMINAL = 0;
 const EXPECTED_TERMINALS: readonly string[] = ["\"def\"","\"emit\"","IDENT","\"[\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"def\"","\"emit\"","EOF","\"=\"","\"=\"","\"=\"","\"]\"","INTEGER","\"=>\"","\"=>\"","\"=>\"","\"=>\"","\"def\"","\"emit\"","EOF","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\",\"","\"]\"","\"]\"","\"]\"","\"]\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\";\"","\">>\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\"(\"","\"(\"","\"(\"","\"(\"","\";\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\";\"","\";\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\"=>\"","\"]\"","\",\"","\"]\"","\";\"","\";\"","\";\"","\")\"","\">>\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\"(\"","\"(\"","\"(\"","\"(\"","\")\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\")\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\",\"","\">>\"","\"]\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\"(\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\"(\"","\"(\"","\"(\"","\"(\"","\",\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","\"def\"","\"emit\"","EOF","\";\"","\";\"","\">>\"","INTEGER","\",\"","\"]\"","\",\"","\"]\"","\"def\"","\"emit\"","EOF","\")\"","\",\"","\"]\"","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","\")\"","\")\"","\">>\"","\";\"","\">>\"","\")\"","\",\"","\"]\"","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","\",\"","\"]\"","\",\"","\">>\"","\"]\"","\"]\"","\",\"","\"]\"","\",\"","\",\"","\",\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\")\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\";\"","\">>\"","\";\"","\">>\"","\",\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\")\"","\">>\"","\"]\"","\",\"","\")\"","\")\"","\")\"","\")\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\")\"","\">>\"","\")\"","\">>\"","\",\"","\">>\"","\"]\"","\"]\"","\",\"","\")\"","\")\"","\")\"","\")\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\";\"","\">>\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\",\"","\"]\"","\",\"","\"]\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\";\"","\">>\"","\")\"","\">>\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\")\"","\">>\"","\",\"","\">>\"","\"]\"","\"(\"","\"[\"","\"add\"","\"dec\"","\"double\"","\"drop\"","\"first\"","\"id\"","\"inc\"","\"last\"","\"mul\"","\"neg\"","\"product\"","\"repeat\"","\"square\"","\"sum\"","\"take\"","IDENT","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\">>\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\",\"","\"]\"","\")\"","\")\"","\")\"","\")\"","\")\"","\";\"","\">>\"","\")\"","\">>\"","\",\"","\">>\"","\"]\""];
@@ -26,14 +98,26 @@ const LITERAL_SPEC_INDICES = new Map<string, number>([["def",3],["=",4],[";",5],
 const RULE_NAMES: readonly string[] = ["module","item","definition","emit","composition","composition_tail","term","group","reference","fanout","fanout_tail","repeat","builtin","id","inc","dec","double","square","neg","sum","product","first","last","add","mul","take","drop","stream","integer_values","integer_tail"];
 const FIELD_NAMES: readonly string[] = ["amount","body","count","factor","first","head","input","name","next","rest","tail","value","values"];
 const EMPTY_PARSE_DIAGNOSTICS = [] as const;
+const DEFAULT_MAX_EXPLORED_BRANCHES = 100_000;
+const DEFAULT_MAX_QUEUED_BRANCHES = 100_000;
+const DEFAULT_MAX_TRACE_ACTIONS = 1_000_000;
+const DEFAULT_PARSER_RUNTIME_LIMITS: ParserRuntimeLimits = {
+  maxExploredBranches: DEFAULT_MAX_EXPLORED_BRANCHES,
+  maxQueuedBranches: DEFAULT_MAX_QUEUED_BRANCHES,
+  maxTraceActions: DEFAULT_MAX_TRACE_ACTIONS,
+  ambiguityMode: 0,
+};
 
 const ACTION_NONE = 0;
 const ACTION_SHIFT = 16777216;
 const ACTION_REDUCE = 33554432;
 const ACTION_ACCEPT = 50331648;
+const ACTION_PAYLOAD_MASK = 16777215;
 const TRACE_STATUS_OK = 0;
 const TRACE_STATUS_UNEXPECTED = 1;
 const TRACE_STATUS_BRANCH_LIMIT = 3;
+const TRACE_STATUS_TRACE_LIMIT = 4;
+const TRACE_STATUS_AMBIGUOUS = 5;
 const REPLAY_ACTION_SHIFT = 1;
 const REPLAY_ACTION_REDUCE = 2;
 const REPLAY_ACTION_ACCEPT = 3;
@@ -138,6 +222,7 @@ const TOKEN_STREAM_GAP = 2;
 const TOKEN_STREAM_OVERLAP = 3;
 const TOKEN_STREAM_ZERO_WIDTH = 4;
 const TOKEN_STREAM_INVALID_EOF = 5;
+const TOKEN_STREAM_NONTRIVIA_GAP = 6;
 const TOKEN_STREAM_TOKEN_MISMATCH = 7;
 const TOKEN_STREAM_CANONICAL_MATCH = 0;
 const TOKEN_STREAM_CANONICAL_SKIP = 1;
@@ -146,21 +231,135 @@ const TRACE_TOKEN_STREAM_EMIT = 0;
 const TRACE_TOKEN_STREAM_SKIP = 1;
 const TRACE_TOKEN_STREAM_STOP = 2;
 const DIAGNOSTIC_PARSE_LEXICAL_ERROR = 1;
+const DIAGNOSTIC_PARSER_AMBIGUOUS_PARSE = 8;
 const DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN = 2;
 const DIAGNOSTIC_PARSE_TRAILING_INPUT = 3;
 const DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM = 4;
 const DIAGNOSTIC_PARSER_INTERNAL_ERROR = 5;
 const DIAGNOSTIC_PARSER_BRANCH_LIMIT = 6;
+const DIAGNOSTIC_PARSER_TRACE_LIMIT = 7;
 const DIAGNOSTIC_DETAIL_NONE = 0;
 const DIAGNOSTIC_DETAIL_PARSER_STATE = 1;
 export const parserDiagnosticCodeParseLexicalError = DIAGNOSTIC_PARSE_LEXICAL_ERROR;
+export const parserDiagnosticCodeAmbiguousParse = DIAGNOSTIC_PARSER_AMBIGUOUS_PARSE;
 export const parserDiagnosticCodeParseUnexpectedToken = DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN;
 export const parserDiagnosticCodeParseTrailingInput = DIAGNOSTIC_PARSE_TRAILING_INPUT;
 export const parserDiagnosticCodeParseInvalidTokenStream = DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM;
 export const parserDiagnosticCodeInternalError = DIAGNOSTIC_PARSER_INTERNAL_ERROR;
 export const parserDiagnosticCodeBranchLimit = DIAGNOSTIC_PARSER_BRANCH_LIMIT;
+export const parserDiagnosticCodeTraceLimit = DIAGNOSTIC_PARSER_TRACE_LIMIT;
 export const parserDiagnosticDetailKindNone = DIAGNOSTIC_DETAIL_NONE;
 export const parserDiagnosticDetailKindParserState = DIAGNOSTIC_DETAIL_PARSER_STATE;
+
+// Generated from src/runtime/token_stream.brl.
+// Keep this direct scalar shape until the generic BRL TypeScript backend can
+// emit structured helpers without a CFG interpreter loop.
+function token_stream_span_bounds_status(start: number, end: number, sourceLength: number): number {
+  if ((sourceLength >>> 0) < (end >>> 0)) return TOKEN_STREAM_INVALID_SPAN;
+  if ((end >>> 0) < (start >>> 0)) return TOKEN_STREAM_INVALID_SPAN;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_span_position_status(start: number, previousEnd: number): number {
+  if ((previousEnd >>> 0) < (start >>> 0)) return TOKEN_STREAM_GAP;
+  if ((start >>> 0) < (previousEnd >>> 0)) return TOKEN_STREAM_OVERLAP;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_width_status(start: number, end: number): number {
+  return start === end ? TOKEN_STREAM_ZERO_WIDTH : TOKEN_STREAM_OK;
+}
+
+function token_stream_eof_status(
+  textLength: number,
+  isMainChannel: number,
+  start: number,
+  end: number,
+  sourceLength: number,
+): number {
+  if (textLength !== 0) return TOKEN_STREAM_INVALID_EOF;
+  if (isMainChannel !== 1) return TOKEN_STREAM_INVALID_EOF;
+  if (start !== end) return TOKEN_STREAM_INVALID_EOF;
+  if (start !== sourceLength) return TOKEN_STREAM_INVALID_EOF;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_gap_token_status(
+  tokenClass: number,
+  tokenStart: number,
+  tokenEnd: number,
+  gapStart: number,
+  gapEnd: number,
+): number {
+  if (tokenClass !== PUBLIC_TOKEN_TRIVIA) return TOKEN_STREAM_NONTRIVIA_GAP;
+  if ((tokenStart >>> 0) < (gapStart >>> 0)) return TOKEN_STREAM_NONTRIVIA_GAP;
+  if ((gapEnd >>> 0) < (tokenEnd >>> 0)) return TOKEN_STREAM_NONTRIVIA_GAP;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_token_match_status(
+  leftClass: number,
+  rightClass: number,
+  leftSpecIndex: number,
+  rightSpecIndex: number,
+  leftTerminal: number,
+  rightTerminal: number,
+  leftStart: number,
+  leftEnd: number,
+  rightStart: number,
+  rightEnd: number,
+): number {
+  if (leftClass !== rightClass) return TOKEN_STREAM_TOKEN_MISMATCH;
+  if (leftSpecIndex !== rightSpecIndex) return TOKEN_STREAM_TOKEN_MISMATCH;
+  if (leftTerminal !== rightTerminal) return TOKEN_STREAM_TOKEN_MISMATCH;
+  if (leftStart !== rightStart) return TOKEN_STREAM_TOKEN_MISMATCH;
+  if (leftEnd !== rightEnd) return TOKEN_STREAM_TOKEN_MISMATCH;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_trace_status(tokenClass: number): number {
+  return tokenClass === PUBLIC_TOKEN_TRIVIA ? TRACE_TOKEN_STREAM_SKIP : TRACE_TOKEN_STREAM_EMIT;
+}
+
+function token_stream_canonical_match_status(
+  canonicalClass: number,
+  tokenMatchStatus: number,
+  canonicalEnd: number,
+  suppliedStart: number,
+): number {
+  if (tokenMatchStatus === TOKEN_STREAM_OK) return TOKEN_STREAM_CANONICAL_MATCH;
+  if (token_stream_trace_status(canonicalClass) !== TRACE_TOKEN_STREAM_SKIP) {
+    return TOKEN_STREAM_CANONICAL_MISMATCH;
+  }
+  if ((suppliedStart >>> 0) < (canonicalEnd >>> 0)) {
+    return TOKEN_STREAM_CANONICAL_MISMATCH;
+  }
+  return TOKEN_STREAM_CANONICAL_SKIP;
+}
+
+function token_stream_final_status(
+  hasEof: number,
+  eofIndex: number,
+  tokenCount: number,
+  previousEnd: number,
+  sourceLength: number,
+): number {
+  if (hasEof === 1 && (((eofIndex + 1) >>> 0) !== tokenCount)) {
+    return TOKEN_STREAM_INVALID_EOF;
+  }
+  if (hasEof === 1) return TOKEN_STREAM_OK;
+  if ((previousEnd >>> 0) < (sourceLength >>> 0)) return TOKEN_STREAM_GAP;
+  return TOKEN_STREAM_OK;
+}
+
+const parserTokenStreamSpanBoundsStatus = token_stream_span_bounds_status;
+const parserTokenStreamSpanPositionStatus = token_stream_span_position_status;
+const parserTokenStreamWidthStatus = token_stream_width_status;
+const parserTokenStreamEofStatus = token_stream_eof_status;
+const parserTokenStreamGapTokenStatus = token_stream_gap_token_status;
+const parserTokenStreamTokenMatchStatus = token_stream_token_match_status;
+const parserTokenStreamCanonicalMatchStatus = token_stream_canonical_match_status;
+const parserTokenStreamFinalStatus = token_stream_final_status;
 
 class RuntimeLanguageTrap extends Error {
   constructor(message: string) {
@@ -1625,126 +1824,6 @@ function parserDiagnosticMergeStatus(leftCount: number, rightCount: number): num
   throw new RuntimeLanguageTrap("function completed without a return");
 }
 
-function parserTokenStreamSpanBoundsStatus(start: number, end: number, sourceLength: number): number {
-  if (((((sourceLength) >>> 0) < ((end) >>> 0) ? 1 : 0)) !== 0) {
-    return (1) >>> 0;
-  }
-  if (((((end) >>> 0) < ((start) >>> 0) ? 1 : 0)) !== 0) {
-    return (1) >>> 0;
-  }
-  return (0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserTokenStreamSpanPositionStatus(start: number, previousEnd: number): number {
-  if (((((previousEnd) >>> 0) < ((start) >>> 0) ? 1 : 0)) !== 0) {
-    return (2) >>> 0;
-  }
-  if (((((start) >>> 0) < ((previousEnd) >>> 0) ? 1 : 0)) !== 0) {
-    return (3) >>> 0;
-  }
-  return (0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserTokenStreamWidthStatus(start: number, end: number): number {
-  if (((((start) >>> 0) === ((end) >>> 0) ? 1 : 0)) !== 0) {
-    return (4) >>> 0;
-  }
-  return (0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserTokenStreamEofStatus(textLength: number, isMainChannel: number, start: number, end: number, sourceLength: number): number {
-  if (((((textLength) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (5) >>> 0;
-  }
-  if (((((isMainChannel) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (5) >>> 0;
-  }
-  if (((((start) >>> 0) === ((end) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (5) >>> 0;
-  }
-  if (((((start) >>> 0) === ((sourceLength) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (5) >>> 0;
-  }
-  return (0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserTokenStreamGapTokenStatus(tokenClass: number, tokenStart: number, tokenEnd: number, gapStart: number, gapEnd: number): number {
-  if (((((tokenClass) >>> 0) === ((3) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (6) >>> 0;
-  }
-  if (((((tokenStart) >>> 0) < ((gapStart) >>> 0) ? 1 : 0)) !== 0) {
-    return (6) >>> 0;
-  }
-  if (((((gapEnd) >>> 0) < ((tokenEnd) >>> 0) ? 1 : 0)) !== 0) {
-    return (6) >>> 0;
-  }
-  return (0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserTokenStreamTokenMatchStatus(leftClass: number, rightClass: number, leftSpecIndex: number, rightSpecIndex: number, leftTerminal: number, rightTerminal: number, leftStart: number, leftEnd: number, rightStart: number, rightEnd: number): number {
-  if (((((leftClass) >>> 0) === ((rightClass) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (7) >>> 0;
-  }
-  if (((((leftSpecIndex) >>> 0) === ((rightSpecIndex) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (7) >>> 0;
-  }
-  if (((((leftTerminal) >>> 0) === ((rightTerminal) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (7) >>> 0;
-  }
-  if (((((leftStart) >>> 0) === ((rightStart) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (7) >>> 0;
-  }
-  if (((((leftEnd) >>> 0) === ((rightEnd) >>> 0) ? 1 : 0)) !== 0) {
-  } else {
-    return (7) >>> 0;
-  }
-  return (0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserTokenStreamCanonicalMatchStatus(canonicalClass: number, tokenMatchStatus: number, canonicalEnd: number, suppliedStart: number): number {
-  if (((((tokenMatchStatus) >>> 0) === ((0) >>> 0) ? 1 : 0)) !== 0) {
-    return (0) >>> 0;
-  }
-  if (((((parserTraceTokenStreamStatus(canonicalClass) >>> 0) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
-    if (((((suppliedStart) >>> 0) < ((canonicalEnd) >>> 0) ? 1 : 0)) !== 0) {
-      return (2) >>> 0;
-    }
-    return (1) >>> 0;
-  }
-  return (2) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
-function parserTokenStreamFinalStatus(hasEof: number, eofIndex: number, tokenCount: number, previousEnd: number, sourceLength: number): number {
-  if (((((hasEof) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
-    if (((((((eofIndex) + (1)) >>> 0) >>> 0) === ((tokenCount) >>> 0) ? 1 : 0)) !== 0) {
-      return (0) >>> 0;
-    } else {
-      return (5) >>> 0;
-    }
-  }
-  if (((((previousEnd) >>> 0) < ((sourceLength) >>> 0) ? 1 : 0)) !== 0) {
-    return (2) >>> 0;
-  }
-  return (0) >>> 0;
-  throw new RuntimeLanguageTrap("function completed without a return");
-}
-
 function parserTokenStreamPublicTokenStatus(tokenType: number, channel: number, literalTextMatches: number): number {
   if (((((tokenType) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
     if (((((channel) >>> 0) === ((1) >>> 0) ? 1 : 0)) !== 0) {
@@ -2425,6 +2504,10 @@ function diagnosticCodeName(runtimeCode: number): ParseDiagnostic["code"] {
       return "PARSE_INVALID_TOKEN_STREAM";
     case DIAGNOSTIC_PARSER_BRANCH_LIMIT:
       return "PARSER_BRANCH_LIMIT";
+    case DIAGNOSTIC_PARSER_TRACE_LIMIT:
+      return "PARSER_TRACE_LIMIT";
+    case DIAGNOSTIC_PARSER_AMBIGUOUS_PARSE:
+      return "PARSER_AMBIGUOUS_PARSE";
     default:
       return "PARSER_INTERNAL_ERROR";
   }
@@ -2547,6 +2630,22 @@ function branchLimitDiagnostic(offset: number): ParseDiagnostic {
   return parseDiagnostic(
     DIAGNOSTIC_PARSER_BRANCH_LIMIT,
     "Parser exceeded the branch exploration limit.",
+    { start: offset, end: offset },
+  );
+}
+
+function traceLimitDiagnostic(offset: number): ParseDiagnostic {
+  return parseDiagnostic(
+    DIAGNOSTIC_PARSER_TRACE_LIMIT,
+    "Parser exceeded the trace action limit.",
+    { start: offset, end: offset },
+  );
+}
+
+function ambiguousParseDiagnostic(offset: number): ParseDiagnostic {
+  return parseDiagnostic(
+    DIAGNOSTIC_PARSER_AMBIGUOUS_PARSE,
+    "Parser found multiple successful conflict branches.",
     { start: offset, end: offset },
   );
 }
@@ -2818,13 +2917,14 @@ export function parse(
 ): ParseResult<RootNode> {
   runtimeArenaReset();
   const sourceText = createSourceTextBoundary(source);
+  const runtimeLimits = normalizeParserRuntimeLimits(options);
   const lexed = lexForParse(source, options);
-  return parseTokenList(
+  return parseCandidateTokenLists(
     sourceText,
-    lexed.tokens,
     lexicalDiagnostics(lexed.diagnostics),
     lexed.parseStream,
-    true,
+    options.contextualLexingStats,
+    runtimeLimits,
   );
 }
 
@@ -2860,12 +2960,111 @@ export function parseTokensUnchecked(
   );
 }
 
+const MAX_CONTEXTUAL_LEXICAL_ALTERNATIVES = 1024;
+
+function parseCandidateTokenLists(
+  sourceText: SourceTextBoundary,
+  lexicalDiagnostics: readonly ParseDiagnostic[],
+  parseStream: WasmParseStream,
+  reportStats?: ParseOptions["contextualLexingStats"],
+  runtimeLimits: ParserRuntimeLimits = DEFAULT_PARSER_RUNTIME_LIMITS,
+): ParseResult<RootNode> {
+  if (lexicalDiagnostics.length > 0) {
+    return failedParseResult(sourceText.source, parseStream.publicTokens, lexicalDiagnostics);
+  }
+
+  const sites = parseStream.sites;
+  if (sites.every((site) => site.candidates.length === 1)) {
+    reportContextualLexingStats(reportStats, {
+      ambiguousLexicalSites: 0,
+      contextualCandidateChecks: 0,
+      attemptedTokenSelections: 0,
+      reductionsBeforeTokenSelection: 0,
+    });
+    return parseTokenList(
+      sourceText,
+      parseStream.publicTokens,
+      lexicalDiagnostics,
+      parseStream,
+      true,
+      runtimeLimits,
+    );
+  }
+  const selectedTokens = new Array<Token>(sites.length);
+  const terminals = new Int32Array(sites.length);
+  const publicTokens = [...parseStream.publicTokens];
+  let attempts = 0;
+  let contextualCandidateChecks = 0;
+  let reductionsBeforeTokenSelection = 0;
+  const ambiguousLexicalSites = sites.filter((site) => site.candidates.length > 1).length;
+
+  function attempt(siteIndex: number): ParseResult<RootNode> | null {
+    if (attempts >= MAX_CONTEXTUAL_LEXICAL_ALTERNATIVES) {
+      return failedParseResult(
+        sourceText.source,
+        publicTokens,
+        [branchLimitDiagnostic(sourceText.length)],
+      );
+    }
+    if (siteIndex === sites.length) {
+      attempts++;
+      const input = createParseTraceInput(terminals.length);
+      input.terminals.set(terminals);
+      const traced = parseTrace(input, terminals.length, {
+        maxBranches: runtimeLimits.maxExploredBranches,
+        maxTraceActions: runtimeLimits.maxTraceActions,
+        maxQueuedBranches: runtimeLimits.maxQueuedBranches,
+        ambiguityMode: runtimeLimits.ambiguityMode,
+      });
+      if (!traced.ok) return null;
+      reductionsBeforeTokenSelection = countTraceReductions(traced.trace);
+      return replayTrace(
+        sourceText,
+        publicTokens,
+        {
+          tokens: selectedTokens,
+          tokenIndices: sites.map((site) => site.tokenIndex),
+        },
+        traced.trace,
+      );
+    }
+
+    for (const candidate of sites[siteIndex].candidates) {
+      contextualCandidateChecks++;
+      selectedTokens[siteIndex] = candidate.token;
+      publicTokens[sites[siteIndex].tokenIndex] = candidate.token;
+      terminals[siteIndex] = candidate.terminal;
+      const result = attempt(siteIndex + 1);
+      if (result) return result;
+    }
+    return null;
+  }
+
+  const result = attempt(0);
+  reportContextualLexingStats(reportStats, {
+    ambiguousLexicalSites,
+    contextualCandidateChecks,
+    attemptedTokenSelections: attempts,
+    reductionsBeforeTokenSelection,
+  });
+  if (result) return result;
+  return parseTokenList(
+    sourceText,
+    parseStream.publicTokens,
+    lexicalDiagnostics,
+    parseStream,
+    true,
+    runtimeLimits,
+  );
+}
+
 function parseTokenList(
   sourceText: SourceTextBoundary,
   tokens: readonly Token[],
   lexicalDiagnostics: readonly ParseDiagnostic[],
   parseStream?: WasmParseStream,
   trustRuntimeTerminals = false,
+  runtimeLimits: ParserRuntimeLimits = DEFAULT_PARSER_RUNTIME_LIMITS,
 ): ParseResult<RootNode> {
   if (lexicalDiagnostics.length > 0) {
     return failedParseResult(sourceText.source, tokens, lexicalDiagnostics);
@@ -2873,10 +3072,29 @@ function parseTokenList(
 
   const stream = parseStream ??
     compactTokenStream(sourceText, tokens, trustRuntimeTerminals);
-  const traced = parseTrace(stream.input, stream.terminalCount);
+  const traced = parseTrace(stream.input, stream.terminalCount, {
+    maxBranches: runtimeLimits.maxExploredBranches,
+    maxTraceActions: runtimeLimits.maxTraceActions,
+    maxQueuedBranches: runtimeLimits.maxQueuedBranches,
+    ambiguityMode: runtimeLimits.ambiguityMode,
+  });
   if (!traced.ok) {
     const token = stream.tokens[traced.index] ?? materializeSourceEofToken(sourceText);
+    if (traced.failureKind === "ambiguous") {
+      return failedParseResult(
+        sourceText.source,
+        tokens,
+        [ambiguousParseDiagnostic(sourceText.length)],
+      );
+    }
     if (traced.limit) {
+      if (traced.failureKind === "trace-limit") {
+        return failedParseResult(
+          sourceText.source,
+          tokens,
+          [traceLimitDiagnostic(sourceText.length)],
+        );
+      }
       return failedParseResult(
         sourceText.source,
         tokens,

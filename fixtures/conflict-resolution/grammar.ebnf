@@ -1,0 +1,10 @@
+token ID = /[A-Za-z_][A-Za-z0-9_]*/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = primary ;
+primary = tuple | group | atom ;
+tuple = "(" atom "," atom ")" ;
+group = "(" atom ")" ;
+atom = modifier* term ;
+modifier = "mut" ;
+term = ID | "(" primary ")" ;

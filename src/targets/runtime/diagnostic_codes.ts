@@ -4,6 +4,8 @@ export const PARSER_DIAGNOSTIC_CODE_PARSE_TRAILING_INPUT = 3;
 export const PARSER_DIAGNOSTIC_CODE_PARSE_INVALID_TOKEN_STREAM = 4;
 export const PARSER_DIAGNOSTIC_CODE_INTERNAL_ERROR = 5;
 export const PARSER_DIAGNOSTIC_CODE_BRANCH_LIMIT = 6;
+export const PARSER_DIAGNOSTIC_CODE_TRACE_LIMIT = 7;
+export const PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE = 8;
 
 export const PARSER_DIAGNOSTIC_CODES = {
   parseLexicalError: PARSER_DIAGNOSTIC_CODE_PARSE_LEXICAL_ERROR,
@@ -12,6 +14,8 @@ export const PARSER_DIAGNOSTIC_CODES = {
   parseInvalidTokenStream: PARSER_DIAGNOSTIC_CODE_PARSE_INVALID_TOKEN_STREAM,
   internalError: PARSER_DIAGNOSTIC_CODE_INTERNAL_ERROR,
   branchLimit: PARSER_DIAGNOSTIC_CODE_BRANCH_LIMIT,
+  traceLimit: PARSER_DIAGNOSTIC_CODE_TRACE_LIMIT,
+  ambiguousParse: PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE,
 } as const;
 
 export const PARSER_DIAGNOSTIC_DETAIL_NONE = 0;
@@ -67,6 +71,22 @@ export const PARSER_DIAGNOSTIC_SCHEMAS = [
     name: "branchLimit",
     publicCode: "PARSER_BRANCH_LIMIT",
     runtimeCode: PARSER_DIAGNOSTIC_CODE_BRANCH_LIMIT,
+    detailKind: "none",
+    detailKindId: PARSER_DIAGNOSTIC_DETAIL_NONE,
+    payloadFields: [],
+  },
+  {
+    name: "traceLimit",
+    publicCode: "PARSER_TRACE_LIMIT",
+    runtimeCode: PARSER_DIAGNOSTIC_CODE_TRACE_LIMIT,
+    detailKind: "none",
+    detailKindId: PARSER_DIAGNOSTIC_DETAIL_NONE,
+    payloadFields: [],
+  },
+  {
+    name: "ambiguousParse",
+    publicCode: "PARSER_AMBIGUOUS_PARSE",
+    runtimeCode: PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE,
     detailKind: "none",
     detailKindId: PARSER_DIAGNOSTIC_DETAIL_NONE,
     payloadFields: [],

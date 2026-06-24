@@ -4,6 +4,9 @@ import {
   assertEquals,
   compile,
   denoCheck,
+  fixtureMetadata,
+  fixtureNames,
+  fixtureSampleEntries,
   parseMetadata,
 } from "./helpers.ts";
 
@@ -46,13 +49,23 @@ Deno.test("TypeScript and Wasm runtimes match deterministic parser behavior", as
         "emoji x;",
       ]
     ) {
-      assertRuntimeParity(runtimes, source);
+      assertRuntimeParity(runtimes, source, {
+        source,
+        command:
+          "deno test --allow-read --allow-write --allow-run tests/ts_wasm_parity_test.ts --filter deterministic",
+      });
     }
 
     const source = "// trivia\nlet value = 7;";
     assertJsonEquals(
       normalizeLexResult(runtimes.ts.lex(source, { preserveTrivia: false })),
       normalizeLexResult(runtimes.wasm.lex(source, { preserveTrivia: false })),
+      {
+        operation: "lex preserveTrivia=false",
+        source,
+        command:
+          "deno test --allow-read --allow-write --allow-run tests/ts_wasm_parity_test.ts --filter deterministic",
+      },
     );
     assertJsonEquals(
       normalizeParseResult(
@@ -61,6 +74,12 @@ Deno.test("TypeScript and Wasm runtimes match deterministic parser behavior", as
       normalizeParseResult(
         runtimes.wasm.parse(source, { preserveTrivia: false }),
       ),
+      {
+        operation: "parse preserveTrivia=false",
+        source,
+        command:
+          "deno test --allow-read --allow-write --allow-run tests/ts_wasm_parity_test.ts --filter deterministic",
+      },
     );
 
     const emoji = runtimes.ts.parse("emoji 😀;");
@@ -75,6 +94,63 @@ Deno.test("TypeScript and Wasm runtimes match deterministic parser behavior", as
   }
 });
 
+Deno.test("TypeScript and Wasm runtimes match portable fixture corpus", async () => {
+  for (const fixture of await fixtureNames()) {
+    if (fixture === "invalid-regex") continue;
+    const source = await Deno.readTextFile(`fixtures/${fixture}/grammar.ebnf`);
+    const metadataJson = await fixtureMetadata(fixture);
+    const options = metadataJson === undefined
+      ? {}
+      : { metadata: parseMetadata(JSON.stringify(metadataJson)) };
+    const runtimes = await buildParityRuntimes(source, options);
+    try {
+      assertPlanMetadataParity(runtimes);
+      for (const sample of await fixtureSampleEntries(fixture, "valid")) {
+        const context = fixtureParityContext(
+          fixture,
+          sample.path,
+          sample.source,
+          metadataJson,
+        );
+        assertRuntimeParity(runtimes, sample.source, context);
+        assertEquals(
+          runtimes.ts.parse(sample.source).ok,
+          true,
+          `${fixture} valid sample should parse`,
+        );
+      }
+      for (const sample of await fixtureSampleEntries(fixture, "invalid")) {
+        const context = fixtureParityContext(
+          fixture,
+          sample.path,
+          sample.source,
+          metadataJson,
+        );
+        assertRuntimeParity(runtimes, sample.source, context);
+        assertEquals(
+          runtimes.ts.parse(sample.source).ok,
+          false,
+          `${fixture} invalid sample should fail`,
+        );
+      }
+    } finally {
+      await runtimes.cleanup();
+    }
+  }
+});
+
+Deno.test("invalid regex fixture remains a compiler diagnostic", () => {
+  const source = Deno.readTextFileSync("fixtures/invalid-regex/grammar.ebnf");
+  const result = compile(source, { targets: ["typescript", "wasm"] });
+  assertEquals(result.bundle, undefined);
+  assert(
+    result.diagnostics.some((diagnostic) =>
+      diagnostic.code === "PORTABLE_REGEX_UNSUPPORTED" ||
+      diagnostic.code === "EBNF_PARSE_ERROR"
+    ),
+  );
+});
+
 Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
   const runtimes = await buildParityRuntimes(deterministicGrammar);
   try {
@@ -84,6 +160,7 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
     assertJsonEquals(
       normalizeParseResult(runtimes.ts.parseTokens(source, tsLexed.tokens)),
       normalizeParseResult(runtimes.wasm.parseTokens(source, wasmLexed.tokens)),
+      { operation: "parseTokens", source },
     );
     assertJsonEquals(
       normalizeParseResult(
@@ -92,6 +169,7 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
       normalizeParseResult(
         runtimes.wasm.parseTokensUnchecked(source, wasmLexed.tokens),
       ),
+      { operation: "parseTokensUnchecked", source },
     );
 
     const tsWithoutTrivia = tsLexed.tokens.filter((token: RuntimeToken) =>
@@ -105,6 +183,7 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
       normalizeParseResult(
         runtimes.wasm.parseTokens(source, wasmWithoutTrivia),
       ),
+      { operation: "parseTokens without trivia", source },
     );
     assertJsonEquals(
       normalizeParseResult(
@@ -113,6 +192,7 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
       normalizeParseResult(
         runtimes.wasm.parseTokensUnchecked(source, wasmWithoutTrivia),
       ),
+      { operation: "parseTokensUnchecked without trivia", source },
     );
 
     const omittedMain = tsWithoutTrivia.slice(1);
@@ -120,6 +200,7 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
     assertJsonEquals(
       normalizeParseResult(runtimes.ts.parseTokens(source, omittedMain)),
       normalizeParseResult(runtimes.wasm.parseTokens(source, omittedMainWasm)),
+      { operation: "parseTokens omitted main token", source },
     );
 
     const malformedTs = tsWithoutTrivia.map((token: RuntimeToken) =>
@@ -140,6 +221,7 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
     assertJsonEquals(
       normalizeParseResult(strictMalformedTs),
       normalizeParseResult(strictMalformedWasm),
+      { operation: "parseTokens malformed token stream", source },
     );
     assertEquals(strictMalformedTs.ok, false);
     assertEquals(strictMalformedWasm.ok, false);
@@ -165,6 +247,7 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
     assertJsonEquals(
       normalizeParseResult(uncheckedMalformedTs),
       normalizeParseResult(uncheckedMalformedWasm),
+      { operation: "parseTokensUnchecked malformed token stream", source },
     );
     assert(
       !uncheckedMalformedTs.diagnostics.some((diagnostic) =>
@@ -185,19 +268,99 @@ Deno.test("TypeScript and Wasm runtimes match declared conflict branches", async
   const metadata = parseMetadata(JSON.stringify({
     version: 1,
     parser: {
-      conflicts: [
-        ["tuple", "atom"],
-        ["group", "atom"],
-      ],
+      conflicts: [["tuple", "atom"]],
     },
   }));
   const runtimes = await buildParityRuntimes(conflictGrammar, { metadata });
   try {
     for (const source of ["(a)", "(a, b)", "((a))", "(mut a, b)", "(a, )"]) {
-      assertRuntimeParity(runtimes, source);
+      assertRuntimeParity(runtimes, source, {
+        operation: "declared conflict branch",
+        source,
+        metadata: { parser: { conflicts: [["tuple", "atom"]] } },
+      });
     }
   } finally {
     await runtimes.cleanup();
+  }
+});
+
+Deno.test("TypeScript and Wasm parse contextual token overlaps in parity", async () => {
+  const result = compile(
+    `
+    skip WS = / +/ ;
+    token A priority 10 = /x/ ;
+    token B priority 0 = /x/ ;
+    module = "a" A | "b" B ;
+  `,
+    {
+      targets: ["typescript", "wasm"],
+      typescript: { directory: "ts" },
+      wasm: { directory: "wasm" },
+    },
+  );
+  assertEquals(result.diagnostics.length, 1);
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].severity, "warning");
+  assert(result.bundle);
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/ts/mod.ts`);
+    await denoCheck(`${dir}/wasm/mod.ts`);
+    const runtimes: ParityRuntimes = {
+      ts: await import(`file://${dir}/ts/mod.ts`),
+      wasm: await import(`file://${dir}/wasm/mod.ts`),
+      cleanup: () => Deno.remove(dir, { recursive: true }),
+    };
+    assertRuntimeParity(runtimes, "a x", {
+      operation: "contextual overlap",
+      source: "a x",
+    });
+    assertRuntimeParity(runtimes, "b x", {
+      operation: "contextual overlap",
+      source: "b x",
+    });
+    const tsStats: unknown[] = [];
+    const wasmStats: unknown[] = [];
+    assertEquals(
+      runtimes.ts.parse("b x", {
+        contextualLexingStats: (entry: unknown) => tsStats.push(entry),
+      }).ok,
+      true,
+    );
+    assertEquals(
+      runtimes.wasm.parse("b x", {
+        contextualLexingStats: (entry: unknown) => wasmStats.push(entry),
+      }).ok,
+      true,
+    );
+    assertJsonEquals(tsStats, wasmStats, {
+      operation: "contextualLexingStats",
+      source: "b x",
+    });
+
+    const tsLexed = runtimes.ts.lex("b x", { preserveTrivia: false });
+    const wasmLexed = runtimes.wasm.lex("b x", { preserveTrivia: false });
+    assertJsonEquals(
+      normalizeLexResult(tsLexed),
+      normalizeLexResult(wasmLexed),
+      { operation: "standalone contextual lex", source: "b x" },
+    );
+    assertEquals(
+      tsLexed.tokens.filter((token) => token.channel !== "eof")[1].kind,
+      "A",
+    );
+    assertEquals(
+      runtimes.ts.parseTokens(tsLexed.source, tsLexed.tokens).ok,
+      false,
+    );
+    assertEquals(
+      runtimes.wasm.parseTokens(wasmLexed.source, wasmLexed.tokens).ok,
+      false,
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
   }
 });
 
@@ -211,7 +374,10 @@ async function buildParityRuntimes(
     typescript: { directory: "ts" },
     wasm: { directory: "wasm" },
   });
-  assertEquals(result.diagnostics.length, 0);
+  assert(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    `Expected no compile errors, got ${JSON.stringify(result.diagnostics)}`,
+  );
   assert(result.bundle);
   const dir = await Deno.makeTempDir();
   await applyBundle(result.bundle, { root: dir });
@@ -224,14 +390,20 @@ async function buildParityRuntimes(
   };
 }
 
-function assertRuntimeParity(runtimes: ParityRuntimes, source: string): void {
+function assertRuntimeParity(
+  runtimes: ParityRuntimes,
+  source: string,
+  context: ParityAssertionContext = {},
+): void {
   assertJsonEquals(
     normalizeLexResult(runtimes.ts.lex(source)),
     normalizeLexResult(runtimes.wasm.lex(source)),
+    { ...context, operation: context.operation ?? "lex" },
   );
   assertJsonEquals(
     normalizeParseResult(runtimes.ts.parse(source)),
     normalizeParseResult(runtimes.wasm.parse(source)),
+    { ...context, operation: context.operation ?? "parse" },
   );
 }
 
@@ -358,14 +530,126 @@ function normalizeDiagnostic(diagnostic: RuntimeDiagnostic): unknown {
   };
 }
 
-function assertJsonEquals(actual: unknown, expected: unknown): void {
-  assertEquals(JSON.stringify(actual), JSON.stringify(expected));
+function assertJsonEquals(
+  actual: unknown,
+  expected: unknown,
+  context: ParityAssertionContext = {},
+): void {
+  const actualJson = JSON.stringify(actual);
+  const expectedJson = JSON.stringify(expected);
+  if (actualJson === expectedJson) return;
+  const difference = firstJsonDifference(actual, expected);
+  assert(difference);
+  throw new Error(
+    [
+      "TypeScript/Wasm parity mismatch.",
+      `operation: ${context.operation ?? "unknown"}`,
+      context.fixture ? `fixture: ${context.fixture}` : undefined,
+      context.sourcePath ? `source path: ${context.sourcePath}` : undefined,
+      "target comparison: TypeScript actual vs Wasm expected",
+      `first differing normalized JSON path: ${difference.path}`,
+      `actual: ${JSON.stringify(difference.actual)}`,
+      `expected: ${JSON.stringify(difference.expected)}`,
+      context.metadata
+        ? `grammar/metadata options: ${JSON.stringify(context.metadata)}`
+        : undefined,
+      context.source ? `source: ${JSON.stringify(context.source)}` : undefined,
+      `reproducible command: ${
+        context.command ??
+          "deno test --allow-read --allow-write --allow-run tests/ts_wasm_parity_test.ts"
+      }`,
+    ].filter((line): line is string => line !== undefined).join("\n"),
+  );
+}
+
+function firstJsonDifference(
+  actual: unknown,
+  expected: unknown,
+  path = "$",
+): { path: string; actual: unknown; expected: unknown } | null {
+  if (Object.is(actual, expected)) return null;
+  if (
+    Array.isArray(actual) && Array.isArray(expected)
+  ) {
+    const length = Math.max(actual.length, expected.length);
+    for (let index = 0; index < length; index++) {
+      if (index >= actual.length || index >= expected.length) {
+        return {
+          path: `${path}[${index}]`,
+          actual: actual[index],
+          expected: expected[index],
+        };
+      }
+      const difference = firstJsonDifference(
+        actual[index],
+        expected[index],
+        `${path}[${index}]`,
+      );
+      if (difference) return difference;
+    }
+    return null;
+  }
+  if (
+    actual && expected && typeof actual === "object" &&
+    typeof expected === "object"
+  ) {
+    const actualRecord = actual as Record<string, unknown>;
+    const expectedRecord = expected as Record<string, unknown>;
+    const keys = [
+      ...new Set([
+        ...Object.keys(actualRecord),
+        ...Object.keys(expectedRecord),
+      ]),
+    ].sort();
+    for (const key of keys) {
+      if (!(key in actualRecord) || !(key in expectedRecord)) {
+        return {
+          path: `${path}.${key}`,
+          actual: actualRecord[key],
+          expected: expectedRecord[key],
+        };
+      }
+      const difference = firstJsonDifference(
+        actualRecord[key],
+        expectedRecord[key],
+        `${path}.${key}`,
+      );
+      if (difference) return difference;
+    }
+    return null;
+  }
+  return { path, actual, expected };
+}
+
+function fixtureParityContext(
+  fixture: string,
+  sourcePath: string,
+  source: string,
+  metadata: unknown,
+): ParityAssertionContext {
+  return {
+    fixture,
+    sourcePath,
+    source,
+    metadata,
+    command:
+      "deno test --allow-read --allow-write --allow-run tests/ts_wasm_parity_test.ts --filter 'portable fixture corpus'",
+  };
 }
 
 interface ParityRuntimes {
   ts: RuntimeModule;
   wasm: RuntimeModule;
   cleanup: () => Promise<void>;
+}
+
+interface ParityAssertionContext {
+  fixture?: string;
+  sourcePath?: string;
+  source?: string;
+  operation?: string;
+  metadata?: unknown;
+  command?: string;
 }
 
 interface RuntimeModule {
@@ -380,7 +664,10 @@ interface RuntimeModule {
   lex(source: string, options?: { preserveTrivia?: boolean }): RuntimeLexResult;
   parse(
     source: string,
-    options?: { preserveTrivia?: boolean },
+    options?: {
+      preserveTrivia?: boolean;
+      contextualLexingStats?: (stats: unknown) => void;
+    },
   ): RuntimeParseResult;
   parseTokens(
     source: string,

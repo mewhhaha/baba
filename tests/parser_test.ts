@@ -17,6 +17,8 @@ import {
   fixtureSamples,
   formatDiagnostic,
   generate,
+  generatedContentForComparison,
+  generatedTextContent,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,
   generateTreeSitterQueries,
@@ -39,6 +41,44 @@ Deno.test("skip declarations cannot be referenced by parser rules", () => {
   assertEquals(diagnostics[0].code, "SKIP_TOKEN_REFERENCE");
   assertIncludes(diagnostics[0].message, "cannot appear in parser rules");
   assertEquals(compile(grammar, { targets: ["typescript"] }).bundle, undefined);
+});
+
+Deno.test("grammar analysis reports nonproductive rules", () => {
+  const nonproductiveRoot = validateGrammar(
+    parseGrammar(`module = module ;`),
+    { targets: ["typescript"] },
+  );
+  assertEquals(nonproductiveRoot[0].code, "NONPRODUCTIVE_ROOT");
+  assertIncludes(nonproductiveRoot[0].message, "cannot derive any sentence");
+
+  const nonproductiveRule = validateGrammar(
+    parseGrammar(`
+      module = bad? "ok" ;
+      bad = bad ;
+    `),
+    { targets: ["typescript"] },
+  );
+  assert(
+    nonproductiveRule.some((diagnostic) =>
+      diagnostic.code === "NONPRODUCTIVE_RULE"
+    ),
+  );
+});
+
+Deno.test("grammar analysis reports nullable recursive cycles", () => {
+  const diagnostics = validateGrammar(
+    parseGrammar(`
+      module = a "done" ;
+      a = b? ;
+      b = a? ;
+    `),
+    { targets: ["typescript"] },
+  );
+  assert(
+    diagnostics.some((diagnostic) =>
+      diagnostic.code === "NULLABLE_RECURSIVE_CYCLE"
+    ),
+  );
 });
 
 Deno.test("TypeScript parser target supports left-recursive arithmetic", async () => {
@@ -74,6 +114,58 @@ Deno.test("TypeScript parser target supports left-recursive arithmetic", async (
     assertEquals(additive.name, "additive");
     assertEquals(additive.fields.op.literal, "+");
     assertEquals(additive.fields.right.name, "multiplicative");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parse uses parser-contextual token selection", async () => {
+  const result = compile(
+    `
+    skip WS = / +/ ;
+    token A priority 10 = /x/ ;
+    token B priority 0 = /x/ ;
+    module = "a" A | "b" B ;
+  `,
+    { targets: ["typescript"] },
+  );
+  assert(result.bundle);
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].severity, "warning");
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+
+    const lexed = mod.lex("b x", { preserveTrivia: false });
+    assertEquals(
+      lexed.tokens.filter((token: { channel: string }) =>
+        token.channel !== "eof"
+      )[1].kind,
+      "A",
+    );
+    assertEquals(mod.parse("a x").ok, true);
+    assertEquals(mod.parse("b x").ok, true);
+    const stats: unknown[] = [];
+    assertEquals(
+      mod.parse("b x", {
+        contextualLexingStats: (entry: unknown) => stats.push(entry),
+      }).ok,
+      true,
+    );
+    assertEquals(stats.length, 1);
+    assertEquals(
+      JSON.stringify(stats[0]),
+      JSON.stringify({
+        ambiguousLexicalSites: 1,
+        contextualCandidateChecks: 5,
+        attemptedTokenSelections: 2,
+        reductionsBeforeTokenSelection: 2,
+      }),
+    );
+    assertEquals(mod.parseTokens(lexed.source, lexed.tokens).ok, false);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -592,8 +684,8 @@ Deno.test("TypeScript target supports literal-only grammars and deterministic ou
   assert(result.bundle);
   assert(repeated.bundle);
   assertEquals(
-    result.bundle.files.map((file) => file.content).join("\n---\n"),
-    repeated.bundle.files.map((file) => file.content).join("\n---\n"),
+    result.bundle.files.map(generatedContentForComparison).join("\n---\n"),
+    repeated.bundle.files.map(generatedContentForComparison).join("\n---\n"),
   );
 
   const dir = await Deno.makeTempDir();
@@ -617,9 +709,7 @@ Deno.test("TypeScript syntax emitter avoids rule node type name collisions", asy
   `;
   const result = compile(source, { targets: ["typescript"] });
   assert(result.bundle);
-  const syntax =
-    result.bundle.files.find((file) => file.path === "typescript/syntax.ts")
-      ?.content ?? "";
+  const syntax = generatedTextContent(result.bundle, "typescript/syntax.ts");
   assertIncludes(syntax, "export interface FooNode ");
   assertIncludes(syntax, "export interface FooNode2 ");
   assertIncludes(syntax, "lower: FooNode;");
@@ -646,9 +736,7 @@ Deno.test("TypeScript syntax emitter reserves public API type names", async () =
   `;
   const result = compile(source, { targets: ["typescript"], rootRule: "root" });
   assert(result.bundle);
-  const syntax =
-    result.bundle.files.find((file) => file.path === "typescript/syntax.ts")
-      ?.content ?? "";
+  const syntax = generatedTextContent(result.bundle, "typescript/syntax.ts");
   assertIncludes(syntax, "export interface RootNode2 ");
   assertIncludes(syntax, "export interface AnyRuleNode2 ");
   assertIncludes(syntax, "export type RootNode = RootNode2;");
@@ -696,7 +784,10 @@ Deno.test("TypeScript target rejects unsafe options and zero-length literals", (
   const source = `module = "" ;`;
   const emptyLiteral = compile(source, { targets: ["typescript"] });
   assertEquals(emptyLiteral.bundle, undefined);
-  assertEquals(emptyLiteral.diagnostics[0].code, "TS_LEXER_GENERATION_ERROR");
+  assertEquals(
+    emptyLiteral.diagnostics[0].code,
+    "PORTABLE_LEXER_GENERATION_ERROR",
+  );
 
   const invalidDirectory = compile(`module = "ok" ;`, {
     targets: ["typescript"],
@@ -705,7 +796,7 @@ Deno.test("TypeScript target rejects unsafe options and zero-length literals", (
   assertEquals(invalidDirectory.bundle, undefined);
   assertEquals(
     invalidDirectory.diagnostics.map((diagnostic) => diagnostic.code).join(","),
-    "TS_LEXER_GENERATION_ERROR",
+    "TS_INVALID_OUTPUT_DIRECTORY",
   );
 
   const invalidLexerLimit = compile(`module = "ok" ;`, {
@@ -713,21 +804,30 @@ Deno.test("TypeScript target rejects unsafe options and zero-length literals", (
     typescript: { lexerStateLimit: 0 },
   });
   assertEquals(invalidLexerLimit.bundle, undefined);
-  assertEquals(invalidLexerLimit.diagnostics[0].code, "TS_LEXER_STATE_LIMIT");
+  assertEquals(
+    invalidLexerLimit.diagnostics[0].code,
+    "PORTABLE_LEXER_STATE_LIMIT",
+  );
 
   const invalidStateLimit = compile(`module = "ok" ;`, {
     targets: ["typescript"],
     typescript: { parserStateLimit: 0 },
   });
   assertEquals(invalidStateLimit.bundle, undefined);
-  assertEquals(invalidStateLimit.diagnostics[0].code, "TS_PARSER_STATE_LIMIT");
+  assertEquals(
+    invalidStateLimit.diagnostics[0].code,
+    "PORTABLE_PARSER_STATE_LIMIT",
+  );
 
   const invalidItemLimit = compile(`module = "ok" ;`, {
     targets: ["typescript"],
     typescript: { parserItemLimit: 0 },
   });
   assertEquals(invalidItemLimit.bundle, undefined);
-  assertEquals(invalidItemLimit.diagnostics[0].code, "TS_PARSER_ITEM_LIMIT");
+  assertEquals(
+    invalidItemLimit.diagnostics[0].code,
+    "PORTABLE_PARSER_ITEM_LIMIT",
+  );
 
   const invalidTableLimit = compile(`module = "ok" ;`, {
     targets: ["typescript"],
@@ -736,7 +836,7 @@ Deno.test("TypeScript target rejects unsafe options and zero-length literals", (
   assertEquals(invalidTableLimit.bundle, undefined);
   assertEquals(
     invalidTableLimit.diagnostics[0].code,
-    "TS_PARSER_TABLE_ENTRY_LIMIT",
+    "PORTABLE_PARSER_TABLE_ENTRY_LIMIT",
   );
 
   const invalidByteLimit = compile(`module = "ok" ;`, {
@@ -761,7 +861,7 @@ Deno.test("TypeScript target rejects nullable separated-list parts", () => {
   assertEquals(nullableItem.bundle, undefined);
   assertEquals(
     nullableItem.diagnostics[0].code,
-    "TS_PARSER_NULLABLE_LIST_ITEM",
+    "PORTABLE_PARSER_NULLABLE_LIST_ITEM",
   );
 
   const nullableSeparator = compile(
@@ -775,7 +875,7 @@ Deno.test("TypeScript target rejects nullable separated-list parts", () => {
   assertEquals(nullableSeparator.bundle, undefined);
   assertEquals(
     nullableSeparator.diagnostics[0].code,
-    "TS_PARSER_NULLABLE_LIST_SEPARATOR",
+    "PORTABLE_PARSER_NULLABLE_LIST_SEPARATOR",
   );
 });
 
@@ -785,7 +885,7 @@ Deno.test("TypeScript parser reports deliberately small state limits", () => {
     typescript: { lexerStateLimit: 1 },
   });
   assertEquals(lexerLimit.bundle, undefined);
-  assertEquals(lexerLimit.diagnostics[0].code, "TS_LEXER_STATE_LIMIT");
+  assertEquals(lexerLimit.diagnostics[0].code, "PORTABLE_LEXER_STATE_LIMIT");
 
   const stateLimit = compile(
     `
@@ -797,14 +897,14 @@ Deno.test("TypeScript parser reports deliberately small state limits", () => {
     },
   );
   assertEquals(stateLimit.bundle, undefined);
-  assertEquals(stateLimit.diagnostics[0].code, "TS_PARSER_STATE_LIMIT");
+  assertEquals(stateLimit.diagnostics[0].code, "PORTABLE_PARSER_STATE_LIMIT");
 
   const itemLimit = compile(`module = "a" | "b" ;`, {
     targets: ["typescript"],
     typescript: { parserItemLimit: 1 },
   });
   assertEquals(itemLimit.bundle, undefined);
-  assertEquals(itemLimit.diagnostics[0].code, "TS_PARSER_ITEM_LIMIT");
+  assertEquals(itemLimit.diagnostics[0].code, "PORTABLE_PARSER_ITEM_LIMIT");
 
   const tableLimit = compile(`module = "a" | "b" ;`, {
     targets: ["typescript"],
@@ -813,7 +913,7 @@ Deno.test("TypeScript parser reports deliberately small state limits", () => {
   assertEquals(tableLimit.bundle, undefined);
   assertEquals(
     tableLimit.diagnostics[0].code,
-    "TS_PARSER_TABLE_ENTRY_LIMIT",
+    "PORTABLE_PARSER_TABLE_ENTRY_LIMIT",
   );
 
   const generatedByteLimit = compile(`module = "a" | "b" ;`, {
@@ -835,6 +935,20 @@ Deno.test("TypeScript parser can report planning statistics", () => {
   assert(result.bundle);
   assertEquals(result.diagnostics[0].code, "TS_PARSER_STATS");
   assertIncludes(result.diagnostics[0].message, "BNF productions: 4");
+  assertIncludes(result.diagnostics[0].message, "lexer states:");
+  assertIncludes(result.diagnostics[0].message, "lexer accept candidates:");
+  assertIncludes(
+    result.diagnostics[0].message,
+    "lexer average accept candidates/state:",
+  );
+  assertIncludes(
+    result.diagnostics[0].message,
+    "lexer max accept candidates/state:",
+  );
+  assertIncludes(
+    result.diagnostics[0].message,
+    "lexer ambiguous accept states:",
+  );
   assertIncludes(result.diagnostics[0].message, "LR states:");
   assertIncludes(result.diagnostics[0].message, "LR core items:");
   assertIncludes(result.diagnostics[0].message, "ACTION entries:");

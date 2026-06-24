@@ -6,13 +6,13 @@
     "format": "baba-parser-plan",
     "version": 1,
     "semantics": "baba-portable-v1",
-    "hash": "fnv1a64:0795ccc8cd6699cd"
+    "hash": "fnv1a64:648d2ebc4633dbe2"
   },
   "runtimeImplementation": {
     "format": "baba-runtime-implementation",
     "version": 1,
     "semantics": "baba-runtime-portable-v1",
-    "hash": "fnv1a64:0aeaf5fef1b6b886"
+    "hash": "fnv1a64:7b0382cfc5222422"
   },
   "core": {
     "abiVersion": 1,
@@ -180,7 +180,9 @@
     "ok": 0,
     "unexpected": 1,
     "internal": 2,
-    "branchLimit": 3
+    "branchLimit": 3,
+    "traceLimit": 4,
+    "ambiguous": 5
   },
   "parserDiagnosticCodes": {
     "parseLexicalError": 1,
@@ -188,7 +190,9 @@
     "parseTrailingInput": 3,
     "parseInvalidTokenStream": 4,
     "internalError": 5,
-    "branchLimit": 6
+    "branchLimit": 6,
+    "traceLimit": 7,
+    "ambiguousParse": 8
   },
   "parserDiagnostics": {
     "detailKinds": {
@@ -248,6 +252,22 @@
         "name": "branchLimit",
         "publicCode": "PARSER_BRANCH_LIMIT",
         "runtimeCode": 6,
+        "detailKind": "none",
+        "detailKindId": 0,
+        "payloadFields": []
+      },
+      {
+        "name": "traceLimit",
+        "publicCode": "PARSER_TRACE_LIMIT",
+        "runtimeCode": 7,
+        "detailKind": "none",
+        "detailKindId": 0,
+        "payloadFields": []
+      },
+      {
+        "name": "ambiguousParse",
+        "publicCode": "PARSER_AMBIGUOUS_PARSE",
+        "runtimeCode": 8,
         "detailKind": "none",
         "detailKindId": 0,
         "payloadFields": []

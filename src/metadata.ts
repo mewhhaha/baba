@@ -149,7 +149,13 @@ function parseParserConflictResolution(
   path: string,
 ): ParserConflictResolutionMetadata {
   const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["rules", "on", "prefer", "reduce"]);
+  assertKnownKeys(object, path, [
+    "conflict",
+    "rules",
+    "on",
+    "prefer",
+    "reduce",
+  ]);
   const prefer = expectString(object.prefer, `${path}.prefer`);
   if (prefer !== "shift" && prefer !== "reduce") {
     throwMetadataShape(
@@ -157,6 +163,9 @@ function parseParserConflictResolution(
     );
   }
   const resolution: ParserConflictResolutionMetadata = { prefer };
+  if (hasKey(object, "conflict")) {
+    resolution.conflict = expectString(object.conflict, `${path}.conflict`);
+  }
   if (hasKey(object, "rules")) {
     resolution.rules = expectStringArray(object.rules, `${path}.rules`);
   }

@@ -1,0 +1,37 @@
+import runtime.intrinsics;
+
+fn lexer_is_upper_ascii_letter(unit: u16) -> bool {
+  if unit < (65 as u16) {
+    return false;
+  }
+  return unit <= (90 as u16);
+}
+
+fn lexer_is_lower_ascii_letter(unit: u16) -> bool {
+  if unit >= (97 as u16) {
+    return unit <= (122 as u16);
+  }
+  return false;
+}
+
+fn lexer_is_ascii_letter(unit: u16) -> bool {
+  if lexer_is_upper_ascii_letter(unit) {
+    return true;
+  }
+  return lexer_is_lower_ascii_letter(unit);
+}
+
+fn lexer_scan_identifier(input: span<u16>, start: u32) -> u32 {
+  let offset: u32 = start;
+  while offset < span_len(input) {
+    if lexer_is_ascii_letter(input[offset]) == false {
+      break;
+    }
+    offset = offset + 1;
+  }
+  return offset;
+}
+
+fn lexer_has_match(input: span<u16>, start: u32) -> bool {
+  return lexer_scan_identifier(input, start) > start;
+}

@@ -34,13 +34,16 @@ export function emitTreeSitterTarget(
       metadata,
     }),
     kind: "source",
+    encoding: "utf-8",
   }];
   const queries = generateAnalyzedTreeSitterQueries(analyzed, {
     metadata,
   });
   for (const [path, name] of treeSitterQueryOutputs) {
     const content = queries[name];
-    if (content.length > 0) files.push({ path, content, kind: "query" });
+    if (content.length > 0) {
+      files.push({ path, content, kind: "query", encoding: "utf-8" });
+    }
   }
   return files;
 }

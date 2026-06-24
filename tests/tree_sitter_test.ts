@@ -14,9 +14,11 @@ import {
   compile,
   denoCheck,
   explicitGrammar,
+  fixtureNames,
   fixtureSamples,
   formatDiagnostic,
   generate,
+  generatedTextContent,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,
   generateTreeSitterQueries,
@@ -38,14 +40,11 @@ Deno.test("generates Tree-sitter grammar and query bundle only", () => {
     "grammar.js,queries/generated-highlights.scm,queries/generated-rainbows.scm",
   );
   assertIncludes(
-    bundle.files.find((file) => file.path === "grammar.js")?.content ?? "",
+    generatedTextContent(bundle, "grammar.js"),
     "export default grammar({",
   );
   assertIncludes(
-    bundle.files.find((file) =>
-      file.path === "queries/generated-highlights.scm"
-    )
-      ?.content ?? "",
+    generatedTextContent(bundle, "queries/generated-highlights.scm"),
     '(module "fn" @keyword)',
   );
   assertEquals(bundle.cleanupPaths, undefined);
@@ -71,13 +70,13 @@ Deno.test("TypeScript target diagnoses conflicts without blocking Tree-sitter", 
   assertEquals(typescript.bundle, undefined);
   assert(
     typescript.diagnostics.some((diagnostic) =>
-      diagnostic.code === "TS_PARSER_REDUCE_REDUCE_CONFLICT" ||
-      diagnostic.code === "TS_PARSER_SHIFT_REDUCE_CONFLICT"
+      diagnostic.code === "PORTABLE_PARSER_REDUCE_REDUCE_CONFLICT" ||
+      diagnostic.code === "PORTABLE_PARSER_SHIFT_REDUCE_CONFLICT"
     ),
   );
   const conflict = typescript.diagnostics.find((diagnostic) =>
-    diagnostic.code === "TS_PARSER_REDUCE_REDUCE_CONFLICT" ||
-    diagnostic.code === "TS_PARSER_SHIFT_REDUCE_CONFLICT"
+    diagnostic.code === "PORTABLE_PARSER_REDUCE_REDUCE_CONFLICT" ||
+    diagnostic.code === "PORTABLE_PARSER_SHIFT_REDUCE_CONFLICT"
   );
   assert(conflict);
   assertIncludes(conflict.message, 'rule "expr"');
@@ -104,7 +103,7 @@ Deno.test("TypeScript target reports unsupported reachable external tokens", () 
   const typescript = compile(source, { targets: ["typescript"], metadata });
   assertEquals(
     typescript.diagnostics.map((diagnostic) => diagnostic.code).join(","),
-    "TS_EXTERNAL_TOKENS_UNSUPPORTED",
+    "PORTABLE_EXTERNAL_TOKENS_UNSUPPORTED",
   );
   assertEquals(typescript.bundle, undefined);
 
@@ -135,8 +134,7 @@ Deno.test("Tree-sitter regex literals preserve escaped slash patterns", async ()
     module = "a" ;
   `;
   const bundle = generate(source, { name: "slashy" });
-  const grammarSource = bundle.files.find((file) => file.path === "grammar.js")
-    ?.content ?? "";
+  const grammarSource = generatedTextContent(bundle, "grammar.js");
   assertIncludes(
     grammarSource,
     "line_comment: $ => /\\/\\/[^\\n\\r]*/",
@@ -212,18 +210,23 @@ Deno.test("Tree-sitter and TypeScript agree on explicit whitespace", async () =>
 });
 
 Deno.test("portable fixtures have matching Tree-sitter and TypeScript acceptance", async () => {
-  for (
-    const fixture of [
-      "expressions",
-      "declarations",
-      "json-like",
-      "markup-like",
-    ]
-  ) {
+  for (const fixture of await fixtureNames()) {
+    if (
+      fixture === "invalid-regex" ||
+      fixture === "conflict-resolution" ||
+      fixture === "empty-productions"
+    ) {
+      continue;
+    }
     const source = await Deno.readTextFile(`fixtures/${fixture}/grammar.ebnf`);
     const languageName = fixture.replaceAll("-", "_");
     const result = compile(source, { targets: ["typescript"] });
-    assertEquals(result.diagnostics.length, 0);
+    assert(
+      result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+      `${fixture} should compile without errors: ${
+        result.diagnostics.map(formatDiagnostic).join("\n")
+      }`,
+    );
     assert(result.bundle);
     const dir = await Deno.makeTempDir();
     try {
@@ -231,17 +234,27 @@ Deno.test("portable fixtures have matching Tree-sitter and TypeScript acceptance
       await denoCheck(`${dir}/typescript/mod.ts`);
       const mod = await import(`file://${dir}/typescript/mod.ts`);
       for (const sample of await fixtureSamples(fixture, "valid")) {
-        assertEquals(mod.parse(sample).ok, true);
+        assertEquals(
+          mod.parse(sample).ok,
+          true,
+          `${fixture} valid TypeScript parse should succeed`,
+        );
         assertEquals(
           await treeSitterAccepts(source, sample, languageName),
           true,
+          `${fixture} valid Tree-sitter parse should succeed`,
         );
       }
       for (const sample of await fixtureSamples(fixture, "invalid")) {
-        assertEquals(mod.parse(sample).ok, false);
+        assertEquals(
+          mod.parse(sample).ok,
+          false,
+          `${fixture} invalid TypeScript parse should fail`,
+        );
         assertEquals(
           await treeSitterAccepts(source, sample, languageName),
           false,
+          `${fixture} invalid Tree-sitter parse should fail`,
         );
       }
     } finally {
@@ -279,16 +292,27 @@ Deno.test("multi-target generation rejects Tree-sitter-only extras by default", 
   );
   assertEquals(warnSingleTarget.diagnostics[0].severity, "warning");
 
-  const warnRuntimeTargets = compile(source, {
+  const strictRuntimeTargets = compile(source, {
     targets: ["typescript", "wasm", "kit"],
     metadata,
   });
+  assertEquals(strictRuntimeTargets.bundle, undefined);
+  assertEquals(
+    strictRuntimeTargets.diagnostics[0].code,
+    "PORTABILITY_TREE_SITTER_EXTRA",
+  );
+  assertEquals(strictRuntimeTargets.diagnostics[0].severity, "error");
+
+  const warnRuntimeTargets = compile(source, {
+    targets: ["typescript", "wasm", "kit"],
+    metadata,
+    portability: "warn",
+  });
   assert(warnRuntimeTargets.bundle);
-  assertEquals(warnRuntimeTargets.diagnostics.length, 3);
-  assert(
-    warnRuntimeTargets.diagnostics.every((diagnostic) =>
-      diagnostic.severity === "warning"
-    ),
+  assertEquals(warnRuntimeTargets.diagnostics.length, 1);
+  assertEquals(
+    warnRuntimeTargets.diagnostics[0].severity,
+    "warning",
   );
 
   const explicitOff = compile(source, {
@@ -671,9 +695,10 @@ Deno.test("generated Tree-sitter artifacts compile, parse, and query", async () 
   const dir = await Deno.makeTempDir();
   try {
     const bundle = generate(source, { name: "tiny", metadata });
-    const highlights = bundle.files.find((file) =>
-      file.path === "queries/generated-highlights.scm"
-    )?.content ?? "";
+    const highlights = generatedTextContent(
+      bundle,
+      "queries/generated-highlights.scm",
+    );
     assertIncludes(highlights, "(function name: (ident) @function)");
     assertIncludes(highlights, "(block binding: (ident) @variable)");
     await applyBundle(bundle, { root: dir });
@@ -710,9 +735,7 @@ Deno.test("generated Tree-sitter artifacts compile, parse, and query", async () 
     assertNotIncludes(parse.stdout, "ERROR");
 
     for (
-      const file of bundle.files.filter((file) =>
-        file.kind === "query"
-      )
+      const file of bundle.files.filter((file) => file.kind === "query")
     ) {
       await runCommand(
         "tree-sitter",

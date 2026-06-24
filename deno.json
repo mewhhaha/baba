@@ -14,29 +14,29 @@
       "CHANGELOG.md",
       "LICENSE",
       "deno.json",
+      "size-budgets.json",
       "docs/**/*.md",
       "scripts/**/*.ts",
       "src/**/*.ts",
-      "examples/**/*",
-      "examples/brainfuck/.helix/languages.toml",
-      "examples/brainfuck/.helix/runtime/queries/brainfuck/highlights.scm",
-      "examples/brainfuck/.helix/runtime/queries/brainfuck/rainbows.scm",
-      "examples/brainfuck/generated/.baba-manifest.json",
-      "examples/funcfuck/.helix/languages.toml",
-      "examples/funcfuck/.helix/runtime/queries/funcfuck/highlights.scm",
-      "examples/funcfuck/.helix/runtime/queries/funcfuck/rainbows.scm",
-      "examples/funcfuck/generated/.baba-manifest.json",
-      "examples/thunkwasm/.helix/languages.toml",
-      "examples/thunkwasm/.helix/runtime/queries/thunkwasm/highlights.scm",
-      "examples/thunkwasm/.helix/runtime/queries/thunkwasm/rainbows.scm",
-      "examples/thunkwasm/generated/.baba-manifest.json"
+      "examples/README.md",
+      "examples/*/README.md",
+      "examples/*/deno.json",
+      "examples/*/grammar.ebnf",
+      "examples/*/baba.json",
+      "examples/*/programs/**/*",
+      "examples/*/interpreter.ts",
+      "examples/*/parser_kit_consumer.ts",
+      "examples/*/aot.ts",
+      "examples/*/bench.ts"
     ]
   },
   "fmt": {
     "exclude": [
       "examples/brainfuck/generated",
       "examples/funcfuck/generated",
-      "examples/thunkwasm/generated"
+      "examples/thunkwasm/generated",
+      "src/runtime_language/SPEC.md",
+      "tasks"
     ]
   },
   "lint": {
@@ -49,8 +49,11 @@
     "bootstrap": "deno run --allow-read --allow-write scripts/bootstrap_check.ts --write",
     "bootstrap:check": "deno run --allow-read --allow-write scripts/bootstrap_check.ts",
     "test": "deno test --allow-read --allow-write --allow-run",
-    "check": "deno check src/mod.ts src/advanced.ts src/cli.ts scripts/*.ts tests/*.ts",
+    "check": "deno check src/mod.ts src/advanced.ts src/cli.ts scripts/*.ts bench/*.ts tests/*.ts",
+    "bench": "deno run --allow-read --allow-write bench/ts_vs_wasm.ts",
     "bench:wasm": "deno run --allow-read --allow-write bench/ts_vs_wasm.ts",
+    "size:report": "deno run --allow-read --allow-write scripts/size_report.ts",
+    "size:check": "deno run --allow-read scripts/size_report.ts --budget size-budgets.json",
     "publish:dry-run": "deno publish --dry-run --allow-dirty"
   }
 }

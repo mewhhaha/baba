@@ -67,12 +67,304 @@ Deno.test("safe bundle apply rejects paths outside the root", async () => {
             path: "../outside.txt",
             content: "escape",
             kind: "source",
+            encoding: "utf-8",
           }],
         }, { root: dir }),
       "Refusing unsafe generated path '../outside.txt'",
     );
   } finally {
     await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("safe bundle apply writes and protects binary files", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const first = {
+      files: [
+        {
+          path: "wasm/parser.wasm",
+          content: new Uint8Array([0, 97, 255, 10]),
+          kind: "binary" as const,
+          encoding: "binary" as const,
+        },
+        {
+          path: "wasm/manifest.json",
+          content: "{}\n",
+          kind: "config" as const,
+          encoding: "utf-8" as const,
+        },
+      ],
+    };
+    await applyBundle(first, { root: dir });
+    assertEquals(
+      [...await Deno.readFile(`${dir}/wasm/parser.wasm`)].join(","),
+      "0,97,255,10",
+    );
+
+    const second = {
+      files: [{
+        path: "wasm/manifest.json",
+        content: "{}\n",
+        kind: "config" as const,
+        encoding: "utf-8" as const,
+      }],
+    };
+    await applyBundle(second, { root: dir });
+    await assertMissing(`${dir}/wasm/parser.wasm`);
+
+    await applyBundle(first, { root: dir });
+    await Deno.writeFile(
+      `${dir}/wasm/parser.wasm`,
+      new Uint8Array([1, 2, 3, 4]),
+    );
+    await assertRejectsIncludes(
+      () => applyBundle(first, { root: dir }),
+      "Refusing to overwrite modified or unowned file 'wasm/parser.wasm'",
+    );
+
+    await assertRejectsIncludes(
+      () =>
+        applyBundle({
+          files: [
+            {
+              path: "wasm",
+              content: "not a dir\n",
+              kind: "source" as const,
+              encoding: "utf-8" as const,
+            },
+            {
+              path: "wasm/parser.wasm",
+              content: new Uint8Array([0]),
+              kind: "binary" as const,
+              encoding: "binary" as const,
+            },
+          ],
+        }, { root: dir }),
+      "Generated output path 'wasm' collides with nested path 'wasm/parser.wasm'",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("size report measures repository and publish payload", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const jsonPath = `${dir}/size-report.json`;
+    const human = await runCommand(Deno.execPath(), [
+      "run",
+      "--allow-read",
+      "--allow-write",
+      "scripts/size_report.ts",
+      "--json",
+      jsonPath,
+    ]);
+    assertIncludes(human.stdout, "Baba size report");
+    assertIncludes(human.stdout, "Publish include payload");
+    assertIncludes(human.stdout, "Generated example snapshot bytes");
+
+    const report = JSON.parse(await Deno.readTextFile(jsonPath));
+    assert(report.repository.bytes > 0);
+    assert(report.repository.fileCount > 0);
+    assert(report.publishPayload.bytes > 0);
+    assert(report.publishPayload.fileCount > 0);
+    assertEquals(report.publishPayload.generatedExampleBytes, 0);
+    assert(
+      !report.publishPayload.largestFiles.some((
+        entry: { path: string },
+      ) => entry.path.includes("/generated/")),
+      "Expected generated example snapshots to stay out of publish payload.",
+    );
+    assert(
+      report.examples.generatedBytesByExample.some((
+        entry: { name: string; bytes: number },
+      ) => entry.name === "brainfuck" && entry.bytes > 0),
+      "Expected generated example bytes for brainfuck.",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("size budget check reports pass and fail states", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const passingJsonPath = `${dir}/passing-size-report.json`;
+    await runCommand(Deno.execPath(), [
+      "run",
+      "--allow-read",
+      "--allow-write",
+      "scripts/size_report.ts",
+      "--budget",
+      "size-budgets.json",
+      "--json",
+      passingJsonPath,
+    ]);
+    const passing = JSON.parse(await Deno.readTextFile(passingJsonPath));
+    assertEquals(passing.budget.ok, true);
+    assert(
+      passing.budget.checks.some((
+        check: { name: string; ok: boolean },
+      ) => check.name === "publishGeneratedExampleBytes" && check.ok),
+      "Expected generated publish payload budget check.",
+    );
+
+    const failingBudgetPath = `${dir}/failing-size-budget.json`;
+    await Deno.writeTextFile(
+      failingBudgetPath,
+      JSON.stringify({ publishPayloadBytes: 1 }, null, 2),
+    );
+    const command = new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-read",
+        "scripts/size_report.ts",
+        "--budget",
+        failingBudgetPath,
+      ],
+    });
+    const output = await command.output();
+    assertEquals(output.success, false);
+    assertIncludes(
+      new TextDecoder().decode(output.stdout),
+      "Size budgets: failed",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("examples expose one-command reproducibility tasks", async () => {
+  for (const example of ["brainfuck", "funcfuck", "thunkwasm"]) {
+    const config = JSON.parse(
+      await Deno.readTextFile(`examples/${example}/deno.json`),
+    );
+    for (const task of ["generate", "check", "run", "test"]) {
+      assert(
+        typeof config.tasks?.[task] === "string" &&
+          config.tasks[task].length > 0,
+        `Expected examples/${example}/deno.json to define task '${task}'.`,
+      );
+    }
+  }
+});
+
+Deno.test("benchmark command writes machine-readable metrics", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const jsonPath = `${dir}/bench-results.json`;
+    const result = await runCommand(Deno.execPath(), [
+      "run",
+      "--allow-read",
+      "--allow-write",
+      "bench/ts_vs_wasm.ts",
+      "--quick",
+      "--samples",
+      "1",
+      "--json",
+      jsonPath,
+    ]);
+    assertIncludes(result.stdout, "preserveTrivia=true");
+    assertIncludes(result.stdout, "sink=");
+
+    const report = JSON.parse(await Deno.readTextFile(jsonPath));
+    assertEquals(report.format, "baba-benchmark-results");
+    assertEquals(report.version, 1);
+    assertEquals(report.quick, true);
+    assertEquals(report.samples, 1);
+    assertEquals(report.cases.length, 6);
+    assert(
+      report.cases.every((
+        entry: {
+          compiler: { totalGenerationMs: number; diagnostics: number };
+          artifacts: {
+            totalBytes: number;
+            textBytes: number;
+            binaryBytes: number;
+            typescriptRuntimeBytes: number;
+            wasmAdapterBytes: number;
+            wasmBinaryBytes: number;
+            treeSitterArtifactBytes: number;
+            largestFile: { path: string; bytes: number } | null;
+          };
+          setup: {
+            applyBundleMs: number;
+            tsImportMs: number;
+            wasmImportMs: number;
+          };
+          metrics: Array<{ operation: string; tsMs: number; wasmMs: number }>;
+        },
+      ) =>
+        entry.compiler.totalGenerationMs >= 0 &&
+        entry.compiler.diagnostics >= 0 &&
+        entry.artifacts.totalBytes > 0 &&
+        entry.artifacts.textBytes > 0 &&
+        entry.artifacts.binaryBytes >= 0 &&
+        entry.artifacts.typescriptRuntimeBytes > 0 &&
+        entry.artifacts.wasmAdapterBytes > 0 &&
+        entry.artifacts.wasmBinaryBytes >= 0 &&
+        entry.artifacts.treeSitterArtifactBytes >= 0 &&
+        entry.artifacts.largestFile !== null &&
+        entry.artifacts.largestFile.bytes > 0 &&
+        entry.setup.applyBundleMs >= 0 &&
+        entry.setup.tsImportMs >= 0 &&
+        entry.setup.wasmImportMs >= 0 &&
+        entry.metrics.some((metric) =>
+          metric.operation === "parse" && metric.tsMs >= 0 &&
+          metric.wasmMs >= 0
+        )
+      ),
+      "Expected each benchmark case to include parse metrics.",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("architecture decision records cover required contracts", async () => {
+  const requiredAdrs = [
+    "docs/adr/0001-scope.md",
+    "docs/adr/0002-analyzed-grammar-and-portable-plan.md",
+    "docs/adr/0003-runtime-language.md",
+    "docs/adr/0004-wasm-artifact-and-abi.md",
+    "docs/adr/0005-contextual-lexing.md",
+    "docs/adr/0006-conflict-policy.md",
+    "docs/adr/0007-generated-file-ownership.md",
+  ];
+  for (const path of requiredAdrs) {
+    const source = await Deno.readTextFile(path);
+    for (
+      const section of [
+        "Status:",
+        "## Context",
+        "## Decision",
+        "## Consequences",
+        "## Rejected Alternatives",
+        "## Compatibility Impact",
+      ]
+    ) {
+      assertIncludes(source, section);
+    }
+  }
+});
+
+Deno.test("stability policy documents required compatibility levels", async () => {
+  const source = await Deno.readTextFile("docs/stability.md");
+  for (
+    const required of [
+      "## Public Library API",
+      "## EBNF Syntax",
+      "## Metadata Schema",
+      "## Parser-Plan Format",
+      "## Generated TypeScript API",
+      "## Wasm ABI",
+      "## Internal BRL",
+      "## Tree-Sitter Compatibility",
+      "private and unstable",
+    ]
+  ) {
+    assertIncludes(source, required);
   }
 });
 
@@ -199,15 +491,7 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
     assertIncludes(externalExplainLogs.join("\n"), "Kit: unsupported");
     assertIncludes(
       externalExplainLogs.join("\n"),
-      "TS_EXTERNAL_TOKENS_UNSUPPORTED",
-    );
-    assertIncludes(
-      externalExplainLogs.join("\n"),
-      "WASM_EXTERNAL_TOKENS_UNSUPPORTED",
-    );
-    assertIncludes(
-      externalExplainLogs.join("\n"),
-      "KIT_EXTERNAL_TOKENS_UNSUPPORTED",
+      "PORTABLE_EXTERNAL_TOKENS_UNSUPPORTED",
     );
 
     const tsOutDir = `${dir}/ts-out`;

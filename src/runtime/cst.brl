@@ -1,0 +1,28 @@
+fn cst_field_accepts_count(flags: u32, count: u32) -> bool {
+  let array: bool = (flags % 2) != 0;
+  let nullable: bool = ((flags / 2) % 2) != 0;
+  if array {
+    return true;
+  }
+  if count == 1 {
+    return true;
+  }
+  if nullable {
+    return count == 0;
+  }
+  return false;
+}
+
+fn cst_child_span_start(left: u32, right: u32) -> u32 {
+  if left <= right {
+    return left;
+  }
+  return right;
+}
+
+fn cst_child_span_end(left: u32, right: u32) -> u32 {
+  if left >= right {
+    return left;
+  }
+  return right;
+}

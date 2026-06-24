@@ -70,6 +70,8 @@ export interface ParseDiagnostic {
     | "PARSE_TRAILING_INPUT"
     | "PARSE_INVALID_TOKEN_STREAM"
     | "PARSER_BRANCH_LIMIT"
+    | "PARSER_TRACE_LIMIT"
+    | "PARSER_AMBIGUOUS_PARSE"
     | "PARSER_INTERNAL_ERROR";
   message: string;
   span: Span;
@@ -548,8 +550,20 @@ export interface LexResult {
   diagnostics: readonly LexDiagnostic[];
 }
 
+export interface ContextualLexingStats {
+  ambiguousLexicalSites: number;
+  contextualCandidateChecks: number;
+  attemptedTokenSelections: number;
+  reductionsBeforeTokenSelection: number;
+}
+
 export interface ParseOptions {
   preserveTrivia?: boolean;
+  contextualLexingStats?: (stats: ContextualLexingStats) => void;
+  maxExploredBranches?: number;
+  maxQueuedBranches?: number;
+  maxTraceActions?: number;
+  ambiguityMode?: "first-success" | "reject-ambiguous-success";
 }
 
 export type ParseResult<Root extends AnyRuleNode = RootNode> =

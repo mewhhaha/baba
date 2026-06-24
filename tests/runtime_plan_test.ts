@@ -700,10 +700,18 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 16);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 24);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
+  assert(roles.includes("shared-brl-lexer"));
+  assert(roles.includes("shared-brl-parser"));
+  assert(roles.includes("shared-brl-branch-search"));
+  assert(roles.includes("shared-brl-reductions"));
+  assert(roles.includes("shared-brl-cst"));
+  assert(roles.includes("shared-brl-token-stream"));
+  assert(roles.includes("shared-brl-diagnostics"));
+  assert(roles.includes("shared-brl-source-map"));
   assert(roles.includes("public-source-text-boundary"));
   assert(roles.includes("parser-diagnostic-codes"));
   assert(roles.includes("wasm-abi-constants"));

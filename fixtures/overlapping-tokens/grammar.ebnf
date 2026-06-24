@@ -1,0 +1,8 @@
+token WORD priority 1 = /[A-Za-z]+/ ;
+token KEYWORD priority 10 = /let/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = item+ ;
+item = declaration | word ;
+declaration = KEYWORD name:WORD ";" ;
+word = WORD ";" ;

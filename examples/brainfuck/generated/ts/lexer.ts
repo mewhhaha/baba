@@ -9,6 +9,10 @@ import type {
 } from "./syntax.ts";
 
 const DEFAULT_PRESERVE_TRIVIA = true;
+const DFA_START_STATE = 0;
+const DFA_TRANSITIONS: readonly (readonly (readonly [number, number, number])[])[] = [[[0,32,1],[33,33,2],[34,42,1],[43,43,3],[44,44,4],[45,45,5],[46,46,6],[47,47,1],[48,57,7],[58,59,1],[60,60,8],[61,61,1],[62,62,9],[63,90,1],[91,91,10],[92,92,1],[93,93,11],[94,122,1],[123,123,12],[124,124,1],[125,125,13],[126,1114111,1]],[[0,32,14],[34,42,14],[47,47,14],[58,59,14],[61,61,14],[63,90,14],[92,92,14],[94,122,14],[124,124,14],[126,1114111,14]],[],[],[],[],[],[[48,57,15]],[],[],[],[],[],[],[[0,32,14],[34,42,14],[47,47,14],[58,59,14],[61,61,14],[63,90,14],[92,92,14],[94,122,14],[124,124,14],[126,1114111,14]],[[48,57,15]]];
+const DFA_ASCII_TRANSITIONS: readonly (readonly number[])[] | null = [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,3,4,5,6,1,7,7,7,7,7,7,7,7,7,7,1,1,8,1,9,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,10,1,11,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,12,1,13,1,1],[14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,-1,14,14,14,14,14,14,14,14,14,-1,-1,-1,-1,14,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,14,14,-1,14,-1,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,-1,14,-1,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,-1,14,-1,14,14],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,15,15,15,15,15,15,15,15,15,15,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],[14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,-1,14,14,14,14,14,14,14,14,14,-1,-1,-1,-1,14,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,14,14,-1,14,-1,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,-1,14,-1,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,-1,14,-1,14,14],[-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,15,15,15,15,15,15,15,15,15,15,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]];
+const DFA_ACCEPT_CANDIDATES: readonly (readonly number[])[] = [[],[1],[12],[2],[7],[3],[6],[0],[4],[5],[8],[9],[10],[11],[1],[0]];
 
 const NAMED_SPECS: readonly {
   kind: NamedTokenKind;
@@ -845,6 +849,22 @@ function lexResult(
   return { source, tokens, diagnostics };
 }
 
+export interface ParseLexCandidate {
+  readonly token: Token;
+  readonly terminal: number;
+}
+
+export interface ParseLexCandidateSite {
+  readonly tokenIndex: number;
+  readonly candidates: readonly ParseLexCandidate[];
+}
+
+export interface ParseLexCandidateStream {
+  readonly tokens: readonly Token[];
+  readonly diagnostics: readonly LexDiagnostic[];
+  readonly sites: readonly ParseLexCandidateSite[];
+}
+
 export function lex(source: string, options: LexOptions = {}): LexResult {
   runtimeArenaReset();
   const sourceText = createSourceTextBoundary(source);
@@ -897,4 +917,161 @@ export function lex(source: string, options: LexOptions = {}): LexResult {
   );
   tokens.push(materializeToken(sourceText, eofHandle));
   return lexResult(sourceText.source, tokens, diagnostics);
+}
+
+export function lexForParse(
+  source: string,
+  options: LexOptions = {},
+): LexResult & { parseStream: ParseLexCandidateStream } {
+  runtimeArenaReset();
+  const sourceText = createSourceTextBoundary(source);
+  const preserveTrivia = options.preserveTrivia ?? DEFAULT_PRESERVE_TRIVIA;
+  const tokens: Token[] = [];
+  const diagnostics: LexDiagnostic[] = [];
+  const sites: ParseLexCandidateSite[] = [];
+  let offset = 0;
+  while (offset < sourceText.length) {
+    const scanned = scanAcceptCandidates(sourceText, offset);
+    if (!scanned) {
+      const end = offset + sourceTextCodePointWidthAt(sourceText, offset);
+      const handle = parserTokenNew(
+        PUBLIC_TOKEN_ERROR,
+        0,
+        NO_TERMINAL,
+        offset,
+        end,
+      );
+      const token = materializeToken(sourceText, handle);
+      tokens.push(token);
+      diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
+      offset = end;
+      continue;
+    }
+    const tokenCandidates = scanned.candidates.map((specIndex) =>
+      materializeSpecToken(sourceText, specIndex, offset, scanned.end)
+    );
+    const trivia = tokenCandidates.find((candidate) =>
+      candidate.token.channel === "trivia"
+    );
+    const mainCandidates = tokenCandidates.filter((candidate) =>
+      candidate.token.channel !== "trivia" && candidate.terminal >= 0
+    );
+    if (trivia && mainCandidates.length === 0) {
+      if (preserveTrivia) tokens.push(trivia.token);
+      offset = scanned.end;
+      continue;
+    }
+    if (mainCandidates.length === 0) {
+      const handle = parserTokenNew(
+        PUBLIC_TOKEN_ERROR,
+        0,
+        NO_TERMINAL,
+        offset,
+        scanned.end,
+      );
+      const token = materializeToken(sourceText, handle);
+      tokens.push(token);
+      diagnostics.push(lexUnexpectedCharacterDiagnostic(token));
+      offset = scanned.end;
+      continue;
+    }
+    const tokenIndex = tokens.length;
+    tokens.push(mainCandidates[0].token);
+    sites.push({ tokenIndex, candidates: mainCandidates });
+    offset = scanned.end;
+  }
+  const eofHandle = parserTokenNew(
+    PUBLIC_TOKEN_EOF,
+    0,
+    NO_TERMINAL,
+    sourceText.length,
+    sourceText.length,
+  );
+  const eofToken = materializeToken(sourceText, eofHandle);
+  const eofIndex = tokens.length;
+  tokens.push(eofToken);
+  sites.push({
+    tokenIndex: eofIndex,
+    candidates: [{ token: eofToken, terminal: 0 }],
+  });
+  return {
+    source: sourceText.source,
+    tokens,
+    diagnostics,
+    parseStream: { tokens, diagnostics, sites },
+  };
+}
+
+function materializeSpecToken(
+  sourceText: SourceTextBoundary,
+  specIndex: number,
+  start: number,
+  end: number,
+): ParseLexCandidate {
+  if (specIndex < NAMED_SPECS.length) {
+    const spec = NAMED_SPECS[specIndex];
+    const tokenClass = spec.channel === "trivia"
+      ? PUBLIC_TOKEN_TRIVIA
+      : PUBLIC_TOKEN_MAIN;
+    const handle = parserTokenNew(
+      tokenClass,
+      specIndex,
+      spec.terminal < 0 ? NO_TERMINAL : spec.terminal,
+      start,
+      end,
+    );
+    return { token: materializeToken(sourceText, handle), terminal: spec.terminal };
+  }
+  const literalIndex = specIndex - NAMED_SPECS.length;
+  const spec = LITERAL_SPECS[literalIndex];
+  const handle = parserTokenNew(
+    PUBLIC_TOKEN_LITERAL,
+    literalIndex,
+    spec.terminal,
+    start,
+    end,
+  );
+  return { token: materializeToken(sourceText, handle), terminal: spec.terminal };
+}
+
+function scanAcceptCandidates(
+  sourceText: SourceTextBoundary,
+  offset: number,
+): { readonly end: number; readonly candidates: readonly number[] } | null {
+  let state = DFA_START_STATE;
+  let cursor = offset;
+  let acceptedEnd = -1;
+  let acceptedCandidates: readonly number[] = [];
+  while (cursor < sourceText.length) {
+    const codePoint = sourceTextCodePointAt(sourceText, cursor);
+    const next = contextualDfaTransition(state, codePoint);
+    if (next < 0) break;
+    state = next;
+    cursor += codePoint > 0xffff ? 2 : 1;
+    const candidates = DFA_ACCEPT_CANDIDATES[state] ?? [];
+    if (candidates.length > 0) {
+      acceptedEnd = cursor;
+      acceptedCandidates = candidates;
+    }
+  }
+  return acceptedEnd < 0
+    ? null
+    : { end: acceptedEnd, candidates: acceptedCandidates };
+}
+
+function contextualDfaTransition(state: number, codePoint: number): number {
+  if (codePoint < 128 && DFA_ASCII_TRANSITIONS) {
+    return DFA_ASCII_TRANSITIONS[state]?.[codePoint] ?? -1;
+  }
+  for (const [start, end, target] of DFA_TRANSITIONS[state] ?? []) {
+    if (start <= codePoint && codePoint <= end) return target;
+  }
+  return -1;
+}
+
+function sourceTextCodePointWidthAt(
+  sourceText: SourceTextBoundary,
+  offset: number,
+): number {
+  return sourceTextCodePointAt(sourceText, offset) > 0xffff ? 2 : 1;
 }

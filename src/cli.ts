@@ -337,12 +337,45 @@ function parseArgs(args: string[]): Options {
           args[++i],
           arg,
         );
+        options.wasm.generatedByteLimit = options.typescript.generatedByteLimit;
         break;
+      case "--wasm-generated-byte-limit":
+        options.wasm.generatedByteLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        break;
+      case "--wasm-packaging": {
+        const packaging = args[++i];
+        if (!packaging) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: `Expected packaging mode after ${arg}`,
+          });
+        }
+        if (
+          packaging !== "external-binary" &&
+          packaging !== "embedded-typescript"
+        ) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message:
+              "Expected Wasm packaging external-binary or embedded-typescript",
+          });
+        }
+        options.wasm.packaging = packaging;
+        break;
+      }
       case "--parser-stats":
         options.typescript.reportParserStats = true;
+        options.wasm.reportParserStats = true;
+        break;
+      case "--wasm-stats":
+        options.wasm.reportParserStats = true;
         break;
       case "--verbose":
         options.typescript.reportParserStats = true;
+        options.wasm.reportParserStats = true;
         break;
       case "--portability": {
         const portability = args[++i];
@@ -441,17 +474,20 @@ Options:
   --kit-profile Parser-kit detail profile: full or runtime. Defaults to full
   --preserve-trivia  Preserve skip matches as trivia tokens
   --discard-trivia   Omit skip matches from generated lexer output
-  --lexer-state-limit  Maximum TypeScript lexer DFA state count
+  --lexer-state-limit  Maximum portable runtime lexer DFA state count
   --regex-ast-node-limit       Maximum parsed regex AST node count
   --regex-bounded-repeat-limit  Maximum regex bounded-repeat expansion
   --regex-nfa-state-limit       Maximum regex NFA state count
   --regex-dfa-state-limit       Maximum regex DFA state count
   --regex-overlap-state-limit   Maximum overlap-analysis product states
-  --parser-state-limit  Maximum TypeScript LR state count
-  --parser-item-limit   Maximum total TypeScript LR item count
-  --parser-table-entry-limit  Maximum TypeScript ACTION/GOTO entry count
-  --generated-byte-limit  Maximum generated TypeScript source bytes
-  --parser-stats  Emit TypeScript parser planning statistics
+  --parser-state-limit  Maximum portable runtime LR state count
+  --parser-item-limit   Maximum total portable runtime LR item count
+  --parser-table-entry-limit  Maximum portable runtime ACTION/GOTO entry count
+  --generated-byte-limit  Compatibility alias for TypeScript and Wasm byte limits
+  --wasm-generated-byte-limit  Maximum generated Wasm bytes
+  --wasm-packaging  Wasm packaging: embedded-typescript or external-binary
+  --parser-stats  Emit runtime parser planning statistics for TypeScript and Wasm
+  --wasm-stats   Emit Wasm runtime parser planning statistics
   --verbose      Alias for --parser-stats
   --portability  Cross-target portability mode: strict, warn, or off
   --metadata    JSON metadata for Tree-sitter shaping and query generation

@@ -1,0 +1,14 @@
+fn branch_can_enqueue(active: u32, limit: u32) -> bool {
+  return active < limit;
+}
+
+fn branch_next_depth(depth: u32, max_depth: u32) -> u32 {
+  if depth >= max_depth {
+    return max_depth;
+  }
+  return depth + 1;
+}
+
+fn branch_is_exhausted(active: u32, cursor: u32) -> bool {
+  return cursor >= active;
+}

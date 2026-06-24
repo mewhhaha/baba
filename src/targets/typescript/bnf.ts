@@ -171,7 +171,7 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
           severity: "error",
           backend: "typescript",
           message:
-            "The TypeScript parser target cannot lower repetition whose body is nullable.",
+            "The portable parser cannot lower repetition whose body is nullable.",
           span: expression.span,
         });
       }
@@ -184,7 +184,7 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
           severity: "error",
           backend: "typescript",
           message:
-            "The TypeScript parser target cannot lower a separated list whose item is nullable.",
+            "The portable parser cannot lower a separated list whose item is nullable.",
           span: expression.item.span,
         });
       }
@@ -197,7 +197,7 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
           severity: "error",
           backend: "typescript",
           message:
-            "The TypeScript parser target cannot lower a separated list whose separator is nullable.",
+            "The portable parser cannot lower a separated list whose separator is nullable.",
           span: expression.separator.span,
         });
       }

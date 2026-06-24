@@ -19,6 +19,10 @@ import type {
   TokenId,
 } from "./ir.ts";
 import type { RegexAst } from "./regex/ast.ts";
+import {
+  type RegexCompilerLimits,
+  RegexResourceLimitError,
+} from "./regex/limits.ts";
 import { isRegexNullable } from "./regex/nullable.ts";
 import { parsePortableRegex } from "./regex/parser.ts";
 
@@ -29,12 +33,21 @@ export function analyzeGrammar(
     name?: string;
     rootRule?: string;
     metadata?: BabaMetadata;
+    regexLimits?: RegexCompilerLimits;
   } = {},
 ): AnalyzedGrammar {
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  const tokenRegexes = grammar.tokens.map((token) =>
+    parseTokenRegex(token.pattern, token.name, token.span, options.regexLimits)
+  );
+  const regexDiagnostics = new Map<number, readonly Diagnostic[]>();
+  tokenRegexes.forEach((regex, index) => {
+    regexDiagnostics.set(index, regex.diagnostics);
+  });
   const diagnostics = collectGrammarDiagnostics(grammar, {
     rootRule: rootRuleName,
     externals: options.metadata?.externals,
+    regexDiagnostics,
   });
 
   const rulesByName = new Map<string, RuleId>();
@@ -161,7 +174,7 @@ export function analyzeGrammar(
     span: rule.span,
   }));
   const tokens: AnalyzedToken[] = grammar.tokens.map((token, id) => {
-    const regex = analyzeTokenRegex(token.pattern);
+    const regex = tokenRegexes[id];
     return {
       id,
       name: token.name,
@@ -205,6 +218,9 @@ export function analyzeGrammar(
         span: rule.span,
       });
     }
+    diagnostics.push(
+      ...collectGrammarHardeningDiagnostics(rules, reachableRules, rootRule),
+    );
   }
 
   return {
@@ -222,15 +238,249 @@ export function analyzeGrammar(
   };
 }
 
-function analyzeTokenRegex(
-  patternSource: string,
-): { pattern: RegexAst; nullable: boolean } {
-  try {
-    const pattern = parsePortableRegex(patternSource);
-    return { pattern, nullable: isRegexNullable(pattern) };
-  } catch {
-    return { pattern: { kind: "empty" }, nullable: true };
+function collectGrammarHardeningDiagnostics(
+  rules: readonly AnalyzedRule[],
+  reachableRules: ReadonlySet<RuleId>,
+  rootRule: RuleId,
+): Diagnostic[] {
+  const productiveRules = computeProductiveRules(rules);
+  const nullableRules = computeNullableRuleSet(rules);
+  const diagnostics: Diagnostic[] = [];
+  for (const rule of rules) {
+    if (!reachableRules.has(rule.id)) continue;
+    if (!productiveRules.has(rule.id)) {
+      diagnostics.push({
+        code: rule.id === rootRule
+          ? "NONPRODUCTIVE_ROOT"
+          : "NONPRODUCTIVE_RULE",
+        severity: "error",
+        message: rule.id === rootRule
+          ? `Root rule '${rule.name}' cannot derive any sentence.`
+          : `Rule '${rule.name}' cannot derive any sentence.`,
+        span: rule.span,
+      });
+      continue;
+    }
   }
+  diagnostics.push(
+    ...collectNullableRecursiveCycleDiagnostics(
+      rules,
+      reachableRules,
+      nullableRules,
+    ),
+  );
+  return diagnostics;
+}
+
+function computeProductiveRules(
+  rules: readonly AnalyzedRule[],
+): ReadonlySet<RuleId> {
+  const productive = new Set<RuleId>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const rule of rules) {
+      if (productive.has(rule.id)) continue;
+      if (isExpressionProductive(rule.expression, productive)) {
+        productive.add(rule.id);
+        changed = true;
+      }
+    }
+  }
+  return productive;
+}
+
+function isExpressionProductive(
+  expression: AnalyzedExpression,
+  productiveRules: ReadonlySet<RuleId>,
+): boolean {
+  switch (expression.kind) {
+    case "field":
+      return isExpressionProductive(expression.expression, productiveRules);
+    case "ref":
+      return expression.reference.kind === "token" ||
+        expression.reference.kind === "external" ||
+        (expression.reference.kind === "rule" &&
+          productiveRules.has(expression.reference.ruleId));
+    case "literal":
+      return true;
+    case "sequence":
+      return expression.items.every((item) =>
+        isExpressionProductive(item, productiveRules)
+      );
+    case "choice":
+      return expression.options.some((option) =>
+        isExpressionProductive(option, productiveRules)
+      );
+    case "optional":
+    case "repeat":
+      return true;
+    case "repeat1":
+      return isExpressionProductive(expression.expression, productiveRules);
+    case "separated":
+      return isExpressionProductive(expression.item, productiveRules);
+  }
+}
+
+function computeNullableRuleSet(
+  rules: readonly AnalyzedRule[],
+): ReadonlySet<RuleId> {
+  const nullable = new Set<RuleId>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const rule of rules) {
+      if (nullable.has(rule.id)) continue;
+      if (isExpressionNullable(rule.expression, nullable)) {
+        nullable.add(rule.id);
+        changed = true;
+      }
+    }
+  }
+  return nullable;
+}
+
+function collectNullableRecursiveCycleDiagnostics(
+  rules: readonly AnalyzedRule[],
+  reachableRules: ReadonlySet<RuleId>,
+  nullableRules: ReadonlySet<RuleId>,
+): readonly Diagnostic[] {
+  const graph = new Map<RuleId, Set<RuleId>>();
+  for (const rule of rules) {
+    if (!reachableRules.has(rule.id) || !nullableRules.has(rule.id)) continue;
+    const edges = new Set<RuleId>();
+    visitAnalyzedExpression(rule.expression, (expression) => {
+      if (
+        expression.kind === "ref" &&
+        expression.reference.kind === "rule" &&
+        nullableRules.has(expression.reference.ruleId)
+      ) {
+        edges.add(expression.reference.ruleId);
+      }
+    });
+    graph.set(rule.id, edges);
+  }
+  const components = stronglyConnectedComponents(graph);
+  return components
+    .filter((component) =>
+      component.length > 1 ||
+      (graph.get(component[0])?.has(component[0]) ?? false)
+    )
+    .map((component): Diagnostic => {
+      const names = component.map((ruleId) => rules[ruleId].name).sort();
+      return {
+        code: "NULLABLE_RECURSIVE_CYCLE",
+        severity: "warning",
+        message:
+          `Nullable recursive rule cycle can derive empty text indefinitely: ${
+            names.join(", ")
+          }.`,
+        span: rules[component[0]].span,
+        related: component.slice(1).map((ruleId) => ({
+          message: `Cycle member '${rules[ruleId].name}'.`,
+          span: rules[ruleId].span,
+        })),
+      };
+    });
+}
+
+function stronglyConnectedComponents(
+  graph: ReadonlyMap<RuleId, ReadonlySet<RuleId>>,
+): readonly (readonly RuleId[])[] {
+  const components: RuleId[][] = [];
+  const indexByRule = new Map<RuleId, number>();
+  const lowlinkByRule = new Map<RuleId, number>();
+  const stack: RuleId[] = [];
+  const onStack = new Set<RuleId>();
+  let nextIndex = 0;
+
+  const visit = (ruleId: RuleId) => {
+    indexByRule.set(ruleId, nextIndex);
+    lowlinkByRule.set(ruleId, nextIndex);
+    nextIndex++;
+    stack.push(ruleId);
+    onStack.add(ruleId);
+
+    for (const target of graph.get(ruleId) ?? []) {
+      if (!graph.has(target)) continue;
+      if (!indexByRule.has(target)) {
+        visit(target);
+        lowlinkByRule.set(
+          ruleId,
+          Math.min(lowlinkByRule.get(ruleId)!, lowlinkByRule.get(target)!),
+        );
+      } else if (onStack.has(target)) {
+        lowlinkByRule.set(
+          ruleId,
+          Math.min(lowlinkByRule.get(ruleId)!, indexByRule.get(target)!),
+        );
+      }
+    }
+
+    if (lowlinkByRule.get(ruleId) !== indexByRule.get(ruleId)) return;
+    const component: RuleId[] = [];
+    while (stack.length > 0) {
+      const member = stack.pop()!;
+      onStack.delete(member);
+      component.push(member);
+      if (member === ruleId) break;
+    }
+    components.push(component);
+  };
+
+  for (const ruleId of graph.keys()) {
+    if (!indexByRule.has(ruleId)) visit(ruleId);
+  }
+  return components;
+}
+
+function parseTokenRegex(
+  patternSource: string,
+  tokenName: string,
+  span: Diagnostic["span"],
+  limits: RegexCompilerLimits = {},
+): {
+  pattern: RegexAst;
+  nullable: boolean;
+  diagnostics: readonly Diagnostic[];
+} {
+  try {
+    const pattern = parsePortableRegex(patternSource, limits);
+    const nullable = isRegexNullable(pattern);
+    return {
+      pattern,
+      nullable,
+      diagnostics: nullable
+        ? [{
+          code: "INVALID_TOKEN_REGEX",
+          severity: "error",
+          message:
+            `Invalid regex for token '${tokenName}': must not match empty text`,
+          span,
+        }]
+        : [],
+    };
+  } catch (error) {
+    const code = error instanceof RegexResourceLimitError
+      ? `PORTABLE_${error.code}`
+      : "INVALID_TOKEN_REGEX";
+    return {
+      pattern: { kind: "empty" },
+      nullable: true,
+      diagnostics: [{
+        code,
+        severity: "error",
+        message: `Invalid regex for token '${tokenName}': ${
+          errorMessage(error)
+        }`,
+        span,
+      }],
+    };
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function visitAnalyzedExpression(

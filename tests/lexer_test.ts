@@ -17,6 +17,7 @@ import {
   fixtureSamples,
   formatDiagnostic,
   generate,
+  generatedTextContent,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,
   generateTreeSitterQueries,
@@ -70,6 +71,8 @@ Deno.test("generates standalone TypeScript lexer and parser", async () => {
     assertEquals(mod.parserDiagnosticCodeParseInvalidTokenStream, 4);
     assertEquals(mod.parserDiagnosticCodeInternalError, 5);
     assertEquals(mod.parserDiagnosticCodeBranchLimit, 6);
+    assertEquals(mod.parserDiagnosticCodeTraceLimit, 7);
+    assertEquals(mod.parserDiagnosticCodeAmbiguousParse, 8);
     const lexed = mod.lex("let x = 42; // ok");
     const firstToken = lexed.tokens[0] as Record<string, unknown>;
     assertEquals("__babaTerminal" in firstToken, true);
@@ -163,13 +166,43 @@ Deno.test("TypeScript lexer reports overlapping named tokens", () => {
     module = "a" A | "b" B ;
   `;
   const result = compile(source, { targets: ["typescript"] });
-  assertEquals(result.bundle, undefined);
-  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assert(result.bundle);
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].severity, "warning");
   assertIncludes(result.diagnostics[0].message, '"x"');
+  assertIncludes(result.diagnostics[0].message, "expects it separately");
   assertRelatedMessages(result.diagnostics[0], [
     "Left declaration: token A",
     "Right declaration: token B",
   ]);
+});
+
+Deno.test("TypeScript lexer rejects indistinguishable equal-priority token overlaps", () => {
+  const source = `
+    token A = /x/ ;
+    token B = /x/ ;
+    module = A | B ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.bundle, undefined);
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].severity, "error");
+  assertIncludes(result.diagnostics[0].message, '"x"');
+  assertIncludes(result.diagnostics[0].message, "cannot distinguish");
+  assertIncludes(result.diagnostics[0].message, "Add an explicit priority");
+});
+
+Deno.test("TypeScript lexer permits indistinguishable priority token overlaps", () => {
+  const source = `
+    token A priority 10 = /x/ ;
+    token B priority 0 = /x/ ;
+    module = A | B ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assert(result.bundle);
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].severity, "warning");
+  assertIncludes(result.diagnostics[0].message, "explicit priority");
 });
 
 Deno.test("TypeScript lexer reports skip and token overlaps", () => {
@@ -182,7 +215,7 @@ Deno.test("TypeScript lexer reports skip and token overlaps", () => {
     { targets: ["typescript"] },
   );
   assertEquals(result.bundle, undefined);
-  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
   assertIncludes(result.diagnostics[0].message, "skip IGNORED_X");
   assertIncludes(result.diagnostics[0].message, "token X");
   assertIncludes(result.diagnostics[0].message, '"x"');
@@ -202,7 +235,7 @@ Deno.test("TypeScript lexer warns for overlapping skip declarations", () => {
     { targets: ["typescript"] },
   );
   assert(result.bundle);
-  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
   assertEquals(result.diagnostics[0].severity, "warning");
   assertRelatedMessages(result.diagnostics[0], [
     "Left declaration: skip A",
@@ -219,18 +252,17 @@ Deno.test("Lexical priority resolves Tree-sitter token overlaps but not portable
   const treeSitter = compile(source, { targets: ["tree-sitter"] });
   assertEquals(treeSitter.diagnostics.length, 0);
   assert(treeSitter.bundle);
-  const grammar =
-    treeSitter.bundle.files.find((file) => file.path === "grammar.js")
-      ?.content ?? "";
+  const grammar = generatedTextContent(treeSitter.bundle, "grammar.js");
   assertIncludes(
     grammar,
     "TYPE_IDENT: $ => token(prec(10, /[A-Z][0-9A-Z_a-z]*/))",
   );
 
   const portable = compile(source, { targets: ["typescript"] });
-  assertEquals(portable.bundle, undefined);
-  assertEquals(portable.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
-  assertIncludes(portable.diagnostics[0].message, "portable global lexer");
+  assert(portable.bundle);
+  assertEquals(portable.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(portable.diagnostics[0].severity, "warning");
+  assertIncludes(portable.diagnostics[0].message, "standalone lex()");
   assertRelatedMessages(portable.diagnostics[0], [
     "Left declaration: token IDENT",
     "Right declaration: token TYPE_IDENT",
@@ -245,7 +277,7 @@ Deno.test("Lexical priority can keep a token above overlapping trivia", async ()
   `;
   const result = compile(source, { targets: ["typescript"] });
   assert(result.bundle);
-  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
   assertEquals(result.diagnostics[0].severity, "warning");
   assertIncludes(
     result.diagnostics[0].message,
@@ -279,7 +311,7 @@ Deno.test("Lexical priority cannot let trivia shadow a reachable token", () => {
     { targets: ["typescript"] },
   );
   assertEquals(result.bundle, undefined);
-  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
   assertIncludes(result.diagnostics[0].message, "cannot reach the parser");
   assertRelatedMessages(result.diagnostics[0], [
     "Left declaration: skip IGNORED_X",
@@ -296,7 +328,7 @@ Deno.test("Lexical priority cannot hide a reachable literal", () => {
     { targets: ["typescript"] },
   );
   assertEquals(result.bundle, undefined);
-  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
   assertIncludes(result.diagnostics[0].message, 'literal "if"');
   assertRelatedMessages(result.diagnostics[0], [
     "Token declaration: token WORD",
@@ -313,7 +345,7 @@ Deno.test("Trivia cannot overlap a reachable literal", () => {
     { targets: ["typescript"] },
   );
   assertEquals(result.bundle, undefined);
-  assertEquals(result.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
   assertIncludes(result.diagnostics[0].message, "skip WORDS");
   assertIncludes(result.diagnostics[0].message, 'literal "if"');
   assertRelatedMessages(result.diagnostics[0], [
@@ -331,8 +363,12 @@ Deno.test("TypeScript lexer reports real overlap witnesses", () => {
   `,
     { targets: ["typescript"] },
   );
-  assertEquals(classLiteral.bundle, undefined);
-  assertEquals(classLiteral.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assert(classLiteral.bundle);
+  assertEquals(
+    classLiteral.diagnostics[0].code,
+    "PORTABLE_LEXER_TOKEN_OVERLAP",
+  );
+  assertEquals(classLiteral.diagnostics[0].severity, "warning");
   assertIncludes(classLiteral.diagnostics[0].message, '"x"');
 
   const keyword = compile(
@@ -343,8 +379,9 @@ Deno.test("TypeScript lexer reports real overlap witnesses", () => {
   `,
     { targets: ["typescript"] },
   );
-  assertEquals(keyword.bundle, undefined);
-  assertEquals(keyword.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assert(keyword.bundle);
+  assertEquals(keyword.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(keyword.diagnostics[0].severity, "warning");
   assertIncludes(keyword.diagnostics[0].message, '"if"');
 
   const duplicateClass = compile(
@@ -355,8 +392,12 @@ Deno.test("TypeScript lexer reports real overlap witnesses", () => {
   `,
     { targets: ["typescript"] },
   );
-  assertEquals(duplicateClass.bundle, undefined);
-  assertEquals(duplicateClass.diagnostics[0].code, "TS_LEXER_TOKEN_OVERLAP");
+  assert(duplicateClass.bundle);
+  assertEquals(
+    duplicateClass.diagnostics[0].code,
+    "PORTABLE_LEXER_TOKEN_OVERLAP",
+  );
+  assertEquals(duplicateClass.diagnostics[0].severity, "warning");
   assertIncludes(duplicateClass.diagnostics[0].message, '"a"');
   assertNotIncludes(duplicateClass.diagnostics[0].message, '"[a-z]+"');
 
@@ -368,11 +409,12 @@ Deno.test("TypeScript lexer reports real overlap witnesses", () => {
   `,
     { targets: ["typescript"] },
   );
-  assertEquals(equivalentRepeats.bundle, undefined);
+  assert(equivalentRepeats.bundle);
   assertEquals(
     equivalentRepeats.diagnostics[0].code,
-    "TS_LEXER_TOKEN_OVERLAP",
+    "PORTABLE_LEXER_TOKEN_OVERLAP",
   );
+  assertEquals(equivalentRepeats.diagnostics[0].severity, "warning");
   assertIncludes(equivalentRepeats.diagnostics[0].message, '"a"');
 });
 
@@ -469,6 +511,57 @@ Deno.test("TypeScript target rejects nonportable regex shorthand classes", () =>
 });
 
 Deno.test("TypeScript target reports regex resource limits", () => {
+  const sourceLengthOption = compile(`module = "ok" ;`, {
+    targets: ["typescript"],
+    typescript: { regexSourceLengthLimit: 0 },
+  });
+  assertEquals(sourceLengthOption.bundle, undefined);
+  assertEquals(
+    sourceLengthOption.diagnostics[0].code,
+    "PORTABLE_REGEX_SOURCE_LIMIT",
+  );
+
+  const sourceLength = compile(
+    `
+    token LONG = /abcd/ ;
+    module = LONG ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { regexSourceLengthLimit: 3 },
+    },
+  );
+  assertEquals(sourceLength.bundle, undefined);
+  assertEquals(
+    sourceLength.diagnostics[0].code,
+    "PORTABLE_REGEX_SOURCE_LIMIT",
+  );
+  assertIncludes(sourceLength.diagnostics[0].message, "regex source has");
+
+  const nestingOption = compile(`module = "ok" ;`, {
+    targets: ["typescript"],
+    typescript: { regexNestingLimit: 0 },
+  });
+  assertEquals(nestingOption.bundle, undefined);
+  assertEquals(
+    nestingOption.diagnostics[0].code,
+    "PORTABLE_REGEX_NESTING_LIMIT",
+  );
+
+  const nesting = compile(
+    `
+    token NESTED = /((a))/ ;
+    module = NESTED ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { regexNestingLimit: 1 },
+    },
+  );
+  assertEquals(nesting.bundle, undefined);
+  assertEquals(nesting.diagnostics[0].code, "PORTABLE_REGEX_NESTING_LIMIT");
+  assertIncludes(nesting.diagnostics[0].message, "regex nesting depth");
+
   const ast = compile(
     `
     token MANY = /(a|b|c|d)/ ;
@@ -480,7 +573,7 @@ Deno.test("TypeScript target reports regex resource limits", () => {
     },
   );
   assertEquals(ast.bundle, undefined);
-  assertEquals(ast.diagnostics[0].code, "TS_REGEX_AST_NODE_LIMIT");
+  assertEquals(ast.diagnostics[0].code, "PORTABLE_REGEX_AST_NODE_LIMIT");
   assertIncludes(ast.diagnostics[0].message, "regex AST has");
 
   const repeat = compile(
@@ -496,7 +589,7 @@ Deno.test("TypeScript target reports regex resource limits", () => {
   assertEquals(repeat.bundle, undefined);
   assertEquals(
     repeat.diagnostics[0].code,
-    "TS_REGEX_REPEAT_EXPANSION_LIMIT",
+    "PORTABLE_REGEX_REPEAT_EXPANSION_LIMIT",
   );
 
   const nfa = compile(
@@ -510,7 +603,7 @@ Deno.test("TypeScript target reports regex resource limits", () => {
     },
   );
   assertEquals(nfa.bundle, undefined);
-  assertEquals(nfa.diagnostics[0].code, "TS_REGEX_NFA_STATE_LIMIT");
+  assertEquals(nfa.diagnostics[0].code, "PORTABLE_REGEX_NFA_STATE_LIMIT");
 
   const overlap = compile(
     `
@@ -524,7 +617,74 @@ Deno.test("TypeScript target reports regex resource limits", () => {
     },
   );
   assertEquals(overlap.bundle, undefined);
-  assertEquals(overlap.diagnostics[0].code, "TS_REGEX_OVERLAP_WORK_LIMIT");
+  assertEquals(
+    overlap.diagnostics[0].code,
+    "PORTABLE_REGEX_OVERLAP_WORK_LIMIT",
+  );
+
+  const overlapPairOption = compile(`module = "ok" ;`, {
+    targets: ["typescript"],
+    typescript: { regexOverlapPairLimit: 0 },
+  });
+  assertEquals(overlapPairOption.bundle, undefined);
+  assertEquals(
+    overlapPairOption.diagnostics[0].code,
+    "PORTABLE_REGEX_OVERLAP_WORK_LIMIT",
+  );
+
+  const overlapPair = compile(
+    `
+    token A = /a/ ;
+    token B = /b/ ;
+    token C = /c/ ;
+    module = A | B | C ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { regexOverlapPairLimit: 1 },
+    },
+  );
+  assertEquals(overlapPair.bundle, undefined);
+  assertEquals(
+    overlapPair.diagnostics[0].code,
+    "PORTABLE_REGEX_OVERLAP_WORK_LIMIT",
+  );
+  assertIncludes(overlapPair.diagnostics[0].message, "regexOverlapPairLimit");
+});
+
+Deno.test("TypeScript target caps runtime planning diagnostics", () => {
+  const invalidLimit = compile(`module = "ok" ;`, {
+    targets: ["typescript"],
+    typescript: { diagnosticLimit: 0 },
+  });
+  assertEquals(invalidLimit.bundle, undefined);
+  assertEquals(
+    invalidLimit.diagnostics[0].code,
+    "PORTABLE_DIAGNOSTIC_LIMIT_REACHED",
+  );
+
+  const capped = compile(
+    `
+    token A = /x/ ;
+    token B = /x/ ;
+    token C = /x/ ;
+    token D = /x/ ;
+    module = A | B | C | D ;
+  `,
+    {
+      targets: ["typescript"],
+      typescript: { diagnosticLimit: 2 },
+    },
+  );
+  assertEquals(capped.bundle, undefined);
+  assertEquals(capped.diagnostics.length, 3);
+  assertEquals(capped.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(capped.diagnostics[1].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
+  assertEquals(
+    capped.diagnostics[2].code,
+    "PORTABLE_DIAGNOSTIC_LIMIT_REACHED",
+  );
+  assertIncludes(capped.diagnostics[2].message, "suppressed");
 });
 
 Deno.test("TypeScript lexer treats non-BMP characters as single dot tokens", async () => {

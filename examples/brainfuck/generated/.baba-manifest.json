@@ -4,55 +4,81 @@
   "files": {
     "grammar.js": {
       "hash": "1c232eff23f70f5706068f766d91745b8b0fbeb4be6c6f99507fc1a7dd6000fc",
-      "ownership": "generated"
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "queries/generated-highlights.scm": {
       "hash": "a995ceddef44bdbe9ea997bc17167607e0703bd9fdd1a0be05dd18807a2d6248",
-      "ownership": "generated"
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "query"
     },
     "queries/generated-rainbows.scm": {
       "hash": "e20bc1103280388f834ab69d6a705e787ee10375fe56c58cab0f331c7c552c27",
-      "ownership": "generated"
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "query"
     },
     "ts/lexer.ts": {
-      "hash": "e17fe08ae3b6894ea6d11a3b86a49d1a787a23e3a586f909df4bad98c07cb0b8",
-      "ownership": "generated"
+      "hash": "57238cf762294005d013c712f2cf5a10a10e155c27de343c488c3bed57378aee",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "ts/mod.ts": {
-      "hash": "75bb107bba648eec8fe15f3646424ae69299527774bf1ed8b7770abf45aaf9bf",
-      "ownership": "generated"
+      "hash": "72d8a6822815fd0e1c82fa61ee865f0775515cf021975e4633e9eb277004a11d",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "ts/parser.ts": {
-      "hash": "66d21228fed1a3b4132054249937b995d7987243f303e5c1c7d03f29dc957f27",
-      "ownership": "generated"
+      "hash": "2c398b0bb147e51480f4b2ea8498cae15ebb8c28ab5fdec8649e96ffbb4459ef",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "ts/syntax.ts": {
-      "hash": "c1e6c6d352c9465546d92afdbf62eba850176054854d7b6ec59ec1ab83669a61",
-      "ownership": "generated"
+      "hash": "775ede772ba661c61d9a60005fb781ffe3fd1e2698f3fe982fc638249cc149a7",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "wasm/abi.json": {
-      "hash": "7dbc7a214d2163bcb661dcc922aaab7a2054784826f10cdbcd8e237454d6bfc0",
-      "ownership": "generated"
+      "hash": "208d6e0305a44525cee7745acb89a6941d58d1a00c1f15b42d1791f645d24809",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "config"
     },
     "wasm/lexer.ts": {
-      "hash": "75dae170c7eb044977c27958ee7d96c2f0b6c114cf66c529ce8e0dd0bd2cd0c2",
-      "ownership": "generated"
+      "hash": "66745f7005bb2259357ea739672b44b414ed8582ecd3ae3c0fd5b3d9e2280c29",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "wasm/mod.ts": {
-      "hash": "d0692c87ba8fc92712f391cb7fca463d0ae91a03055c1b909bd447e0cc87e0cd",
-      "ownership": "generated"
+      "hash": "f73fa60ec1905f6adbd85913c08d57e8c5e3f15cebcfbd6ba0002dfce8e55b3c",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "wasm/parser.ts": {
-      "hash": "66b60387583c844fbd0d5735a214f020884b7fa17a1db0d40299675c1ecd938e",
-      "ownership": "generated"
+      "hash": "b60bbf95b69a7c838f2a9022feed7a9e095fc8e273a5c1e84670f06f6017a38d",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "wasm/syntax.ts": {
-      "hash": "c1e6c6d352c9465546d92afdbf62eba850176054854d7b6ec59ec1ab83669a61",
-      "ownership": "generated"
+      "hash": "775ede772ba661c61d9a60005fb781ffe3fd1e2698f3fe982fc638249cc149a7",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     },
     "wasm/wasm.ts": {
-      "hash": "e85c9f2c92f60552df9b13c69ceb6f3ffef6c0ad2fa28275ecf221e22e8cfc93",
-      "ownership": "generated"
+      "hash": "05b2999ddc96a2f56aab0569ae6bec05cd8d63be7faa0cec5c75114f7aaee536",
+      "ownership": "generated",
+      "encoding": "utf-8",
+      "kind": "source"
     }
   }
 }

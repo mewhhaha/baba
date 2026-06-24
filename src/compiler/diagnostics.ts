@@ -20,7 +20,11 @@ export function validateEbnfGrammar(
 /** Collects grammar-level semantic diagnostics without stopping at first error. */
 export function collectGrammarDiagnostics(
   grammar: EbnfGrammar,
-  options: { rootRule?: string; externals?: readonly string[] } = {},
+  options: {
+    rootRule?: string;
+    externals?: readonly string[];
+    regexDiagnostics?: ReadonlyMap<number, readonly Diagnostic[]>;
+  } = {},
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   if (grammar.rules.length === 0) {
@@ -67,7 +71,7 @@ export function collectGrammarDiagnostics(
     }
     declaredNames.add(external);
   }
-  for (const token of grammar.tokens) {
+  for (const [index, token] of grammar.tokens.entries()) {
     if (reservedTokenDeclarationNames.has(token.name)) {
       diagnostics.push({
         code: "RESERVED_GENERATED_NAME",
@@ -84,14 +88,14 @@ export function collectGrammarDiagnostics(
         span: token.span,
       });
     }
-    diagnostics.push(
-      ...analyzeRegexPattern({
+    const regexDiagnostics = options.regexDiagnostics?.get(index) ??
+      analyzeRegexPattern({
         pattern: token.pattern,
         label: `Invalid regex for token '${token.name}'`,
         code: "INVALID_TOKEN_REGEX",
         span: token.span,
-      }).diagnostics,
-    );
+      }).diagnostics;
+    diagnostics.push(...regexDiagnostics);
     declaredNames.add(token.name);
     if (token.kind === "skip") skipNames.add(token.name);
     else tokenNames.add(token.name);

@@ -49,8 +49,17 @@ jobs:
       - name: Test
         run: deno task test
 
+      - name: Bootstrap drift check
+        run: deno task bootstrap:check
+
       - name: Runtime smoke
         run: deno run --allow-read --allow-write --allow-run tests/runtime_smoke.ts deno node bun
+
+      - name: Size budget check
+        run: deno task size:check
+
+      - name: Benchmark JSON smoke
+        run: deno task bench -- --quick --samples 1 --json bench-results.json
 
       - name: Publish dry run
         run: deno task publish:dry-run

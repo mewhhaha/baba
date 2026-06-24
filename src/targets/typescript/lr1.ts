@@ -105,7 +105,7 @@ export function buildCanonicalLr1Table(
         severity: "error",
         backend: "typescript",
         message:
-          `The TypeScript parser exceeded the canonical LR(1) state limit (${options.stateLimit}).`,
+          `The portable parser exceeded the canonical LR(1) state limit (${options.stateLimit}).`,
       });
       return states[0] ?? { id: 0, items: [] };
     }
@@ -118,7 +118,7 @@ export function buildCanonicalLr1Table(
         severity: "error",
         backend: "typescript",
         message:
-          `The TypeScript parser exceeded the canonical LR(1) item limit (${options.itemLimit}).`,
+          `The portable parser exceeded the canonical LR(1) item limit (${options.itemLimit}).`,
       });
       return states[0] ?? { id: 0, items: [] };
     }
@@ -153,6 +153,14 @@ export function buildCanonicalLr1Table(
 
   const actions = new Map<number, Map<number, LrActionSet>>();
   const gotos = new Map<number, Map<number, number>>();
+  const conflictResolutions = options.conflictResolutions ?? [];
+  diagnostics.push(
+    ...duplicateConflictResolutionDiagnostics(conflictResolutions),
+  );
+  const conflictResolutionUseCounts = new Array(conflictResolutions.length)
+    .fill(0);
+  const conflictGroups = options.conflictGroups ?? [];
+  const conflictGroupUseCounts = new Array(conflictGroups.length).fill(0);
 
   const setAction = (
     state: LrState,
@@ -176,8 +184,26 @@ export function buildCanonicalLr1Table(
       state,
       terminal,
       nextActions,
-      options.conflictResolutions ?? [],
-      options.conflictGroups ?? [],
+      conflictResolutions,
+      conflictGroups,
+      (index, context) => {
+        if (
+          conflictResolutionUseCounts[index] === 0 &&
+          conflictResolutions[index]?.conflict === undefined
+        ) {
+          diagnostics.push(
+            legacyConflictResolutionMigrationDiagnostic(
+              index,
+              grammar,
+              context,
+            ),
+          );
+        }
+        conflictResolutionUseCounts[index]++;
+      },
+      (index) => {
+        conflictGroupUseCounts[index]++;
+      },
     );
     if (resolved) {
       row.set(terminal, resolved);
@@ -233,6 +259,13 @@ export function buildCanonicalLr1Table(
   const actionEntries = countActionEntries(actions);
   const gotoEntries = countEntries(gotos);
   const tableEntries = actionEntries + gotoEntries;
+  diagnostics.push(
+    ...unusedConflictResolutionDiagnostics(
+      conflictResolutions,
+      conflictResolutionUseCounts,
+    ),
+    ...unusedConflictGroupDiagnostics(conflictGroups, conflictGroupUseCounts),
+  );
   if (
     options.tableEntryLimit !== undefined &&
     tableEntries > options.tableEntryLimit
@@ -242,7 +275,7 @@ export function buildCanonicalLr1Table(
       severity: "error",
       backend: "typescript",
       message:
-        `The TypeScript parser exceeded the ACTION/GOTO table entry limit (${options.tableEntryLimit}).`,
+        `The portable parser exceeded the ACTION/GOTO table entry limit (${options.tableEntryLimit}).`,
     });
   }
 
@@ -449,7 +482,8 @@ function conflictDiagnostic(
       isShiftReduce ? "Shift/reduce" : "Reduce/reduce"
     } conflict on ${terminalName}${
       ruleName ? ` in rule ${JSON.stringify(ruleName)}` : ""
-    } while generating the TypeScript parser.`,
+    } while generating the portable parser.`,
+    `Conflict ID: ${conflictId(grammar, context)}`,
     "",
     ...originDescriptions(
       grammar,
@@ -503,6 +537,7 @@ function metadataSuggestionLines(
 ): string[] {
   const rules = uniqueRuleNames(context.origins);
   const terminal = terminalMetadataValue(grammar, context.terminal);
+  const stableConflictId = conflictId(grammar, context);
   const resolution = {
     rules,
     on: terminal,
@@ -514,6 +549,8 @@ function metadataSuggestionLines(
   const lines = [
     "Resolve this in metadata.parser.resolutions with an entry like:",
     indentJson(resolution),
+    "Stable conflict selector for metadata v2:",
+    indentJson({ conflict: stableConflictId }),
   ];
   if (isShiftReduce) {
     lines.push(
@@ -655,19 +692,195 @@ function resolveConflict(
   actions: readonly LrAction[],
   resolutions: readonly ParserConflictResolutionMetadata[],
   conflictGroups: readonly (readonly string[])[],
+  markResolutionUsed: (index: number, context: ConflictContext) => void,
+  markConflictGroupUsed: (index: number) => void,
 ): LrActionSet | undefined {
   const context = conflictContext(grammar, state, terminal, actions);
-  for (const resolution of resolutions) {
+  for (const [index, resolution] of resolutions.entries()) {
     if (!resolutionMatches(grammar, context, resolution)) continue;
     const selected = selectResolvedAction(context, resolution);
-    if (selected) return [selected];
+    if (selected) {
+      markResolutionUsed(index, context);
+      return [selected];
+    }
   }
-  for (const group of conflictGroups) {
+  for (const [index, group] of conflictGroups.entries()) {
     if (originGroupMatches(context.origins, group)) {
+      markConflictGroupUsed(index);
       return sortActions(actions);
     }
   }
   return undefined;
+}
+
+function unusedConflictResolutionDiagnostics(
+  resolutions: readonly ParserConflictResolutionMetadata[],
+  useCounts: readonly number[],
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  for (const [index, resolution] of resolutions.entries()) {
+    if (!resolution.conflict || (useCounts[index] ?? 0) > 0) continue;
+    diagnostics.push({
+      code: "TS_PARSER_CONFLICT_METADATA",
+      severity: "error",
+      backend: "typescript",
+      message:
+        `metadata.parser.resolutions[${index}].conflict references unknown conflict ID ${
+          JSON.stringify(resolution.conflict)
+        }. Regenerate the conflict diagnostic and copy the current stable conflict ID, or remove this stale resolution.`,
+    });
+  }
+  return diagnostics;
+}
+
+function unusedConflictGroupDiagnostics(
+  conflictGroups: readonly (readonly string[])[],
+  useCounts: readonly number[],
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  for (const [index, group] of conflictGroups.entries()) {
+    if ((useCounts[index] ?? 0) > 0) continue;
+    diagnostics.push({
+      code: "TS_PARSER_CONFLICT_METADATA",
+      severity: "error",
+      backend: "typescript",
+      message:
+        `metadata.parser.conflicts[${index}] did not match any LR conflict. Regenerate the conflict diagnostic and update this branch declaration, or remove the stale group ${
+          JSON.stringify(group)
+        }.`,
+    });
+  }
+  return diagnostics;
+}
+
+function duplicateConflictResolutionDiagnostics(
+  resolutions: readonly ParserConflictResolutionMetadata[],
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const firstByConflict = new Map<string, {
+    index: number;
+    prefer: ParserConflictResolutionMetadata["prefer"];
+    reduce?: string;
+  }>();
+  for (const [index, resolution] of resolutions.entries()) {
+    if (!resolution.conflict) continue;
+    const previous = firstByConflict.get(resolution.conflict);
+    if (!previous) {
+      firstByConflict.set(resolution.conflict, {
+        index,
+        prefer: resolution.prefer,
+        reduce: resolution.reduce,
+      });
+      continue;
+    }
+    const contradictory = previous.prefer !== resolution.prefer ||
+      previous.reduce !== resolution.reduce;
+    diagnostics.push({
+      code: "TS_PARSER_CONFLICT_METADATA",
+      severity: "error",
+      backend: "typescript",
+      message:
+        `metadata.parser.resolutions[${index}].conflict duplicates metadata.parser.resolutions[${previous.index}].conflict for ${
+          JSON.stringify(resolution.conflict)
+        }${
+          contradictory ? " with a contradictory resolution" : ""
+        }. Keep exactly one resolution for each stable conflict ID.`,
+    });
+  }
+  return diagnostics;
+}
+
+function legacyConflictResolutionMigrationDiagnostic(
+  index: number,
+  grammar: BnfGrammar,
+  context: ConflictContext,
+): Diagnostic {
+  const stableSelector = { conflict: conflictId(grammar, context) };
+  return {
+    code: "TS_PARSER_CONFLICT_METADATA",
+    severity: "information",
+    backend: "typescript",
+    message: [
+      `metadata.parser.resolutions[${index}] uses legacy rule/on matching. Prefer the stable conflict selector:`,
+      indentJson(stableSelector),
+    ].join("\n"),
+  };
+}
+
+function conflictId(grammar: BnfGrammar, context: ConflictContext): string {
+  const payload = {
+    semantics: "baba-lr-conflict-v1",
+    lookahead: terminalStableKey(grammar, context.terminal),
+    actions: context.actions.map((action) =>
+      actionStableKey(grammar, context, action)
+    ).sort(),
+  };
+  return `c_${fnv1a64(JSON.stringify(payload)).slice(0, 16)}`;
+}
+
+function actionStableKey(
+  grammar: BnfGrammar,
+  context: ConflictContext,
+  action: LrAction,
+): string {
+  if (action.kind === "accept") return "accept";
+  if (action.kind === "reduce") {
+    return `reduce:${
+      productionStableKey(
+        grammar,
+        grammar.productions[action.production],
+      )
+    }`;
+  }
+  return `shift:${
+    context.shiftProductions.map((production) =>
+      productionStableKey(grammar, production)
+    ).sort().join("|")
+  }`;
+}
+
+function productionStableKey(
+  grammar: BnfGrammar,
+  production: BnfProduction,
+): string {
+  const lhs = grammar.nonterminals[production.lhs]?.name ??
+    `nonterminal:${production.lhs}`;
+  const rhs = production.rhs.map((symbol) => symbolStableKey(grammar, symbol));
+  const origin = production.origin;
+  const originKey = origin
+    ? `rule:${origin.ruleName}:expr:${origin.expressionId ?? "rule"}`
+    : "origin:none";
+  return JSON.stringify({
+    origin: originKey,
+    lhs,
+    rhs,
+    reducer: production.reducer,
+  });
+}
+
+function symbolStableKey(grammar: BnfGrammar, symbol: BnfSymbol): string {
+  if (symbol.kind === "terminal") return terminalStableKey(grammar, symbol.id);
+  const nonterminal = grammar.nonterminals[symbol.id];
+  if (!nonterminal) return `nonterminal:${symbol.id}`;
+  if (nonterminal.ruleId !== undefined) return `rule:${nonterminal.name}`;
+  return `expr:${nonterminal.name}:${nonterminal.expressionId ?? symbol.id}`;
+}
+
+function terminalStableKey(grammar: BnfGrammar, terminal: number): string {
+  const info = grammar.terminals[terminal];
+  if (!info) return `terminal:${terminal}`;
+  if (info.kind === "eof") return "eof";
+  if (info.kind === "named") return `named:${info.key}`;
+  return `literal:${info.key}`;
+}
+
+function fnv1a64(source: string): string {
+  let hash = 0xcbf29ce484222325n;
+  for (let index = 0; index < source.length; index++) {
+    hash ^= BigInt(source.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
 }
 
 interface ConflictContext {
@@ -709,6 +922,12 @@ function resolutionMatches(
   context: ConflictContext,
   resolution: ParserConflictResolutionMetadata,
 ): boolean {
+  if (
+    resolution.conflict !== undefined &&
+    resolution.conflict !== conflictId(grammar, context)
+  ) {
+    return false;
+  }
   if (
     resolution.on !== undefined &&
     !terminalMatches(grammar, context.terminal, resolution.on)

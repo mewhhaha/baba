@@ -2,12 +2,14 @@ import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { BnfGrammar, ReducerSpec } from "../typescript/bnf.ts";
 import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
 import {
+  PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE,
   PARSER_DIAGNOSTIC_CODE_BRANCH_LIMIT,
   PARSER_DIAGNOSTIC_CODE_INTERNAL_ERROR,
   PARSER_DIAGNOSTIC_CODE_PARSE_INVALID_TOKEN_STREAM,
   PARSER_DIAGNOSTIC_CODE_PARSE_LEXICAL_ERROR,
   PARSER_DIAGNOSTIC_CODE_PARSE_TRAILING_INPUT,
   PARSER_DIAGNOSTIC_CODE_PARSE_UNEXPECTED_TOKEN,
+  PARSER_DIAGNOSTIC_CODE_TRACE_LIMIT,
   PARSER_DIAGNOSTIC_DETAIL_NONE,
   PARSER_DIAGNOSTIC_DETAIL_PARSER_STATE,
 } from "./diagnostic_codes.ts";
@@ -157,12 +159,15 @@ import {
   RUNTIME_TOKEN_STREAM_STATUS_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF,
   RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN,
+  RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP,
   RUNTIME_TOKEN_STREAM_STATUS_OK,
   RUNTIME_TOKEN_STREAM_STATUS_OVERLAP,
   RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH,
   RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH,
+  RUNTIME_TRACE_STATUS_AMBIGUOUS,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_OK,
+  RUNTIME_TRACE_STATUS_TRACE_LIMIT,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
   RUNTIME_TRACE_TOKEN_STREAM_EMIT,
   RUNTIME_TRACE_TOKEN_STREAM_SKIP,
@@ -174,6 +179,10 @@ import { emitPublicParseResultMaterializer } from "./public_parse_result_materia
 import { emitPublicRuleNodeMaterializer } from "./public_rule_node_materializer.ts";
 import { emitPublicSourceTextBoundary } from "./public_source_text.ts";
 import { emitPublicEofTokenMaterializer } from "./public_token_materializer.ts";
+import type {
+  PortableParserPlanV1,
+  PortableReducerPlan,
+} from "./portable_plan.ts";
 
 export type ParserEmitMode = "typescript" | "wasm";
 
@@ -188,122 +197,94 @@ type EncodedAction =
 
 type GotoEntry = readonly [nonterminal: number, state: number];
 
+interface ParserRuntimeModel {
+  readonly eofTerminal: number;
+  readonly hasBranchingActions: boolean;
+  readonly actionRows: readonly (readonly EncodedAction[])[];
+  readonly gotoRows: readonly (readonly GotoEntry[])[];
+  readonly runtimeProductions: readonly (readonly [
+    lhs: number,
+    length: number,
+  ])[];
+  readonly reducerEntries:
+    readonly (readonly [kind: number, payload: number])[];
+  readonly fieldRows: readonly (readonly (readonly [
+    fieldId: number,
+    flags: number,
+  ])[])[];
+  readonly expectedRows: readonly (readonly string[])[];
+  readonly lexerSpecs: readonly (readonly [
+    flags: number,
+    payload: number,
+    terminal: number,
+  ])[];
+  readonly namedSpecIndices: readonly (readonly [string, number])[];
+  readonly literalSpecIndices: readonly (readonly [string, number])[];
+  readonly ruleNames: readonly string[];
+  readonly fieldNames: readonly string[];
+}
+
 export function emitParser(
   analyzed: AnalyzedGrammar,
   bnf: BnfGrammar,
   lr: LrTable,
   options: ParserEmitOptions = {},
 ): string {
+  return emitParserModel(
+    parserRuntimeModelFromCompiler(analyzed, bnf, lr),
+    options,
+  );
+}
+
+export function emitParserFromPortablePlan(
+  plan: PortableParserPlanV1,
+  options: ParserEmitOptions = {},
+): string {
+  return emitParserModel(parserRuntimeModelFromPortablePlan(plan), options);
+}
+
+function emitParserModel(
+  model: ParserRuntimeModel,
+  options: ParserEmitOptions = {},
+): string {
   const mode = options.mode ?? "typescript";
   const emitTypeScriptTables = mode === "typescript";
   const emitBranchRuntime = mode === "typescript" &&
-    hasMultiActionEntries(lr.actions);
-  const actionRows = bnfActionTableRows(lr.actions);
-  const gotoRows = bnfTableRows(lr.gotos, (nonterminal, target) => [
-    nonterminal,
-    target,
-  ]);
-  const runtimeProductions = bnf.productions.map((production) =>
-    [production.lhs, production.rhs.length] as const
-  );
+    model.hasBranchingActions;
   const tableRuntimeProgram = emitTypeScriptTables
     ? emitBranchRuntime
       ? createParserConflictTraceRuntimeProgram({
-        actionRows: parserRuntimeActionRows(actionRows),
-        gotoRows,
-        productions: runtimeProductions,
+        actionRows: parserRuntimeActionRows(model.actionRows),
+        gotoRows: model.gotoRows,
+        productions: model.runtimeProductions,
       })
       : createParserTraceRuntimeProgram({
-        actionRows: parserRuntimeActionRows(actionRows),
-        gotoRows,
-        productions: runtimeProductions,
+        actionRows: parserRuntimeActionRows(model.actionRows),
+        gotoRows: model.gotoRows,
+        productions: model.runtimeProductions,
       })
     : null;
   const productionRuntimeProgram = createParserProductionRuntimeProgram({
-    productions: runtimeProductions,
+    productions: model.runtimeProductions,
   });
   const actionRuntimeProgram = createParserActionRuntimeProgram();
-  const fieldSchemaModels = collectRuleFieldSchemas(analyzed);
-  const fieldNames = [
-    ...new Set([
-      ...fieldSchemaModels.flatMap((schema) =>
-        schema.fields.map((field) => field.name)
-      ),
-      ...bnf.productions.flatMap((production) =>
-        production.reducer.kind === "field" ? [production.reducer.name] : []
-      ),
-    ]),
-  ].sort((left, right) => left.localeCompare(right));
-  const fieldIds = new Map(fieldNames.map((name, index) => [name, index]));
   const reducerRuntimeProgram = createParserReducerRuntimeProgram({
-    reducers: bnf.productions.map((production) =>
-      parserRuntimeReducerEntry(production.reducer, fieldIds)
-    ),
+    reducers: model.reducerEntries,
   });
-  const fieldRows: Array<Array<readonly [fieldId: number, flags: number]>> =
-    Array.from({ length: analyzed.rules.length }, () => []);
-  for (const schema of fieldSchemaModels) {
-    fieldRows[schema.ruleId] = schema.fields.map((field) =>
-      [
-        fieldIds.get(field.name)!,
-        (field.array ? RUNTIME_FIELD_ARRAY : 0) |
-        (field.nullable ? RUNTIME_FIELD_NULLABLE : 0),
-      ] as const
-    );
-  }
-  const fieldRuntimeProgram = createParserFieldRuntimeProgram({ fieldRows });
+  const fieldRuntimeProgram = createParserFieldRuntimeProgram({
+    fieldRows: model.fieldRows,
+  });
   const parserObjectRuntimeProgram = createParserObjectRuntimeProgram({
     includeArena: tableRuntimeProgram === null,
   });
   const parserReplayRuntimeProgram = createParserReplayRuntimeProgram();
-  const expectedRows = expectedTerminalRows(bnf, lr);
   const expectedRuntimeProgram = createParserExpectedRuntimeProgram({
-    rowLengths: expectedRows.map((row) => row.length),
-    rowHasEof: expectedRows.map((row) => row.includes("EOF")),
+    rowLengths: model.expectedRows.map((row) => row.length),
+    rowHasEof: model.expectedRows.map((row) => row.includes("EOF")),
   });
-  const namedTerminalIds = new Map<number, number>();
-  const literalTerminalIds = new Map<number, number>();
-  for (const terminal of bnf.terminals) {
-    if (terminal.kind === "named") {
-      namedTerminalIds.set(terminal.tokenId!, terminal.id);
-    }
-    if (terminal.kind === "literal") {
-      literalTerminalIds.set(terminal.literalId!, terminal.id);
-    }
-  }
-  const namedTokens = analyzed.tokens
-    .filter((token) =>
-      token.kind === "skip" ||
-      (token.kind === "token" && analyzed.reachableTokens.has(token.id))
-    );
-  const literalSpecs = analyzed.literals
-    .filter((literal) => analyzed.reachableLiterals.has(literal.id));
-  const literalSpecOffset = namedTokens.length;
-  const namedSpecIndices = namedTokens.map((token, index) =>
-    [token.name, index] as const
-  );
-  const literalSpecIndices = literalSpecs.map((literal, index) =>
-    [literal.value, literalSpecOffset + index] as const
-  );
   const lexerSpecRuntimeProgram = createLexerSpecRuntimeProgram({
-    specs: [
-      ...namedTokens.map((token, payload) =>
-        [
-          token.kind === "skip" ? RUNTIME_LEXER_SPEC_TRIVIA : 0,
-          payload,
-          token.kind === "skip" ? -1 : namedTerminalIds.get(token.id) ?? -1,
-        ] as const
-      ),
-      ...literalSpecs.map((literal, payload) =>
-        [
-          RUNTIME_LEXER_SPEC_LITERAL,
-          payload,
-          literalTerminalIds.get(literal.id) ?? -1,
-        ] as const
-      ),
-    ],
+    specs: model.lexerSpecs,
   });
-  const ruleNames = analyzed.rules.map((rule) => rule.name);
   const runtimeProgram = mergeRuntimePrograms(
     tableRuntimeProgram
       ? mergeRuntimePrograms(tableRuntimeProgram, expectedRuntimeProgram)
@@ -334,12 +315,12 @@ ${importSource(mode)}
 ${commonTypes()}
 ${
     commonConstants({
-      bnf,
-      expectedRows,
-      namedSpecIndices,
-      literalSpecIndices,
-      ruleNames,
-      fieldNames,
+      eofTerminal: model.eofTerminal,
+      expectedRows: model.expectedRows,
+      namedSpecIndices: model.namedSpecIndices,
+      literalSpecIndices: model.literalSpecIndices,
+      ruleNames: model.ruleNames,
+      fieldNames: model.fieldNames,
     })
   }
 
@@ -359,11 +340,262 @@ ${reductionRuntime().trimEnd()}
 `;
 }
 
+function parserRuntimeModelFromCompiler(
+  analyzed: AnalyzedGrammar,
+  bnf: BnfGrammar,
+  lr: LrTable,
+): ParserRuntimeModel {
+  const actionRows = bnfActionTableRows(lr.actions);
+  const gotoRows = bnfTableRows(lr.gotos, (nonterminal, target) => [
+    nonterminal,
+    target,
+  ]);
+  const runtimeProductions = bnf.productions.map((production) =>
+    [production.lhs, production.rhs.length] as const
+  );
+  const fieldSchemaModels = collectRuleFieldSchemas(analyzed);
+  const fieldNames = [
+    ...new Set([
+      ...fieldSchemaModels.flatMap((schema) =>
+        schema.fields.map((field) => field.name)
+      ),
+      ...bnf.productions.flatMap((production) =>
+        production.reducer.kind === "field" ? [production.reducer.name] : []
+      ),
+    ]),
+  ].sort((left, right) => left.localeCompare(right));
+  const fieldIds = new Map(fieldNames.map((name, index) => [name, index]));
+  const fieldRows: Array<Array<readonly [fieldId: number, flags: number]>> =
+    Array.from({ length: analyzed.rules.length }, () => []);
+  for (const schema of fieldSchemaModels) {
+    fieldRows[schema.ruleId] = schema.fields.map((field) =>
+      [
+        fieldIds.get(field.name)!,
+        (field.array ? RUNTIME_FIELD_ARRAY : 0) |
+        (field.nullable ? RUNTIME_FIELD_NULLABLE : 0),
+      ] as const
+    );
+  }
+  const namedTerminalIds = new Map<number, number>();
+  const literalTerminalIds = new Map<number, number>();
+  for (const terminal of bnf.terminals) {
+    if (terminal.kind === "named") {
+      namedTerminalIds.set(terminal.tokenId!, terminal.id);
+    }
+    if (terminal.kind === "literal") {
+      literalTerminalIds.set(terminal.literalId!, terminal.id);
+    }
+  }
+  const namedTokens = analyzed.tokens
+    .filter((token) =>
+      token.kind === "skip" ||
+      (token.kind === "token" && analyzed.reachableTokens.has(token.id))
+    );
+  const literalSpecs = analyzed.literals
+    .filter((literal) => analyzed.reachableLiterals.has(literal.id));
+  const literalSpecOffset = namedTokens.length;
+  return {
+    eofTerminal: bnf.eofTerminal,
+    hasBranchingActions: hasMultiActionEntries(lr.actions),
+    actionRows,
+    gotoRows,
+    runtimeProductions,
+    reducerEntries: bnf.productions.map((production) =>
+      parserRuntimeReducerEntry(production.reducer, fieldIds)
+    ),
+    fieldRows,
+    expectedRows: expectedTerminalRows(bnf, lr),
+    lexerSpecs: [
+      ...namedTokens.map((token, payload) =>
+        [
+          token.kind === "skip" ? RUNTIME_LEXER_SPEC_TRIVIA : 0,
+          payload,
+          token.kind === "skip" ? -1 : namedTerminalIds.get(token.id) ?? -1,
+        ] as const
+      ),
+      ...literalSpecs.map((literal, payload) =>
+        [
+          RUNTIME_LEXER_SPEC_LITERAL,
+          payload,
+          literalTerminalIds.get(literal.id) ?? -1,
+        ] as const
+      ),
+    ],
+    namedSpecIndices: namedTokens.map((token, index) =>
+      [token.name, index] as const
+    ),
+    literalSpecIndices: literalSpecs.map((literal, index) =>
+      [literal.value, literalSpecOffset + index] as const
+    ),
+    ruleNames: analyzed.rules.map((rule) => rule.name),
+    fieldNames,
+  };
+}
+
+function parserRuntimeModelFromPortablePlan(
+  plan: PortableParserPlanV1,
+): ParserRuntimeModel {
+  const fieldNames = [...plan.symbols.fields]
+    .sort((left, right) => left.id - right.id)
+    .map((field) => field.name);
+  const fieldIds = new Map(
+    fieldNames.map((name, index) => [name, index] as const),
+  );
+  const maxRuleId = Math.max(
+    -1,
+    ...plan.diagnostics.ruleDisplays.map((rule) => rule.id),
+    ...plan.cst.rules.map((rule) => rule.ruleId),
+  );
+  const fieldRows: Array<Array<readonly [fieldId: number, flags: number]>> =
+    Array.from({ length: maxRuleId + 1 }, () => []);
+  for (const schema of plan.cst.rules) {
+    fieldRows[schema.ruleId] = schema.fields.map((field) =>
+      [
+        fieldIds.get(field.name) ?? -1,
+        (field.array ? RUNTIME_FIELD_ARRAY : 0) |
+        (field.nullable ? RUNTIME_FIELD_NULLABLE : 0),
+      ] as const
+    );
+  }
+  const ruleNames = Array.from(
+    { length: maxRuleId + 1 },
+    (_, index) =>
+      plan.diagnostics.ruleDisplays.find((rule) => rule.id === index)
+        ?.display ??
+        `rule_${index}`,
+  );
+  const namedSpecs = plan.lexer.specifications
+    .filter((spec) => spec.type === "named");
+  const literalSpecs = plan.lexer.specifications
+    .filter((spec) => spec.type === "literal");
+  const literalSpecOffset = namedSpecs.length;
+  const terminalDisplays = new Map(
+    plan.diagnostics.terminalDisplays.map((terminal) =>
+      [terminal.id, terminal.display] as const
+    ),
+  );
+  return {
+    eofTerminal: plan.parser.eofTerminal,
+    hasBranchingActions: plan.parser.actions.some((row) =>
+      row.entries.some((entry) => entry.actions.length > 1)
+    ),
+    actionRows: actionRowsFromPortablePlan(plan),
+    gotoRows: gotoRowsFromPortablePlan(plan),
+    runtimeProductions: plan.parser.productions.map((production) =>
+      [production.lhs, production.rhs.length] as const
+    ),
+    reducerEntries: plan.reducers
+      .slice()
+      .sort((left, right) => left.id - right.id)
+      .map(portableReducerRuntimeEntry),
+    fieldRows,
+    expectedRows: plan.diagnostics.expectedTerminalsByState.map((row) =>
+      row.terminals.map((terminal) =>
+        terminalDisplays.get(terminal) ?? `#${terminal}`
+      ).sort()
+    ),
+    lexerSpecs: [
+      ...namedSpecs.map((spec, payload) =>
+        [
+          spec.channel === "trivia" ? RUNTIME_LEXER_SPEC_TRIVIA : 0,
+          payload,
+          spec.terminalId ?? -1,
+        ] as const
+      ),
+      ...literalSpecs.map((spec, payload) =>
+        [
+          RUNTIME_LEXER_SPEC_LITERAL,
+          payload,
+          spec.terminalId,
+        ] as const
+      ),
+    ],
+    namedSpecIndices: namedSpecs.map((spec, index) => {
+      const token = plan.symbols.tokens[spec.tokenId];
+      return [token?.name ?? `token_${spec.tokenId}`, index] as const;
+    }),
+    literalSpecIndices: literalSpecs.map((spec, index) => {
+      const literal = plan.symbols.literals[spec.literalId];
+      return [
+        literal?.value ?? "",
+        literalSpecOffset + index,
+      ] as const;
+    }),
+    ruleNames,
+    fieldNames,
+  };
+}
+
+function actionRowsFromPortablePlan(
+  plan: PortableParserPlanV1,
+): EncodedAction[][] {
+  const byState = new Map(plan.parser.actions.map((row) => [row.state, row]));
+  return plan.parser.states.map((state) =>
+    (byState.get(state.id)?.entries ?? []).flatMap((entry) =>
+      entry.actions.map((action) => {
+        if (action.kind === "shift") {
+          return [entry.terminal, 1, action.state] as const;
+        }
+        if (action.kind === "reduce") {
+          return [entry.terminal, 2, action.production] as const;
+        }
+        return [entry.terminal, 3] as const;
+      })
+    )
+  );
+}
+
+function gotoRowsFromPortablePlan(plan: PortableParserPlanV1): GotoEntry[][] {
+  const byState = new Map(plan.parser.gotos.map((row) => [row.state, row]));
+  return plan.parser.states.map((state) =>
+    (byState.get(state.id)?.entries ?? []).map((entry) =>
+      [entry.nonterminal, entry.target] as const
+    )
+  );
+}
+
+function portableReducerRuntimeEntry(
+  reducer: PortableReducerPlan,
+): readonly [kind: number, payload: number] {
+  switch (reducer.op) {
+    case "start":
+      return [RUNTIME_REDUCER_START, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "rule":
+      return [RUNTIME_REDUCER_RULE, reducer.ruleId];
+    case "terminal":
+      return [RUNTIME_REDUCER_TERMINAL, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "rule-ref":
+      return [RUNTIME_REDUCER_RULE_REF, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "identity":
+      return [RUNTIME_REDUCER_IDENTITY, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "sequence":
+      return [RUNTIME_REDUCER_SEQUENCE, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "optional-empty":
+      return [RUNTIME_REDUCER_OPTIONAL_EMPTY, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "optional-some":
+      return [RUNTIME_REDUCER_OPTIONAL_SOME, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "repeat-empty":
+      return [RUNTIME_REDUCER_REPEAT_EMPTY, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "repeat-append":
+      return [RUNTIME_REDUCER_REPEAT_APPEND, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "repeat1-first":
+      return [RUNTIME_REDUCER_REPEAT1_FIRST, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "repeat1-append":
+      return [RUNTIME_REDUCER_REPEAT1_APPEND, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "separated-first":
+      return [RUNTIME_REDUCER_SEPARATED_FIRST, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "separated-append":
+      return [RUNTIME_REDUCER_SEPARATED_APPEND, RUNTIME_NO_REDUCER_PAYLOAD];
+    case "field":
+      return [RUNTIME_REDUCER_FIELD, reducer.fieldId];
+  }
+}
+
 function importSource(mode: ParserEmitMode): string {
   const lexerImport = mode === "wasm"
     ? `import { lex, lexForParse, type WasmParseStream } from "./lexer.ts";
 import { createParseTraceInput, parseTrace, type ParseTraceInput } from "./wasm.ts";`
-    : `import { lex } from "./lexer.ts";`;
+    : `import { lex, lexForParse, type ParseLexCandidateStream } from "./lexer.ts";`;
   return `${lexerImport}
 import type {
   AnyRuleNode,
@@ -384,19 +616,91 @@ function commonTypes(): string {
   end: number;
 }
 
+interface ContextualLexingStatsRecord {
+  ambiguousLexicalSites: number;
+  contextualCandidateChecks: number;
+  attemptedTokenSelections: number;
+  reductionsBeforeTokenSelection: number;
+}
+
+interface ParserRuntimeLimits {
+  maxExploredBranches: number;
+  maxQueuedBranches: number;
+  maxTraceActions: number;
+  ambiguityMode: number;
+}
+
+function reportContextualLexingStats(
+  reportStats: ParseOptions["contextualLexingStats"] | undefined,
+  stats: ContextualLexingStatsRecord,
+): void {
+  if (reportStats) reportStats(stats);
+}
+
+function normalizeParserRuntimeLimits(options: ParseOptions): ParserRuntimeLimits {
+  return {
+    maxExploredBranches: normalizePositiveIntegerOption(
+      "maxExploredBranches",
+      options.maxExploredBranches,
+      DEFAULT_MAX_EXPLORED_BRANCHES,
+    ),
+    maxQueuedBranches: normalizePositiveIntegerOption(
+      "maxQueuedBranches",
+      options.maxQueuedBranches,
+      DEFAULT_MAX_QUEUED_BRANCHES,
+    ),
+    maxTraceActions: normalizePositiveIntegerOption(
+      "maxTraceActions",
+      options.maxTraceActions,
+      DEFAULT_MAX_TRACE_ACTIONS,
+    ),
+    ambiguityMode: normalizeAmbiguityMode(options.ambiguityMode),
+  };
+}
+
+function normalizePositiveIntegerOption(
+  name: string,
+  value: number | undefined,
+  fallback: number,
+): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new RangeError(name + " must be a positive integer.");
+  }
+  return value;
+}
+
+function normalizeAmbiguityMode(
+  ambiguityMode: ParseOptions["ambiguityMode"] | undefined,
+): number {
+  if (ambiguityMode === undefined || ambiguityMode === "first-success") return 0;
+  if (ambiguityMode === "reject-ambiguous-success") return 1;
+  throw new RangeError(
+    "ambiguityMode must be 'first-success' or 'reject-ambiguous-success'.",
+  );
+}
+
+function countTraceReductions(trace: Int32Array): number {
+  let reductions = 0;
+  for (let index = 0; index < trace.length; index++) {
+    if ((trace[index] & ~ACTION_PAYLOAD_MASK) === ACTION_REDUCE) reductions++;
+  }
+  return reductions;
+}
+
 `;
 }
 
 function commonConstants(values: {
-  bnf: BnfGrammar;
+  eofTerminal: number;
   expectedRows: readonly (readonly string[])[];
-  namedSpecIndices: Array<readonly [string, number]>;
-  literalSpecIndices: Array<readonly [string, number]>;
-  ruleNames: string[];
-  fieldNames: string[];
+  namedSpecIndices: readonly (readonly [string, number])[];
+  literalSpecIndices: readonly (readonly [string, number])[];
+  ruleNames: readonly string[];
+  fieldNames: readonly string[];
 }): string {
   const expectedTerminals = values.expectedRows.flat();
-  return `const EOF_TERMINAL = ${values.bnf.eofTerminal};
+  return `const EOF_TERMINAL = ${values.eofTerminal};
 const EXPECTED_TERMINALS: readonly string[] = ${
     JSON.stringify(expectedTerminals)
   };
@@ -408,7 +712,16 @@ const LITERAL_SPEC_INDICES = new Map<string, number>(${
   });
 const RULE_NAMES: readonly string[] = ${JSON.stringify(values.ruleNames)};
 const FIELD_NAMES: readonly string[] = ${JSON.stringify(values.fieldNames)};
-const EMPTY_PARSE_DIAGNOSTICS = [] as const;`;
+const EMPTY_PARSE_DIAGNOSTICS = [] as const;
+const DEFAULT_MAX_EXPLORED_BRANCHES = 100_000;
+const DEFAULT_MAX_QUEUED_BRANCHES = 100_000;
+const DEFAULT_MAX_TRACE_ACTIONS = 1_000_000;
+const DEFAULT_PARSER_RUNTIME_LIMITS: ParserRuntimeLimits = {
+  maxExploredBranches: DEFAULT_MAX_EXPLORED_BRANCHES,
+  maxQueuedBranches: DEFAULT_MAX_QUEUED_BRANCHES,
+  maxTraceActions: DEFAULT_MAX_TRACE_ACTIONS,
+  ambiguityMode: 0,
+};`;
 }
 
 function parserTableRuntime(program: RuntimeLanguageProgram): string {
@@ -416,9 +729,12 @@ function parserTableRuntime(program: RuntimeLanguageProgram): string {
 const ACTION_SHIFT = ${RUNTIME_ACTION_SHIFT};
 const ACTION_REDUCE = ${RUNTIME_ACTION_REDUCE};
 const ACTION_ACCEPT = ${RUNTIME_ACTION_ACCEPT};
+const ACTION_PAYLOAD_MASK = ${RUNTIME_ACTION_PAYLOAD_MASK};
 const TRACE_STATUS_OK = ${RUNTIME_TRACE_STATUS_OK};
 const TRACE_STATUS_UNEXPECTED = ${RUNTIME_TRACE_STATUS_UNEXPECTED};
 const TRACE_STATUS_BRANCH_LIMIT = ${RUNTIME_TRACE_STATUS_BRANCH_LIMIT};
+const TRACE_STATUS_TRACE_LIMIT = ${RUNTIME_TRACE_STATUS_TRACE_LIMIT};
+const TRACE_STATUS_AMBIGUOUS = ${RUNTIME_TRACE_STATUS_AMBIGUOUS};
 const REPLAY_ACTION_SHIFT = ${RUNTIME_REPLAY_ACTION_STATUS_SHIFT};
 const REPLAY_ACTION_REDUCE = ${RUNTIME_REPLAY_ACTION_STATUS_REDUCE};
 const REPLAY_ACTION_ACCEPT = ${RUNTIME_REPLAY_ACTION_STATUS_ACCEPT};
@@ -523,6 +839,7 @@ const TOKEN_STREAM_GAP = ${RUNTIME_TOKEN_STREAM_STATUS_GAP};
 const TOKEN_STREAM_OVERLAP = ${RUNTIME_TOKEN_STREAM_STATUS_OVERLAP};
 const TOKEN_STREAM_ZERO_WIDTH = ${RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH};
 const TOKEN_STREAM_INVALID_EOF = ${RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF};
+const TOKEN_STREAM_NONTRIVIA_GAP = ${RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP};
 const TOKEN_STREAM_TOKEN_MISMATCH = ${RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH};
 const TOKEN_STREAM_CANONICAL_MATCH = ${RUNTIME_TOKEN_STREAM_CANONICAL_MATCH};
 const TOKEN_STREAM_CANONICAL_SKIP = ${RUNTIME_TOKEN_STREAM_CANONICAL_SKIP};
@@ -531,23 +848,141 @@ const TRACE_TOKEN_STREAM_EMIT = ${RUNTIME_TRACE_TOKEN_STREAM_EMIT};
 const TRACE_TOKEN_STREAM_SKIP = ${RUNTIME_TRACE_TOKEN_STREAM_SKIP};
 const TRACE_TOKEN_STREAM_STOP = ${RUNTIME_TRACE_TOKEN_STREAM_STOP};
 const DIAGNOSTIC_PARSE_LEXICAL_ERROR = ${PARSER_DIAGNOSTIC_CODE_PARSE_LEXICAL_ERROR};
+const DIAGNOSTIC_PARSER_AMBIGUOUS_PARSE = ${PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE};
 const DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN = ${PARSER_DIAGNOSTIC_CODE_PARSE_UNEXPECTED_TOKEN};
 const DIAGNOSTIC_PARSE_TRAILING_INPUT = ${PARSER_DIAGNOSTIC_CODE_PARSE_TRAILING_INPUT};
 const DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM = ${PARSER_DIAGNOSTIC_CODE_PARSE_INVALID_TOKEN_STREAM};
 const DIAGNOSTIC_PARSER_INTERNAL_ERROR = ${PARSER_DIAGNOSTIC_CODE_INTERNAL_ERROR};
 const DIAGNOSTIC_PARSER_BRANCH_LIMIT = ${PARSER_DIAGNOSTIC_CODE_BRANCH_LIMIT};
+const DIAGNOSTIC_PARSER_TRACE_LIMIT = ${PARSER_DIAGNOSTIC_CODE_TRACE_LIMIT};
 const DIAGNOSTIC_DETAIL_NONE = ${PARSER_DIAGNOSTIC_DETAIL_NONE};
 const DIAGNOSTIC_DETAIL_PARSER_STATE = ${PARSER_DIAGNOSTIC_DETAIL_PARSER_STATE};
 export const parserDiagnosticCodeParseLexicalError = DIAGNOSTIC_PARSE_LEXICAL_ERROR;
+export const parserDiagnosticCodeAmbiguousParse = DIAGNOSTIC_PARSER_AMBIGUOUS_PARSE;
 export const parserDiagnosticCodeParseUnexpectedToken = DIAGNOSTIC_PARSE_UNEXPECTED_TOKEN;
 export const parserDiagnosticCodeParseTrailingInput = DIAGNOSTIC_PARSE_TRAILING_INPUT;
 export const parserDiagnosticCodeParseInvalidTokenStream = DIAGNOSTIC_PARSE_INVALID_TOKEN_STREAM;
 export const parserDiagnosticCodeInternalError = DIAGNOSTIC_PARSER_INTERNAL_ERROR;
 export const parserDiagnosticCodeBranchLimit = DIAGNOSTIC_PARSER_BRANCH_LIMIT;
+export const parserDiagnosticCodeTraceLimit = DIAGNOSTIC_PARSER_TRACE_LIMIT;
 export const parserDiagnosticDetailKindNone = DIAGNOSTIC_DETAIL_NONE;
 export const parserDiagnosticDetailKindParserState = DIAGNOSTIC_DETAIL_PARSER_STATE;
 
+${emitSharedBrlTokenStreamTypeScriptRuntime().trimEnd()}
+
 ${emitRuntimeLanguageTypeScriptFunction(program).trimEnd()}`;
+}
+
+function emitSharedBrlTokenStreamTypeScriptRuntime(): string {
+  return `// Generated from src/runtime/token_stream.brl.
+// Keep this direct scalar shape until the generic BRL TypeScript backend can
+// emit structured helpers without a CFG interpreter loop.
+function token_stream_span_bounds_status(start: number, end: number, sourceLength: number): number {
+  if ((sourceLength >>> 0) < (end >>> 0)) return TOKEN_STREAM_INVALID_SPAN;
+  if ((end >>> 0) < (start >>> 0)) return TOKEN_STREAM_INVALID_SPAN;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_span_position_status(start: number, previousEnd: number): number {
+  if ((previousEnd >>> 0) < (start >>> 0)) return TOKEN_STREAM_GAP;
+  if ((start >>> 0) < (previousEnd >>> 0)) return TOKEN_STREAM_OVERLAP;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_width_status(start: number, end: number): number {
+  return start === end ? TOKEN_STREAM_ZERO_WIDTH : TOKEN_STREAM_OK;
+}
+
+function token_stream_eof_status(
+  textLength: number,
+  isMainChannel: number,
+  start: number,
+  end: number,
+  sourceLength: number,
+): number {
+  if (textLength !== 0) return TOKEN_STREAM_INVALID_EOF;
+  if (isMainChannel !== 1) return TOKEN_STREAM_INVALID_EOF;
+  if (start !== end) return TOKEN_STREAM_INVALID_EOF;
+  if (start !== sourceLength) return TOKEN_STREAM_INVALID_EOF;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_gap_token_status(
+  tokenClass: number,
+  tokenStart: number,
+  tokenEnd: number,
+  gapStart: number,
+  gapEnd: number,
+): number {
+  if (tokenClass !== PUBLIC_TOKEN_TRIVIA) return TOKEN_STREAM_NONTRIVIA_GAP;
+  if ((tokenStart >>> 0) < (gapStart >>> 0)) return TOKEN_STREAM_NONTRIVIA_GAP;
+  if ((gapEnd >>> 0) < (tokenEnd >>> 0)) return TOKEN_STREAM_NONTRIVIA_GAP;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_token_match_status(
+  leftClass: number,
+  rightClass: number,
+  leftSpecIndex: number,
+  rightSpecIndex: number,
+  leftTerminal: number,
+  rightTerminal: number,
+  leftStart: number,
+  leftEnd: number,
+  rightStart: number,
+  rightEnd: number,
+): number {
+  if (leftClass !== rightClass) return TOKEN_STREAM_TOKEN_MISMATCH;
+  if (leftSpecIndex !== rightSpecIndex) return TOKEN_STREAM_TOKEN_MISMATCH;
+  if (leftTerminal !== rightTerminal) return TOKEN_STREAM_TOKEN_MISMATCH;
+  if (leftStart !== rightStart) return TOKEN_STREAM_TOKEN_MISMATCH;
+  if (leftEnd !== rightEnd) return TOKEN_STREAM_TOKEN_MISMATCH;
+  return TOKEN_STREAM_OK;
+}
+
+function token_stream_trace_status(tokenClass: number): number {
+  return tokenClass === PUBLIC_TOKEN_TRIVIA ? TRACE_TOKEN_STREAM_SKIP : TRACE_TOKEN_STREAM_EMIT;
+}
+
+function token_stream_canonical_match_status(
+  canonicalClass: number,
+  tokenMatchStatus: number,
+  canonicalEnd: number,
+  suppliedStart: number,
+): number {
+  if (tokenMatchStatus === TOKEN_STREAM_OK) return TOKEN_STREAM_CANONICAL_MATCH;
+  if (token_stream_trace_status(canonicalClass) !== TRACE_TOKEN_STREAM_SKIP) {
+    return TOKEN_STREAM_CANONICAL_MISMATCH;
+  }
+  if ((suppliedStart >>> 0) < (canonicalEnd >>> 0)) {
+    return TOKEN_STREAM_CANONICAL_MISMATCH;
+  }
+  return TOKEN_STREAM_CANONICAL_SKIP;
+}
+
+function token_stream_final_status(
+  hasEof: number,
+  eofIndex: number,
+  tokenCount: number,
+  previousEnd: number,
+  sourceLength: number,
+): number {
+  if (hasEof === 1 && (((eofIndex + 1) >>> 0) !== tokenCount)) {
+    return TOKEN_STREAM_INVALID_EOF;
+  }
+  if (hasEof === 1) return TOKEN_STREAM_OK;
+  if ((previousEnd >>> 0) < (sourceLength >>> 0)) return TOKEN_STREAM_GAP;
+  return TOKEN_STREAM_OK;
+}
+
+const parserTokenStreamSpanBoundsStatus = token_stream_span_bounds_status;
+const parserTokenStreamSpanPositionStatus = token_stream_span_position_status;
+const parserTokenStreamWidthStatus = token_stream_width_status;
+const parserTokenStreamEofStatus = token_stream_eof_status;
+const parserTokenStreamGapTokenStatus = token_stream_gap_token_status;
+const parserTokenStreamTokenMatchStatus = token_stream_token_match_status;
+const parserTokenStreamCanonicalMatchStatus = token_stream_canonical_match_status;
+const parserTokenStreamFinalStatus = token_stream_final_status;`;
 }
 
 function mergeRuntimePrograms(
@@ -571,21 +1006,23 @@ function mergeRuntimePrograms(
 
 function parseEntryPoints(mode: ParserEmitMode): string {
   const parseBody = mode === "wasm"
-    ? `  const lexed = lexForParse(source, options);
-  return parseTokenList(
+    ? `  const runtimeLimits = normalizeParserRuntimeLimits(options);
+  const lexed = lexForParse(source, options);
+  return parseCandidateTokenLists(
     sourceText,
-    lexed.tokens,
     lexicalDiagnostics(lexed.diagnostics),
     lexed.parseStream,
-    true,
+    options.contextualLexingStats,
+    runtimeLimits,
   );`
-    : `  const lexed = lex(source, options);
-  return parseTokenList(
+    : `  const runtimeLimits = normalizeParserRuntimeLimits(options);
+  const lexed = lexForParse(source, options);
+  return parseCandidateTokenLists(
     sourceText,
-    lexed.tokens,
     lexicalDiagnostics(lexed.diagnostics),
-    undefined,
-    true,
+    lexed.parseStream,
+    options.contextualLexingStats,
+    runtimeLimits,
   );`;
   return `export function parse(
   source: string,
@@ -630,12 +1067,128 @@ export function parseTokensUnchecked(
 }
 
 function deterministicParseRuntime(): string {
-  return `function parseTokenList(
+  return `const MAX_CONTEXTUAL_LEXICAL_ALTERNATIVES = 1024;
+
+function parseCandidateTokenLists(
+  sourceText: SourceTextBoundary,
+  lexicalDiagnostics: readonly ParseDiagnostic[],
+  parseStream: ParseLexCandidateStream,
+  reportStats?: ParseOptions["contextualLexingStats"],
+  runtimeLimits: ParserRuntimeLimits = DEFAULT_PARSER_RUNTIME_LIMITS,
+): ParseResult<RootNode> {
+  if (lexicalDiagnostics.length > 0) {
+    return failedParseResult(sourceText.source, parseStream.tokens, lexicalDiagnostics);
+  }
+
+  const sites = parseStream.sites;
+  if (sites.every((site) => site.candidates.length === 1)) {
+    reportContextualLexingStats(reportStats, {
+      ambiguousLexicalSites: 0,
+      contextualCandidateChecks: 0,
+      attemptedTokenSelections: 0,
+      reductionsBeforeTokenSelection: 0,
+    });
+    return parseTokenList(
+      sourceText,
+      parseStream.tokens,
+      lexicalDiagnostics,
+      undefined,
+      true,
+      runtimeLimits,
+    );
+  }
+  const selectedTokens = new Array<Token>(sites.length);
+  const terminals = new Int32Array(sites.length);
+  const publicTokens = [...parseStream.tokens];
+  let attempts = 0;
+  let contextualCandidateChecks = 0;
+  let reductionsBeforeTokenSelection = 0;
+  const ambiguousLexicalSites = sites.filter((site) => site.candidates.length > 1).length;
+
+  function attempt(siteIndex: number): ParseResult<RootNode> | null {
+    if (attempts >= MAX_CONTEXTUAL_LEXICAL_ALTERNATIVES) {
+      return failedParseResult(
+        sourceText.source,
+        selectedTokens.filter((token): token is Token => Boolean(token)),
+        [branchLimitDiagnostic(sourceText.length)],
+      );
+    }
+    if (siteIndex === sites.length) {
+      attempts++;
+      let status = 0;
+      try {
+        for (let index = 0; index < terminals.length; index++) {
+          parserTraceSetTerminal(index, terminals[index]);
+        }
+        status = parserTrace(
+          terminals.length,
+          runtimeLimits.maxExploredBranches,
+          runtimeLimits.maxTraceActions,
+          runtimeLimits.maxQueuedBranches,
+          runtimeLimits.ambiguityMode,
+        );
+      } catch (error) {
+        return failedParseResult(
+          sourceText.source,
+          selectedTokens,
+          [internalParserDiagnostic(error, {
+            start: sourceText.length,
+            end: sourceText.length,
+          })],
+        );
+      }
+      if (parserTraceStatusKind(status) !== TRACE_STATUS_OK) return null;
+      const traceCount = parserTraceCount();
+      const trace = new Int32Array(traceCount);
+      for (let index = 0; index < traceCount; index++) {
+        trace[index] = parserTraceAction(index) | 0;
+      }
+      reductionsBeforeTokenSelection = countTraceReductions(trace);
+      const tokenIndices = sites.map((site) => site.tokenIndex);
+      return replayTrace(
+        sourceText,
+        publicTokens,
+        { tokens: selectedTokens, tokenIndices },
+        trace,
+      );
+    }
+
+    for (const candidate of sites[siteIndex].candidates) {
+      contextualCandidateChecks++;
+      selectedTokens[siteIndex] = candidate.token;
+      publicTokens[sites[siteIndex].tokenIndex] = candidate.token;
+      terminals[siteIndex] = candidate.terminal;
+      const result = attempt(siteIndex + 1);
+      if (result) return result;
+    }
+    return null;
+  }
+
+  const result = attempt(0);
+  reportContextualLexingStats(reportStats, {
+    ambiguousLexicalSites,
+    contextualCandidateChecks,
+    attemptedTokenSelections: attempts,
+    reductionsBeforeTokenSelection,
+  });
+  if (result) return result;
+  return parseTokenList(
+    sourceText,
+    parseStream.tokens,
+    lexicalDiagnostics,
+    undefined,
+    true,
+    runtimeLimits,
+  );
+}
+
+function parseTokenList(
   sourceText: SourceTextBoundary,
   tokens: readonly Token[],
   lexicalDiagnostics: readonly ParseDiagnostic[],
   _parseStream: undefined = undefined,
   trustRuntimeTerminals = false,
+  runtimeLimits: ParserRuntimeLimits = DEFAULT_PARSER_RUNTIME_LIMITS,
 ): ParseResult<RootNode> {
   if (lexicalDiagnostics.length > 0) {
     return failedParseResult(sourceText.source, tokens, lexicalDiagnostics);
@@ -647,7 +1200,13 @@ function deterministicParseRuntime(): string {
     for (let index = 0; index < stream.terminalCount; index++) {
       parserTraceSetTerminal(index, stream.terminals[index]);
     }
-    status = parserTrace(stream.terminalCount);
+    status = parserTrace(
+      stream.terminalCount,
+      runtimeLimits.maxExploredBranches,
+      runtimeLimits.maxTraceActions,
+      runtimeLimits.maxQueuedBranches,
+      runtimeLimits.ambiguityMode,
+    );
   } catch (error) {
     return failedParseResult(
       sourceText.source,
@@ -678,6 +1237,20 @@ function deterministicParseRuntime(): string {
         sourceText.source,
         tokens,
         [branchLimitDiagnostic(sourceText.length)],
+      );
+    }
+    if (traceStatus === TRACE_STATUS_TRACE_LIMIT) {
+      return failedParseResult(
+        sourceText.source,
+        tokens,
+        [traceLimitDiagnostic(sourceText.length)],
+      );
+    }
+    if (traceStatus === TRACE_STATUS_AMBIGUOUS) {
+      return failedParseResult(
+        sourceText.source,
+        tokens,
+        [ambiguousParseDiagnostic(sourceText.length)],
       );
     }
     return failedParseResult(
@@ -756,12 +1329,111 @@ ${replayTraceRuntime("Runtime-language")}`;
 }
 
 function wasmParseRuntime(): string {
-  return `function parseTokenList(
+  return `const MAX_CONTEXTUAL_LEXICAL_ALTERNATIVES = 1024;
+
+function parseCandidateTokenLists(
+  sourceText: SourceTextBoundary,
+  lexicalDiagnostics: readonly ParseDiagnostic[],
+  parseStream: WasmParseStream,
+  reportStats?: ParseOptions["contextualLexingStats"],
+  runtimeLimits: ParserRuntimeLimits = DEFAULT_PARSER_RUNTIME_LIMITS,
+): ParseResult<RootNode> {
+  if (lexicalDiagnostics.length > 0) {
+    return failedParseResult(sourceText.source, parseStream.publicTokens, lexicalDiagnostics);
+  }
+
+  const sites = parseStream.sites;
+  if (sites.every((site) => site.candidates.length === 1)) {
+    reportContextualLexingStats(reportStats, {
+      ambiguousLexicalSites: 0,
+      contextualCandidateChecks: 0,
+      attemptedTokenSelections: 0,
+      reductionsBeforeTokenSelection: 0,
+    });
+    return parseTokenList(
+      sourceText,
+      parseStream.publicTokens,
+      lexicalDiagnostics,
+      parseStream,
+      true,
+      runtimeLimits,
+    );
+  }
+  const selectedTokens = new Array<Token>(sites.length);
+  const terminals = new Int32Array(sites.length);
+  const publicTokens = [...parseStream.publicTokens];
+  let attempts = 0;
+  let contextualCandidateChecks = 0;
+  let reductionsBeforeTokenSelection = 0;
+  const ambiguousLexicalSites = sites.filter((site) => site.candidates.length > 1).length;
+
+  function attempt(siteIndex: number): ParseResult<RootNode> | null {
+    if (attempts >= MAX_CONTEXTUAL_LEXICAL_ALTERNATIVES) {
+      return failedParseResult(
+        sourceText.source,
+        publicTokens,
+        [branchLimitDiagnostic(sourceText.length)],
+      );
+    }
+    if (siteIndex === sites.length) {
+      attempts++;
+      const input = createParseTraceInput(terminals.length);
+      input.terminals.set(terminals);
+      const traced = parseTrace(input, terminals.length, {
+        maxBranches: runtimeLimits.maxExploredBranches,
+        maxTraceActions: runtimeLimits.maxTraceActions,
+        maxQueuedBranches: runtimeLimits.maxQueuedBranches,
+        ambiguityMode: runtimeLimits.ambiguityMode,
+      });
+      if (!traced.ok) return null;
+      reductionsBeforeTokenSelection = countTraceReductions(traced.trace);
+      return replayTrace(
+        sourceText,
+        publicTokens,
+        {
+          tokens: selectedTokens,
+          tokenIndices: sites.map((site) => site.tokenIndex),
+        },
+        traced.trace,
+      );
+    }
+
+    for (const candidate of sites[siteIndex].candidates) {
+      contextualCandidateChecks++;
+      selectedTokens[siteIndex] = candidate.token;
+      publicTokens[sites[siteIndex].tokenIndex] = candidate.token;
+      terminals[siteIndex] = candidate.terminal;
+      const result = attempt(siteIndex + 1);
+      if (result) return result;
+    }
+    return null;
+  }
+
+  const result = attempt(0);
+  reportContextualLexingStats(reportStats, {
+    ambiguousLexicalSites,
+    contextualCandidateChecks,
+    attemptedTokenSelections: attempts,
+    reductionsBeforeTokenSelection,
+  });
+  if (result) return result;
+  return parseTokenList(
+    sourceText,
+    parseStream.publicTokens,
+    lexicalDiagnostics,
+    parseStream,
+    true,
+    runtimeLimits,
+  );
+}
+
+function parseTokenList(
   sourceText: SourceTextBoundary,
   tokens: readonly Token[],
   lexicalDiagnostics: readonly ParseDiagnostic[],
   parseStream?: WasmParseStream,
   trustRuntimeTerminals = false,
+  runtimeLimits: ParserRuntimeLimits = DEFAULT_PARSER_RUNTIME_LIMITS,
 ): ParseResult<RootNode> {
   if (lexicalDiagnostics.length > 0) {
     return failedParseResult(sourceText.source, tokens, lexicalDiagnostics);
@@ -769,10 +1441,29 @@ function wasmParseRuntime(): string {
 
   const stream = parseStream ??
     compactTokenStream(sourceText, tokens, trustRuntimeTerminals);
-  const traced = parseTrace(stream.input, stream.terminalCount);
+  const traced = parseTrace(stream.input, stream.terminalCount, {
+    maxBranches: runtimeLimits.maxExploredBranches,
+    maxTraceActions: runtimeLimits.maxTraceActions,
+    maxQueuedBranches: runtimeLimits.maxQueuedBranches,
+    ambiguityMode: runtimeLimits.ambiguityMode,
+  });
   if (!traced.ok) {
     const token = stream.tokens[traced.index] ?? materializeSourceEofToken(sourceText);
+    if (traced.failureKind === "ambiguous") {
+      return failedParseResult(
+        sourceText.source,
+        tokens,
+        [ambiguousParseDiagnostic(sourceText.length)],
+      );
+    }
     if (traced.limit) {
+      if (traced.failureKind === "trace-limit") {
+        return failedParseResult(
+          sourceText.source,
+          tokens,
+          [traceLimitDiagnostic(sourceText.length)],
+        );
+      }
       return failedParseResult(
         sourceText.source,
         tokens,

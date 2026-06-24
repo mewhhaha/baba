@@ -7,6 +7,7 @@ import {
 import {
   enforceRegexAstNodeLimit,
   type RegexCompilerLimits,
+  RegexResourceLimitError,
 } from "./limits.ts";
 
 export class RegexSyntaxError extends Error {
@@ -16,11 +17,22 @@ export class RegexSyntaxError extends Error {
   }
 }
 
+let parsePortableRegexInvocationCountForTesting = 0;
+
 export function parsePortableRegex(
   pattern: string,
   limits: RegexCompilerLimits = {},
 ): RegexAst {
-  const parser = new RegexParser(pattern);
+  parsePortableRegexInvocationCountForTesting++;
+  const sourceLimit = limits.sourceLengthLimit;
+  if (sourceLimit !== undefined && pattern.length > sourceLimit) {
+    throw new RegexResourceLimitError(
+      "REGEX_SOURCE_LIMIT",
+      `regex source has ${pattern.length} UTF-16 code units, exceeding the configured limit (${sourceLimit}).`,
+      sourceLimit,
+    );
+  }
+  const parser = new RegexParser(pattern, limits);
   const ast = parser.parseChoice();
   if (!parser.atEnd()) {
     throw parser.error(`Unexpected ${JSON.stringify(parser.peek())}`);
@@ -29,10 +41,22 @@ export function parsePortableRegex(
   return ast;
 }
 
+export function resetParsePortableRegexInvocationCountForTesting(): void {
+  parsePortableRegexInvocationCountForTesting = 0;
+}
+
+export function getParsePortableRegexInvocationCountForTesting(): number {
+  return parsePortableRegexInvocationCountForTesting;
+}
+
 class RegexParser {
   #index = 0;
+  #groupDepth = 0;
 
-  constructor(private readonly source: string) {}
+  constructor(
+    private readonly source: string,
+    private readonly limits: RegexCompilerLimits,
+  ) {}
 
   atEnd(): boolean {
     return this.#index >= this.source.length;
@@ -119,14 +143,27 @@ class RegexParser {
 
   private parseGroup(): RegexAst {
     this.expect("(");
+    this.#groupDepth++;
+    const nestingLimit = this.limits.nestingLimit;
+    if (nestingLimit !== undefined && this.#groupDepth > nestingLimit) {
+      throw new RegexResourceLimitError(
+        "REGEX_NESTING_LIMIT",
+        `regex nesting depth ${this.#groupDepth} exceeds the configured limit (${nestingLimit}).`,
+        nestingLimit,
+      );
+    }
     if (this.peek() === "?") {
       throw this.error(
         "Lookaround, inline flags, named groups, and noncapturing groups are outside Baba's portable regex subset",
       );
     }
-    const expression = this.parseChoice();
-    this.expect(")");
-    return expression;
+    try {
+      const expression = this.parseChoice();
+      this.expect(")");
+      return expression;
+    } finally {
+      this.#groupDepth--;
+    }
   }
 
   private parseClass(): RegexAst {

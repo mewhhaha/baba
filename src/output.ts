@@ -4,7 +4,15 @@ import { BabaError } from "./errors.ts";
 interface OutputManifest {
   generator: string;
   manifestVersion: 1;
-  files: Record<string, { hash: string; ownership: "generated" }>;
+  files: Record<
+    string,
+    {
+      hash: string;
+      ownership: "generated";
+      encoding?: "utf-8" | "binary";
+      kind?: GeneratedFile["kind"];
+    }
+  >;
 }
 
 /** Applies a generated bundle to a directory using baba ownership manifests. */
@@ -31,6 +39,7 @@ async function writeGeneratedFiles(
   for (const previousPath of Object.keys(previous?.files ?? {})) {
     validateBundlePath(previousPath);
   }
+  assertNoBundlePathCollisions(files.map((file) => file.path));
   const nextPaths = new Set(files.map((file) => file.path));
   const stalePaths = previous
     ? Object.keys(previous.files).filter((path) => !nextPaths.has(path))
@@ -52,15 +61,17 @@ async function writeGeneratedFiles(
       const parent = parentDir(path);
       if (parent) await Deno.mkdir(parent, { recursive: true });
       const tempPath = temporarySiblingPath(path);
-      await Deno.writeTextFile(tempPath, file.content);
+      await Deno.writeFile(tempPath, generatedFileBytes(file));
       stagedWrites.push({ finalPath: path, tempPath });
     }
 
     const manifestFiles: OutputManifest["files"] = {};
     for (const file of files) {
       manifestFiles[file.path] = {
-        hash: await hashText(file.content),
+        hash: await hashBytes(generatedFileBytes(file)),
         ownership: "generated",
+        encoding: file.encoding,
+        kind: file.kind,
       };
     }
     const manifest: OutputManifest = {
@@ -115,14 +126,31 @@ function throwInvalidBundlePath(path: string): never {
   });
 }
 
+function assertNoBundlePathCollisions(paths: readonly string[]): void {
+  const seen = new Set(paths);
+  for (const path of seen) {
+    const parts = path.split("/");
+    for (let index = 1; index < parts.length; index++) {
+      const ancestor = parts.slice(0, index).join("/");
+      if (seen.has(ancestor)) {
+        throw new BabaError({
+          code: "OUTPUT_PATH_COLLISION",
+          message:
+            `Generated output path '${ancestor}' collides with nested path '${path}'.`,
+        });
+      }
+    }
+  }
+}
+
 async function assertCanOverwrite(
   path: string,
   relativePath: string,
   manifest: OutputManifest | null,
 ): Promise<void> {
-  let current: string;
+  let current: Uint8Array;
   try {
-    current = await Deno.readTextFile(path);
+    current = await Deno.readFile(path);
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return;
     throw error;
@@ -132,7 +160,7 @@ async function assertCanOverwrite(
   if (!manifestEntry) {
     throwOverwriteRefused("overwrite", relativePath);
   }
-  const currentHash = await hashText(current);
+  const currentHash = await hashBytes(current);
   if (manifestEntry.hash === currentHash) return;
   throwOverwriteRefused("overwrite", relativePath);
 }
@@ -142,9 +170,9 @@ async function assertCanRemove(
   relativePath: string,
   manifest: OutputManifest | null,
 ): Promise<void> {
-  let current: string;
+  let current: Uint8Array;
   try {
-    current = await Deno.readTextFile(path);
+    current = await Deno.readFile(path);
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return;
     throw error;
@@ -152,7 +180,7 @@ async function assertCanRemove(
 
   const manifestEntry = manifest?.files[relativePath];
   if (!manifestEntry) throwOverwriteRefused("remove", relativePath);
-  const currentHash = await hashText(current);
+  const currentHash = await hashBytes(current);
   if (manifestEntry.hash === currentHash) return;
   throwOverwriteRefused("remove", relativePath);
 }
@@ -190,9 +218,19 @@ function manifestPath(rootDir: string): string {
   return `${rootDir}/.baba-manifest.json`;
 }
 
-async function hashText(content: string): Promise<string> {
-  const bytes = new TextEncoder().encode(content);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+function generatedFileBytes(file: GeneratedFile): Uint8Array {
+  return file.encoding === "binary"
+    ? file.content
+    : new TextEncoder().encode(file.content);
+}
+
+async function hashBytes(bytes: Uint8Array): Promise<string> {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    copy.buffer as ArrayBuffer,
+  );
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");

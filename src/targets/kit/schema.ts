@@ -6,6 +6,8 @@ export const parserDiagnosticCodeParseTrailingInput = 3;
 export const parserDiagnosticCodeParseInvalidTokenStream = 4;
 export const parserDiagnosticCodeInternalError = 5;
 export const parserDiagnosticCodeBranchLimit = 6;
+export const parserDiagnosticCodeTraceLimit = 7;
+export const parserDiagnosticCodeAmbiguousParse = 8;
 export const parserDiagnosticDetailKindNone = 0;
 export const parserDiagnosticDetailKindParserState = 1;
 
@@ -265,6 +267,8 @@ export interface KitParseDiagnostic {
     | "PARSE_TRAILING_INPUT"
     | "PARSE_INVALID_TOKEN_STREAM"
     | "PARSER_BRANCH_LIMIT"
+    | "PARSER_TRACE_LIMIT"
+    | "PARSER_AMBIGUOUS_PARSE"
     | "PARSER_INTERNAL_ERROR";
   message: string;
   span: KitSpan;
@@ -1792,6 +1796,10 @@ function kitDiagnosticCodeId(code: KitParseDiagnostic["code"]): number {
       return parserDiagnosticCodeInternalError;
     case "PARSER_BRANCH_LIMIT":
       return parserDiagnosticCodeBranchLimit;
+    case "PARSER_TRACE_LIMIT":
+      return parserDiagnosticCodeTraceLimit;
+    case "PARSER_AMBIGUOUS_PARSE":
+      return parserDiagnosticCodeAmbiguousParse;
   }
 }
 

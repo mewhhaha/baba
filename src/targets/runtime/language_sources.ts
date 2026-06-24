@@ -87,6 +87,8 @@ export const RUNTIME_TRACE_STATUS_OK = 0;
 export const RUNTIME_TRACE_STATUS_UNEXPECTED = 1;
 export const RUNTIME_TRACE_STATUS_INTERNAL = 2;
 export const RUNTIME_TRACE_STATUS_BRANCH_LIMIT = 3;
+export const RUNTIME_TRACE_STATUS_TRACE_LIMIT = 4;
+export const RUNTIME_TRACE_STATUS_AMBIGUOUS = 5;
 export const RUNTIME_REPLAY_ACTION_STATUS_UNKNOWN = 0;
 export const RUNTIME_REPLAY_ACTION_STATUS_SHIFT = 1;
 export const RUNTIME_REPLAY_ACTION_STATUS_REDUCE = 2;
@@ -218,7 +220,8 @@ const TRACE_STATUS_OK = RUNTIME_TRACE_STATUS_OK;
 const TRACE_STATUS_UNEXPECTED = RUNTIME_TRACE_STATUS_UNEXPECTED;
 const TRACE_STATUS_INTERNAL = RUNTIME_TRACE_STATUS_INTERNAL;
 const TRACE_STATUS_BRANCH_LIMIT = RUNTIME_TRACE_STATUS_BRANCH_LIMIT;
-const TRACE_BRANCH_LIMIT = 100_000;
+const TRACE_STATUS_TRACE_LIMIT = RUNTIME_TRACE_STATUS_TRACE_LIMIT;
+const TRACE_STATUS_AMBIGUOUS = RUNTIME_TRACE_STATUS_AMBIGUOUS;
 
 const LEXER_SCAN_STATE = 0;
 const LEXER_SCAN_LENGTH = 1;
@@ -1970,14 +1973,6 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserDiagnosticDetailKindIdFunction(),
     parserDiagnosticCodeStatusFunction(),
     parserDiagnosticMergeStatusFunction(),
-    parserTokenStreamSpanBoundsStatusFunction(),
-    parserTokenStreamSpanPositionStatusFunction(),
-    parserTokenStreamWidthStatusFunction(),
-    parserTokenStreamEofStatusFunction(),
-    parserTokenStreamGapTokenStatusFunction(),
-    parserTokenStreamTokenMatchStatusFunction(),
-    parserTokenStreamCanonicalMatchStatusFunction(),
-    parserTokenStreamFinalStatusFunction(),
     parserTokenStreamPublicTokenStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
     parserTraceTokenStreamPublicIndexFunction(),
@@ -2985,366 +2980,6 @@ function parserDiagnosticMergeStatusFunction(): RuntimeLanguageFunction {
       {
         kind: "return",
         expression: u32(RUNTIME_DIAGNOSTIC_MERGE_BOTH),
-      },
-    ],
-  };
-}
-
-function parserTokenStreamSpanBoundsStatusFunction(): RuntimeLanguageFunction {
-  return {
-    name: "parserTokenStreamSpanBoundsStatus",
-    parameters: [
-      { name: "start", type: "u32" },
-      { name: "end", type: "u32" },
-      { name: "sourceLength", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      {
-        kind: "if",
-        condition: ltu(local("sourceLength"), local("end")),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN),
-        }],
-      },
-      {
-        kind: "if",
-        condition: ltu(local("end"), local("start")),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN),
-        }],
-      },
-      {
-        kind: "return",
-        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
-      },
-    ],
-  };
-}
-
-function parserTokenStreamSpanPositionStatusFunction(): RuntimeLanguageFunction {
-  return {
-    name: "parserTokenStreamSpanPositionStatus",
-    parameters: [
-      { name: "start", type: "u32" },
-      { name: "previousEnd", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      {
-        kind: "if",
-        condition: ltu(local("previousEnd"), local("start")),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_GAP),
-        }],
-      },
-      {
-        kind: "if",
-        condition: ltu(local("start"), local("previousEnd")),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OVERLAP),
-        }],
-      },
-      {
-        kind: "return",
-        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
-      },
-    ],
-  };
-}
-
-function parserTokenStreamWidthStatusFunction(): RuntimeLanguageFunction {
-  return {
-    name: "parserTokenStreamWidthStatus",
-    parameters: [
-      { name: "start", type: "u32" },
-      { name: "end", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      {
-        kind: "if",
-        condition: eq(local("start"), local("end")),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH),
-        }],
-      },
-      {
-        kind: "return",
-        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
-      },
-    ],
-  };
-}
-
-function parserTokenStreamEofStatusFunction(): RuntimeLanguageFunction {
-  return {
-    name: "parserTokenStreamEofStatus",
-    parameters: [
-      { name: "textLength", type: "u32" },
-      { name: "isMainChannel", type: "u32" },
-      { name: "start", type: "u32" },
-      { name: "end", type: "u32" },
-      { name: "sourceLength", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      {
-        kind: "if",
-        condition: eq(local("textLength"), u32(0)),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
-        }],
-      },
-      {
-        kind: "if",
-        condition: eq(local("isMainChannel"), u32(1)),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
-        }],
-      },
-      {
-        kind: "if",
-        condition: eq(local("start"), local("end")),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
-        }],
-      },
-      {
-        kind: "if",
-        condition: eq(local("start"), local("sourceLength")),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
-        }],
-      },
-      {
-        kind: "return",
-        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
-      },
-    ],
-  };
-}
-
-function parserTokenStreamGapTokenStatusFunction(): RuntimeLanguageFunction {
-  return {
-    name: "parserTokenStreamGapTokenStatus",
-    parameters: [
-      { name: "tokenClass", type: "u32" },
-      { name: "tokenStart", type: "u32" },
-      { name: "tokenEnd", type: "u32" },
-      { name: "gapStart", type: "u32" },
-      { name: "gapEnd", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      {
-        kind: "if",
-        condition: eq(local("tokenClass"), u32(RUNTIME_PUBLIC_TOKEN_TRIVIA)),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
-        }],
-      },
-      {
-        kind: "if",
-        condition: ltu(local("tokenStart"), local("gapStart")),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
-        }],
-      },
-      {
-        kind: "if",
-        condition: ltu(local("gapEnd"), local("tokenEnd")),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
-        }],
-      },
-      {
-        kind: "return",
-        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
-      },
-    ],
-  };
-}
-
-function parserTokenStreamTokenMatchStatusFunction(): RuntimeLanguageFunction {
-  return {
-    name: "parserTokenStreamTokenMatchStatus",
-    parameters: [
-      { name: "leftClass", type: "u32" },
-      { name: "rightClass", type: "u32" },
-      { name: "leftSpecIndex", type: "u32" },
-      { name: "rightSpecIndex", type: "u32" },
-      { name: "leftTerminal", type: "u32" },
-      { name: "rightTerminal", type: "u32" },
-      { name: "leftStart", type: "u32" },
-      { name: "leftEnd", type: "u32" },
-      { name: "rightStart", type: "u32" },
-      { name: "rightEnd", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      {
-        kind: "if",
-        condition: eq(local("leftClass"), local("rightClass")),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
-        }],
-      },
-      {
-        kind: "if",
-        condition: eq(local("leftSpecIndex"), local("rightSpecIndex")),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
-        }],
-      },
-      {
-        kind: "if",
-        condition: eq(local("leftTerminal"), local("rightTerminal")),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
-        }],
-      },
-      {
-        kind: "if",
-        condition: eq(local("leftStart"), local("rightStart")),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
-        }],
-      },
-      {
-        kind: "if",
-        condition: eq(local("leftEnd"), local("rightEnd")),
-        consequent: [],
-        alternate: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
-        }],
-      },
-      {
-        kind: "return",
-        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
-      },
-    ],
-  };
-}
-
-function parserTokenStreamCanonicalMatchStatusFunction(): RuntimeLanguageFunction {
-  return {
-    name: "parserTokenStreamCanonicalMatchStatus",
-    parameters: [
-      { name: "canonicalClass", type: "u32" },
-      { name: "tokenMatchStatus", type: "u32" },
-      { name: "canonicalEnd", type: "u32" },
-      { name: "suppliedStart", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      {
-        kind: "if",
-        condition: eq(
-          local("tokenMatchStatus"),
-          u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
-        ),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MATCH),
-        }],
-      },
-      {
-        kind: "if",
-        condition: eq(
-          call("parserTraceTokenStreamStatus", [local("canonicalClass")]),
-          u32(RUNTIME_TRACE_TOKEN_STREAM_SKIP),
-        ),
-        consequent: [
-          {
-            kind: "if",
-            condition: ltu(local("suppliedStart"), local("canonicalEnd")),
-            consequent: [{
-              kind: "return",
-              expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH),
-            }],
-          },
-          {
-            kind: "return",
-            expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_SKIP),
-          },
-        ],
-      },
-      {
-        kind: "return",
-        expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH),
-      },
-    ],
-  };
-}
-
-function parserTokenStreamFinalStatusFunction(): RuntimeLanguageFunction {
-  return {
-    name: "parserTokenStreamFinalStatus",
-    parameters: [
-      { name: "hasEof", type: "u32" },
-      { name: "eofIndex", type: "u32" },
-      { name: "tokenCount", type: "u32" },
-      { name: "previousEnd", type: "u32" },
-      { name: "sourceLength", type: "u32" },
-    ],
-    result: "u32",
-    body: [
-      {
-        kind: "if",
-        condition: eq(local("hasEof"), u32(1)),
-        consequent: [
-          {
-            kind: "if",
-            condition: eq(add(local("eofIndex"), u32(1)), local("tokenCount")),
-            consequent: [{
-              kind: "return",
-              expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
-            }],
-            alternate: [{
-              kind: "return",
-              expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
-            }],
-          },
-        ],
-      },
-      {
-        kind: "if",
-        condition: ltu(local("previousEnd"), local("sourceLength")),
-        consequent: [{
-          kind: "return",
-          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_GAP),
-        }],
-      },
-      {
-        kind: "return",
-        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
       },
     ],
   };
@@ -7245,6 +6880,8 @@ function parserTraceStatusKindFunction(): RuntimeLanguageFunction {
       statusIs(TRACE_STATUS_UNEXPECTED),
       statusIs(TRACE_STATUS_INTERNAL),
       statusIs(TRACE_STATUS_BRANCH_LIMIT),
+      statusIs(TRACE_STATUS_TRACE_LIMIT),
+      statusIs(TRACE_STATUS_AMBIGUOUS),
       {
         kind: "return",
         expression: u32(TRACE_STATUS_INTERNAL),
@@ -7260,6 +6897,10 @@ function parserTraceFunction(
     name: "parserTrace",
     parameters: [
       { name: "terminalCount", type: "u32" },
+      { name: "maxBranches", type: "u32" },
+      { name: "maxTraceActions", type: "u32" },
+      { name: "maxQueuedBranches", type: "u32" },
+      { name: "ambiguityMode", type: "u32" },
     ],
     locals: [
       { name: "capacity", type: "u32" },
@@ -7475,6 +7116,10 @@ function parserConflictTraceFunction(
     name: "parserTrace",
     parameters: [
       { name: "terminalCount", type: "u32" },
+      { name: "maxBranches", type: "u32" },
+      { name: "maxTraceActions", type: "u32" },
+      { name: "maxQueuedBranches", type: "u32" },
+      { name: "ambiguityMode", type: "u32" },
     ],
     locals: [
       { name: "capacity", type: "u32" },
@@ -7488,6 +7133,9 @@ function parserConflictTraceFunction(
       { name: "branchTraceCountHandle", type: "u32" },
       { name: "branchStackHandle", type: "u32" },
       { name: "branchTraceHandle", type: "u32" },
+      { name: "successTraceHandle", type: "u32" },
+      { name: "successTraceCount", type: "u32" },
+      { name: "successFound", type: "u32" },
       { name: "branchCount", type: "u32" },
       { name: "exploredBranches", type: "u32" },
       { name: "depth", type: "u32" },
@@ -7548,6 +7196,9 @@ function parserConflictTraceFunction(
       setLocal("branchTraceCountHandle", call("runtimeVectorNew", [u32(0)])),
       setLocal("branchStackHandle", call("runtimeVectorNew", [u32(0)])),
       setLocal("branchTraceHandle", call("runtimeVectorNew", [u32(0)])),
+      setLocal("successTraceHandle", u32(0)),
+      setLocal("successTraceCount", u32(0)),
+      setLocal("successFound", u32(0)),
       setLocal(
         "capacity",
         call("runtimeVectorAppend", [
@@ -7791,7 +7442,30 @@ function parserConflictTraceFunction(
                     ),
                     consequent: [
                       ...conflictTraceStoreAction(),
-                      ...traceReturnStatements(TRACE_STATUS_OK),
+                      {
+                        kind: "if",
+                        condition: eq(local("ambiguityMode"), u32(0)),
+                        consequent: traceReturnStatements(TRACE_STATUS_OK),
+                      },
+                      {
+                        kind: "if",
+                        condition: local("successFound"),
+                        consequent: traceReturnStatements(
+                          TRACE_STATUS_AMBIGUOUS,
+                        ),
+                      },
+                      {
+                        kind: "if",
+                        condition: eq(local("branchCount"), u32(0)),
+                        consequent: traceReturnStatements(TRACE_STATUS_OK),
+                      },
+                      setLocal("successFound", u32(1)),
+                      setLocal("successTraceCount", local("traceCount")),
+                      setLocal(
+                        "successTraceHandle",
+                        call("runtimeVectorClone", [local("traceHandle")]),
+                      ),
+                      ...conflictRestoreBranchOrReturnUnexpected(),
                     ],
                     alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
                   }],
@@ -8035,14 +7709,21 @@ function traceHeaderLoadFunction(
 
 function traceStoreActionStatements(): RuntimeStatement[] {
   return [
-    setLocal(
-      "capacity",
-      call("runtimeVectorAppend", [
-        local("traceHandle"),
-        local("action"),
-      ]),
-    ),
-    setLocal("traceCount", add(local("traceCount"), u32(1))),
+    {
+      kind: "if",
+      condition: lt(local("traceCount"), local("maxTraceActions")),
+      consequent: [
+        setLocal(
+          "capacity",
+          call("runtimeVectorAppend", [
+            local("traceHandle"),
+            local("action"),
+          ]),
+        ),
+        setLocal("traceCount", add(local("traceCount"), u32(1))),
+      ],
+      alternate: traceReturnStatements(TRACE_STATUS_TRACE_LIMIT),
+    },
   ];
 }
 
@@ -8059,18 +7740,25 @@ function traceReturnStatements(status: number): RuntimeStatement[] {
 function conflictTraceStoreAction(): RuntimeStatement[] {
   return [{
     kind: "if",
-    condition: lt(local("traceCount"), local("traceCapacity")),
+    condition: lt(local("traceCount"), local("maxTraceActions")),
     consequent: [
-      setLocal(
-        "capacity",
-        call("runtimeVectorAppend", [
-          local("traceHandle"),
-          local("action"),
-        ]),
-      ),
-      setLocal("traceCount", add(local("traceCount"), u32(1))),
+      {
+        kind: "if",
+        condition: lt(local("traceCount"), local("traceCapacity")),
+        consequent: [
+          setLocal(
+            "capacity",
+            call("runtimeVectorAppend", [
+              local("traceHandle"),
+              local("action"),
+            ]),
+          ),
+          setLocal("traceCount", add(local("traceCount"), u32(1))),
+        ],
+        alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+      },
     ],
-    alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+    alternate: traceReturnStatements(TRACE_STATUS_TRACE_LIMIT),
   }];
 }
 
@@ -8078,7 +7766,7 @@ function conflictSaveBranchFrame(): RuntimeStatement[] {
   return [
     {
       kind: "if",
-      condition: lt(local("branchCount"), u32(TRACE_BRANCH_LIMIT)),
+      condition: lt(local("branchCount"), local("maxQueuedBranches")),
       consequent: [],
       alternate: traceReturnStatements(TRACE_STATUS_BRANCH_LIMIT),
     },
@@ -8136,9 +7824,21 @@ function conflictRestoreBranchOrReturnUnexpected(): RuntimeStatement[] {
       kind: "if",
       condition: eq(local("branchCount"), u32(0)),
       consequent: [
-        setLocal("state", local("bestState")),
-        setLocal("streamIndex", local("bestIndex")),
-        ...traceReturnStatements(TRACE_STATUS_UNEXPECTED),
+        {
+          kind: "if",
+          condition: local("successFound"),
+          consequent: [
+            setLocal("traceHandle", local("successTraceHandle")),
+            setLocal("traceCount", local("successTraceCount")),
+            storeScratch(u32(TRACE_BASE), local("traceHandle")),
+            ...traceReturnStatements(TRACE_STATUS_OK),
+          ],
+          alternate: [
+            setLocal("state", local("bestState")),
+            setLocal("streamIndex", local("bestIndex")),
+            ...traceReturnStatements(TRACE_STATUS_UNEXPECTED),
+          ],
+        },
       ],
       alternate: [
         setLocal("branchCount", sub(local("branchCount"), u32(1))),
@@ -8189,7 +7889,7 @@ function conflictRestoreBranchOrReturnUnexpected(): RuntimeStatement[] {
         setLocal("exploredBranches", add(local("exploredBranches"), u32(1))),
         {
           kind: "if",
-          condition: lt(u32(TRACE_BRANCH_LIMIT), local("exploredBranches")),
+          condition: lt(local("maxBranches"), local("exploredBranches")),
           consequent: [
             setLocal("state", local("bestState")),
             setLocal("streamIndex", local("bestIndex")),

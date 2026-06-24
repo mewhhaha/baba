@@ -37,16 +37,17 @@ export function planKitTarget(
   options: KitTargetOptions = {},
   metadata: BabaMetadata = {},
   portability: PortabilityMode = "warn",
+  runtimePlanInput?: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
 ): KitPlan | { diagnostics: readonly Diagnostic[] } {
   const diagnostics = [...kitOptionsDiagnostics(options)];
-  const runtimePlan = planRuntimeParserTarget(
+  const runtimePlan = runtimePlanInput ?? planRuntimeParserTarget(
     analyzed,
     runtimePlanningOptions(options),
     metadata,
     portability,
     { backend: "kit", codePrefix: "KIT", label: "kit" },
   );
-  diagnostics.push(...runtimePlan.diagnostics);
+  if (!runtimePlanInput) diagnostics.push(...runtimePlan.diagnostics);
   if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
     return { diagnostics };
   }
@@ -74,6 +75,7 @@ export function emitKitTarget(plan: KitPlan): GeneratedFile[] {
     path: `${plan.directory}/parser-kit.json`,
     content,
     kind: "config",
+    encoding: "utf-8",
   }];
 }
 
@@ -352,16 +354,22 @@ function runtimePlanningOptions(
 ): RuntimeParserPlanningOptions {
   return {
     lexerStateLimit: options.lexerStateLimit,
+    regexSourceLengthLimit: options.regexSourceLengthLimit,
+    regexNestingLimit: options.regexNestingLimit,
     regexAstNodeLimit: options.regexAstNodeLimit,
     regexBoundedRepeatLimit: options.regexBoundedRepeatLimit,
     regexNfaStateLimit: options.regexNfaStateLimit,
     regexDfaStateLimit: options.regexDfaStateLimit,
     regexOverlapStateLimit: options.regexOverlapStateLimit,
+    regexOverlapPairLimit: options.regexOverlapPairLimit,
     parserStateLimit: options.parserStateLimit,
     parserItemLimit: options.parserItemLimit,
     parserTableEntryLimit: options.parserTableEntryLimit,
+    diagnosticLimit: options.diagnosticLimit,
   };
 }
+
+export { runtimePlanningOptions as kitRuntimePlanningOptions };
 
 function isSafeRelativeDirectory(directory: string): boolean {
   if (

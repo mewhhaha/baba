@@ -1,0 +1,62 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token INT = /0x[0-9A-Fa-f]+|[0-9]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+skip LINE_COMMENT = /\/\/[^\n\r]*/ ;
+
+module = item* ;
+item = import_decl | record_decl | enum_decl | function_decl ;
+import_decl = "import" path:IDENT ("." path:IDENT)* ";" ;
+record_decl = "record" name:IDENT "{" field* "}" ;
+field = name:IDENT ":" type ";" ;
+enum_decl = "enum" name:IDENT "{" variant ("," variant)* ","? "}" ;
+variant = name:IDENT ("(" type ("," type)* ")")? ;
+function_decl = "fn" name:IDENT "(" param_list? ")" ("->" type)? block ;
+param_list = param ("," param)* ","? ;
+param = name:IDENT ":" type ;
+
+type = scalar_type | named_type | array_type | span_type | vec_type ;
+scalar_type = "bool" | "u8" | "u16" | "u32" | "i32" ;
+named_type = IDENT ;
+array_type = "[" type ";" INT "]" ;
+span_type = "span" "<" type ">" ;
+vec_type = "vec" "<" type ">" ;
+
+block = "{" statement* "}" ;
+statement =
+    let_stmt
+  | assign_stmt
+  | if_stmt
+  | while_stmt
+  | for_stmt
+  | break_stmt
+  | continue_stmt
+  | return_stmt
+  | expr_stmt
+  | block ;
+let_stmt = "let" name:IDENT (":" type)? "=" expression ";" ;
+assign_stmt = target:IDENT "=" expression ";" ;
+if_stmt = "if" expression block ("else" block)? ;
+while_stmt = "while" expression block ;
+for_stmt = "for" name:IDENT "in" expression ".." expression block ;
+break_stmt = "break" ";" ;
+continue_stmt = "continue" ";" ;
+return_stmt = "return" expression? ";" ;
+expr_stmt = expression ";" ;
+
+expression = binary ;
+binary = unary (binary_op unary)* ;
+binary_op =
+    "==" | "!=" | "<=" | ">=" | "<" | ">"
+  | "+" | "-" | "*" | "/" | "%"
+  | "<<" | ">>" | "&&" | "||" ;
+unary = unary_op unary | postfix ;
+unary_op = "!" ;
+postfix = primary (call_suffix | field_suffix | index_suffix | cast_suffix)* ;
+call_suffix = "(" argument_list? ")" ;
+argument_list = expression ("," expression)* ","? ;
+field_suffix = "." IDENT ;
+index_suffix = "[" expression "]" ;
+cast_suffix = "as" type ;
+record_literal = "record" IDENT "{" record_literal_field ("," record_literal_field)* ","? "}" ;
+record_literal_field = IDENT ":" expression ;
+primary = INT | "true" | "false" | record_literal | IDENT | "(" expression ")" ;

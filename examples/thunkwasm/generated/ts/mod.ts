@@ -2,11 +2,11 @@
 export const parserPlanFormat = "baba-parser-plan" as const;
 export const parserPlanVersion = 1;
 export const parserPlanSemantics = "baba-portable-v1" as const;
-export const parserPlanHash = "fnv1a64:0795ccc8cd6699cd" as const;
+export const parserPlanHash = "fnv1a64:648d2ebc4633dbe2" as const;
 export const runtimeImplementationFormat = "baba-runtime-implementation" as const;
 export const runtimeImplementationVersion = 1;
 export const runtimeImplementationSemantics = "baba-runtime-portable-v1" as const;
-export const runtimeImplementationHash = "fnv1a64:0aeaf5fef1b6b886" as const;
+export const runtimeImplementationHash = "fnv1a64:7b0382cfc5222422" as const;
 export * from "./syntax.ts";
 export { lex } from "./lexer.ts";
-export { parse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState, parseTokens, parseTokensUnchecked } from "./parser.ts";
+export { parse, parserDiagnosticCodeAmbiguousParse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticCodeTraceLimit, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState, parseTokens, parseTokensUnchecked } from "./parser.ts";

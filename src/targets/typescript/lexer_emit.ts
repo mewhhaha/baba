@@ -4,6 +4,8 @@ import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { RegexAst } from "../../compiler/regex/ast.ts";
 import { buildLexerDfa } from "../../compiler/regex/lexer.ts";
 import { emitTypeScriptLexerRuntime } from "../runtime/typescript_lexer_runtime.ts";
+import { portablePlanToDfa } from "../runtime/portable_plan.ts";
+import type { PortableParserPlanV1 } from "../runtime/portable_plan.ts";
 import type { BnfGrammar } from "./bnf.ts";
 
 export function emitLexer(
@@ -70,6 +72,9 @@ export function emitLexer(
   );
   const asciiTransitions = buildAsciiTransitionRows(dfa);
   const accepts = dfa.states.map((state) => state.selectedAccept ?? -1);
+  const acceptCandidates = dfa.states.map((state) =>
+    orderAcceptCandidates(lexerSpecs, state.accepts)
+  );
   const preserveTrivia = options.preserveTrivia ?? true;
 
   return emitTypeScriptLexerRuntime({
@@ -79,6 +84,68 @@ export function emitLexer(
     transitions,
     asciiTransitions,
     accepts,
+    acceptCandidates,
+  });
+}
+
+export function emitLexerFromPortablePlan(
+  plan: PortableParserPlanV1,
+  options: TypeScriptTargetOptions = {},
+): string {
+  const namedSpecs = plan.lexer.specifications
+    .filter((spec) => spec.type === "named")
+    .map((spec) => {
+      const token = plan.symbols.tokens[spec.tokenId];
+      return {
+        kind: token?.name ?? `token_${spec.tokenId}`,
+        pattern: token?.patternSource ?? "",
+        channel: spec.channel,
+        terminal: spec.terminalId ?? -1,
+        priority: spec.priority,
+        order: spec.order,
+      };
+    });
+  const literalSpecs = plan.lexer.specifications
+    .filter((spec) => spec.type === "literal")
+    .map((spec) => {
+      const literal = plan.symbols.literals[spec.literalId];
+      return {
+        literal: literal?.value ?? "",
+        terminal: spec.terminalId,
+        priority: spec.priority,
+        order: spec.order,
+      };
+    });
+  const dfa = portablePlanToDfa(plan);
+  const transitions = dfa.states.map((state) =>
+    state.transitions.map((transition) =>
+      [
+        transition.start,
+        transition.end,
+        transition.target,
+      ] as const
+    )
+  );
+  const asciiTransitions = buildAsciiTransitionRows(dfa);
+  const accepts = dfa.states.map((state) => state.selectedAccept ?? -1);
+  const lexerSpecs = plan.lexer.specifications.map((spec) => ({
+    type: spec.literal ? "literal" as const : "named" as const,
+    priority: spec.priority,
+    order: spec.order,
+  }));
+  const acceptCandidates = dfa.states.map((state) =>
+    orderAcceptCandidates(lexerSpecs, state.accepts)
+  );
+  const preserveTrivia = options.preserveTrivia ?? true;
+
+  return emitTypeScriptLexerRuntime({
+    preserveTrivia,
+    namedSpecs,
+    literalSpecs,
+    transitions,
+    asciiTransitions,
+    accepts,
+    acceptCandidates,
   });
 }
 
@@ -106,5 +173,28 @@ function buildAsciiTransitionRows(dfa: Dfa): number[][] | null {
       }
     }
     return row;
+  });
+}
+
+function orderAcceptCandidates(
+  specs: readonly {
+    readonly type: "named" | "literal";
+    readonly priority: number;
+    readonly order: number;
+  }[],
+  accepts: readonly number[],
+): readonly number[] {
+  return [...accepts].sort((left, right) => {
+    const leftSpec = specs[left];
+    const rightSpec = specs[right];
+    if (!leftSpec || !rightSpec) return left - right;
+    return rightSpec.priority - leftSpec.priority ||
+      (leftSpec.type === rightSpec.type
+        ? 0
+        : leftSpec.type === "literal"
+        ? -1
+        : 1) ||
+      leftSpec.order - rightSpec.order ||
+      left - right;
   });
 }

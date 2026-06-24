@@ -1,0 +1,5 @@
+token WORD = /[A-Za-z]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = greeting ;
+greeting = "hello" icon:"😀" name:WORD ;

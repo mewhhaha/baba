@@ -18,6 +18,8 @@ import {
   fixtureSamples,
   formatDiagnostic,
   generate,
+  generatedTextContent,
+  generatedTextContentOrEmpty,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,
   generateTreeSitterQueries,
@@ -30,6 +32,14 @@ import {
   treeSitterAccepts,
   validateGrammar,
 } from "./helpers.ts";
+import {
+  getParsePortableRegexInvocationCountForTesting,
+  resetParsePortableRegexInvocationCountForTesting,
+} from "../src/compiler/regex/parser.ts";
+import {
+  getPortableRuntimePlanInvocationCountForTesting,
+  resetPortableRuntimePlanInvocationCountForTesting,
+} from "../src/targets/runtime/plan.ts";
 
 Deno.test("parses and validates explicit token grammars", () => {
   const grammar = parseGrammar(explicitGrammar);
@@ -94,6 +104,109 @@ Deno.test("target output paths cannot collide", () => {
   assertEquals(result.diagnostics[0].code, "OUTPUT_PATH_COLLISION");
 });
 
+Deno.test("portability defaults are warn for one target and strict for multiple targets", () => {
+  const grammar = parseGrammar(`module = "ok" ;`);
+  const metadata = parseMetadata(JSON.stringify({
+    extras: [{ kind: "rule", name: "not_skip" }],
+  }));
+  const cases: Array<
+    [readonly string[], string | undefined, string | undefined]
+  > = [
+    [["tree-sitter"], undefined, undefined],
+    [["typescript"], "warning", "PORTABILITY_TREE_SITTER_EXTRA"],
+    [["wasm"], "warning", "PORTABILITY_TREE_SITTER_EXTRA"],
+    [["tree-sitter", "typescript"], "error", "PORTABILITY_TREE_SITTER_EXTRA"],
+    [["tree-sitter", "wasm"], "error", "PORTABILITY_TREE_SITTER_EXTRA"],
+    [["typescript", "wasm"], "error", "PORTABILITY_TREE_SITTER_EXTRA"],
+    [
+      ["tree-sitter", "typescript", "wasm"],
+      "error",
+      "PORTABILITY_TREE_SITTER_EXTRA",
+    ],
+  ];
+
+  for (const [targets, severity, code] of cases) {
+    const diagnostics = validateGrammar(grammar, {
+      metadata,
+      targets: targets as ("tree-sitter" | "typescript" | "wasm")[],
+    });
+    const diagnostic = diagnostics.find((entry) =>
+      entry.code === "PORTABILITY_TREE_SITTER_EXTRA"
+    );
+    assertEquals(diagnostic?.code, code);
+    assertEquals(diagnostic?.severity, severity);
+  }
+
+  assertEquals(
+    validateGrammar(grammar, {
+      metadata,
+      targets: ["typescript", "wasm"],
+      portability: "warn",
+    }).find((entry) => entry.code === "PORTABILITY_TREE_SITTER_EXTRA")
+      ?.severity,
+    "warning",
+  );
+  assertEquals(
+    validateGrammar(grammar, {
+      metadata,
+      targets: ["typescript"],
+      portability: "strict",
+    }).find((entry) => entry.code === "PORTABILITY_TREE_SITTER_EXTRA")
+      ?.severity,
+    "error",
+  );
+  assertEquals(
+    validateGrammar(grammar, {
+      metadata,
+      targets: ["typescript", "wasm"],
+      portability: "off",
+    }).some((entry) => entry.code === "PORTABILITY_TREE_SITTER_EXTRA"),
+    false,
+  );
+});
+
+Deno.test("TypeScript and Wasm share one portable runtime planning pass", () => {
+  resetPortableRuntimePlanInvocationCountForTesting();
+  const result = compile(`module = "ok" ;`, {
+    targets: ["typescript", "wasm"],
+  });
+
+  assert(result.bundle);
+  assertEquals(getPortableRuntimePlanInvocationCountForTesting(), 1);
+});
+
+Deno.test("shared analysis parses each token regex once per compile", () => {
+  resetParsePortableRegexInvocationCountForTesting();
+  const result = compile(
+    `
+    token A = /a+/ ;
+    token B = /b+/ ;
+    skip WS = /[ \\t\\n]+/ ;
+    module = A B ;
+  `,
+    { targets: ["typescript", "wasm"] },
+  );
+
+  assert(result.bundle);
+  assertEquals(getParsePortableRegexInvocationCountForTesting(), 3);
+});
+
+Deno.test("validateGrammar and compile agree on shared runtime planning diagnostics", () => {
+  const grammar = parseGrammar(`module = "ok" ;`);
+  const options = {
+    targets: ["typescript", "wasm"] as const,
+    typescript: { parserStateLimit: 0 },
+  };
+
+  const validateDiagnostics = validateGrammar(grammar, options);
+  const compileDiagnostics = compile(grammar, options).diagnostics;
+  assertEquals(
+    compileDiagnostics.map((diagnostic) => diagnostic.code).join(","),
+    validateDiagnostics.map((diagnostic) => diagnostic.code).join(","),
+  );
+  assertEquals(validateDiagnostics[0].code, "PORTABLE_PARSER_STATE_LIMIT");
+});
+
 Deno.test("root reachability omits dead rules and warns", () => {
   const source = `
     token ident = /[a-z]+/ ;
@@ -103,13 +216,11 @@ Deno.test("root reachability omits dead rules and warns", () => {
   `;
 
   const bundle = generate(source, { rootRule: "module" });
-  const grammar = bundle.files.find((file) => file.path === "grammar.js")
-    ?.content ?? "";
-  const highlights =
-    bundle.files.find((file) =>
-      file.path === "queries/generated-highlights.scm"
-    )
-      ?.content ?? "";
+  const grammar = generatedTextContent(bundle, "grammar.js");
+  const highlights = generatedTextContentOrEmpty(
+    bundle,
+    "queries/generated-highlights.scm",
+  );
 
   assertIncludes(grammar, "module: $ => $.ident");
   assertNotIncludes(grammar, "dead: $ =>");

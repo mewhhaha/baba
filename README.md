@@ -116,8 +116,12 @@ Both generated parser runtimes export the same main TypeScript API:
   `runtimeImplementationSemantics`, and `runtimeImplementationHash`, identifying
   the packaged standalone runtime source family used to emit the generated
   runtime;
-- `lex(source)` for DFA tokenization;
-- `parse(source)` returning a discriminated `ParseResult`;
+- `lex(source)` for deterministic standalone DFA tokenization. It emits the
+  global longest-match winner using priority, literal/regex tie policy, and
+  declaration order;
+- `parse(source)` returning a discriminated `ParseResult`. When overlapping
+  main-channel tokens share the same longest source extent, parsing may choose
+  among the retained DFA accept candidates using the current LR parser context;
 - strict `parseTokens(source, tokens)` validation for external token streams:
   Baba lexes the complete source once, compares supplied tokens against that
   canonical tokenization, and permits omitted trivia only;
@@ -140,11 +144,35 @@ Both generated parser runtimes export the same main TypeScript API:
 - separate `MainNamedToken` and `TriviaToken` types for significant and trivia
   channels.
 
-The Wasm target also writes `wasm/abi.json`, a host-neutral descriptor for the
+For grammars with parser-contextual token overlaps, `parse(source)` is not
+guaranteed to be equivalent to `parseTokens(source, lex(source).tokens)`.
+`lex(source)` deliberately collapses each token site to one global winner, and
+`parseTokens()`/`parseTokensUnchecked()` cannot recover candidates that an
+external token stream no longer carries. Use `parse(source)` when the grammar
+depends on LR context to distinguish overlapping tokens; use token-stream APIs
+only when the caller owns the exact token sequence to parse. For benchmarks and
+debugging, `parse(source, { contextualLexingStats(stats) {
+... } })` reports
+contextual token-selection counters without adding fields to normal parse
+results: ambiguous lexical sites, candidate checks, attempted token selections,
+and reductions in the successful trace.
+
+Generated parsers also accept bounded ambiguity limits through `ParseOptions`.
+`maxExploredBranches`, `maxQueuedBranches`, and `maxTraceActions` default to
+100,000, 100,000, and 1,000,000 respectively. All three must be positive
+integers when provided. Exceeding the explored or queued branch budget produces
+`PARSER_BRANCH_LIMIT`; exceeding the action trace budget produces
+`PARSER_TRACE_LIMIT`. `ambiguityMode` defaults to `"first-success"`. Set it to
+`"reject-ambiguous-success"` to continue exploring pending conflict branches
+after the first successful parse and report `PARSER_AMBIGUOUS_PARSE` if another
+branch also succeeds.
+
+The Wasm target also writes `wasm/abi.json`, a host-readable descriptor for the
 core Wasm ABI, parser-plan identity, runtime implementation identity, memory
 layout, UTF-16 source/span conventions, trace statuses, adapter handle model,
 numeric parser diagnostic IDs, and diagnostic payload schemas. Non-JS hosts
-should read that JSON rather than scraping the generated TypeScript adapter.
+should read that JSON rather than scraping the generated TypeScript adapter. The
+normative ABI contract is documented in [docs/wasm-abi.md](docs/wasm-abi.md).
 
 The Wasm target also exports `wasmTargetKind`, `wasmBytes`, `wasmAbiVersion`,
 core ABI metadata constants, `memory`, and `reset()` from `wasm/mod.ts`.
@@ -226,6 +254,13 @@ and action-decode conformance. The Stage-0 compiler lowers validated
 runtime-language programs to one resolved control-flow/value IR before the
 TypeScript and Wasm backends emit target artifacts; target-specific source/byte
 emission is still separate.
+
+Architecture decisions are recorded under [docs/adr](docs/adr), including the
+scope boundary, portable parser plan, runtime language, Wasm ABI, contextual
+lexing, conflict policy, and generated-file ownership. Compatibility and support
+levels for public APIs, EBNF, metadata, parser plans, generated TypeScript, Wasm
+ABI, BRL, and Tree-sitter output are documented in
+[docs/stability.md](docs/stability.md).
 
 Use `--target kit` when another tool wants Baba's parser data without generated
 TypeScript source:
@@ -642,6 +677,18 @@ Wasm parser engine and replays the successful action trace in TypeScript to
 build the CST. Shift/reduce diagnostics with multiple rule origins also suggest
 a matching `conflicts` entry when branch search is the intended policy.
 
+Branch search is deterministic and shared by TypeScript and Wasm runtimes. At a
+conflicted state, the runtime explores action alternatives in table order, saves
+later alternatives on a LIFO stack, and returns the first successful parse in
+`"first-success"` mode. In `"reject-ambiguous-success"` mode, the runtime saves
+the first successful action trace and continues exploring pending branches; if a
+second branch succeeds, parsing fails with `PARSER_AMBIGUOUS_PARSE`; otherwise
+the saved first success is replayed. When all branches fail, the diagnostic uses
+the branch that reached the furthest token offset, preserving the earliest
+reached parser state for equal offsets. The search is bounded by the generated
+`ParseOptions` ambiguity limits: `maxExploredBranches`, `maxQueuedBranches`, and
+`maxTraceActions`.
+
 ### Diagnostics
 
 Generation failures caused by grammar or metadata input are reported as
@@ -677,7 +724,8 @@ deno lint
 deno task check
 deno task test
 deno test --allow-read --allow-write tests/runtime_language_test.ts
-deno task bench:wasm -- --samples 5
+deno task bench -- --samples 5 --json bench-results.json
+deno task size:check
 deno task publish:dry-run
 ```
 
@@ -696,3 +744,7 @@ artifacts and verify the checked-in runtime implementation source manifest. They
 also verify the Stage-0 runtime-language compiler source manifest and checked
 runtime-language helper artifact hashes so compiler drift is tracked
 independently from generated parser runtime identity.
+
+Generated example snapshots are not part of the publish payload. The example
+source/publish policy and `deno task size:report` are documented in
+[docs/examples.md](docs/examples.md).

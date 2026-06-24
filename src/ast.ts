@@ -124,14 +124,16 @@ export type GenerateTarget = "tree-sitter" | "typescript" | "wasm" | "kit";
 /** Cross-target portability diagnostic policy. */
 export type PortabilityMode = "strict" | "warn" | "off";
 
-/** Options for the standalone TypeScript lexer/parser target. */
-export interface TypeScriptTargetOptions {
-  /** Relative directory inside the generated bundle. Defaults to `typescript`. */
-  directory?: string;
+/** Shared options for targets backed by the portable standalone runtime. */
+export interface PortableRuntimePlanningOptions {
   /** Preserve skip-token matches as trivia tokens. Defaults to true. */
   preserveTrivia?: boolean;
   /** Maximum generated lexer DFA state count. Defaults to 50,000. */
   lexerStateLimit?: number;
+  /** Maximum regex source length in UTF-16 code units per token pattern. Defaults to unlimited. */
+  regexSourceLengthLimit?: number;
+  /** Maximum nested regex group depth per token pattern. Defaults to unlimited. */
+  regexNestingLimit?: number;
   /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
   regexAstNodeLimit?: number;
   /** Maximum regex bounded-repeat expansion count. Defaults to 10,000. */
@@ -142,12 +144,23 @@ export interface TypeScriptTargetOptions {
   regexDfaStateLimit?: number;
   /** Maximum DFA product states explored during overlap analysis. Defaults to 250,000. */
   regexOverlapStateLimit?: number;
+  /** Maximum token/literal pairs compared during overlap analysis. Defaults to unlimited. */
+  regexOverlapPairLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
   /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
   parserItemLimit?: number;
   /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
   parserTableEntryLimit?: number;
+  /** Maximum runtime-planning diagnostics returned before a summary is appended. Defaults to unlimited. */
+  diagnosticLimit?: number;
+}
+
+/** Options for the standalone TypeScript lexer/parser target. */
+export interface TypeScriptTargetOptions
+  extends PortableRuntimePlanningOptions {
+  /** Relative directory inside the generated bundle. Defaults to `typescript`. */
+  directory?: string;
   /** Maximum generated TypeScript source bytes. Defaults to unlimited. */
   generatedByteLimit?: number;
   /** Emit an informational parser planning statistics diagnostic. */
@@ -155,29 +168,15 @@ export interface TypeScriptTargetOptions {
 }
 
 /** Options for the standalone Wasm lexer/parser target. */
-export interface WasmTargetOptions {
+export interface WasmTargetOptions extends PortableRuntimePlanningOptions {
   /** Relative directory inside the generated bundle. Defaults to `wasm`. */
   directory?: string;
-  /** Preserve skip-token matches as trivia tokens. Defaults to true. */
-  preserveTrivia?: boolean;
-  /** Maximum generated lexer DFA state count. Defaults to 50,000. */
-  lexerStateLimit?: number;
-  /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
-  regexAstNodeLimit?: number;
-  /** Maximum regex bounded-repeat expansion count. Defaults to 10,000. */
-  regexBoundedRepeatLimit?: number;
-  /** Maximum regex NFA state count per planning operation. Defaults to 100,000. */
-  regexNfaStateLimit?: number;
-  /** Maximum regex DFA state count per planning operation. Defaults to 50,000. */
-  regexDfaStateLimit?: number;
-  /** Maximum DFA product states explored during overlap analysis. Defaults to 250,000. */
-  regexOverlapStateLimit?: number;
-  /** Maximum canonical LR(1) state count. Defaults to 20,000. */
-  parserStateLimit?: number;
-  /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
-  parserItemLimit?: number;
-  /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
-  parserTableEntryLimit?: number;
+  /** Maximum generated Wasm adapter/source bytes. Defaults to unlimited. */
+  generatedByteLimit?: number;
+  /** Emit an informational parser planning statistics diagnostic. */
+  reportParserStats?: boolean;
+  /** Wasm packaging mode. Currently defaults to the JavaScript-embedded module. */
+  packaging?: "external-binary" | "embedded-typescript";
 }
 
 /** Options for the generic parser-kit target. */
@@ -190,6 +189,10 @@ export interface KitTargetOptions {
   preserveTrivia?: boolean;
   /** Maximum generated lexer DFA state count. Defaults to 50,000. */
   lexerStateLimit?: number;
+  /** Maximum regex source length in UTF-16 code units per token pattern. Defaults to unlimited. */
+  regexSourceLengthLimit?: number;
+  /** Maximum nested regex group depth per token pattern. Defaults to unlimited. */
+  regexNestingLimit?: number;
   /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
   regexAstNodeLimit?: number;
   /** Maximum regex bounded-repeat expansion count. Defaults to 10,000. */
@@ -200,12 +203,16 @@ export interface KitTargetOptions {
   regexDfaStateLimit?: number;
   /** Maximum DFA product states explored during overlap analysis. Defaults to 250,000. */
   regexOverlapStateLimit?: number;
+  /** Maximum token/literal pairs compared during overlap analysis. Defaults to unlimited. */
+  regexOverlapPairLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
   /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
   parserItemLimit?: number;
   /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
   parserTableEntryLimit?: number;
+  /** Maximum runtime-planning diagnostics returned before a summary is appended. Defaults to unlimited. */
+  diagnosticLimit?: number;
 }
 
 /** Conflict policy for standalone parser runtimes. */
@@ -218,6 +225,8 @@ export interface ParserRuntimeMetadata {
 
 /** One deterministic LR parser conflict resolution. */
 export interface ParserConflictResolutionMetadata {
+  /** Stable conflict ID reported by parser conflict diagnostics. */
+  conflict?: string;
   /** Rule names or expression descriptions that must be involved. */
   rules?: string[];
   /** Terminal display or literal text that must trigger the conflict. */
@@ -299,15 +308,35 @@ export interface ValidateOptions {
   kit?: KitTargetOptions;
 }
 
+export type TextGeneratedFileKind =
+  | "source"
+  | "query"
+  | "config"
+  | "test"
+  | "docs";
+
 /** One generated file. */
-export interface GeneratedFile {
-  /** POSIX-style relative output path. */
-  path: string;
-  /** File contents. */
-  content: string;
-  /** File category. */
-  kind: "source" | "query" | "config" | "test" | "docs";
-}
+export type GeneratedFile =
+  | {
+    /** POSIX-style relative output path. */
+    readonly path: string;
+    /** File category. */
+    readonly kind: TextGeneratedFileKind;
+    /** Text encoding. */
+    readonly encoding: "utf-8";
+    /** File contents. */
+    readonly content: string;
+  }
+  | {
+    /** POSIX-style relative output path. */
+    readonly path: string;
+    /** File category. */
+    readonly kind: "binary";
+    /** Binary encoding. */
+    readonly encoding: "binary";
+    /** File contents. */
+    readonly content: Uint8Array;
+  };
 
 /** Generated file bundle. */
 export interface GeneratedBundle {

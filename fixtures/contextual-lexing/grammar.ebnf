@@ -1,0 +1,7 @@
+token A priority 10 = /x/ ;
+token B priority 0 = /x/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = left | right ;
+left = "a" value:A ;
+right = "b" value:B ;

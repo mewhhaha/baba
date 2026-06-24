@@ -1,12 +1,8 @@
-import type { AnalyzedGrammar } from "../../compiler/ir.ts";
-import type { BnfGrammar } from "../typescript/bnf.ts";
-import type { LrTable } from "../typescript/lr1.ts";
-import { emitParser } from "../typescript/parser_emit.ts";
+import type { PortableParserPlanV1 } from "../runtime/portable_plan.ts";
+import { emitParserFromPortablePlan } from "../typescript/parser_emit.ts";
 
 export function emitWasmParser(
-  analyzed: AnalyzedGrammar,
-  bnf: BnfGrammar,
-  lr: LrTable,
+  plan: PortableParserPlanV1,
 ): string {
-  return emitParser(analyzed, bnf, lr, { mode: "wasm" });
+  return emitParserFromPortablePlan(plan, { mode: "wasm" });
 }

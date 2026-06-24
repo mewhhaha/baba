@@ -23,15 +23,22 @@ import {
   RUNTIME_ACTION_PAYLOAD_MASK,
   RUNTIME_ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT,
+  RUNTIME_TRACE_STATUS_AMBIGUOUS,
   RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
   RUNTIME_TRACE_STATUS_INTERNAL,
   RUNTIME_TRACE_STATUS_OK,
+  RUNTIME_TRACE_STATUS_TRACE_LIMIT,
   RUNTIME_TRACE_STATUS_UNEXPECTED,
 } from "../runtime/language_sources.ts";
 import type {
   PortableParserPlanMetadata,
   PortableParserPlanV1,
 } from "../runtime/portable_plan.ts";
+import {
+  portablePlanToBnf,
+  portablePlanToDfa,
+  portablePlanToLrTable,
+} from "../../compiler/portable_plan/adapters.ts";
 import {
   WASM_ABI_VERSION,
   WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
@@ -47,13 +54,13 @@ import {
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
 } from "../runtime/wasm_abi.ts";
-import { emitSyntax } from "../typescript/syntax_emit.ts";
+import { emitSyntaxFromPortablePlan } from "../typescript/syntax_emit.ts";
 import {
-  planRuntimeParserTarget,
+  planPortableRuntime,
   type RuntimeParserPlan,
   type RuntimeParserPlanningOptions,
 } from "../runtime/plan.ts";
-import { emitWasmLexer } from "./lexer_emit.ts";
+import { emitWasmLexerFromPortablePlan } from "./lexer_emit.ts";
 import { emitWasmModule, type WasmModuleImage } from "./module_emit.ts";
 import { emitWasmParser } from "./parser_emit.ts";
 import { emitWasmRuntime } from "./runtime_emit.ts";
@@ -69,6 +76,7 @@ export interface WasmPlan {
   parserTraceWasm: Uint8Array;
   directory: string;
   preserveTrivia: boolean;
+  generatedBytes: number;
   diagnostics: readonly Diagnostic[];
 }
 
@@ -77,53 +85,86 @@ export function planWasmTarget(
   options: WasmTargetOptions = {},
   metadata: BabaMetadata = {},
   portability: PortabilityMode = "warn",
+  runtimePlanInput?: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
 ): WasmPlan | { diagnostics: readonly Diagnostic[] } {
   const diagnostics = [...wasmOptionsDiagnostics(options)];
-  const runtimePlan = planRuntimeParserTarget(
-    analyzed,
-    runtimePlanningOptions(options),
-    metadata,
-    portability,
-    { backend: "wasm", codePrefix: "WASM", label: "Wasm" },
-  );
-  diagnostics.push(...runtimePlan.diagnostics);
+  const runtimePlan = runtimePlanInput ??
+    planPortableRuntime(
+      analyzed,
+      runtimePlanningOptions(options),
+      metadata,
+      portability,
+    );
+  if (!runtimePlanInput) diagnostics.push(...runtimePlan.diagnostics);
   if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
     return { diagnostics };
   }
+  const portableBnf = portablePlanToBnf(runtimePlan.portable);
+  const portableLr = portablePlanToLrTable(runtimePlan.portable);
+  const portableDfa = portablePlanToDfa(runtimePlan.portable);
   const wasm = emitWasmModule(
-    runtimePlan.dfa,
-    runtimePlan.lr,
+    portableDfa,
+    portableLr,
     runtimePlan.portable.version,
   );
   const parserTraceWasm = emitParserTraceWasm(
-    runtimePlan.bnf,
-    runtimePlan.lr,
+    portableBnf,
+    portableLr,
   );
+  const generatedBytes = wasmGeneratedByteLength(
+    analyzed,
+    runtimePlan,
+    portableBnf,
+    portableLr,
+    wasm,
+    parserTraceWasm,
+    options,
+  );
+  if (
+    options.generatedByteLimit !== undefined &&
+    generatedBytes > options.generatedByteLimit
+  ) {
+    diagnostics.push({
+      code: "WASM_GENERATED_BYTE_LIMIT",
+      severity: "error",
+      backend: "wasm",
+      message:
+        `The Wasm target generated ${generatedBytes} bytes, exceeding the configured limit (${options.generatedByteLimit}).`,
+    });
+  }
+  if (hasErrors(diagnostics)) return { diagnostics };
+  if (options.reportParserStats) {
+    diagnostics.push(
+      parserStatsDiagnostic(analyzed, runtimePlan, generatedBytes),
+    );
+  }
   return {
     analyzed,
-    bnf: runtimePlan.bnf,
-    lr: runtimePlan.lr,
-    dfa: runtimePlan.dfa,
+    bnf: portableBnf,
+    lr: portableLr,
+    dfa: portableDfa,
     portable: runtimePlan.portable,
     portableMetadata: runtimePlan.portableMetadata,
     wasm,
     parserTraceWasm,
     directory: options.directory ?? "wasm",
     preserveTrivia: options.preserveTrivia ?? true,
+    generatedBytes,
     diagnostics,
   };
 }
 
 export function emitWasmTarget(
   plan: WasmPlan,
-  _options: WasmTargetOptions = {},
+  options: WasmTargetOptions = {},
 ): GeneratedFile[] {
   const dir = plan.directory;
-  return [
+  const files: GeneratedFile[] = [
     {
       path: `${dir}/syntax.ts`,
-      content: emitSyntax(plan.analyzed),
+      content: emitSyntaxFromPortablePlan(plan.portable),
       kind: "source",
+      encoding: "utf-8",
     },
     {
       path: `${dir}/wasm.ts`,
@@ -131,34 +172,84 @@ export function emitWasmTarget(
         plan.wasm,
         plan.parserTraceWasm,
         plan.portableMetadata,
+        { packaging: options.packaging },
       ),
       kind: "source",
+      encoding: "utf-8",
     },
     {
       path: `${dir}/abi.json`,
       content: wasmAbiDescriptorSource(plan),
       kind: "config",
+      encoding: "utf-8",
     },
     {
       path: `${dir}/lexer.ts`,
-      content: emitWasmLexer(plan.analyzed, plan.bnf, plan.preserveTrivia),
+      content: emitWasmLexerFromPortablePlan(
+        plan.portable,
+        plan.preserveTrivia,
+      ),
       kind: "source",
+      encoding: "utf-8",
     },
     {
       path: `${dir}/parser.ts`,
-      content: emitWasmParser(plan.analyzed, plan.bnf, plan.lr),
+      content: emitWasmParser(plan.portable),
       kind: "source",
+      encoding: "utf-8",
     },
     {
       path: `${dir}/mod.ts`,
-      content: wasmModSource(),
+      content: wasmModSource(options.packaging),
       kind: "source",
+      encoding: "utf-8",
     },
   ];
+  if ((options.packaging ?? "embedded-typescript") === "external-binary") {
+    files.push(
+      {
+        path: `${dir}/parser.wasm`,
+        content: plan.wasm.bytes,
+        kind: "binary",
+        encoding: "binary",
+      },
+      {
+        path: `${dir}/manifest.json`,
+        content: wasmRuntimeManifestSource(plan),
+        kind: "config",
+        encoding: "utf-8",
+      },
+    );
+  }
+  return files;
 }
 
 function wasmAbiDescriptorSource(plan: WasmPlan): string {
   return `${JSON.stringify(wasmAbiDescriptor(plan), null, 2)}\n`;
+}
+
+function wasmRuntimeManifestSource(plan: WasmPlan): string {
+  return `${
+    JSON.stringify(
+      {
+        format: "baba-wasm-runtime",
+        version: 1,
+        abiVersion: WASM_ABI_VERSION,
+        parserPlanVersion: plan.portableMetadata.version,
+        parserPlanSemantics: plan.portableMetadata.semantics,
+        parserPlanHash: plan.portableMetadata.hash,
+        runtimeImplementation: {
+          format: RUNTIME_IMPLEMENTATION_METADATA.format,
+          version: RUNTIME_IMPLEMENTATION_METADATA.version,
+          semantics: RUNTIME_IMPLEMENTATION_METADATA.semantics,
+          hash: RUNTIME_IMPLEMENTATION_METADATA.hash,
+        },
+        module: "parser.wasm",
+      },
+      null,
+      2,
+    )
+  }\n`;
 }
 
 function wasmAbiDescriptor(plan: WasmPlan): unknown {
@@ -317,6 +408,8 @@ function wasmAbiDescriptor(plan: WasmPlan): unknown {
       unexpected: RUNTIME_TRACE_STATUS_UNEXPECTED,
       internal: RUNTIME_TRACE_STATUS_INTERNAL,
       branchLimit: RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
+      traceLimit: RUNTIME_TRACE_STATUS_TRACE_LIMIT,
+      ambiguous: RUNTIME_TRACE_STATUS_AMBIGUOUS,
     },
     parserDiagnosticCodes: PARSER_DIAGNOSTIC_CODES,
     parserDiagnostics: {
@@ -442,12 +535,17 @@ function hasMultiActionEntries(
   return false;
 }
 
-function wasmModSource(): string {
+function wasmModSource(
+  packaging: WasmTargetOptions["packaging"] = "embedded-typescript",
+): string {
+  const wasmExports = packaging === "external-binary"
+    ? "createParserFromBytes, createParserFromModule, createParserFromUrl, memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, runtimeImplementationFormat, runtimeImplementationHash, runtimeImplementationSemantics, runtimeImplementationVersion, wasmAbiVersion, wasmAdapterHandleCapabilityModel, wasmHostOwnershipModel, wasmInputBase, wasmLexResultI32Count, wasmMaxPages, wasmResultLifetimeModel, wasmSourceEncoding, wasmSpanUnit, wasmTargetKind, wasmTokenRecordI32Count, wasmTraceStatusAmbiguous, wasmTraceStatusBranchLimit, wasmTraceStatusInternal, wasmTraceStatusOk, wasmTraceStatusTraceLimit, wasmTraceStatusUnexpected"
+    : "memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, runtimeImplementationFormat, runtimeImplementationHash, runtimeImplementationSemantics, runtimeImplementationVersion, wasmAbiVersion, wasmAdapterHandleCapabilityModel, wasmBytes, wasmHostOwnershipModel, wasmInputBase, wasmLexResultI32Count, wasmMaxPages, wasmResultLifetimeModel, wasmSourceEncoding, wasmSpanUnit, wasmTargetKind, wasmTokenRecordI32Count, wasmTraceStatusAmbiguous, wasmTraceStatusBranchLimit, wasmTraceStatusInternal, wasmTraceStatusOk, wasmTraceStatusTraceLimit, wasmTraceStatusUnexpected";
   return `// Generated by @mewhhaha/baba. Do not edit by hand.
 export * from "./syntax.ts";
 export { lex } from "./lexer.ts";
-export { parse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState, parseTokens, parseTokensUnchecked } from "./parser.ts";
-export { memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, runtimeImplementationFormat, runtimeImplementationHash, runtimeImplementationSemantics, runtimeImplementationVersion, wasmAbiVersion, wasmAdapterHandleCapabilityModel, wasmBytes, wasmHostOwnershipModel, wasmInputBase, wasmLexResultI32Count, wasmMaxPages, wasmResultLifetimeModel, wasmSourceEncoding, wasmSpanUnit, wasmTargetKind, wasmTokenRecordI32Count, wasmTraceStatusBranchLimit, wasmTraceStatusInternal, wasmTraceStatusOk, wasmTraceStatusUnexpected } from "./wasm.ts";
+export { parse, parserDiagnosticCodeAmbiguousParse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticCodeTraceLimit, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState, parseTokens, parseTokensUnchecked } from "./parser.ts";
+export { ${wasmExports} } from "./wasm.ts";
 `;
 }
 
@@ -456,30 +554,124 @@ function runtimePlanningOptions(
 ): RuntimeParserPlanningOptions {
   return {
     lexerStateLimit: options.lexerStateLimit,
+    regexSourceLengthLimit: options.regexSourceLengthLimit,
+    regexNestingLimit: options.regexNestingLimit,
     regexAstNodeLimit: options.regexAstNodeLimit,
     regexBoundedRepeatLimit: options.regexBoundedRepeatLimit,
     regexNfaStateLimit: options.regexNfaStateLimit,
     regexDfaStateLimit: options.regexDfaStateLimit,
     regexOverlapStateLimit: options.regexOverlapStateLimit,
+    regexOverlapPairLimit: options.regexOverlapPairLimit,
     parserStateLimit: options.parserStateLimit,
     parserItemLimit: options.parserItemLimit,
     parserTableEntryLimit: options.parserTableEntryLimit,
+    diagnosticLimit: options.diagnosticLimit,
   };
 }
+
+export { runtimePlanningOptions as wasmRuntimePlanningOptions };
 
 function wasmOptionsDiagnostics(options: WasmTargetOptions): Diagnostic[] {
   const directory = options.directory ?? "wasm";
   const diagnostics: Diagnostic[] = [];
   if (!isSafeRelativeDirectory(directory)) {
     diagnostics.push({
-      code: "WASM_GENERATION_ERROR",
+      code: "WASM_INVALID_OUTPUT_DIRECTORY",
       severity: "error",
       backend: "wasm",
       message:
         `Invalid Wasm output directory '${directory}'. Use a relative directory without '.', '..', empty components, absolute paths, drive prefixes, or backslashes.`,
     });
   }
+  if (
+    options.generatedByteLimit !== undefined &&
+    (!Number.isInteger(options.generatedByteLimit) ||
+      options.generatedByteLimit < 1)
+  ) {
+    diagnostics.push({
+      code: "WASM_GENERATED_BYTE_LIMIT",
+      severity: "error",
+      backend: "wasm",
+      message: "generatedByteLimit must be a positive integer.",
+    });
+  }
+  if (
+    options.packaging !== undefined &&
+    options.packaging !== "embedded-typescript" &&
+    options.packaging !== "external-binary"
+  ) {
+    diagnostics.push({
+      code: "WASM_PACKAGING_MODE",
+      severity: "error",
+      backend: "wasm",
+      message: "packaging must be external-binary or embedded-typescript.",
+    });
+  }
   return diagnostics;
+}
+
+function wasmGeneratedByteLength(
+  _analyzed: AnalyzedGrammar,
+  runtimePlan: RuntimeParserPlan,
+  _bnf: BnfGrammar,
+  _lr: LrTable,
+  wasm: WasmModuleImage,
+  parserTraceWasm: Uint8Array,
+  options: WasmTargetOptions,
+): number {
+  return wasm.bytes.length + parserTraceWasm.length + byteLength([
+    emitSyntaxFromPortablePlan(runtimePlan.portable),
+    emitWasmRuntime(
+      wasm,
+      parserTraceWasm,
+      runtimePlan.portableMetadata,
+      { packaging: options.packaging },
+    ),
+    emitWasmLexerFromPortablePlan(
+      runtimePlan.portable,
+      options.preserveTrivia ?? true,
+    ),
+    emitWasmParser(runtimePlan.portable),
+    wasmModSource(options.packaging),
+  ].join(""));
+}
+
+function parserStatsDiagnostic(
+  analyzed: AnalyzedGrammar,
+  runtimePlan: RuntimeParserPlan,
+  generatedBytes: number,
+): Diagnostic {
+  const stats = runtimePlan.lr.stats;
+  const portableStats = runtimePlan.portable.statistics;
+  return {
+    code: "WASM_PARSER_STATS",
+    severity: "information",
+    backend: "wasm",
+    message: [
+      "Wasm parser planning statistics:",
+      `rules: ${analyzed.reachableRules.size}`,
+      `BNF productions: ${runtimePlan.bnf.productions.length}`,
+      `lexer states: ${portableStats.lexerStates}`,
+      `lexer accept candidates: ${portableStats.lexerAcceptCandidates}`,
+      `lexer average accept candidates/state: ${
+        (portableStats.lexerAverageAcceptCandidatesPerStateMilli / 1000)
+          .toFixed(2)
+      }`,
+      `lexer max accept candidates/state: ${portableStats.lexerMaxAcceptCandidatesPerState}`,
+      `lexer ambiguous accept states: ${portableStats.lexerAmbiguousAcceptStates}`,
+      `LR states: ${stats.states}`,
+      `LR core items: ${stats.coreItems}`,
+      `LR items: ${stats.items}`,
+      `ACTION entries: ${stats.actionEntries}`,
+      `GOTO entries: ${stats.gotoEntries}`,
+      `table entries: ${stats.tableEntries}`,
+      `generated bytes: ${generatedBytes}`,
+    ].join("\n"),
+  };
+}
+
+function byteLength(source: string): number {
+  return new TextEncoder().encode(source).length;
 }
 
 function isSafeRelativeDirectory(directory: string): boolean {

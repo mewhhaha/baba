@@ -1,6 +1,8 @@
 import { countRegexAstNodes, type RegexAst } from "./ast.ts";
 
 export type RegexResourceLimitCode =
+  | "REGEX_SOURCE_LIMIT"
+  | "REGEX_NESTING_LIMIT"
   | "REGEX_AST_NODE_LIMIT"
   | "REGEX_NFA_STATE_LIMIT"
   | "REGEX_DFA_STATE_LIMIT"
@@ -8,6 +10,8 @@ export type RegexResourceLimitCode =
   | "REGEX_REPEAT_EXPANSION_LIMIT";
 
 export interface RegexCompilerLimits {
+  readonly sourceLengthLimit?: number;
+  readonly nestingLimit?: number;
   readonly astNodeLimit?: number;
   readonly boundedRepeatLimit?: number;
   readonly nfaStateLimit?: number;

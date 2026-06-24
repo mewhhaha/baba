@@ -1,0 +1,28 @@
+name: Scheduled quality gates
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+jobs:
+  fuzz-and-bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.8.0
+
+      - name: Deterministic fuzz seeds
+        run: deno test --allow-read --allow-write --allow-run tests/fuzz_test.ts
+
+      - name: Benchmark JSON report
+        run: deno task bench -- --samples 3 --json bench-results.json
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench-results.json

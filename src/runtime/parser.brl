@@ -1,0 +1,11 @@
+fn parser_action_kind(action: u32) -> u32 {
+  return (action / 16777216) * 16777216;
+}
+
+fn parser_action_payload(action: u32) -> u32 {
+  return action - parser_action_kind(action);
+}
+
+fn parser_is_accept(action: u32) -> bool {
+  return parser_action_kind(action) == 50331648;
+}
