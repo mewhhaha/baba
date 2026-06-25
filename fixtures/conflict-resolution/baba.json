@@ -1,8 +1,8 @@
 {
-  "version": 1,
+  "version": 2,
   "parser": {
     "conflicts": [
-      ["tuple", "atom"]
+      { "conflict": "c_979957f160420871" }
     ]
   }
 }

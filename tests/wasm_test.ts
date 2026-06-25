@@ -435,14 +435,18 @@ Deno.test("Wasm target can emit external binary packaging", async () => {
     await applyBundle(first.bundle, { root: dir });
     const wasmSource = await Deno.readTextFile(`${dir}/wasm/wasm.ts`);
     assertNotIncludes(wasmSource, "export const wasmBytes");
-    assertIncludes(wasmSource, "export function createParserFromBytes");
-    assertIncludes(wasmSource, "export function createParserFromModule");
-    assertIncludes(wasmSource, "export async function createParserFromUrl");
+    assertIncludes(wasmSource, "export function createWasmParserInstance");
+    assertNotIncludes(wasmSource, "createParserFromBytes");
+    assertNotIncludes(wasmSource, "createParserFromModule");
+    assertNotIncludes(wasmSource, "createParserFromUrl");
     const bytes = await Deno.readFile(`${dir}/wasm/parser.wasm`);
     assert(WebAssembly.validate(arrayBuffer(bytes)));
     const mod = await import(`file://${dir}/wasm/mod.ts`);
     assertEquals("wasmBytes" in mod, false);
-    assertEquals(typeof mod.createParserFromBytes, "function");
+    assertEquals("createParserFromBytes" in mod, false);
+    assertEquals("createParserFromModule" in mod, false);
+    assertEquals("createParserFromUrl" in mod, false);
+    assertEquals(typeof mod.createWasmParserInstance, "function");
     assertThrowsIncludes(
       () => mod.parse("let x"),
       "Wasm parser runtime is not initialized",
@@ -450,10 +454,18 @@ Deno.test("Wasm target can emit external binary packaging", async () => {
     const fromBytes = mod.createParser({ bytes });
     assertEquals(fromBytes.parse("let x").ok, true);
     fromBytes.dispose();
+    const module = new WebAssembly.Module(arrayBuffer(bytes));
+    const fromModule = mod.createParser({ module });
+    assertEquals(fromModule.parse("let x").ok, true);
+    fromModule.dispose();
     const asyncFromBytes = await mod.createParserAsync({ bytes });
     assertEquals(asyncFromBytes.lex("let x").diagnostics.length, 0);
     asyncFromBytes.dispose();
-    mod.createParserFromBytes(bytes);
+    const wasm = mod.createWasmParserInstance({ bytes });
+    const fromWasm = mod.createParser({ wasm });
+    assertEquals(fromWasm.parse("let x").ok, true);
+    fromWasm.dispose();
+    mod.createParser({ bytes });
     const parsed = mod.parse("let x");
     assertEquals(parsed.ok, true);
     assertEquals(parsed.root.children[1].kind, "IDENT");

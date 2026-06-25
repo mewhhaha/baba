@@ -70,8 +70,8 @@ export type EbnfExpression =
 
 /** Optional metadata for generation, query emission, and parser conflict policy. */
 export interface BabaMetadata {
-  /** Metadata schema version. Omit for legacy callers; when present, must be 1. */
-  version?: 1;
+  /** Metadata schema version. Omit to use the current schema; when present, must be 2. */
+  version?: 2;
   /** External token names supplied by a user-owned Tree-sitter scanner. */
   externals?: string[];
   /** Extra tokens or rules allowed between tree-sitter tokens. */
@@ -91,9 +91,6 @@ export interface BabaMetadata {
   /** Standalone parser runtime conflict policy. */
   parser?: ParserRuntimeMetadata;
 }
-
-/** @deprecated Use `BabaMetadata`. */
-export type TreeSitterMetadata = BabaMetadata;
 
 /** A structured baba diagnostic. */
 export interface Diagnostic {
@@ -232,21 +229,15 @@ export interface ParserRuntimeMetadata {
 }
 
 /** One LR parser conflict declaration that enables bounded branch search. */
-export type ParserConflictDeclarationMetadata =
-  | string[]
-  | {
-    /** Stable conflict ID reported by parser conflict diagnostics. */
-    readonly conflict: string;
-  };
+export interface ParserConflictDeclarationMetadata {
+  /** Stable conflict ID reported by parser conflict diagnostics. */
+  readonly conflict: string;
+}
 
 /** One deterministic LR parser conflict resolution. */
 export interface ParserConflictResolutionMetadata {
   /** Stable conflict ID reported by parser conflict diagnostics. */
-  conflict?: string;
-  /** Exact rule names or exact expression descriptions that must be involved. */
-  rules?: string[];
-  /** Terminal display or literal text that must trigger the conflict. */
-  on?: string;
+  conflict: string;
   /** Which LR action kind should win. */
   prefer: "shift" | "reduce";
   /** Exact rule name or exact expression text to select when more than one reduce action exists. */
@@ -464,13 +455,11 @@ export type TreeSitterExtra =
 
 /** Per-rule tree-sitter shaping metadata. */
 export interface TreeSitterRuleMetadata {
-  /** @deprecated Use named EBNF fields instead. */
-  fields?: Record<string, string>;
   /** Token wrapper for the rendered rule. */
   token?: TreeSitterRuleToken;
   /** Precedence wrapper for the rendered rule. */
   wrap?: TreeSitterRuleWrap;
-  /** Root, named-field, or unversioned legacy numeric path rewrites. */
+  /** Root or named-field path rewrites. */
   paths?: Record<string, TreeSitterPathMetadata>;
 }
 

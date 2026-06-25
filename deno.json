@@ -1,6 +1,6 @@
 {
   "name": "@mewhhaha/baba",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "license": "MIT",
   "exports": {
     ".": "./src/mod.ts",
@@ -48,7 +48,7 @@
   },
   "tasks": {
     "bootstrap": "deno run --allow-read --allow-write scripts/bootstrap_check.ts --write",
-    "bootstrap:check": "deno run --allow-read --allow-write scripts/bootstrap_check.ts",
+    "bootstrap:check": "deno run --allow-read --allow-write --allow-run scripts/bootstrap_check.ts",
     "test": "deno test --allow-read --allow-write --allow-run",
     "test:brl-conformance": "deno test --allow-read --allow-write --allow-run tests/runtime_language_conformance_test.ts tests/runtime_language_frontend_test.ts tests/runtime_language_wasm_test.ts",
     "test:fuzz": "deno test --allow-read --allow-write --allow-run tests/fuzz_test.ts",

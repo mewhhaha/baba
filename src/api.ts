@@ -19,7 +19,7 @@ import {
   validateTreeSitterBackendCapabilities,
   validateTreeSitterGenerationMetadataSemantics,
 } from "./generate.ts";
-import { parseTreeSitterMetadata } from "./metadata.ts";
+import { parseMetadata as parseBabaMetadata } from "./metadata.ts";
 import { BabaError, formatDiagnostic, toBabaError } from "./errors.ts";
 import { parseEbnf } from "./parser.ts";
 import { generatedBundle } from "./bundle.ts";
@@ -63,7 +63,7 @@ export function parseGrammar(source: string): EbnfGrammar {
 /** Parses baba metadata JSON. */
 export function parseMetadata(source: string): BabaMetadata {
   try {
-    return parseTreeSitterMetadata(source);
+    return parseBabaMetadata(source);
   } catch (error) {
     throw toBabaError(error, "METADATA_ERROR");
   }

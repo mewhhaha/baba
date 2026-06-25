@@ -5,16 +5,16 @@ Status: accepted.
 ## Context
 
 Baba writes generated source, query, JSON, and binary artifacts. Regeneration
-must be reproducible, but user edits and generated snapshots should not be
+must be reproducible, but user edits and generated artifacts should not be
 silently overwritten or published as source.
 
 ## Decision
 
 Generated output is tracked by `.baba-manifest.json` ownership metadata.
 `applyBundle()` refuses unsafe paths, nested path collisions, and overwrites of
-modified or unowned files. Checked-in example generated outputs are treated as
-snapshots verified by bootstrap tasks, and generated example snapshots are
-excluded from the publish payload.
+modified or unowned files. Example generated outputs are ignored local
+artifacts; bootstrap tasks regenerate them into temporary directories for
+validation, and generated example outputs are excluded from the publish payload.
 
 ## Consequences
 
@@ -25,7 +25,7 @@ runners rather than generated example outputs.
 ## Rejected Alternatives
 
 - Overwriting generated output unconditionally.
-- Treating checked-in generated example directories as user-authored source.
+- Treating generated example directories as user-authored source.
 - Publishing all generated example artifacts by default.
 
 ## Compatibility Impact

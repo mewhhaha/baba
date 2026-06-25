@@ -40,9 +40,6 @@ parser.dispose();
 `createParserAsync()` has the same behavior for embedded bundles. External
 binary bundles accept `{ bytes }`, `{ module }`, or `{ wasm }` in
 `createParser()` and additionally accept `{ url }` in `createParserAsync()`.
-`createParserFromBytes()`, `createParserFromModule()`, and
-`createParserFromUrl()` remain available for the low-level adapter path and also
-install a backwards-compatible module-level default instance.
 
 Importing an embedded adapter exposes static metadata such as ABI constants and
 parser-plan identity without synchronously compiling Wasm. The embedded core
@@ -64,12 +61,11 @@ const parser = createParser({
 });
 ```
 
-The low-level factories accept the same options. Limit failures throw
-`WasmResourceLimitError` with a stable string `code`, such as
-`INPUT_LIMIT_EXCEEDED`, `TOKEN_LIMIT_EXCEEDED`, `PARSER_STACK_LIMIT_EXCEEDED`,
-`PARSER_BRANCH_LIMIT_EXCEEDED`, `TRACE_LIMIT_EXCEEDED`,
-`CST_NODE_LIMIT_EXCEEDED`, `DIAGNOSTIC_LIMIT_EXCEEDED`, or
-`MEMORY_LIMIT_EXCEEDED`.
+Limit failures throw `WasmResourceLimitError` with a stable string `code`, such
+as `INPUT_LIMIT_EXCEEDED`, `TOKEN_LIMIT_EXCEEDED`,
+`PARSER_STACK_LIMIT_EXCEEDED`, `PARSER_BRANCH_LIMIT_EXCEEDED`,
+`TRACE_LIMIT_EXCEEDED`, `CST_NODE_LIMIT_EXCEEDED`, `DIAGNOSTIC_LIMIT_EXCEEDED`,
+or `MEMORY_LIMIT_EXCEEDED`.
 
 Each parser instance owns its `WebAssembly.Instance`, memory, source buffers,
 trace runtime, caches, reset epoch, and disposed state. Module-level `lex`,

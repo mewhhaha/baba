@@ -1,6 +1,6 @@
 # Metadata
 
-Status: current metadata guide for schema version 1.
+Status: current metadata guide for schema version 2.
 
 Baba metadata is optional JSON loaded next to a grammar or passed through the
 CLI. Metadata controls target-specific syntax shaping, query generation, root
@@ -13,13 +13,14 @@ Metadata files should declare:
 
 ```json
 {
-  "version": 1
+  "version": 2
 }
 ```
 
-Schema version `1` is the current stable metadata schema. Additive fields may be
-accepted in compatible releases; incompatible selector or default changes need a
-new schema version or a documented breaking release.
+Omitting `version` uses the current schema. Explicit schema version `1` is no
+longer accepted. Schema version `2` is the current stable metadata schema.
+Additive fields may be accepted in compatible releases; incompatible selector or
+default changes need a new schema version or a documented breaking release.
 
 ## Tree-Sitter Metadata
 
@@ -43,7 +44,7 @@ The optional `parser` block controls standalone parser conflict handling:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "parser": {
     "resolutions": [
       { "conflict": "c_91a8...", "prefer": "shift" }
@@ -57,9 +58,7 @@ The optional `parser` block controls standalone parser conflict handling:
 
 `resolutions` make a conflict deterministic. `conflicts` declares a conflict
 that may be explored with bounded branch search. Stable conflict IDs reported by
-diagnostics are the preferred selectors for both fields. Legacy rule/on
-resolution selectors and rule-group conflict declarations remain accepted for
-compatibility; diagnostics provide replacement stable IDs where possible.
+diagnostics are required selectors for both fields.
 
 ## Compatibility
 

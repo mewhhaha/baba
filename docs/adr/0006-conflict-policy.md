@@ -18,11 +18,10 @@ conflict with the same stable ID shape:
 { "conflict": "c_91a8..." }
 ```
 
-Legacy rule/token selectors and rule-group branch declarations remain compatible
-with replacement guidance. Declared branch conflicts use bounded deterministic
-branch search with configurable explored-branch, queued-branch, and trace-action
-limits. `ambiguityMode` controls whether the first success is accepted or
-multiple successful branches are rejected.
+Declared branch conflicts use bounded deterministic branch search with
+configurable explored-branch, queued-branch, and trace-action limits.
+`ambiguityMode` controls whether the first success is accepted or multiple
+successful branches are rejected.
 
 ## Consequences
 
@@ -38,6 +37,5 @@ diagnostics when configured budgets are exceeded.
 
 ## Compatibility Impact
 
-Stable conflict IDs are the preferred metadata selector for deterministic
-resolutions and branch declarations. Legacy selectors remain supported for
-compatibility but can produce informational replacement diagnostics.
+Stable conflict IDs are the required metadata selector for deterministic
+resolutions and branch declarations.

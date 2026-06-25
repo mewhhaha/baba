@@ -27,7 +27,6 @@ import {
   parseEbnf,
   parseGrammar,
   parseMetadata,
-  parseTreeSitterMetadata,
   runCommand,
   treeSitterAccepts,
   validateGrammar,
@@ -330,7 +329,7 @@ Deno.test("minimal highlight defaults preserve literal-only inference", () => {
     module = function_decl integer ;
     function_decl = "fn" name:ident ;
   `;
-  const metadata = parseTreeSitterMetadata(JSON.stringify({
+  const metadata = parseMetadata(JSON.stringify({
     queries: {
       highlights: {
         defaults: { mode: "minimal" },
@@ -353,7 +352,7 @@ Deno.test("contextual highlight suppression only removes matching defaults", () 
     call = callee:ident ;
     variable = name:ident ;
   `;
-  const metadata = parseTreeSitterMetadata(JSON.stringify({
+  const metadata = parseMetadata(JSON.stringify({
     queries: {
       highlights: {
         defaults: {
@@ -377,7 +376,7 @@ Deno.test("contextual highlight suppression only removes matching defaults", () 
     0,
   );
 
-  const warningMetadata = parseTreeSitterMetadata(JSON.stringify({
+  const warningMetadata = parseMetadata(JSON.stringify({
     queries: {
       highlights: {
         defaults: {

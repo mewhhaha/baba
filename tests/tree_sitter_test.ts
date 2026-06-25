@@ -26,7 +26,6 @@ import {
   parseEbnf,
   parseGrammar,
   parseMetadata,
-  parseTreeSitterMetadata,
   runCommand,
   treeSitterAccepts,
   validateGrammar,
@@ -97,7 +96,7 @@ Deno.test("TypeScript target reports unsupported reachable external tokens", () 
     module = INDENT IDENT ;
   `;
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     externals: ["INDENT"],
   }));
   const typescript = compile(source, { targets: ["typescript"], metadata });
@@ -266,7 +265,7 @@ Deno.test("portable fixtures have matching Tree-sitter and TypeScript acceptance
 Deno.test("multi-target generation rejects Tree-sitter-only extras by default", () => {
   const source = `module = "a" "b" ;`;
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     extras: [{ kind: "regex", value: "[ ]+" }],
   }));
 
@@ -335,7 +334,7 @@ Deno.test("external tokens are explicit metadata", () => {
   );
 
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     externals: ["INDENT", "DEDENT"],
   }));
   const grammar = generateTreeSitterGrammar(source, { metadata });
@@ -371,9 +370,18 @@ Deno.test("metadata rejects non-syntax feature blocks", () => {
   );
 });
 
+Deno.test("metadata schema version 2 is current", () => {
+  assertEquals(parseMetadata("{}").version, undefined);
+  assertEquals(parseMetadata(JSON.stringify({ version: 2 })).version, 2);
+  assertThrowsIncludes(
+    () => parseMetadata(JSON.stringify({ version: 1 })),
+    "Unsupported metadata.version 1",
+  );
+});
+
 Deno.test("metadata drives Tree-sitter shaping and queries", () => {
-  const metadata = parseTreeSitterMetadata(JSON.stringify({
-    version: 1,
+  const metadata = parseMetadata(JSON.stringify({
+    version: 2,
     word: "ident",
     extras: [{ kind: "rule", name: "whitespace" }],
     rules: {
@@ -412,7 +420,7 @@ Deno.test("highlight metadata renders and validates contextual captures", () => 
     module = fn_sig ;
     fn_sig = "fn" name:IDENT ;
   `;
-  const metadata = parseTreeSitterMetadata(JSON.stringify({
+  const metadata = parseMetadata(JSON.stringify({
     queries: {
       highlights: {
         entries: [
@@ -433,7 +441,7 @@ Deno.test("highlight metadata renders and validates contextual captures", () => 
   assertThrowsIncludes(
     () =>
       generateTreeSitterHighlightsQuery(source, {
-        metadata: parseTreeSitterMetadata(JSON.stringify({
+        metadata: parseMetadata(JSON.stringify({
           queries: {
             highlights: {
               entries: [{
@@ -451,7 +459,7 @@ Deno.test("highlight metadata renders and validates contextual captures", () => 
   assertThrowsIncludes(
     () =>
       generateTreeSitterHighlightsQuery(source, {
-        metadata: parseTreeSitterMetadata(JSON.stringify({
+        metadata: parseMetadata(JSON.stringify({
           queries: {
             highlights: {
               entries: [{
@@ -469,7 +477,7 @@ Deno.test("highlight metadata renders and validates contextual captures", () => 
   assertThrowsIncludes(
     () =>
       generateTreeSitterHighlightsQuery(source, {
-        metadata: parseTreeSitterMetadata(JSON.stringify({
+        metadata: parseMetadata(JSON.stringify({
           queries: {
             highlights: {
               entries: [{
@@ -487,7 +495,7 @@ Deno.test("highlight metadata renders and validates contextual captures", () => 
   assertThrowsIncludes(
     () =>
       generateTreeSitterHighlightsQuery(source, {
-        metadata: parseTreeSitterMetadata(JSON.stringify({
+        metadata: parseMetadata(JSON.stringify({
           queries: {
             highlights: {
               entries: [{
@@ -504,13 +512,13 @@ Deno.test("highlight metadata renders and validates contextual captures", () => 
   );
 });
 
-Deno.test("versioned metadata rejects legacy numeric paths", () => {
+Deno.test("metadata rejects numeric paths as unknown field selectors", () => {
   assertThrowsIncludes(
     () =>
       generateTreeSitterGrammar(explicitGrammar, {
         name: "tiny",
-        metadata: parseTreeSitterMetadata(JSON.stringify({
-          version: 1,
+        metadata: parseMetadata(JSON.stringify({
+          version: 2,
           rules: {
             module: {
               paths: {
@@ -520,15 +528,15 @@ Deno.test("versioned metadata rejects legacy numeric paths", () => {
           },
         })),
       }),
-    "uses legacy numeric metadata",
+    "Unknown field selector '1'",
   );
 });
 
 Deno.test("compile reports structured Tree-sitter metadata diagnostics", () => {
   const unknownWord = compile(explicitGrammar, {
     targets: ["tree-sitter"],
-    metadata: parseTreeSitterMetadata(JSON.stringify({
-      version: 1,
+    metadata: parseMetadata(JSON.stringify({
+      version: 2,
       word: "missing",
     })),
   });
@@ -539,8 +547,8 @@ Deno.test("compile reports structured Tree-sitter metadata diagnostics", () => {
 
   const invalidAlias = compile(explicitGrammar, {
     targets: ["tree-sitter"],
-    metadata: parseTreeSitterMetadata(JSON.stringify({
-      version: 1,
+    metadata: parseMetadata(JSON.stringify({
+      version: 2,
       rules: {
         module: {
           paths: {
@@ -554,10 +562,10 @@ Deno.test("compile reports structured Tree-sitter metadata diagnostics", () => {
   assertIncludes(invalidAlias.diagnostics[0].path ?? "", "alias_ref");
   assertEquals(invalidAlias.diagnostics[0].backend, "tree-sitter");
 
-  const legacyPath = compile(explicitGrammar, {
+  const numericPath = compile(explicitGrammar, {
     targets: ["tree-sitter"],
-    metadata: parseTreeSitterMetadata(JSON.stringify({
-      version: 1,
+    metadata: parseMetadata(JSON.stringify({
+      version: 2,
       rules: {
         module: {
           paths: {
@@ -567,13 +575,19 @@ Deno.test("compile reports structured Tree-sitter metadata diagnostics", () => {
       },
     })),
   });
-  assertEquals(legacyPath.diagnostics[0].code, "METADATA_LEGACY_PATH");
-  assertEquals(legacyPath.diagnostics[0].path, "metadata.rules.module.paths.1");
+  assertEquals(
+    numericPath.diagnostics[0].code,
+    "METADATA_UNKNOWN_FIELD_SELECTOR",
+  );
+  assertEquals(
+    numericPath.diagnostics[0].path,
+    "metadata.rules.module.paths.1",
+  );
 
   const invalidExternal = compile(`module = "a" ;`, {
     targets: ["tree-sitter"],
-    metadata: parseTreeSitterMetadata(JSON.stringify({
-      version: 1,
+    metadata: parseMetadata(JSON.stringify({
+      version: 2,
       externals: ["bad-token"],
     })),
   });
@@ -590,8 +604,8 @@ Deno.test("compile reports structured Tree-sitter metadata diagnostics", () => {
   `,
     {
       targets: ["tree-sitter"],
-      metadata: parseTreeSitterMetadata(JSON.stringify({
-        version: 1,
+      metadata: parseMetadata(JSON.stringify({
+        version: 2,
         queries: {
           locals: [{ node: "dead", capture: "local.definition" }],
         },
@@ -620,7 +634,7 @@ Deno.test("query metadata must target the selected root graph", () => {
     () =>
       generate(source, {
         rootRule: "module",
-        metadata: parseTreeSitterMetadata(JSON.stringify({
+        metadata: parseMetadata(JSON.stringify({
           queries: {
             locals: [{ node: "dead", capture: "local.definition" }],
           },
@@ -632,7 +646,7 @@ Deno.test("query metadata must target the selected root graph", () => {
     () =>
       generateTreeSitterQueries(source, {
         rootRule: "module",
-        metadata: parseTreeSitterMetadata(JSON.stringify({
+        metadata: parseMetadata(JSON.stringify({
           queries: {
             highlights: {
               entries: [{ literal: "unused", capture: "keyword" }],
@@ -646,7 +660,7 @@ Deno.test("query metadata must target the selected root graph", () => {
     () =>
       generate(source, {
         rootRule: "module",
-        metadata: parseTreeSitterMetadata(JSON.stringify({
+        metadata: parseMetadata(JSON.stringify({
           rules: {
             dead: { paths: { "": { wrap: { kind: "prec", value: 1 } } } },
           },
@@ -674,7 +688,7 @@ Deno.test("generated Tree-sitter artifacts compile, parse, and query", async () 
     block = "{" "let" binding:ident "=" value:integer ";" "}" ;
   `;
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     word: "ident",
     queries: {
       highlights: {

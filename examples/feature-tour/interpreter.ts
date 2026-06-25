@@ -157,7 +157,7 @@ function assertStableConflictIdExample(): void {
   const resolved = compile(conflictGrammar, {
     targets: ["typescript", "wasm", "kit"],
     metadata: parseMetadata(JSON.stringify({
-      version: 1,
+      version: 2,
       parser: { conflicts: [{ conflict }] },
     })),
   });

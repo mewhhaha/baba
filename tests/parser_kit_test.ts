@@ -551,10 +551,15 @@ Deno.test("parser-kit metadata matches TypeScript and Wasm plan metadata", async
 });
 
 Deno.test("parser-kit helpers preserve declared parser conflict branches", async () => {
+  const unresolved = compile(conflictGrammar, {
+    targets: ["typescript"],
+  });
+  assertEquals(unresolved.bundle, undefined);
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      conflicts: [["tuple", "atom"]],
+      conflicts: [{ conflict }],
     },
   }));
   const { kit, ts, cleanup } = await buildKitParityRuntime(conflictGrammar, {
@@ -575,6 +580,12 @@ Deno.test("parser-kit helpers preserve declared parser conflict branches", async
     await cleanup();
   }
 });
+
+function conflictIdFromMessage(message: string): string {
+  const match = message.match(/Conflict ID: (c_[0-9a-f]+)/);
+  assert(match);
+  return match[1];
+}
 
 async function buildKitParityRuntime(
   source: string,

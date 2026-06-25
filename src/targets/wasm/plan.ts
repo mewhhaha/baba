@@ -546,7 +546,7 @@ function wasmModSource(
   packaging: WasmTargetOptions["packaging"] = "embedded-typescript",
 ): string {
   const wasmExports = packaging === "external-binary"
-    ? "createParserFromBytes, createParserFromModule, createParserFromUrl, memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, runtimeImplementationFormat, runtimeImplementationHash, runtimeImplementationSemantics, runtimeImplementationVersion, wasmAbiVersion, wasmAdapterHandleCapabilityModel, wasmHostOwnershipModel, wasmInputBase, wasmLexResultI32Count, wasmMaxPages, wasmResultLifetimeModel, wasmSemanticsVersion, wasmSourceEncoding, wasmSpanUnit, wasmTargetKind, wasmTokenRecordI32Count, wasmTraceStatusAmbiguous, wasmTraceStatusBranchLimit, wasmTraceStatusInternal, wasmTraceStatusOk, wasmTraceStatusTraceLimit, wasmTraceStatusUnexpected"
+    ? "createWasmParserInstance, memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, runtimeImplementationFormat, runtimeImplementationHash, runtimeImplementationSemantics, runtimeImplementationVersion, wasmAbiVersion, wasmAdapterHandleCapabilityModel, wasmHostOwnershipModel, wasmInputBase, wasmLexResultI32Count, wasmMaxPages, wasmResultLifetimeModel, wasmSemanticsVersion, wasmSourceEncoding, wasmSpanUnit, wasmTargetKind, wasmTokenRecordI32Count, wasmTraceStatusAmbiguous, wasmTraceStatusBranchLimit, wasmTraceStatusInternal, wasmTraceStatusOk, wasmTraceStatusTraceLimit, wasmTraceStatusUnexpected"
     : "createWasmParserInstance, memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, runtimeImplementationFormat, runtimeImplementationHash, runtimeImplementationSemantics, runtimeImplementationVersion, wasmAbiVersion, wasmAdapterHandleCapabilityModel, wasmBytes, wasmHostOwnershipModel, wasmInputBase, wasmLexResultI32Count, wasmMaxPages, wasmResultLifetimeModel, wasmSemanticsVersion, wasmSourceEncoding, wasmSpanUnit, wasmTargetKind, wasmTokenRecordI32Count, wasmTraceStatusAmbiguous, wasmTraceStatusBranchLimit, wasmTraceStatusInternal, wasmTraceStatusOk, wasmTraceStatusTraceLimit, wasmTraceStatusUnexpected";
   const parserFactorySource = packaging === "external-binary"
     ? externalBinaryParserFactorySource()
@@ -631,8 +631,7 @@ function externalBinaryParserFactorySource(): {
   body: string;
 } {
   return {
-    imports:
-      "createParserFromBytes, createParserFromModule, createParserFromUrl,",
+    imports: "createWasmParserInstance,",
     body: `export interface ParserInstanceOptions {
   wasm?: WasmParserInstance;
   bytes?: Uint8Array;
@@ -655,15 +654,27 @@ export interface ParserInstance {
 
 export function createParser(options: ParserInstanceOptions = {}): ParserInstance {
   if (options.wasm) return createParserFacade(options.wasm);
-  if (options.module) return createParserFacade(createParserFromModule(options.module, { limits: options.limits }));
-  if (options.bytes) return createParserFacade(createParserFromBytes(options.bytes, { limits: options.limits }));
+  if (options.module || options.bytes) return createParserFacade(createWasmParserInstance({
+    module: options.module,
+    bytes: options.bytes,
+    limits: options.limits,
+  }));
   throw new Error("External-binary Wasm parser creation requires bytes, module, or wasm.");
 }
 
 export async function createParserAsync(
   options: AsyncParserInstanceOptions = {},
 ): Promise<ParserInstance> {
-  if (options.url) return createParserFacade(await createParserFromUrl(options.url, { limits: options.limits }));
+  if (options.url) {
+    const response = await fetch(options.url);
+    if (!response.ok) {
+      throw new Error("Failed to load Wasm parser module from " + options.url.href + ".");
+    }
+    return createParserFacade(createWasmParserInstance({
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      limits: options.limits,
+    }));
+  }
   return createParser(options);
 }
 

@@ -18,7 +18,6 @@ export {
   generateTreeSitterHighlightsQuery,
   generateTreeSitterQueries,
   parseEbnf,
-  parseTreeSitterMetadata,
 } from "../src/advanced.ts";
 export { main } from "../src/cli.ts";
 

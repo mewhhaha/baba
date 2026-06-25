@@ -56,9 +56,8 @@ deno task tree-sitter:build
 deno task tree-sitter:parse
 ```
 
-The generated files under `generated/` are committed so bootstrap drift can be
-reviewed, but they are reproducible output. Regenerate them with the root
-repository task:
+The generated files under `generated/` are ignored reproducible output.
+Regenerate them with the root repository task:
 
 ```sh
 deno task bootstrap

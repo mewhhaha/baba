@@ -348,12 +348,11 @@ function parseArgs(args: string[]): Options {
         options.kit.parserTableEntryLimit =
           options.typescript.parserTableEntryLimit;
         break;
-      case "--generated-byte-limit":
+      case "--typescript-generated-byte-limit":
         options.typescript.generatedByteLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.generatedByteLimit = options.typescript.generatedByteLimit;
         break;
       case "--wasm-generated-byte-limit":
         options.wasm.generatedByteLimit = parsePositiveIntegerArg(
@@ -389,10 +388,6 @@ function parseArgs(args: string[]): Options {
       case "--wasm-stats":
         options.wasm.reportParserStats = true;
         break;
-      case "--verbose":
-        options.typescript.reportParserStats = true;
-        options.wasm.reportParserStats = true;
-        break;
       case "--portability": {
         const portability = args[++i];
         if (
@@ -409,8 +404,7 @@ function parseArgs(args: string[]): Options {
         break;
       }
       case "--metadata":
-      case "--meta":
-      case "--ts-meta": {
+      case "--meta": {
         const metadataPath = args[++i];
         if (!metadataPath) {
           throw new BabaError({
@@ -444,14 +438,6 @@ function parseArgs(args: string[]): Options {
         options.diagnosticFormat = format;
         break;
       }
-      case "init":
-      case "--preset":
-      case "--backend":
-        throw new BabaError({
-          code: "REMOVED_CLI_OPTION",
-          message:
-            `'${arg}' was removed in baba 1.0. Use --target tree-sitter, --target typescript, --target wasm, --target kit, or --target all.`,
-        });
       default:
         if (arg.startsWith("-")) {
           throw new BabaError({
@@ -501,16 +487,14 @@ Options:
   --parser-item-limit   Maximum total portable runtime LR item count
   --lr-closure-work-limit  Maximum portable runtime LR closure work units
   --parser-table-entry-limit  Maximum portable runtime ACTION/GOTO entry count
-  --generated-byte-limit  Compatibility alias for TypeScript and Wasm byte limits
+  --typescript-generated-byte-limit  Maximum generated TypeScript bytes
   --wasm-generated-byte-limit  Maximum generated Wasm bytes
   --wasm-packaging  Wasm packaging: embedded-typescript or external-binary
   --parser-stats  Emit runtime parser planning statistics for TypeScript and Wasm
   --wasm-stats   Emit Wasm runtime parser planning statistics
-  --verbose      Alias for --parser-stats
   --portability  Cross-target portability mode: strict, warn, or off
   --metadata    JSON metadata for Tree-sitter shaping and query generation
   --meta        Alias for --metadata
-  --ts-meta     Deprecated alias for --metadata
   --diagnostic-format  Diagnostic output format: text or json. Defaults to text
   --explain-targets  Print target support and portability diagnostics
   --list-files  Print generated file paths without writing output files`;

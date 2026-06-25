@@ -29,7 +29,7 @@ diagnostic and is documented as a semantic correction.
 
 ## Metadata Schema
 
-Baba metadata is versioned. Metadata schema `version: 1` is the current stable
+Baba metadata is versioned. Metadata schema `version: 2` is the current stable
 schema. Additive fields are allowed when older compilers can reject or ignore
 them deterministically. Removing fields, changing selector meaning, or changing
 default target behavior requires a new schema version or a documented breaking

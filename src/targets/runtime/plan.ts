@@ -348,7 +348,7 @@ function runtimeCapabilityDiagnostics(
     }
     if (
       portability !== "off" &&
-      (ruleMeta.paths || ruleMeta.wrap || ruleMeta.fields)
+      (ruleMeta.paths || ruleMeta.wrap)
     ) {
       diagnostics.push({
         code: "PORTABILITY_TREE_SHAPE_DIFFERS",

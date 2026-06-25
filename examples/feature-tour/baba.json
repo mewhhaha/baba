@@ -1,9 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
   "word": "IDENT",
   "parser": {
     "conflicts": [
-      ["type_tuple", "type_atom"]
+      { "conflict": "c_c0b22aed305af8bf" }
     ]
   },
   "queries": {

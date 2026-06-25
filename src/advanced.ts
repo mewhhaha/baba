@@ -26,8 +26,6 @@ export type {
   TreeSitterExtra,
   TreeSitterInjectionMetadata,
   TreeSitterInjectionQueryEntry,
-  /** @deprecated Use `BabaMetadata`. */
-  TreeSitterMetadata,
   TreeSitterPathMetadata,
   TreeSitterQueriesMetadata,
   TreeSitterRainbowsMetadata,
@@ -78,7 +76,6 @@ export type {
   RuntimeParserPlan,
   RuntimeParserPlanningOptions,
 } from "./targets/runtime/plan.ts";
-export { parseTreeSitterMetadata } from "./metadata.ts";
 export { buildPortableParserPlan } from "./compiler/portable_plan/build.ts";
 export {
   parsePortableParserPlanJson,

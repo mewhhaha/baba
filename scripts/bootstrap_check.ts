@@ -183,12 +183,8 @@ async function checkExample(example: ExampleConfig): Promise<void> {
   try {
     const tempGenerated = `${tempDir}/generated`;
     await applyBundle(bundle, { root: tempGenerated });
-    await assertDirectoriesEqual(
-      `${example.dir}/generated`,
-      tempGenerated,
-      `${example.dir}/generated`,
-    );
-    console.log(`verified ${example.dir}/generated`);
+    await validateGeneratedExample(tempGenerated, example);
+    console.log(`verified regenerated ${example.dir}/generated`);
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
@@ -222,38 +218,26 @@ async function compileExample(example: ExampleConfig) {
   return result.bundle;
 }
 
-async function assertDirectoriesEqual(
-  expectedRoot: string,
-  actualRoot: string,
-  label: string,
+async function validateGeneratedExample(
+  root: string,
+  example: ExampleConfig,
 ): Promise<void> {
-  const [expectedFiles, actualFiles] = await Promise.all([
-    manifestOwnedFiles(expectedRoot),
-    manifestOwnedFiles(actualRoot),
-  ]);
-  const expectedSet = new Set(expectedFiles);
-  const actualSet = new Set(actualFiles);
-  const missing = expectedFiles.filter((file) => !actualSet.has(file));
-  const extra = actualFiles.filter((file) => !expectedSet.has(file));
-  if (missing.length > 0 || extra.length > 0) {
-    throw new Error(
-      [
-        `${label} differs from regenerated output.`,
-        ...missing.map((file) => `missing regenerated file: ${file}`),
-        ...extra.map((file) => `unexpected regenerated file: ${file}`),
-      ].join("\n"),
-    );
-  }
-
-  for (const file of expectedFiles) {
-    const [expected, actual] = await Promise.all([
-      Deno.readFile(`${expectedRoot}/${file}`),
-      Deno.readFile(`${actualRoot}/${file}`),
-    ]);
-    if (!bytesEqual(expected, actual)) {
-      throw new Error(`${label}/${file} differs from regenerated output.`);
+  const files = await manifestOwnedFiles(root);
+  for (
+    const required of [
+      ".baba-manifest.json",
+      "grammar.js",
+      `${example.typescriptDir}/mod.ts`,
+      "wasm/mod.ts",
+      "wasm/abi.json",
+    ]
+  ) {
+    if (!files.includes(required)) {
+      throw new Error(`${root} is missing generated file ${required}.`);
     }
   }
+  await denoCheck(`${root}/${example.typescriptDir}/mod.ts`);
+  await denoCheck(`${root}/wasm/mod.ts`);
 }
 
 async function manifestOwnedFiles(root: string): Promise<string[]> {
@@ -275,10 +259,20 @@ async function manifestOwnedFiles(root: string): Promise<string[]> {
   return [".baba-manifest.json", ...Object.keys(manifest.files)].sort();
 }
 
-function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index++) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
+async function denoCheck(path: string): Promise<void> {
+  const command = new Deno.Command(Deno.execPath(), {
+    args: ["check", path],
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await command.output();
+  if (output.success) return;
+  const decoder = new TextDecoder();
+  throw new Error(
+    [
+      `deno check failed for ${path}`,
+      decoder.decode(output.stdout),
+      decoder.decode(output.stderr),
+    ].join("\n"),
+  );
 }

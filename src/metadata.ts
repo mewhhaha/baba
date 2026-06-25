@@ -1,4 +1,5 @@
 import type {
+  BabaMetadata,
   ParserConflictDeclarationMetadata,
   ParserConflictResolutionMetadata,
   ParserRuntimeMetadata,
@@ -8,7 +9,6 @@ import type {
   TreeSitterExtra,
   TreeSitterInjectionMetadata,
   TreeSitterInjectionQueryEntry,
-  TreeSitterMetadata,
   TreeSitterPathMetadata,
   TreeSitterRainbowsMetadata,
   TreeSitterRuleMetadata,
@@ -18,7 +18,7 @@ import type {
 import { BabaError } from "./errors.ts";
 
 /** Parses and validates Baba metadata JSON. */
-export function parseTreeSitterMetadata(source: string): TreeSitterMetadata {
+export function parseMetadata(source: string): BabaMetadata {
   let parsed: unknown;
   try {
     parsed = JSON.parse(source);
@@ -33,15 +33,15 @@ export function parseTreeSitterMetadata(source: string): TreeSitterMetadata {
       { cause: error },
     );
   }
-  return parseTreeSitterMetadataObject(parsed, "metadata");
+  return parseMetadataObject(parsed, "metadata");
 }
 
 type UnknownRecord = Record<string, unknown>;
 
-function parseTreeSitterMetadataObject(
+function parseMetadataObject(
   value: unknown,
   path: string,
-): TreeSitterMetadata {
+): BabaMetadata {
   const object = expectObject(value, path);
   assertKnownKeys(object, path, [
     "version",
@@ -56,13 +56,13 @@ function parseTreeSitterMetadataObject(
     "parser",
   ]);
 
-  const metadata: TreeSitterMetadata = {};
+  const metadata: BabaMetadata = {};
   if (hasKey(object, "version")) {
     const version = expectInteger(object.version, `${path}.version`);
-    if (version !== 1) {
+    if (version !== 2) {
       throwMetadataShape(`Unsupported ${path}.version ${version}`);
     }
-    metadata.version = 1;
+    metadata.version = 2;
   }
   if (hasKey(object, "externals")) {
     metadata.externals = expectStringArray(
@@ -152,7 +152,6 @@ function parseParserConflictDeclaration(
   value: unknown,
   path: string,
 ): ParserConflictDeclarationMetadata {
-  if (Array.isArray(value)) return expectStringArray(value, path);
   const object = expectObject(value, path);
   assertKnownKeys(object, path, ["conflict"]);
   return { conflict: expectString(object.conflict, `${path}.conflict`) };
@@ -163,29 +162,17 @@ function parseParserConflictResolution(
   path: string,
 ): ParserConflictResolutionMetadata {
   const object = expectObject(value, path);
-  assertKnownKeys(object, path, [
-    "conflict",
-    "rules",
-    "on",
-    "prefer",
-    "reduce",
-  ]);
+  assertKnownKeys(object, path, ["conflict", "prefer", "reduce"]);
   const prefer = expectString(object.prefer, `${path}.prefer`);
   if (prefer !== "shift" && prefer !== "reduce") {
     throwMetadataShape(
       `Invalid ${path}.prefer '${prefer}', expected 'shift' or 'reduce'`,
     );
   }
-  const resolution: ParserConflictResolutionMetadata = { prefer };
-  if (hasKey(object, "conflict")) {
-    resolution.conflict = expectString(object.conflict, `${path}.conflict`);
-  }
-  if (hasKey(object, "rules")) {
-    resolution.rules = expectStringArray(object.rules, `${path}.rules`);
-  }
-  if (hasKey(object, "on")) {
-    resolution.on = expectString(object.on, `${path}.on`);
-  }
+  const resolution: ParserConflictResolutionMetadata = {
+    conflict: expectString(object.conflict, `${path}.conflict`),
+    prefer,
+  };
   if (hasKey(object, "reduce")) {
     resolution.reduce = expectString(object.reduce, `${path}.reduce`);
   }
@@ -209,7 +196,7 @@ function parseTreeSitterExtra(value: unknown, path: string): TreeSitterExtra {
 function parseQueriesMetadata(
   value: unknown,
   path: string,
-): TreeSitterMetadata["queries"] {
+): BabaMetadata["queries"] {
   const object = expectObject(value, path);
   assertKnownKeys(object, path, [
     "highlights",
@@ -222,7 +209,7 @@ function parseQueriesMetadata(
     "injections",
   ]);
 
-  const queries: NonNullable<TreeSitterMetadata["queries"]> = {};
+  const queries: NonNullable<BabaMetadata["queries"]> = {};
   if (hasKey(object, "highlights")) {
     queries.highlights = parseHighlightCaptureQuery(
       object.highlights,
@@ -531,12 +518,9 @@ function parseRuleMetadataShape(
   path: string,
 ): TreeSitterRuleMetadata {
   const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["fields", "token", "wrap", "paths"]);
+  assertKnownKeys(object, path, ["token", "wrap", "paths"]);
 
   const metadata: TreeSitterRuleMetadata = {};
-  if (hasKey(object, "fields")) {
-    metadata.fields = expectStringRecord(object.fields, `${path}.fields`);
-  }
   if (hasKey(object, "token")) {
     metadata.token = parseRuleToken(object.token, `${path}.token`);
   }
@@ -652,18 +636,6 @@ function expectStringArray(value: unknown, path: string): string[] {
   return expectArray(value, path).map((item, index) =>
     expectString(item, `${path}[${index}]`)
   );
-}
-
-function expectStringRecord(
-  value: unknown,
-  path: string,
-): Record<string, string> {
-  const object = expectObject(value, path);
-  const record: Record<string, string> = {};
-  for (const [key, item] of Object.entries(object)) {
-    record[key] = expectString(item, `${path}.${key}`);
-  }
-  return record;
 }
 
 function parseRegexPattern(value: unknown, path: string): string {

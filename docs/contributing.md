@@ -29,9 +29,10 @@ deno task test:fuzz
 
 ## Generated Output
 
-Generated example outputs are checked-in snapshots and are not published. Use
+Generated example outputs are ignored local artifacts and are not published. Use
 `deno task bootstrap` to regenerate them through Baba's manifest-aware output
-path and `deno task bootstrap:check` to verify drift.
+path and `deno task bootstrap:check` to validate regenerated manifests and
+generated entrypoints.
 
 Do not edit generated files by hand unless a test is intentionally exercising
 ownership protection.

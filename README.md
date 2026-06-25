@@ -244,7 +244,7 @@ versioned portable parser plan:
 ```ts
 {
   format: "baba-parser-plan",
-  version: 1,
+  version: 2,
   semantics: "baba-portable-v1"
 }
 ```
@@ -379,8 +379,7 @@ deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --metadata baba.json
 ```
 
-`--meta` is an alias for `--metadata`. `--ts-meta` remains as a deprecated
-alias.
+`--meta` is an alias for `--metadata`.
 
 Select and configure parser-runtime targets:
 
@@ -433,15 +432,14 @@ Inspect generated TypeScript target size and parser table statistics:
 ```sh
 deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --target typescript \
-  --generated-byte-limit 1000000 \
+  --typescript-generated-byte-limit 1000000 \
   --parser-stats
 ```
 
-`--generated-byte-limit` and `--parser-stats` only inspect the generated
-TypeScript target output. `--parser-stats`/`--verbose` also include internal
-hardening counters such as regex AST/NFA/DFA sizes, overlap pairs compared,
-grammar SCC/iteration counts, LR closure work, and diagnostics emitted or
-suppressed.
+`--typescript-generated-byte-limit` only inspects generated TypeScript output.
+`--parser-stats` also includes internal hardening counters such as regex
+AST/NFA/DFA sizes, overlap pairs compared, grammar SCC/iteration counts, LR
+closure work, and diagnostics emitted or suppressed.
 
 ## Library API
 
@@ -584,7 +582,7 @@ block = "{" embedded_source "}" ;
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "word": "ident",
   "extras": [{ "kind": "rule", "name": "whitespace" }],
   "rules": {
@@ -676,7 +674,7 @@ separate from Tree-sitter shaping metadata:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "parser": {
     "resolutions": [
       {
@@ -687,31 +685,28 @@ separate from Tree-sitter shaping metadata:
     ],
     "conflicts": [
       { "conflict": "c_91a8..." },
-      ["tuple_type", "type_atom"],
-      ["unit_type", "type_atom"]
+      { "conflict": "c_ef90..." }
     ]
   }
 }
 ```
 
 `resolutions` keep the generated LR table deterministic by selecting either a
-`shift` or `reduce` action when the listed rules and optional terminal are
-involved. For reduce/reduce conflicts, add `reduce` with the rule or expression
-text that should win. When generation reports an LR conflict, the diagnostic
-includes candidate `resolutions` metadata shaped for the conflicting rules and
-lookahead token. It also includes a conflict witness prefix: a short token
-sequence that reaches the conflicted parser state, followed by the conflicting
-lookahead as the final symbol.
+`shift` or `reduce` action for a stable conflict ID. For reduce/reduce
+conflicts, add `reduce` with the rule or expression text that should win. When
+generation reports an LR conflict, the diagnostic includes candidate
+`resolutions` metadata with the current conflict ID. It also includes a conflict
+witness prefix: a short token sequence that reaches the conflicted parser state,
+followed by the conflicting lookahead as the final symbol.
 
 `conflicts` declares local grammar ambiguities that the generated TypeScript and
 Wasm parsers may explore with bounded branch search. Prefer stable conflict-ID
-entries such as `{ "conflict": "c_91a8..." }`; legacy rule groups remain
-accepted for compatibility. This is useful for grammars that need
-Tree-sitter-like conflict handling but still want standalone parser runtimes.
-The Wasm target traces declared conflict branches inside its generated Wasm
-parser engine and replays the successful action trace in TypeScript to build the
-CST. Shift/reduce diagnostics with multiple rule origins also suggest matching
-`conflicts` metadata when branch search is the intended policy.
+entries such as `{ "conflict": "c_91a8..." }`. This is useful for grammars that
+need Tree-sitter-like conflict handling but still want standalone parser
+runtimes. The Wasm target traces declared conflict branches inside its generated
+Wasm parser engine and replays the successful action trace in TypeScript to
+build the CST. Shift/reduce diagnostics with multiple rule origins also suggest
+matching `conflicts` metadata when branch search is the intended policy.
 
 Branch search is deterministic and shared by TypeScript and Wasm runtimes. At a
 conflicted state, the runtime explores action alternatives in table order, saves
@@ -738,7 +733,7 @@ External scanner symbols are declared in metadata:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "externals": ["INDENT", "DEDENT", "NEWLINE"]
 }
 ```
@@ -748,7 +743,7 @@ implementation remains user-owned.
 
 ## Stability
 
-The versioned metadata schema is `version: 1`. It uses explicit EBNF fields
+The versioned metadata schema is `version: 2`. It uses explicit EBNF fields
 rather than positional expression paths, so grammar edits do not silently
 retarget field metadata.
 
@@ -765,22 +760,22 @@ deno task size:check
 deno task publish:dry-run
 ```
 
-Use the bootstrap tasks to keep checked-in generated examples reproducible:
+Use the bootstrap tasks to validate and regenerate example outputs:
 
 ```sh
 deno task bootstrap:check
 deno task bootstrap
 ```
 
-`bootstrap:check` regenerates the Baba-owned files for the checked-in examples
-into a temporary directory and byte-compares them with `examples/*/generated`.
-`bootstrap` rewrites those generated files through Baba's manifest-aware
-`applyBundle()` path. These tasks cover the current Stage-0 generated runtime
-artifacts and verify the checked-in runtime implementation source manifest. They
-also verify the Stage-0 runtime-language compiler source manifest and checked
-runtime-language helper artifact hashes so compiler drift is tracked
-independently from generated parser runtime identity.
+`bootstrap:check` regenerates the Baba-owned files for the examples into a
+temporary directory and validates their manifests and generated TypeScript/Wasm
+entrypoints. `bootstrap` rewrites local ignored generated files through Baba's
+manifest-aware `applyBundle()` path. These tasks cover the current Stage-0
+generated runtime artifacts and verify the checked-in runtime implementation
+source manifest. They also verify the Stage-0 runtime-language compiler source
+manifest and checked runtime-language helper artifact hashes so compiler drift
+is tracked independently from generated parser runtime identity.
 
-Generated example snapshots are not part of the publish payload. The example
-source/publish policy and `deno task size:report` are documented in
-[docs/examples.md](docs/examples.md).
+Generated example outputs are ignored local artifacts and are not part of the
+publish payload. The example source/publish policy and `deno task size:report`
+are documented in [docs/examples.md](docs/examples.md).

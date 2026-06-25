@@ -24,7 +24,6 @@ import {
   parseEbnf,
   parseGrammar,
   parseMetadata,
-  parseTreeSitterMetadata,
   runCommand,
   treeSitterAccepts,
   validateGrammar,
@@ -162,7 +161,7 @@ Deno.test("size report measures repository and publish payload", async () => {
     ]);
     assertIncludes(human.stdout, "Baba size report");
     assertIncludes(human.stdout, "Publish include payload");
-    assertIncludes(human.stdout, "Generated example snapshot bytes");
+    assertIncludes(human.stdout, "Local generated example bytes");
 
     const report = JSON.parse(await Deno.readTextFile(jsonPath));
     assert(report.repository.bytes > 0);
@@ -174,14 +173,10 @@ Deno.test("size report measures repository and publish payload", async () => {
       !report.publishPayload.largestFiles.some((
         entry: { path: string },
       ) => entry.path.includes("/generated/")),
-      "Expected generated example snapshots to stay out of publish payload.",
+      "Expected generated example outputs to stay out of publish payload.",
     );
-    assert(
-      report.examples.generatedBytesByExample.some((
-        entry: { name: string; bytes: number },
-      ) => entry.name === "brainfuck" && entry.bytes > 0),
-      "Expected generated example bytes for brainfuck.",
-    );
+    assertEquals(report.examples.generatedBytes, 0);
+    assertEquals(report.examples.generatedBytesByExample.length, 0);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -571,7 +566,7 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
     const externalMetadataPath = `${dir}/externals.json`;
     await Deno.writeTextFile(
       externalMetadataPath,
-      JSON.stringify({ version: 1, externals: ["INDENT"] }),
+      JSON.stringify({ version: 2, externals: ["INDENT"] }),
     );
     const externalGrammarPath = `${dir}/external.ebnf`;
     await Deno.writeTextFile(
@@ -639,7 +634,7 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
           "1000",
           "--parser-table-entry-limit",
           "1000",
-          "--generated-byte-limit",
+          "--typescript-generated-byte-limit",
           "1000000",
           "--parser-stats",
         ])
@@ -757,23 +752,17 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
 
     await assertRejectsIncludes(
       () => main(["init", outDir]),
-      "'init' was removed in baba 1.0",
+      "Unexpected extra input",
     );
     await assertRejectsIncludes(
       () => main([grammarPath, "--backend", "typescript-ll1"]),
-      "'--backend' was removed in baba 1.0",
+      "Unknown option '--backend'",
     );
 
-    const verboseLogs = await captureConsoleError(() =>
-      main([
-        "check",
-        grammarPath,
-        "--target",
-        "typescript",
-        "--verbose",
-      ])
+    await assertRejectsIncludes(
+      () => main(["check", grammarPath, "--target", "typescript", "--verbose"]),
+      "Unknown option '--verbose'",
     );
-    assertIncludes(verboseLogs.join("\n"), "TS_PARSER_STATS");
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

@@ -309,10 +309,15 @@ Deno.test("TypeScript and Wasm parseTokens APIs stay in parity", async () => {
 });
 
 Deno.test("TypeScript and Wasm runtimes match declared conflict branches", async () => {
+  const unresolved = compile(conflictGrammar, {
+    targets: ["typescript"],
+  });
+  assertEquals(unresolved.bundle, undefined);
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      conflicts: [["tuple", "atom"]],
+      conflicts: [{ conflict }],
     },
   }));
   const runtimes = await buildParityRuntimes(conflictGrammar, { metadata });
@@ -321,7 +326,7 @@ Deno.test("TypeScript and Wasm runtimes match declared conflict branches", async
       assertRuntimeParity(runtimes, source, {
         operation: "declared conflict branch",
         source,
-        metadata: { parser: { conflicts: [["tuple", "atom"]] } },
+        metadata: { parser: { conflicts: [{ conflict }] } },
       });
     }
   } finally {
@@ -412,6 +417,12 @@ Deno.test("TypeScript and Wasm parse contextual token overlaps in parity", async
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+function conflictIdFromMessage(message: string): string {
+  const match = message.match(/Conflict ID: (c_[0-9a-f]+)/);
+  assert(match);
+  return match[1];
+}
 
 async function buildParityRuntimes(
   source: string,

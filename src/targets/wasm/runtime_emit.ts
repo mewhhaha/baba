@@ -774,7 +774,7 @@ function requireActiveParser(): WasmParserInstanceImpl {
     setActiveParser(defaultParser);
   }
   if (!activeParser) {
-    throw new Error("Wasm parser runtime is not initialized. Call createParserFromBytes(), createParserFromModule(), or createParserFromUrl() first.");
+    throw new Error("Wasm parser runtime is not initialized. Call createParser() or createParserAsync() first.");
   }
   return activeParser;
 }
@@ -810,7 +810,7 @@ function initializeExportBindings(parser: WasmParserInstanceImpl): void {
 }
 
 function uninitializedWasmExport(): never {
-  throw new Error("Wasm parser runtime is not initialized. Call createParserFromBytes(), createParserFromModule(), or createParserFromUrl() first.");
+  throw new Error("Wasm parser runtime is not initialized. Call createParser() or createParserAsync() first.");
 }`;
   }
   return `let wasm: ParserWasmExports | null = null;
@@ -837,22 +837,18 @@ export const wasmTraceStatusAmbiguous = TRACE_STATUS_AMBIGUOUS;
 export let parserPlanVersion = ${portableMetadata.version};
 let activeParser: WasmParserInstanceImpl | null = null;
 
-export function createParserFromBytes(
-  bytes: Uint8Array,
-  options: WasmParserInstanceOptions = {},
-): WasmParserInstance {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return createParserFromModule(
-    new WebAssembly.Module(copy.buffer as ArrayBuffer),
-    options,
-  );
+export interface ExternalWasmParserInstanceOptions extends WasmParserInstanceOptions {
+  bytes?: Uint8Array;
+  module?: WebAssembly.Module;
 }
 
-export function createParserFromModule(
-  module: WebAssembly.Module,
-  options: WasmParserInstanceOptions = {},
+export function createWasmParserInstance(
+  options: ExternalWasmParserInstanceOptions = {},
 ): WasmParserInstance {
+  const module = options.module ?? moduleFromBytes(options.bytes);
+  if (!module) {
+    throw new Error("External-binary Wasm parser creation requires bytes or module.");
+  }
   const instance = new WebAssembly.Instance(module, {});
   const parser = new WasmParserInstanceImpl(
     instance.exports as unknown as ParserWasmExports,
@@ -862,15 +858,11 @@ export function createParserFromModule(
   return parser;
 }
 
-export async function createParserFromUrl(
-  url: URL,
-  options: WasmParserInstanceOptions = {},
-): Promise<WasmParserInstance> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("Failed to load Wasm parser module from " + url.href + ".");
-  }
-  return createParserFromBytes(new Uint8Array(await response.arrayBuffer()), options);
+function moduleFromBytes(bytes: Uint8Array | undefined): WebAssembly.Module | undefined {
+  if (!bytes) return undefined;
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return new WebAssembly.Module(copy.buffer as ArrayBuffer);
 }
 
 export function withWasmParserInstance<T>(
@@ -892,7 +884,7 @@ export function withWasmParserInstance<T>(
 
 function requireActiveParser(): WasmParserInstanceImpl {
   if (!activeParser) {
-    throw new Error("Wasm parser runtime is not initialized. Call createParserFromBytes(), createParserFromModule(), or createParserFromUrl() first.");
+    throw new Error("Wasm parser runtime is not initialized. Call createParser() or createParserAsync() first.");
   }
   return activeParser;
 }
@@ -929,7 +921,7 @@ function initializeExportBindings(parser: WasmParserInstanceImpl): void {
 }
 
 function uninitializedWasmExport(): never {
-  throw new Error("Wasm parser runtime is not initialized. Call createParserFromBytes(), createParserFromModule(), or createParserFromUrl() first.");
+  throw new Error("Wasm parser runtime is not initialized. Call createParser() or createParserAsync() first.");
 }`;
 }
 

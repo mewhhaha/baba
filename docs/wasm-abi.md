@@ -136,9 +136,7 @@ are convenience wrappers over an active/default parser instance. Embedded
 adapters create that default instance lazily. External-binary adapters can
 create isolated instances with `createParser({ bytes })`,
 `createParser({ module })`, `createParser({ wasm })`, or
-`createParserAsync({ url })`; the low-level `createParserFromBytes()`,
-`createParserFromModule()`, and `createParserFromUrl()` helpers remain available
-and also install the module-level default instance for compatibility.
+`createParserAsync({ url })`.
 
 Calls into one core instance are not specified as thread-safe or reentrant.
 Hosts that need interleaved parsing should use separate parser instances. CI

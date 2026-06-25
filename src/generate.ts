@@ -1,4 +1,5 @@
 import type {
+  BabaMetadata,
   Diagnostic,
   EbnfExpression,
   EbnfGrammar,
@@ -8,7 +9,6 @@ import type {
   TreeSitterCaptureSelectorMetadata,
   TreeSitterExtra,
   TreeSitterInjectionQueryEntry,
-  TreeSitterMetadata,
   TreeSitterPathMetadata,
   TreeSitterRainbowsMetadata,
   TreeSitterRuleMetadata,
@@ -119,7 +119,7 @@ function createAnalyzedTreeSitterPlan(
 function createGrammarTreeSitterPlan(
   grammar: EbnfGrammar,
   rootRuleName: string,
-  metadata: TreeSitterMetadata = {},
+  metadata: BabaMetadata = {},
 ): TreeSitterPlan {
   const rootRule = grammar.rules.find((rule) => rule.name === rootRuleName);
   if (!rootRule) {
@@ -189,15 +189,13 @@ export function validateAnalyzedTreeSitterBackendCapabilities(
   void analyzed;
 }
 
-export { parseTreeSitterMetadata } from "./metadata.ts";
-
 /** Generates an ESM tree-sitter grammar source file. */
 export function generateTreeSitterGrammar(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     name?: string;
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -231,7 +229,7 @@ export function generateTreeSitterGrammar(
   }
 
   if (!options.skipValidation) {
-    validateTreeSitterMetadataSemantics(
+    validateBabaMetadataSemantics(
       grammar,
       rootRuleName,
       options.metadata,
@@ -249,7 +247,7 @@ export function generateAnalyzedTreeSitterGrammar(
   analyzed: AnalyzedGrammar,
   options: {
     name?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
   } = {},
 ): string {
   const metadata = options.metadata ?? {};
@@ -351,7 +349,7 @@ export function generateTreeSitterRainbowsQuery(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -378,7 +376,7 @@ export function generateTreeSitterRainbowsQuery(
 
 function generateTreeSitterRainbowsQueryFromPlan(
   plan: TreeSitterPlan,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
 ): string {
   const rainbow = metadata.queries?.rainbows;
   const patterns = rainbow?.patterns ?? [];
@@ -410,7 +408,7 @@ export function generateTreeSitterInjectionsQuery(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -433,7 +431,7 @@ export function generateTreeSitterInjectionsQuery(
 }
 
 function generateTreeSitterInjectionsQueryFromMetadata(
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
 ): string {
   const injections = metadata.queries?.injections ?? [];
   if (injections.length === 0) return "";
@@ -458,7 +456,7 @@ export function generateTreeSitterHighlightsQuery(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -485,7 +483,7 @@ export function generateTreeSitterHighlightsQuery(
 
 function generateTreeSitterHighlightsQueryFromPlan(
   plan: TreeSitterPlan,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
 ): string {
   const highlightMetadata = metadata.queries?.highlights;
   const explicit = resolveHighlightCaptureSelectors(
@@ -515,7 +513,7 @@ export function collectTreeSitterHighlightDiagnostics(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): Diagnostic[] {
@@ -543,7 +541,7 @@ export function collectTreeSitterHighlightDiagnostics(
 export function collectAnalyzedTreeSitterHighlightDiagnostics(
   analyzed: AnalyzedGrammar,
   options: {
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
   } = {},
 ): Diagnostic[] {
   return uncoveredSuppressedHighlightDiagnostics(
@@ -557,7 +555,7 @@ export function generateTreeSitterLocalsQuery(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -583,7 +581,7 @@ export function generateTreeSitterFoldsQuery(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -609,7 +607,7 @@ export function generateTreeSitterIndentsQuery(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -635,7 +633,7 @@ export function generateTreeSitterTagsQuery(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -661,7 +659,7 @@ export function generateTreeSitterTextobjectsQuery(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): string {
@@ -687,7 +685,7 @@ export function generateTreeSitterQueries(
   sourceOrGrammar: string | EbnfGrammar,
   options: {
     rootRule?: string;
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
     skipValidation?: boolean;
   } = {},
 ): Record<string, string> {
@@ -743,7 +741,7 @@ export function generateTreeSitterQueries(
 export function generateAnalyzedTreeSitterQueries(
   analyzed: AnalyzedGrammar,
   options: {
-    metadata?: TreeSitterMetadata;
+    metadata?: BabaMetadata;
   } = {},
 ): Record<string, string> {
   const plan = createAnalyzedTreeSitterPlan(analyzed);
@@ -1467,10 +1465,10 @@ function collectLiteralTerminals(
   }
 }
 
-function validateTreeSitterMetadataSemantics(
+function validateBabaMetadataSemantics(
   grammar: EbnfGrammar,
   rootRuleName: string,
-  metadata?: TreeSitterMetadata,
+  metadata?: BabaMetadata,
 ): void {
   if (!metadata) return;
   const plan = createGrammarTreeSitterPlan(grammar, rootRuleName, metadata);
@@ -1608,9 +1606,9 @@ function validateTreeSitterMetadataSemantics(
 export function validateTreeSitterGenerationMetadataSemantics(
   grammar: EbnfGrammar,
   rootRuleName: string,
-  metadata: TreeSitterMetadata = {},
+  metadata: BabaMetadata = {},
 ): void {
-  validateTreeSitterMetadataSemantics(grammar, rootRuleName, metadata);
+  validateBabaMetadataSemantics(grammar, rootRuleName, metadata);
   validateTreeSitterQueryMetadata(grammar, metadata, rootRuleName);
 }
 
@@ -1618,7 +1616,7 @@ export function validateTreeSitterGenerationMetadataSemantics(
 export function validateGenerationMetadataSemantics(
   grammar: EbnfGrammar,
   rootRuleName: string,
-  metadata: TreeSitterMetadata = {},
+  metadata: BabaMetadata = {},
 ): void {
   validateTreeSitterGenerationMetadataSemantics(
     grammar,
@@ -1629,7 +1627,7 @@ export function validateGenerationMetadataSemantics(
 
 function validateTreeSitterQueryMetadata(
   grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
   rootRuleName: string,
 ): void {
   const queries = metadata.queries;
@@ -1710,7 +1708,7 @@ function validateTreeSitterQueryMetadata(
 
 function validateHighlightCoverageIgnoreMetadata(
   grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
   rootRuleName: string,
 ): void {
   const ignore = metadata.queries?.highlights?.defaults?.ignore;
@@ -1743,7 +1741,7 @@ function validateHighlightCoverageIgnoreMetadata(
 
 function validateCaptureMetadata(
   grammar: EbnfGrammar,
-  fullMetadata: TreeSitterMetadata,
+  fullMetadata: BabaMetadata,
   rootRuleName: string,
   metadata: TreeSitterCaptureQueryEntry[] | undefined,
   context: string,
@@ -1801,7 +1799,7 @@ function validateCaptureMetadata(
 
 function validateCaptureSelectorsMetadata(
   grammar: EbnfGrammar,
-  fullMetadata: TreeSitterMetadata,
+  fullMetadata: BabaMetadata,
   rootRuleName: string,
   metadata: TreeSitterCaptureSelectorMetadata[] | undefined,
   context: string,
@@ -1887,7 +1885,7 @@ function validateCaptureSelectorContext(
 
 function uncoveredSuppressedHighlightDiagnostics(
   plan: TreeSitterPlan,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
 ): Diagnostic[] {
   const suppress = metadata.queries?.highlights?.defaults?.suppress ?? [];
   if (suppress.length === 0) return [];
@@ -2123,7 +2121,7 @@ function expressionChildren(
 
 function validateTreeSitterRainbowsMetadata(
   grammar: EbnfGrammar,
-  fullMetadata: TreeSitterMetadata,
+  fullMetadata: BabaMetadata,
   rootRuleName: string,
   metadata?: TreeSitterRainbowsMetadata,
   path = "metadata.queries.rainbows",
@@ -2164,7 +2162,7 @@ function validateTreeSitterRainbowsMetadata(
 
 function validateTreeSitterInjectionsMetadata(
   grammar: EbnfGrammar,
-  fullMetadata: TreeSitterMetadata,
+  fullMetadata: BabaMetadata,
   rootRuleName: string,
   metadata?: TreeSitterInjectionQueryEntry[],
   path = "metadata.queries.injections",
@@ -2198,7 +2196,7 @@ function validateTreeSitterInjectionsMetadata(
 
 function collectGeneratedTreeSitterNodeNames(
   grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
   rootRuleName: string,
 ): Set<string> {
   const symbolSets = collectGeneratedSymbolSets(
@@ -2228,7 +2226,7 @@ function collectGeneratedTreeSitterNodeNames(
 
 function collectGeneratedTreeSitterFieldNames(
   grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
   rootRuleName: string,
 ): Map<string, Set<string>> {
   const plan = createGrammarTreeSitterPlan(grammar, rootRuleName, metadata);
@@ -2288,7 +2286,7 @@ function collectExpressionFieldNames(
 
 function collectGeneratedSymbolSets(
   grammar: EbnfGrammar,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
   rootRuleName: string,
 ): {
   parserRules: Set<string>;
@@ -2382,21 +2380,10 @@ function resolveMetadataPathSelector(
   expression: TreeSitterExpression,
   selector: string,
   ruleName: string,
-  metadataVersion?: TreeSitterMetadata["version"],
+  _metadataVersion?: BabaMetadata["version"],
   metadataPath?: string,
 ): string {
   if (selector === "") return "";
-  if (isLegacyNumericPath(selector)) {
-    if (metadataVersion === 1) {
-      treeSitterDiagnosticError(
-        "METADATA_LEGACY_PATH",
-        `Rule '${ruleName}' path '${selector}' uses legacy numeric metadata; use a named EBNF field`,
-        { path: metadataPath },
-      );
-    }
-    parsePathSegments(selector, ruleName, metadataPath);
-    return selector;
-  }
 
   const namedFieldPaths = collectNamedFieldPaths(expression);
   const matches = namedFieldPaths.get(selector) ?? [];
@@ -2462,14 +2449,6 @@ function collectNamedFieldPathsInto(
     case "literal":
       return;
   }
-}
-
-function isLegacyNumericPath(selector: string): boolean {
-  return selector.split(".").every((segment) =>
-    /^(0|[1-9][0-9]*)$/.test(
-      segment,
-    )
-  );
 }
 
 function parsePathSegments(
@@ -2901,7 +2880,7 @@ interface NormalizedRuleMetadata {
 }
 
 interface RenderContext {
-  metadata: TreeSitterMetadata;
+  metadata: BabaMetadata;
   normalizedRules: Map<string, NormalizedRuleMetadata>;
   ruleExpressions: Map<string, TreeSitterExpression>;
   helperRules: Map<string, string>;
@@ -2911,30 +2890,12 @@ function normalizeRuleMetadata(
   metadata?: TreeSitterRuleMetadata,
   expression?: TreeSitterExpression,
   ruleName?: string,
-  metadataVersion?: TreeSitterMetadata["version"],
+  metadataVersion?: BabaMetadata["version"],
   metadataPath?: string,
 ): NormalizedRuleMetadata {
   const paths = new Map<string, TreeSitterPathMetadata>();
   if (!metadata) return { paths };
 
-  for (const [path, field] of Object.entries(metadata.fields ?? {})) {
-    const resolvedPath = expression && ruleName
-      ? resolveMetadataPathSelector(
-        expression,
-        path,
-        ruleName,
-        metadataVersion,
-        `${metadataPath ?? `metadata.rules.${ruleName}`}.fields.${path}`,
-      )
-      : path;
-    mergePathMetadata(
-      paths,
-      resolvedPath,
-      { field },
-      ruleName ?? "<unknown>",
-      `${metadataPath ?? `metadata.rules.${ruleName}`}.fields.${path}`,
-    );
-  }
   if (metadata.wrap) {
     mergePathMetadata(
       paths,
@@ -2989,7 +2950,7 @@ function mergePathMetadata(
 function createRenderContext(
   rules: readonly TreeSitterRulePlan[],
   sourceFile: TreeSitterExpression,
-  metadata: TreeSitterMetadata,
+  metadata: BabaMetadata,
 ): RenderContext {
   const ruleExpressions = new Map<string, TreeSitterExpression>();
   for (const rule of rules) {
@@ -3027,7 +2988,7 @@ function createRenderContext(
   return { metadata, normalizedRules, ruleExpressions, helperRules: new Map() };
 }
 
-function collectInlineRules(metadata: TreeSitterMetadata): string[] {
+function collectInlineRules(metadata: BabaMetadata): string[] {
   const inline = new Set(metadata.inline ?? []);
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
     if (ruleMeta.paths?.[""]?.hidden_path) inline.add(ruleName);
@@ -3039,20 +3000,9 @@ function validateRuleMetadata(
   metadata: TreeSitterRuleMetadata,
   expression: TreeSitterExpression,
   ruleName: string,
-  metadataVersion?: TreeSitterMetadata["version"],
+  metadataVersion?: BabaMetadata["version"],
   metadataPath = `metadata.rules.${ruleName}`,
 ): void {
-  if (
-    metadataVersion === 1 &&
-    metadata.fields &&
-    Object.keys(metadata.fields).length > 0
-  ) {
-    treeSitterDiagnosticError(
-      "METADATA_LEGACY_FIELDS",
-      `Rule '${ruleName}' uses legacy fields metadata; use named EBNF fields`,
-      { path: `${metadataPath}.fields`, span: expression.span },
-    );
-  }
   if (metadata.token) {
     if (expression.kind !== "literal") {
       treeSitterDiagnosticError(
@@ -3063,7 +3013,6 @@ function validateRuleMetadata(
     }
     if (
       metadata.wrap ||
-      metadata.fields?.[""] ||
       Object.prototype.hasOwnProperty.call(metadata.paths ?? {}, "")
     ) {
       treeSitterDiagnosticError(

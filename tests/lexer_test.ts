@@ -25,7 +25,6 @@ import {
   parseEbnf,
   parseGrammar,
   parseMetadata,
-  parseTreeSitterMetadata,
   runCommand,
   treeSitterAccepts,
   validateGrammar,

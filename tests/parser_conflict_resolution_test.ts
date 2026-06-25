@@ -4,6 +4,7 @@ import {
   assertEquals,
   assertIncludes,
   assertNotIncludes,
+  assertThrowsIncludes,
   compile,
   denoCheck,
   generatedTextContent,
@@ -71,31 +72,19 @@ Deno.test("TypeScript parser resolves declared shift/reduce conflicts determinis
     unresolved.diagnostics[0].message,
     "metadata.parser.conflicts",
   );
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
 
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      resolutions: [
-        {
-          rules: ["generic", "primary"],
-          on: "[",
-          prefer: "shift",
-        },
-      ],
+      resolutions: [{ conflict, prefer: "shift" }],
     },
   }));
   const resolved = compile(genericPostfixGrammar, {
     targets: ["typescript"],
     metadata,
   });
-  assertEquals(resolved.diagnostics.length, 1);
-  assertEquals(
-    resolved.diagnostics[0].code,
-    "PORTABLE_PARSER_CONFLICT_METADATA",
-  );
-  assertEquals(resolved.diagnostics[0].severity, "information");
-  assertIncludes(resolved.diagnostics[0].message, "legacy rule/on matching");
-  assertIncludes(resolved.diagnostics[0].message, '"conflict": "c_');
+  assertEquals(resolved.diagnostics.length, 0);
   assert(resolved.bundle);
 
   const dir = await Deno.makeTempDir();
@@ -170,7 +159,7 @@ Deno.test("TypeScript parser resolves conflicts by stable conflict ID", () => {
   assertEquals(unresolved.bundle, undefined);
   const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
       resolutions: [{ conflict, prefer: "shift" }],
     },
@@ -183,52 +172,34 @@ Deno.test("TypeScript parser resolves conflicts by stable conflict ID", () => {
   assert(resolved.bundle);
 });
 
-Deno.test("legacy conflict selectors require exact origin names", () => {
-  const exactMetadata = parseMetadata(JSON.stringify({
-    version: 1,
-    parser: {
-      resolutions: [
-        {
-          rules: ["generic", "primary"],
-          on: "[",
-          prefer: "shift",
+Deno.test("parser conflict metadata rejects legacy selector shapes", () => {
+  assertThrowsIncludes(
+    () =>
+      parseMetadata(JSON.stringify({
+        version: 2,
+        parser: {
+          resolutions: [
+            { rules: ["generic", "primary"], on: "[", prefer: "shift" },
+          ],
         },
-      ],
-    },
-  }));
-  const exact = compile(genericPostfixGrammar, {
-    targets: ["typescript"],
-    metadata: exactMetadata,
-  });
-  assert(exact.bundle);
-  assertEquals(exact.diagnostics[0]?.severity, "information");
-
-  const substringMetadata = parseMetadata(JSON.stringify({
-    version: 1,
-    parser: {
-      resolutions: [
-        {
-          rules: ["gener", "primary"],
-          on: "[",
-          prefer: "shift",
+      })),
+    "Unknown metadata.parser.resolutions[0] key 'rules'",
+  );
+  assertThrowsIncludes(
+    () =>
+      parseMetadata(JSON.stringify({
+        version: 2,
+        parser: {
+          conflicts: [["short", "long"]],
         },
-      ],
-    },
-  }));
-  const substring = compile(genericPostfixGrammar, {
-    targets: ["typescript"],
-    metadata: substringMetadata,
-  });
-  assertEquals(substring.bundle, undefined);
-  assertEquals(
-    substring.diagnostics[0].code,
-    "PORTABLE_PARSER_SHIFT_REDUCE_CONFLICT",
+      })),
+    "Expected metadata.parser.conflicts[0] to be object",
   );
 });
 
 Deno.test("TypeScript parser rejects stale stable conflict IDs", () => {
   const noConflictMetadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
       resolutions: [{ conflict: "c_deadbeefdeadbeef", prefer: "shift" }],
     },
@@ -267,7 +238,7 @@ Deno.test("TypeScript parser rejects duplicate stable conflict resolutions", () 
   const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
 
   const duplicateMetadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
       resolutions: [
         { conflict, prefer: "shift" },
@@ -287,7 +258,7 @@ Deno.test("TypeScript parser rejects duplicate stable conflict resolutions", () 
   assertIncludes(duplicate.diagnostics[0].message, "duplicates");
 
   const contradictoryMetadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
       resolutions: [
         { conflict, prefer: "shift" },
@@ -386,11 +357,12 @@ Deno.test("TypeScript parser branches through declared local grammar conflicts",
     unresolved.diagnostics[0].code,
     "PORTABLE_PARSER_SHIFT_REDUCE_CONFLICT",
   );
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
 
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      conflicts: [["tuple", "atom"]],
+      conflicts: [{ conflict }],
     },
   }));
   const resolved = compile(parenthesizedTypeGrammar, {
@@ -432,7 +404,7 @@ Deno.test("parser branches through stable declared conflict IDs", async () => {
   assertEquals(unresolved.bundle, undefined);
   const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
       conflicts: [{ conflict }],
     },
@@ -462,9 +434,9 @@ Deno.test("parser branches through stable declared conflict IDs", async () => {
 
 Deno.test("TypeScript parser rejects stale declared branch conflicts", () => {
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      conflicts: [["missing", "branch"]],
+      conflicts: [{ conflict: "c_deadbeefdeadbeef" }],
     },
   }));
   const deterministic = compile(`module = "x" ;`, {
@@ -478,12 +450,17 @@ Deno.test("TypeScript parser rejects stale declared branch conflicts", () => {
   );
   assertIncludes(deterministic.diagnostics[0].message, "did not match");
 
+  const unresolved = compile(shiftFirstRestoreGrammar, {
+    targets: ["typescript"],
+  });
+  assertEquals(unresolved.bundle, undefined);
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
   const mixedMetadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
       conflicts: [
-        ["short", "long"],
-        ["missing", "branch"],
+        { conflict },
+        { conflict: "c_deadbeefdeadbeef" },
       ],
     },
   }));
@@ -508,11 +485,12 @@ Deno.test("TypeScript parser restores saved reduce branch after shifted branch f
     unresolved.diagnostics[0].code,
     "PORTABLE_PARSER_SHIFT_REDUCE_CONFLICT",
   );
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
 
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      conflicts: [["short", "long"]],
+      conflicts: [{ conflict }],
     },
   }));
   const result = compile(shiftFirstRestoreGrammar, {
@@ -545,10 +523,15 @@ Deno.test("TypeScript parser restores saved reduce branch after shifted branch f
 });
 
 Deno.test("Wasm parser target traces declared conflict branches", async () => {
+  const unresolved = compile(parenthesizedTypeGrammar, {
+    targets: ["wasm"],
+  });
+  assertEquals(unresolved.bundle, undefined);
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      conflicts: [["tuple", "atom"]],
+      conflicts: [{ conflict }],
     },
   }));
   const result = compile(parenthesizedTypeGrammar, {
@@ -591,11 +574,12 @@ Deno.test("Wasm parser restores saved reduce branch after shifted branch fails",
     unresolved.diagnostics[0].message,
     'Conflict witness prefix: "a" "b"',
   );
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
 
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      conflicts: [["short", "long"]],
+      conflicts: [{ conflict }],
     },
   }));
   const result = compile(shiftFirstRestoreGrammar, {
@@ -627,16 +611,19 @@ Deno.test("Wasm parser restores saved reduce branch after shifted branch fails",
   }
 });
 
-Deno.test("parser limits queued branches for high fan-out reduce conflicts", async () => {
-  const rules = Array.from({ length: 20 }, (_, index) => `r${index}`);
+Deno.test("parser reports declared reduce ambiguity", async () => {
   const grammar = `
-    module = ${rules.join(" | ")} ;
-    ${rules.map((rule) => `${rule} = "a" ;`).join("\n")}
+    module = left | right ;
+    left = "a" ;
+    right = "a" ;
   `;
+  const unresolved = compile(grammar, { targets: ["typescript", "wasm"] });
+  assertEquals(unresolved.bundle, undefined);
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
   const metadata = parseMetadata(JSON.stringify({
-    version: 1,
+    version: 2,
     parser: {
-      conflicts: [["r0", "r1"]],
+      conflicts: [{ conflict }],
     },
   }));
   const result = compile(grammar, {
@@ -664,9 +651,6 @@ Deno.test("parser limits queued branches for high fan-out reduce conflicts", asy
       });
       assertEquals(ambiguous.ok, false);
       assertEquals(ambiguous.diagnostics[0].code, "PARSER_AMBIGUOUS_PARSE");
-      const limited = mod.parse("a", { maxQueuedBranches: 1 });
-      assertEquals(limited.ok, false);
-      assertEquals(limited.diagnostics[0].code, "PARSER_BRANCH_LIMIT");
     }
   } finally {
     await Deno.remove(dir, { recursive: true });

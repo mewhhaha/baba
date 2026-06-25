@@ -211,19 +211,7 @@ export function buildCanonicalLr1Table(
       nextActions,
       conflictResolutions,
       conflictGroups,
-      (index, context) => {
-        if (
-          conflictResolutionUseCounts[index] === 0 &&
-          conflictResolutions[index]?.conflict === undefined
-        ) {
-          diagnostics.push(
-            legacyConflictResolutionMigrationDiagnostic(
-              index,
-              grammar,
-              context,
-            ),
-          );
-        }
+      (index) => {
         conflictResolutionUseCounts[index]++;
       },
       (index) => {
@@ -737,7 +725,7 @@ function resolveConflict(
   actions: readonly LrAction[],
   resolutions: readonly ParserConflictResolutionMetadata[],
   conflictGroups: readonly ParserConflictDeclarationMetadata[],
-  markResolutionUsed: (index: number, context: ConflictContext) => void,
+  markResolutionUsed: (index: number) => void,
   markConflictGroupUsed: (index: number) => void,
 ): LrActionSet | undefined {
   const context = conflictContext(grammar, state, terminal, actions);
@@ -745,7 +733,7 @@ function resolveConflict(
     if (!resolutionMatches(grammar, context, resolution)) continue;
     const selected = selectResolvedAction(context, resolution);
     if (selected) {
-      markResolutionUsed(index, context);
+      markResolutionUsed(index);
       return [selected];
     }
   }
@@ -764,7 +752,7 @@ function unusedConflictResolutionDiagnostics(
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   for (const [index, resolution] of resolutions.entries()) {
-    if (!resolution.conflict || (useCounts[index] ?? 0) > 0) continue;
+    if ((useCounts[index] ?? 0) > 0) continue;
     diagnostics.push({
       code: "TS_PARSER_CONFLICT_METADATA",
       severity: "error",
@@ -808,7 +796,6 @@ function duplicateConflictResolutionDiagnostics(
     reduce?: string;
   }>();
   for (const [index, resolution] of resolutions.entries()) {
-    if (!resolution.conflict) continue;
     const previous = firstByConflict.get(resolution.conflict);
     if (!previous) {
       firstByConflict.set(resolution.conflict, {
@@ -833,23 +820,6 @@ function duplicateConflictResolutionDiagnostics(
     });
   }
   return diagnostics;
-}
-
-function legacyConflictResolutionMigrationDiagnostic(
-  index: number,
-  grammar: BnfGrammar,
-  context: ConflictContext,
-): Diagnostic {
-  const stableSelector = { conflict: conflictId(grammar, context) };
-  return {
-    code: "TS_PARSER_CONFLICT_METADATA",
-    severity: "information",
-    backend: "typescript",
-    message: [
-      `metadata.parser.resolutions[${index}] uses legacy rule/on matching. Prefer the stable conflict selector:`,
-      indentJson(stableSelector),
-    ].join("\n"),
-  };
 }
 
 function conflictId(grammar: BnfGrammar, context: ConflictContext): string {
@@ -967,28 +937,7 @@ function resolutionMatches(
   context: ConflictContext,
   resolution: ParserConflictResolutionMetadata,
 ): boolean {
-  if (
-    resolution.conflict !== undefined &&
-    resolution.conflict !== conflictId(grammar, context)
-  ) {
-    return false;
-  }
-  if (
-    resolution.on !== undefined &&
-    !terminalMatches(grammar, context.terminal, resolution.on)
-  ) {
-    return false;
-  }
-  return originGroupMatches(context.origins, resolution.rules ?? []);
-}
-
-function terminalMatches(
-  grammar: BnfGrammar,
-  terminal: number,
-  expected: string,
-): boolean {
-  const display = grammar.terminals[terminal]?.display ?? String(terminal);
-  return display === expected || display === JSON.stringify(expected);
+  return resolution.conflict === conflictId(grammar, context);
 }
 
 function conflictDeclarationMatches(
@@ -996,19 +945,7 @@ function conflictDeclarationMatches(
   context: ConflictContext,
   declaration: ParserConflictDeclarationMetadata,
 ): boolean {
-  if (Array.isArray(declaration)) {
-    return originGroupMatches(context.origins, declaration);
-  }
   return declaration.conflict === conflictId(grammar, context);
-}
-
-function originGroupMatches(
-  origins: readonly ProductionOrigin[],
-  group: readonly string[],
-): boolean {
-  return group.every((name) =>
-    origins.some((origin) => originSelectorMatches(origin, name))
-  );
 }
 
 function originSelectorMatches(

@@ -1,5 +1,36 @@
 # Changelog
 
+## 2.0.0
+
+### Removed
+
+- Removed legacy public metadata aliases `TreeSitterMetadata` and
+  `parseTreeSitterMetadata`; use `BabaMetadata` and `parseMetadata`.
+- Removed metadata schema `version: 1`, legacy parser conflict selectors,
+  rule-array branch declarations, `rules.*.fields`, and numeric path
+  compatibility. Metadata schema `version: 2` is current, and parser conflict
+  metadata must use stable conflict IDs.
+- Removed CLI compatibility aliases `--ts-meta`, `--generated-byte-limit`, and
+  `--verbose`, plus special removed-option diagnostics for `init`, `--preset`,
+  and `--backend`.
+- Removed generated Wasm adapter exports `createParserFromBytes`,
+  `createParserFromModule`, and `createParserFromUrl`.
+- Removed tracked `examples/*/generated` outputs from the repository.
+
+### Added
+
+- Added `--typescript-generated-byte-limit` for explicit TypeScript target size
+  limits.
+
+### Changed
+
+- Generated examples are ignored local artifacts. `deno task bootstrap:check`
+  regenerates examples into temporary directories, validates manifests, and
+  type-checks generated entrypoints instead of byte-comparing committed
+  snapshots.
+- Size reports keep local generated example bytes informational; CI size budgets
+  gate publish payloads, not ignored generated example outputs.
+
 ## 1.6.0
 
 ### Added

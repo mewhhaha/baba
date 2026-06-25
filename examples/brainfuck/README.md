@@ -27,8 +27,8 @@ Step 2: write the starting files:
 - `baba.json`: optional Tree-sitter query metadata.
 - `programs/*.bf`: sample source files to test.
 
-The generated files under `generated/` are committed in this example so you can
-inspect the result, but they should be treated as generated output.
+The generated files under `generated/` are ignored local artifacts. Regenerate
+them when you want to inspect or run the example.
 
 Step 3: generate the parser artifacts.
 
@@ -123,5 +123,5 @@ deno task tree-sitter:build
 deno task tree-sitter:parse
 ```
 
-`parser.so` and `.cache/` are local build outputs; they do not need to be
-committed.
+`parser.so`, `.cache/`, and `generated/` are local build outputs; they do not
+need to be committed.
