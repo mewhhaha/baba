@@ -7,6 +7,7 @@ import {
   RUNTIME_ACTION_REDUCE as ACTION_REDUCE,
   RUNTIME_ACTION_SHIFT as ACTION_SHIFT,
 } from "./language_sources.ts";
+import { RUNTIME_IMPLEMENTATION_VERSION } from "./implementation.ts";
 import {
   WASM_ABI_VERSION,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
@@ -243,6 +244,7 @@ function functionSection(): number[] {
     u32(1),
     u32(2),
     u32(2),
+    u32(2),
     u32(3),
     u32(2),
     u32(2),
@@ -268,15 +270,16 @@ function exportSection(): number[] {
     exportEntry("lex_all", 0x00, 4),
     exportEntry("abi_version", 0x00, 5),
     exportEntry("plan_version", 0x00, 6),
-    exportEntry("reset", 0x00, 7),
-    exportEntry("input_base", 0x00, 8),
-    exportEntry("max_pages", 0x00, 9),
-    exportEntry("source_encoding", 0x00, 10),
-    exportEntry("span_unit", 0x00, 11),
-    exportEntry("lex_result_i32_count", 0x00, 12),
-    exportEntry("token_record_i32_count", 0x00, 13),
-    exportEntry("host_ownership_model", 0x00, 14),
-    exportEntry("result_lifetime_model", 0x00, 15),
+    exportEntry("semantics_version", 0x00, 7),
+    exportEntry("reset", 0x00, 8),
+    exportEntry("input_base", 0x00, 9),
+    exportEntry("max_pages", 0x00, 10),
+    exportEntry("source_encoding", 0x00, 11),
+    exportEntry("span_unit", 0x00, 12),
+    exportEntry("lex_result_i32_count", 0x00, 13),
+    exportEntry("token_record_i32_count", 0x00, 14),
+    exportEntry("host_ownership_model", 0x00, 15),
+    exportEntry("result_lifetime_model", 0x00, 16),
   ]);
 }
 
@@ -310,6 +313,7 @@ function codeSection(
     functionBody(15, lexAllFunction(layout)),
     functionBody(0, versionFunction(WASM_ABI_VERSION)),
     functionBody(0, versionFunction(parserPlanVersion)),
+    functionBody(0, versionFunction(RUNTIME_IMPLEMENTATION_VERSION)),
     functionBody(0, resetFunction()),
     functionBody(0, versionFunction(layout.inputBase)),
     functionBody(0, versionFunction(MAX_WASM_PAGES)),

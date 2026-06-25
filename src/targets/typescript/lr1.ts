@@ -1,5 +1,6 @@
 import type {
   Diagnostic,
+  ParserConflictDeclarationMetadata,
   ParserConflictResolutionMetadata,
 } from "../../ast.ts";
 import type {
@@ -45,6 +46,7 @@ export interface LrPlanningStats {
   states: number;
   coreItems: number;
   items: number;
+  closureWork: number;
   actionEntries: number;
   gotoEntries: number;
   tableEntries: number;
@@ -78,8 +80,9 @@ export function buildCanonicalLr1Table(
   options: {
     stateLimit: number;
     itemLimit?: number;
+    closureWorkLimit?: number;
     tableEntryLimit?: number;
-    conflictGroups?: readonly (readonly string[])[];
+    conflictGroups?: readonly ParserConflictDeclarationMetadata[];
     conflictResolutions?: readonly ParserConflictResolutionMetadata[];
   },
 ): LrTable {
@@ -90,11 +93,26 @@ export function buildCanonicalLr1Table(
   const states: LrState[] = [];
   const queue: LrState[] = [];
   const transitionEdges: LrTransitionEdge[] = [];
+  const closureBudget: ClosureBudget = {
+    limit: options.closureWorkLimit,
+    used: 0,
+    exhausted: false,
+  };
   let totalCoreItems = 0;
   let totalItems = 0;
 
   const addState = (items: readonly LrItem[]): LrState => {
-    const closed = closure(grammar, analysis, items);
+    const closed = closure(grammar, analysis, items, closureBudget);
+    if (closureBudget.exhausted) {
+      diagnostics.push({
+        code: "TS_LR_CLOSURE_WORK_LIMIT",
+        severity: "error",
+        backend: "typescript",
+        message:
+          `The portable parser exceeded the canonical LR(1) closure work limit (${options.closureWorkLimit}).`,
+      });
+      return states[0] ?? { id: 0, items: [] };
+    }
     const key = itemSetKey(closed);
     const existing = stateByKey.get(key);
     if (existing !== undefined) return states[existing];
@@ -140,8 +158,15 @@ export function buildCanonicalLr1Table(
     if (diagnostics.length > 0) break;
     const state = queue[index];
     for (const symbol of nextSymbols(state.items, grammar)) {
-      const target = gotoItems(grammar, analysis, state.items, symbol);
+      const target = gotoItems(
+        grammar,
+        analysis,
+        state.items,
+        symbol,
+        closureBudget,
+      );
       const targetState = addState(target);
+      if (diagnostics.length > 0) break;
       transitions.set(transitionKey(state.id, symbol), targetState.id);
       transitionEdges.push({
         from: state.id,
@@ -288,6 +313,7 @@ export function buildCanonicalLr1Table(
       states: states.length,
       coreItems: totalCoreItems,
       items: totalItems,
+      closureWork: closureBudget.used,
       actionEntries,
       gotoEntries,
       tableEntries,
@@ -306,6 +332,22 @@ function countEntries<K, V>(table: ReadonlyMap<K, ReadonlyMap<K, V>>): number {
   let count = 0;
   for (const row of table.values()) count += row.size;
   return count;
+}
+
+interface ClosureBudget {
+  limit?: number;
+  used: number;
+  exhausted: boolean;
+}
+
+function consumeClosureWork(budget: ClosureBudget): boolean {
+  if (budget.exhausted) return false;
+  budget.used++;
+  if (budget.limit !== undefined && budget.used > budget.limit) {
+    budget.exhausted = true;
+    return false;
+  }
+  return true;
 }
 
 function countActionEntries(
@@ -380,6 +422,7 @@ function closure(
   grammar: BnfGrammar,
   analysis: FirstAnalysis,
   items: readonly LrItem[],
+  budget: ClosureBudget,
 ): LrItem[] {
   const byKey = new Map<string, MutableLrItem>();
   const queue: MutableLrItem[] = [];
@@ -406,6 +449,7 @@ function closure(
   }
 
   for (let index = 0; index < queue.length; index++) {
+    if (!consumeClosureWork(budget)) break;
     const item = queue[index];
     const production = grammar.productions[item.production];
     const symbol = production.rhs[item.dot];
@@ -436,6 +480,7 @@ function gotoItems(
   analysis: FirstAnalysis,
   items: readonly LrItem[],
   symbol: BnfSymbol,
+  budget: ClosureBudget,
 ): LrItem[] {
   const advanced = items
     .filter((item) =>
@@ -446,7 +491,7 @@ function gotoItems(
       dot: item.dot + 1,
       lookaheads: item.lookaheads,
     }));
-  return closure(grammar, analysis, advanced);
+  return closure(grammar, analysis, advanced, budget);
 }
 
 function nextSymbols(
@@ -691,7 +736,7 @@ function resolveConflict(
   terminal: number,
   actions: readonly LrAction[],
   resolutions: readonly ParserConflictResolutionMetadata[],
-  conflictGroups: readonly (readonly string[])[],
+  conflictGroups: readonly ParserConflictDeclarationMetadata[],
   markResolutionUsed: (index: number, context: ConflictContext) => void,
   markConflictGroupUsed: (index: number) => void,
 ): LrActionSet | undefined {
@@ -705,7 +750,7 @@ function resolveConflict(
     }
   }
   for (const [index, group] of conflictGroups.entries()) {
-    if (originGroupMatches(context.origins, group)) {
+    if (conflictDeclarationMatches(grammar, context, group)) {
       markConflictGroupUsed(index);
       return sortActions(actions);
     }
@@ -734,7 +779,7 @@ function unusedConflictResolutionDiagnostics(
 }
 
 function unusedConflictGroupDiagnostics(
-  conflictGroups: readonly (readonly string[])[],
+  conflictGroups: readonly ParserConflictDeclarationMetadata[],
   useCounts: readonly number[],
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
@@ -745,7 +790,7 @@ function unusedConflictGroupDiagnostics(
       severity: "error",
       backend: "typescript",
       message:
-        `metadata.parser.conflicts[${index}] did not match any LR conflict. Regenerate the conflict diagnostic and update this branch declaration, or remove the stale group ${
+        `metadata.parser.conflicts[${index}] did not match any LR conflict. Regenerate the conflict diagnostic and update this branch declaration, or remove the stale declaration ${
           JSON.stringify(group)
         }.`,
     });
@@ -946,15 +991,31 @@ function terminalMatches(
   return display === expected || display === JSON.stringify(expected);
 }
 
+function conflictDeclarationMatches(
+  grammar: BnfGrammar,
+  context: ConflictContext,
+  declaration: ParserConflictDeclarationMetadata,
+): boolean {
+  if (Array.isArray(declaration)) {
+    return originGroupMatches(context.origins, declaration);
+  }
+  return declaration.conflict === conflictId(grammar, context);
+}
+
 function originGroupMatches(
   origins: readonly ProductionOrigin[],
   group: readonly string[],
 ): boolean {
   return group.every((name) =>
-    origins.some((origin) =>
-      origin.ruleName === name || origin.description.includes(name)
-    )
+    origins.some((origin) => originSelectorMatches(origin, name))
   );
+}
+
+function originSelectorMatches(
+  origin: ProductionOrigin,
+  selector: string,
+): boolean {
+  return origin.ruleName === selector || origin.description === selector;
 }
 
 function selectResolvedAction(
@@ -978,9 +1039,7 @@ function selectResolvedAction(
       candidate.id === action.production
     );
     const origin = production?.origin;
-    return origin
-      ? origin.ruleName === reduce || origin.description.includes(reduce)
-      : false;
+    return origin ? originSelectorMatches(origin, reduce) : false;
   });
 }
 

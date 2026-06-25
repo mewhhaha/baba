@@ -19,20 +19,24 @@ import {
   parseGrammar,
 } from "./helpers.ts";
 
-function portableFixturePlan(): PortableParserPlanV1 {
-  const grammar = parseGrammar(`
-    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
-    token INTEGER = /[0-9]+/ ;
-    skip WS = /[ \\t\\r\\n]+/ ;
-    module = item+ ;
-    item = name:IDENT value:INTEGER? "." ;
-  `);
+function portablePlanFor(source: string): PortableParserPlanV1 {
+  const grammar = parseGrammar(source);
   const analyzed = analyzeGrammar(grammar, { name: "portable_fixture" });
   assertEquals(analyzed.diagnostics.length, 0);
   const result = buildPortableParserPlan(analyzed);
   assertEquals(result.diagnostics.length, 0);
   assert(result.runtime);
   return result.runtime.portable;
+}
+
+function portableFixturePlan(): PortableParserPlanV1 {
+  return portablePlanFor(`
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    token INTEGER = /[0-9]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = item+ ;
+    item = name:IDENT value:INTEGER? "." ;
+  `);
 }
 
 Deno.test("portable parser plan serializes deterministically and round-trips", () => {
@@ -43,14 +47,50 @@ Deno.test("portable parser plan serializes deterministically and round-trips", (
   const secondJson = serializePortableParserPlanJson(second);
   assertEquals(firstJson, secondJson);
   assertIncludes(firstJson, '"format": "baba-parser-plan"');
+  assertIncludes(firstJson, '"stableId": "p_');
   assertIncludes(firstJson, '"reducers": [');
   assertIncludes(firstJson, '"diagnostics": {');
+  assert(
+    first.parser.productions.every((production) =>
+      /^p_[0-9a-f]{16}$/.test(production.stableId)
+    ),
+  );
 
   const parsed = parsePortableParserPlanJson(firstJson);
   assert("format" in parsed);
   assertEquals(parsed.format, "baba-parser-plan");
   assertEquals(serializePortableParserPlanJson(parsed), firstJson);
   assertEquals(validatePortableParserPlan(parsed).length, 0);
+});
+
+Deno.test("portable parser plan production stable IDs are structural", () => {
+  const left = portablePlanFor(`
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = item+ ;
+    item = IDENT "." ;
+  `);
+  const reformatted = portablePlanFor(`
+    // Comments and formatting do not affect production identity.
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module=item+;
+    item = IDENT
+      "." ;
+  `);
+  const changed = portablePlanFor(`
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = item+ ;
+    item = IDENT "," ;
+  `);
+
+  const stableIds = (plan: PortableParserPlanV1) =>
+    plan.parser.productions.map((production) => production.stableId).join(",");
+  assertEquals(stableIds(reformatted), stableIds(left));
+  assert(stableIds(changed) !== stableIds(left));
 });
 
 Deno.test("portable parser plan exposes stable runtime statistics", () => {
@@ -184,6 +224,19 @@ Deno.test("portable parser plan validation reports malformed untrusted plans", (
       "bad start production",
       (copy) => copy.parser.startProduction = 999,
       "$.parser.startProduction",
+    ],
+    [
+      "bad production stable id",
+      (copy) => copy.parser.productions[0].stableId = "production-0",
+      "$.parser.productions[0].stableId",
+    ],
+    [
+      "duplicate production stable id",
+      (copy) => {
+        copy.parser.productions[1].stableId =
+          copy.parser.productions[0].stableId;
+      },
+      "$.parser.productions[1].stableId",
     ],
     [
       "bad production rhs terminal",

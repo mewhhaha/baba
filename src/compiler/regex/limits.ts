@@ -1,5 +1,7 @@
 import { countRegexAstNodes, type RegexAst } from "./ast.ts";
 
+export const DEFAULT_REGEX_NESTING_LIMIT = 256;
+
 export type RegexResourceLimitCode =
   | "REGEX_SOURCE_LIMIT"
   | "REGEX_NESTING_LIMIT"

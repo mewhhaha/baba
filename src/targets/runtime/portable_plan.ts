@@ -198,6 +198,7 @@ export interface GotoEntryPlan {
 
 export interface ProductionPlan {
   readonly id: number;
+  readonly stableId: string;
   readonly lhs: number;
   readonly rhs: readonly BnfSymbol[];
   readonly reducerId: number;
@@ -216,6 +217,7 @@ export interface LrParserStatisticsPlan {
   readonly states: number;
   readonly coreItems: number;
   readonly items: number;
+  readonly closureWork: number;
   readonly actionEntries: number;
   readonly gotoEntries: number;
   readonly tableEntries: number;
@@ -309,7 +311,9 @@ export function createPortableParserPlanV1(
     rule.ruleId === analyzed.rootRule
   );
   const fields = fieldSymbols(cstRules);
-  const productions = bnf.productions.map(productionPlan);
+  const productions = bnf.productions.map((production) =>
+    productionPlan(bnf, production)
+  );
   const reducers = bnf.productions.map((production) =>
     reducerPlan(production.id, production.reducer, fields)
   );
@@ -523,9 +527,13 @@ function actionPlan(action: LrAction): LrActionPlan {
   return { kind: "accept" };
 }
 
-function productionPlan(production: BnfProduction): ProductionPlan {
+function productionPlan(
+  grammar: BnfGrammar,
+  production: BnfProduction,
+): ProductionPlan {
   return {
     id: production.id,
+    stableId: productionStableId(grammar, production),
     lhs: production.lhs,
     rhs: production.rhs.map((symbol) => ({ ...symbol })),
     reducerId: production.id,
@@ -533,6 +541,49 @@ function productionPlan(production: BnfProduction): ProductionPlan {
     ...(production.span ? { span: production.span } : {}),
     ...(production.origin ? { origin: production.origin } : {}),
   };
+}
+
+function productionStableId(
+  grammar: BnfGrammar,
+  production: BnfProduction,
+): string {
+  const origin = production.origin;
+  const payload = {
+    semantics: "baba-production-v1",
+    origin: origin
+      ? {
+        ruleName: origin.ruleName,
+        expressionId: origin.expressionId ?? null,
+      }
+      : null,
+    lhs: nonterminalStableKey(grammar, production.lhs),
+    rhs: production.rhs.map((symbol) => symbolStableKey(grammar, symbol)),
+    reducer: production.reducer,
+  };
+  return `p_${fnv1a64String(JSON.stringify(payload)).slice(0, 16)}`;
+}
+
+function symbolStableKey(grammar: BnfGrammar, symbol: BnfSymbol): string {
+  if (symbol.kind === "terminal") return terminalStableKey(grammar, symbol.id);
+  return nonterminalStableKey(grammar, symbol.id);
+}
+
+function terminalStableKey(grammar: BnfGrammar, terminal: number): string {
+  const info = grammar.terminals[terminal];
+  if (!info) return `terminal:${terminal}`;
+  if (info.kind === "eof") return "eof";
+  if (info.kind === "named") return `named:${info.display}`;
+  return `literal:${info.display}`;
+}
+
+function nonterminalStableKey(
+  grammar: BnfGrammar,
+  nonterminal: number,
+): string {
+  const info = grammar.nonterminals[nonterminal];
+  if (!info) return `nonterminal:${nonterminal}`;
+  if (info.ruleId !== undefined) return `rule:${info.name}`;
+  return `expr:${info.name}:${info.expressionId ?? nonterminal}`;
 }
 
 function reducerPlan(
@@ -1081,8 +1132,30 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
     if (startProduction === undefined || !hasId(productions, startProduction)) {
       fail("$.parser.startProduction", "must refer to a production.");
     }
+    const productionStableIds = new Set<string>();
     for (const [index, production] of productions.entries()) {
       if (!isRecord(production)) continue;
+      const stableId = stringProperty(
+        production,
+        "stableId",
+        `$.parser.productions[${index}].stableId`,
+        fail,
+      );
+      if (stableId !== undefined) {
+        if (!/^p_[0-9a-f]{16}$/.test(stableId)) {
+          fail(
+            `$.parser.productions[${index}].stableId`,
+            "must be a stable production id.",
+          );
+        } else if (productionStableIds.has(stableId)) {
+          fail(
+            `$.parser.productions[${index}].stableId`,
+            "must be unique.",
+          );
+        } else {
+          productionStableIds.add(stableId);
+        }
+      }
       const lhs = integerProperty(
         production,
         "lhs",
@@ -1227,6 +1300,15 @@ function hashPortableParserPlan(plan: PortableParserPlanV1): string {
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
   return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
+}
+
+function fnv1a64String(source: string): string {
+  let hash = 0xcbf29ce484222325n;
+  for (let index = 0; index < source.length; index++) {
+    hash ^= BigInt(source.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
 }
 
 function canonicalValue(value: unknown): unknown {
@@ -1534,6 +1616,20 @@ function integerProperty(
   const child = value[key];
   if (!isSupportedInteger(child)) {
     fail(path, "must be a supported non-negative integer.");
+    return undefined;
+  }
+  return child;
+}
+
+function stringProperty(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  fail: (path: string, message: string) => void,
+): string | undefined {
+  const child = value[key];
+  if (typeof child !== "string") {
+    fail(path, "must be a string.");
     return undefined;
   }
   return child;

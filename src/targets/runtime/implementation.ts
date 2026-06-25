@@ -23,37 +23,37 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/runtime/source_map.brl",
       role: "shared-brl-source-map",
-      hash: "fnv1a64:d9ccaba15a195d48",
+      hash: "fnv1a64:224c05ae079edd0a",
     },
     {
       path: "src/runtime/lexer.brl",
       role: "shared-brl-lexer",
-      hash: "fnv1a64:a8a4abcc02bc5026",
+      hash: "fnv1a64:f7c666153fd2abb7",
     },
     {
       path: "src/runtime/parser.brl",
       role: "shared-brl-parser",
-      hash: "fnv1a64:c443a73b566f917a",
+      hash: "fnv1a64:a7969cc9921f67d4",
     },
     {
       path: "src/runtime/branch_search.brl",
       role: "shared-brl-branch-search",
-      hash: "fnv1a64:3657073b777ec67c",
+      hash: "fnv1a64:1911bf79e43284a6",
     },
     {
       path: "src/runtime/reductions.brl",
       role: "shared-brl-reductions",
-      hash: "fnv1a64:e5bc50f4eda21f54",
+      hash: "fnv1a64:42b9767fe38c09d1",
     },
     {
       path: "src/runtime/cst.brl",
       role: "shared-brl-cst",
-      hash: "fnv1a64:a484570b0e81f682",
+      hash: "fnv1a64:301481c1d6bd2e3e",
     },
     {
       path: "src/runtime/token_stream.brl",
       role: "shared-brl-token-stream",
-      hash: "fnv1a64:d3be8fffab8ffe0a",
+      hash: "fnv1a64:69213d70c0219621",
     },
     {
       path: "src/runtime/diagnostics.brl",
@@ -63,7 +63,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/typescript_lexer_runtime.ts",
       role: "typescript-lexer-runtime",
-      hash: "fnv1a64:bf60820c7a89d453",
+      hash: "fnv1a64:7d3d196b8d7cd3e7",
     },
     {
       path: "src/targets/runtime/public_source_text.ts",
@@ -88,12 +88,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/public_diagnostic_materializer.ts",
       role: "public-diagnostic-materializer",
-      hash: "fnv1a64:664b1265c2dac0ad",
+      hash: "fnv1a64:e2b2be5c37cdeffb",
     },
     {
       path: "src/targets/runtime/public_parse_result_materializer.ts",
       role: "public-parse-result-materializer",
-      hash: "fnv1a64:af4871ee34eddbb2",
+      hash: "fnv1a64:f17bda91bb4f9cfb",
     },
     {
       path: "src/targets/runtime/public_field_materializer.ts",
@@ -113,7 +113,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_sources.ts",
       role: "runtime-language-source",
-      hash: "fnv1a64:9652595e9f642839",
+      hash: "fnv1a64:c37c4378ae453e01",
     },
     {
       path: "src/targets/runtime/language.ts",
@@ -123,12 +123,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/language_artifacts.ts",
       role: "runtime-language-artifact-manifest",
-      hash: "fnv1a64:931b97a304d2c1c3",
+      hash: "fnv1a64:495f395c96083fb6",
     },
     {
       path: "src/targets/runtime/typescript_parser_runtime.ts",
       role: "typescript-parser-runtime",
-      hash: "fnv1a64:b4b13456c79a879b",
+      hash: "fnv1a64:6db1b4e38849e2d4",
     },
     {
       path: "src/targets/runtime/wasm_abi.ts",
@@ -138,11 +138,16 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_core_runtime.ts",
       role: "wasm-core-runtime",
-      hash: "fnv1a64:a057c8f7654a12e7",
+      hash: "fnv1a64:e5cf31c35671bb24",
+    },
+    {
+      path: "src/targets/runtime/provenance.ts",
+      role: "generated-source-provenance",
+      hash: "fnv1a64:b810e814a119b80f",
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:7b0382cfc5222422" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:9209694e205bf401" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

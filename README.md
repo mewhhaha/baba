@@ -179,41 +179,64 @@ core ABI metadata constants, `memory`, and `reset()` from `wasm/mod.ts`.
 `wasmTargetKind` is currently `"javascript-hosted-core-wasm"`; Baba does not yet
 emit a WASI library, Wasm Component/WIT package, browser-only package, or
 host-neutral parser ABI. The embedded core module exports
-`abi_version() -> i32`, `plan_version() -> i32`, `reset() -> void`,
-`input_base() -> i32`, `max_pages() -> i32`, `source_encoding() -> i32`,
-`span_unit() -> i32`, `lex_result_i32_count() -> i32`, and
-`token_record_i32_count() -> i32`, `host_ownership_model() -> i32`, and
-`result_lifetime_model() -> i32`; the JavaScript adapter exposes their current
-values as constants and validates that they match its generated table layout
-before use. Source encoding and span unit value `1` means UTF-16 code units.
-Host ownership model value `1` means the host owns UTF-16 input and result
-buffers in linear memory; result lifetime model value `1` means low-level core
-results are valid in caller-provided buffers until the host overwrites those
-buffers or grows memory. The generated JavaScript adapter copies source text
-into Wasm memory as UTF-16 code units, so all public spans are UTF-16 offsets
-matching the TypeScript target. The adapter also exports trace status constants,
-and `parseTrace()` failure results include both `statusKind` and `failureKind`
-while retaining the older `internal`/`limit` booleans. Parse and lex results
-remain ordinary JavaScript objects. Low-level typed-array views returned by
-`wasm.ts` helpers are tied to the current `WebAssembly.Memory` buffer.
-`WasmSourceBuffer` values returned by `writeSource()` and `ParseTraceInput`
-values returned by `createParseTraceInput()` are adapter-owned capabilities:
-they are not forgeable or serializable. The adapter handle capability model
-value `1` means those JavaScript capabilities are epoch-checked.
-`WasmSourceBuffer` values become stale after `reset()` or after `writeSource()`
-installs a different source; `ParseTraceInput` values become stale after
-`reset()`. Call `writeSource()` or `createParseTraceInput()` again to obtain a
-current handle before using `lexOne()`, `lexAll()`, or `parseTrace()`. Repeated
-parses reuse memory up to the previous high-water mark, and adapter-side offset
-arithmetic is checked against the 32-bit Wasm address space. The core module
-declares a maximum of 65,535 Wasm pages; the adapter checks the same page limit
-before calling `memory.grow()`.
+`abi_version() -> i32`, `plan_version() -> i32`, `semantics_version() -> i32`,
+`reset() -> void`, `input_base() -> i32`, `max_pages() -> i32`,
+`source_encoding() -> i32`, `span_unit() -> i32`,
+`lex_result_i32_count() -> i32`, and `token_record_i32_count() -> i32`,
+`host_ownership_model() -> i32`, and `result_lifetime_model() -> i32`; the
+JavaScript adapter exposes their current values as constants and validates that
+they match its generated table layout before use. Importing an embedded adapter
+does not synchronously compile Wasm; the core module and trace runtime compile
+lazily when a parser instance or module-level parse/lex helper first needs them.
+Source encoding and span unit value `1` means UTF-16 code units. Host ownership
+model value `1` means the host owns UTF-16 input and result buffers in linear
+memory; result lifetime model value `1` means low-level core results are valid
+in caller-provided buffers until the host overwrites those buffers or grows
+memory. The generated JavaScript adapter copies source text into Wasm memory as
+UTF-16 code units, so all public spans are UTF-16 offsets matching the
+TypeScript target. The adapter also exports trace status constants, and
+`parseTrace()` failure results include both `statusKind` and `failureKind` while
+retaining the older `internal`/`limit` booleans. Parse and lex results remain
+ordinary JavaScript objects. Low-level typed-array views returned by `wasm.ts`
+helpers are tied to the current `WebAssembly.Memory` buffer. `WasmSourceBuffer`
+values returned by `writeSource()` and `ParseTraceInput` values returned by
+`createParseTraceInput()` are adapter-owned capabilities: they are not forgeable
+or serializable. The adapter handle capability model value `1` means those
+JavaScript capabilities are epoch-checked. `WasmSourceBuffer` values become
+stale after `reset()` or after `writeSource()` installs a different source;
+`ParseTraceInput` values become stale after `reset()`. Call `writeSource()` or
+`createParseTraceInput()` again to obtain a current handle before using
+`lexOne()`, `lexAll()`, or `parseTrace()`. Repeated parses reuse memory up to
+the previous high-water mark, and adapter-side offset arithmetic is checked
+against the 32-bit Wasm address space. The core module declares a maximum of
+65,535 Wasm pages; the adapter checks the same page limit before calling
+`memory.grow()`.
+
+Generated Wasm bundles also expose `createParser()` and `createParserAsync()`.
+Each returned parser instance owns its own `WebAssembly.Instance`, memory,
+source buffers, trace runtime, reset epoch, and disposed state. Module-level
+`lex`, `parse`, and token-stream helpers remain convenience wrappers over an
+active/default Wasm instance; use parser instances when lifecycle isolation or
+interleaved parsers matter.
 
 CI installs `wasm-tools` and `wasmtime` so the Wasm target is validated both by
 the JavaScript-hosted adapter tests and by an independent core-Wasm toolchain.
 Local `deno task test` runs the Deno/JavaScript adapter path by default and
 skips the independent-engine checks with an install hint when those binaries are
 not available.
+
+## Further Documentation
+
+- [Grammar](docs/grammar.md)
+- [Metadata](docs/metadata.md)
+- [Portable runtime](docs/portable-runtime.md)
+- [TypeScript target](docs/typescript.md)
+- [Wasm target](docs/wasm.md)
+- [Diagnostics](docs/diagnostics.md)
+- [Limits](docs/limits.md)
+- [Examples](docs/examples.md)
+- [Stability policy](docs/stability.md)
+- [Contributing](docs/contributing.md)
 
 Internally, standalone parser targets lower the analyzed grammar once into a
 versioned portable parser plan:
@@ -239,21 +262,23 @@ Generated TypeScript, generated Wasm adapters, and parser-kit JSON also expose a
 runtime implementation identity with format `"baba-runtime-implementation"`,
 version `1`, semantics `"baba-runtime-portable-v1"`, and an aggregate source
 hash. This verifies that outputs were packaged against the same checked-in
-runtime source family and checked runtime-language artifact manifest.
-Deterministic TypeScript parser control flow now uses a runtime-language
-`parserTrace` helper, and generated TypeScript lexer candidate selection uses
-runtime-language `lexerScan*` helpers, but this identity is not yet a claim that
-the full TypeScript and Wasm parser runtimes were compiled from one
-runtime-language source; that remains the next runtime compiler boundary.
+runtime source family and checked runtime-language artifact manifest. Generated
+TypeScript and JavaScript-hosted Wasm parser runtimes now satisfy the runtime
+source-of-truth cutline documented in
+[docs/runtime-language.md](docs/runtime-language.md): parser semantics are
+runtime-language-owned, while generated host code owns source/string
+capabilities, public object allocation, diagnostic text rendering, adapter
+capabilities, and packaging. Parser-kit helpers remain tooling/convenience
+interpreters for `parser-kit.json`, not part of that TypeScript/Wasm proof.
 
 The initial private runtime-language semantics are documented in
 `docs/runtime-language.md`. Its Stage-0 executable subset currently covers
-32-bit scalar control, table helpers, growable scratch memory, and deterministic
-lexer-scan/parser-trace, parser expected-range, and parser production-metadata
-and action-decode conformance. The Stage-0 compiler lowers validated
-runtime-language programs to one resolved control-flow/value IR before the
-TypeScript and Wasm backends emit target artifacts; target-specific source/byte
-emission is still separate.
+32-bit scalar control, table helpers, growable scratch memory, lexer/parser
+runtime semantics, reducer dispatch, CST arena helpers, diagnostic payloads, and
+Wasm ABI metadata. The Stage-0 compiler lowers validated runtime-language
+programs to one resolved control-flow/value IR before the TypeScript and Wasm
+backends emit target artifacts; target-specific source/byte emission is still
+separate.
 
 Architecture decisions are recorded under [docs/adr](docs/adr), including the
 scope boundary, portable parser plan, runtime language, Wasm ABI, contextual
@@ -366,11 +391,13 @@ deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --wasm-dir wasm \
   --discard-trivia \
   --lexer-state-limit 50000 \
+  --regex-nesting-limit 256 \
   --regex-ast-node-limit 100000 \
   --regex-bounded-repeat-limit 10000 \
   --regex-nfa-state-limit 100000 \
   --regex-dfa-state-limit 50000 \
   --regex-overlap-state-limit 250000 \
+  --grammar-expression-depth-limit 1024 \
   --parser-state-limit 20000 \
   --parser-item-limit 200000 \
   --parser-table-entry-limit 200000
@@ -382,13 +409,16 @@ when `--target kit` is selected. `--kit-profile full|runtime` controls the
 parser-kit detail level and defaults to `full`. `--preserve-trivia` and
 `--discard-trivia` control whether skip matches are emitted as trivia tokens by
 generated runtimes and kit helper lexing. `--lexer-state-limit`,
-`--regex-ast-node-limit`, `--regex-bounded-repeat-limit`,
-`--regex-nfa-state-limit`, `--regex-dfa-state-limit`,
-`--regex-overlap-state-limit`, `--parser-state-limit`, `--parser-item-limit`,
-and `--parser-table-entry-limit` apply to the TypeScript, Wasm, and kit
-parser-runtime planning path. Regex limit diagnostics identify the compiler
-phase, for example `TS_REGEX_NFA_STATE_LIMIT`, `TS_REGEX_DFA_STATE_LIMIT`,
-`TS_REGEX_OVERLAP_WORK_LIMIT`, `TS_REGEX_AST_NODE_LIMIT`, or
+`--regex-nesting-limit`, `--regex-ast-node-limit`,
+`--regex-bounded-repeat-limit`, `--regex-nfa-state-limit`,
+`--regex-dfa-state-limit`, `--regex-overlap-state-limit`,
+`--grammar-expression-depth-limit`, `--parser-state-limit`,
+`--parser-item-limit`, and `--parser-table-entry-limit` apply to the TypeScript,
+Wasm, and kit parser-runtime planning path. Regex nesting defaults to 256
+groups, and grammar expression depth defaults to 1,024. Regex limit diagnostics
+identify the compiler phase, for example `TS_REGEX_NFA_STATE_LIMIT`,
+`TS_REGEX_DFA_STATE_LIMIT`, `TS_REGEX_OVERLAP_WORK_LIMIT`,
+`TS_REGEX_NESTING_LIMIT`, `TS_REGEX_AST_NODE_LIMIT`, or
 `TS_REGEX_REPEAT_EXPANSION_LIMIT`. `--portability strict|warn|off` controls
 diagnostics for known cross-target acceptance differences. When Tree-sitter is
 selected with another target, portability defaults to `strict`; otherwise it
@@ -408,7 +438,10 @@ deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
 ```
 
 `--generated-byte-limit` and `--parser-stats` only inspect the generated
-TypeScript target output.
+TypeScript target output. `--parser-stats`/`--verbose` also include internal
+hardening counters such as regex AST/NFA/DFA sizes, overlap pairs compared,
+grammar SCC/iteration counts, LR closure work, and diagnostics emitted or
+suppressed.
 
 ## Library API
 
@@ -653,6 +686,7 @@ separate from Tree-sitter shaping metadata:
       }
     ],
     "conflicts": [
+      { "conflict": "c_91a8..." },
       ["tuple_type", "type_atom"],
       ["unit_type", "type_atom"]
     ]
@@ -670,12 +704,14 @@ sequence that reaches the conflicted parser state, followed by the conflicting
 lookahead as the final symbol.
 
 `conflicts` declares local grammar ambiguities that the generated TypeScript and
-Wasm parsers may explore with bounded branch search. This is useful for grammars
-that need Tree-sitter-like conflict handling but still want standalone parser
-runtimes. The Wasm target traces declared conflict branches inside its generated
-Wasm parser engine and replays the successful action trace in TypeScript to
-build the CST. Shift/reduce diagnostics with multiple rule origins also suggest
-a matching `conflicts` entry when branch search is the intended policy.
+Wasm parsers may explore with bounded branch search. Prefer stable conflict-ID
+entries such as `{ "conflict": "c_91a8..." }`; legacy rule groups remain
+accepted for compatibility. This is useful for grammars that need
+Tree-sitter-like conflict handling but still want standalone parser runtimes.
+The Wasm target traces declared conflict branches inside its generated Wasm
+parser engine and replays the successful action trace in TypeScript to build the
+CST. Shift/reduce diagnostics with multiple rule origins also suggest matching
+`conflicts` metadata when branch search is the intended policy.
 
 Branch search is deterministic and shared by TypeScript and Wasm runtimes. At a
 conflicted state, the runtime explores action alternatives in table order, saves

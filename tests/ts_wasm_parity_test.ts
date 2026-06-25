@@ -2,6 +2,7 @@ import {
   applyBundle,
   assert,
   assertEquals,
+  assertIncludes,
   compile,
   denoCheck,
   fixtureMetadata,
@@ -35,6 +36,49 @@ const conflictGrammar = `
   modifier = "mut" ;
   term = ID | "(" primary ")" ;
 `;
+
+Deno.test("parity mismatch diagnostics include a reproducible JSON diff", () => {
+  let message = "";
+  try {
+    assertJsonEquals(
+      { tokens: [{ type: "named", span: { start: 0, end: 1 } }] },
+      { tokens: [{ type: "named", span: { start: 0, end: 2 } }] },
+      {
+        operation: "parse",
+        fixture: "diagnostic-fixture",
+        sourcePath: "fixtures/diagnostic-fixture/valid/sample.txt",
+        source: "x",
+        metadata: { targets: ["typescript", "wasm"] },
+        command: "deno test --filter diagnostic-fixture",
+      },
+    );
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+
+  assertIncludes(message, "TypeScript/Wasm parity mismatch.");
+  assertIncludes(message, "operation: parse");
+  assertIncludes(message, "fixture: diagnostic-fixture");
+  assertIncludes(
+    message,
+    "source path: fixtures/diagnostic-fixture/valid/sample.txt",
+  );
+  assertIncludes(
+    message,
+    "first differing normalized JSON path: $.tokens[0].span.end",
+  );
+  assertIncludes(message, "actual: 1");
+  assertIncludes(message, "expected: 2");
+  assertIncludes(
+    message,
+    'grammar/metadata options: {"targets":["typescript","wasm"]}',
+  );
+  assertIncludes(message, 'source: "x"');
+  assertIncludes(
+    message,
+    "reproducible command: deno test --filter diagnostic-fixture",
+  );
+});
 
 Deno.test("TypeScript and Wasm runtimes match deterministic parser behavior", async () => {
   const runtimes = await buildParityRuntimes(deterministicGrammar);
@@ -299,9 +343,14 @@ Deno.test("TypeScript and Wasm parse contextual token overlaps in parity", async
       wasm: { directory: "wasm" },
     },
   );
-  assertEquals(result.diagnostics.length, 1);
+  assertEquals(result.diagnostics.length, 2);
   assertEquals(result.diagnostics[0].code, "PORTABLE_LEXER_TOKEN_OVERLAP");
   assertEquals(result.diagnostics[0].severity, "warning");
+  assertEquals(
+    result.diagnostics[1].code,
+    "PORTABLE_SHADOWED_TOKEN_LANGUAGE",
+  );
+  assertEquals(result.diagnostics[1].severity, "warning");
   assert(result.bundle);
   const dir = await Deno.makeTempDir();
   try {

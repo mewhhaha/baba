@@ -6,8 +6,13 @@ Status: accepted for Stage-0 compiler infrastructure.
 
 Baba's TypeScript and Wasm runtimes need exact semantic parity for lexer,
 parser, branch-search, reducer, CST, and diagnostic behavior. Some runtime
-helpers are already generated from the private runtime language, while the full
-standalone runtime has not yet completed the T04/T05 migration.
+helpers were initially generated from the private runtime language before the
+full standalone runtime cutline was complete. The generated TypeScript and
+JavaScript-hosted Wasm parser runtimes now satisfy the source-of-truth cutline
+documented in `docs/runtime-language.md`: parser semantics are
+runtime-language-owned, while generated host code owns source/string
+capabilities, public object allocation, diagnostic text rendering, adapter
+capabilities, and packaging.
 
 ## Decision
 
@@ -20,15 +25,17 @@ tracked independently from package version.
 ## Consequences
 
 Runtime-language source and generated helper artifacts are checked for drift.
-Generated parsers may package runtime-language-derived helpers, but this ADR is
-not a claim that every TypeScript and Wasm parser algorithm has been fully
-ported to one BRL source yet.
+Generated TypeScript and Wasm parsers package runtime-language-derived parser
+semantics and expose runtime implementation identity separately from parser-plan
+identity. Parser-kit helpers remain tooling/convenience interpreters for
+`parser-kit.json`, not part of the TypeScript/Wasm source-of-truth proof.
 
 ## Rejected Alternatives
 
 - Exposing BRL as a public user-facing language.
 - Maintaining untracked generated helper artifacts.
-- Claiming source-of-truth unification before the full runtime port is complete.
+- Moving JavaScript host-boundary work such as public object materialization and
+  diagnostic text rendering into BRL before a host-neutral ABI requires it.
 
 ## Compatibility Impact
 

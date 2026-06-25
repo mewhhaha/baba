@@ -6,13 +6,13 @@
     "format": "baba-parser-plan",
     "version": 1,
     "semantics": "baba-portable-v1",
-    "hash": "fnv1a64:f9323f7c6c89fb3d"
+    "hash": "fnv1a64:be53599faeb82f8e"
   },
   "runtimeImplementation": {
     "format": "baba-runtime-implementation",
     "version": 1,
     "semantics": "baba-runtime-portable-v1",
-    "hash": "fnv1a64:7b0382cfc5222422"
+    "hash": "fnv1a64:9209694e205bf401"
   },
   "core": {
     "abiVersion": 1,
@@ -106,6 +106,11 @@
       },
       {
         "name": "plan_version",
+        "params": [],
+        "result": "i32"
+      },
+      {
+        "name": "semantics_version",
         "params": [],
         "result": "i32"
       },

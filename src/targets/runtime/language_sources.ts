@@ -56,7 +56,8 @@ export const RUNTIME_LEXER_DRIVER_EVENT_DONE = 0;
 export const RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT = 1;
 export const RUNTIME_LEXER_DRIVER_EVENT_TOKEN = 2;
 export const RUNTIME_LEXER_DRIVER_EVENT_ERROR = 3;
-export const RUNTIME_LEXER_DRIVER_SCRATCH_WORDS = 16;
+export const RUNTIME_LEXER_SCAN_SCRATCH_WORDS = 6;
+export const RUNTIME_LEXER_DRIVER_SCRATCH_WORDS = 17;
 export const RUNTIME_TOKEN_STREAM_STATUS_OK = 0;
 export const RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN = 1;
 export const RUNTIME_TOKEN_STREAM_STATUS_GAP = 2;
@@ -228,17 +229,18 @@ const LEXER_SCAN_LENGTH = 1;
 const LEXER_SCAN_BEST_SPEC = 2;
 const LEXER_SCAN_BEST_END = 3;
 const LEXER_SCAN_DONE = 4;
-const LEXER_DRIVER_EVENT = 5;
-const LEXER_DRIVER_SOURCE_LENGTH = 6;
-const LEXER_DRIVER_PRESERVE_TRIVIA = 7;
-const LEXER_DRIVER_TOKEN_START = 8;
-const LEXER_DRIVER_TOKEN_END = 9;
-const LEXER_DRIVER_TOKEN_SPEC = 10;
-const LEXER_DRIVER_TOKEN_CLASS = 11;
-const LEXER_DRIVER_TOKEN_PAYLOAD = 12;
-const LEXER_DRIVER_TOKEN_TERMINAL = 13;
-const LEXER_DRIVER_READ_OFFSET = 14;
-const LEXER_DRIVER_ERROR_END = 15;
+const LEXER_SCAN_BEST_STATE = 5;
+const LEXER_DRIVER_EVENT = 6;
+const LEXER_DRIVER_SOURCE_LENGTH = 7;
+const LEXER_DRIVER_PRESERVE_TRIVIA = 8;
+const LEXER_DRIVER_TOKEN_START = 9;
+const LEXER_DRIVER_TOKEN_END = 10;
+const LEXER_DRIVER_TOKEN_SPEC = 11;
+const LEXER_DRIVER_TOKEN_CLASS = 12;
+const LEXER_DRIVER_TOKEN_PAYLOAD = 13;
+const LEXER_DRIVER_TOKEN_TERMINAL = 14;
+const LEXER_DRIVER_READ_OFFSET = 15;
+const LEXER_DRIVER_ERROR_END = 16;
 const RUNTIME_ARENA_NEXT_WORD = 0;
 const RUNTIME_ARENA_FIRST_WORD = 1;
 const RUNTIME_OBJECT_ARRAY = 1;
@@ -309,6 +311,7 @@ export interface LexerRuntimeProgramInput {
   readonly transitions: readonly (readonly LexerRuntimeTransition[])[];
   readonly asciiTransitions: readonly (readonly number[])[] | null;
   readonly accepts?: readonly number[];
+  readonly acceptCandidates?: readonly (readonly number[])[];
   readonly specs?: readonly LexerRuntimeSpecEntry[];
   readonly includeTokenRecords?: boolean;
 }
@@ -666,6 +669,27 @@ export function createLexerRuntimeProgram(
       ),
     });
   }
+  if (input.acceptCandidates) {
+    const candidateRows: number[] = [];
+    const candidateValues: number[] = [];
+    for (const candidates of input.acceptCandidates) {
+      candidateRows.push(candidateValues.length);
+      for (const candidate of candidates) candidateValues.push(candidate);
+    }
+    candidateRows.push(candidateValues.length);
+    tables.push(
+      {
+        name: "dfaAcceptCandidateRows",
+        type: "u32" as const,
+        values: candidateRows,
+      },
+      {
+        name: "dfaAcceptCandidateValues",
+        type: "u32" as const,
+        values: candidateValues,
+      },
+    );
+  }
 
   if (input.specs) {
     tables.push(lexerSpecTable(input.specs));
@@ -679,12 +703,14 @@ export function createLexerRuntimeProgram(
         input.accepts && input.specs
           ? RUNTIME_LEXER_DRIVER_SCRATCH_WORDS
           : input.accepts
-          ? 5
+          ? RUNTIME_LEXER_SCAN_SCRATCH_WORDS
           : 0,
         RUNTIME_ARENA_FIRST_WORD,
       )
       : input.accepts
-      ? input.specs ? RUNTIME_LEXER_DRIVER_SCRATCH_WORDS : 5
+      ? input.specs
+        ? RUNTIME_LEXER_DRIVER_SCRATCH_WORDS
+        : RUNTIME_LEXER_SCAN_SCRATCH_WORDS
       : undefined,
     tables,
     functions: [
@@ -697,8 +723,12 @@ export function createLexerRuntimeProgram(
           lexerScanNextOffsetFunction(),
           lexerScanBestSpecFunction(),
           lexerScanBestEndFunction(),
+          lexerScanBestStateFunction(),
           lexerScanCandidateEndFunction(),
         ]
+        : []),
+      ...(input.acceptCandidates
+        ? lexerAcceptCandidateFunctions(input.acceptCandidates.length)
         : []),
       ...(input.specs ? lexerSpecFunctions(input.specs.length) : []),
       ...(input.accepts && input.specs ? lexerDriverFunctions() : []),
@@ -788,6 +818,10 @@ export function createParserTraceRuntimeProgram(
       ...parserProductionFunctions(input.productions.length),
       ...runtimeArenaFunctions(),
       parserTraceSetTerminalFunction(),
+      branchHasTerminalFunction(),
+      branchNextDepthFunction(),
+      branchTraceAppendStatusFunction(),
+      branchStackAppendStatusFunction(),
       parserTraceFunction(input.productions.length),
       parserTraceErrorStateFunction(),
       parserTraceErrorIndexFunction(),
@@ -863,6 +897,17 @@ export function createParserConflictTraceRuntimeProgram(
       ...parserProductionFunctions(input.productions.length),
       ...runtimeArenaFunctions(),
       parserTraceSetTerminalFunction(),
+      branchHasTerminalFunction(),
+      branchHasActionFunction(),
+      branchHasDeferredActionFunction(),
+      branchShouldRecordFailureFunction(),
+      branchNextDepthFunction(),
+      branchAcceptOutcomeFunction(),
+      branchCanEnqueueFunction(),
+      branchTraceAppendStatusFunction(),
+      branchStackAppendStatusFunction(),
+      branchExplorationStatusFunction(),
+      branchRestoreOutcomeFunction(),
       parserConflictTraceFunction(input.productions.length),
       parserTraceErrorStateFunction(),
       parserTraceErrorIndexFunction(),
@@ -986,6 +1031,7 @@ export function createParserExpectedRuntimeProgram(
       parserExpectedStartFunction(input.rowLengths.length),
       parserExpectedEndFunction(input.rowLengths.length),
       parserExpectedHasEofFunction(input.rowLengths.length),
+      parserExpectedRowStatusFunction(),
       parserUnexpectedDiagnosticCodeFunction(),
     ],
   };
@@ -1973,11 +2019,23 @@ function parserObjectFunctions(): RuntimeLanguageFunction[] {
     parserDiagnosticDetailKindIdFunction(),
     parserDiagnosticCodeStatusFunction(),
     parserDiagnosticMergeStatusFunction(),
+    parserTokenStreamSpanBoundsStatusFunction(),
+    parserTokenStreamSpanPositionStatusFunction(),
+    parserTokenStreamWidthStatusFunction(),
+    parserTokenStreamEofStatusFunction(),
+    parserTokenStreamEofSequenceStatusFunction(),
+    parserTokenStreamGapTokenStatusFunction(),
+    parserTokenStreamGapIsEmptyFunction(),
+    parserTokenStreamCanAdvanceFunction(),
+    parserTokenStreamTokenMatchStatusFunction(),
+    parserTokenStreamCanonicalMatchStatusFunction(),
+    parserTokenStreamFinalStatusFunction(),
     parserTokenStreamPublicTokenStatusFunction(),
     parserTraceTokenStreamStatusFunction(),
     parserTraceTokenStreamPublicIndexFunction(),
     parserTraceTerminalFunction(),
     parserTraceTokenStreamStepFunction(),
+    parserTraceTokenStreamEncodedTerminalFunction(),
     parserTraceTokenStreamStepStatusFunction(),
     parserTraceTokenStreamStepTerminalFunction(),
     parserShiftedTokenStatusFunction(),
@@ -3114,6 +3172,414 @@ function parserTokenStreamPublicTokenStatusFunction(): RuntimeLanguageFunction {
   };
 }
 
+function parserTokenStreamSpanBoundsStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamSpanBoundsStatus",
+    parameters: [
+      { name: "start", type: "u32" },
+      { name: "end", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: ltu(local("sourceLength"), local("end")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("end"), local("start")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_SPAN),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamSpanPositionStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamSpanPositionStatus",
+    parameters: [
+      { name: "start", type: "u32" },
+      { name: "previousEnd", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: ltu(local("previousEnd"), local("start")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_GAP),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("start"), local("previousEnd")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OVERLAP),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamWidthStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamWidthStatus",
+    parameters: [
+      { name: "start", type: "u32" },
+      { name: "end", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("start"), local("end")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_ZERO_WIDTH),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamEofStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamEofStatus",
+    parameters: [
+      { name: "textLength", type: "u32" },
+      { name: "isMainChannel", type: "u32" },
+      { name: "start", type: "u32" },
+      { name: "end", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("textLength"), u32(0)),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("isMainChannel"), u32(1)),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("start"), local("end")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("start"), local("sourceLength")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamEofSequenceStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamEofSequenceStatus",
+    parameters: [
+      { name: "hasEof", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("hasEof"), u32(1)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamGapTokenStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamGapTokenStatus",
+    parameters: [
+      { name: "tokenClass", type: "u32" },
+      { name: "tokenStart", type: "u32" },
+      { name: "tokenEnd", type: "u32" },
+      { name: "gapStart", type: "u32" },
+      { name: "gapEnd", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("tokenClass"), u32(RUNTIME_PUBLIC_TOKEN_TRIVIA)),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("tokenStart"), local("gapStart")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("gapEnd"), local("tokenEnd")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_NONTRIVIA_GAP),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamGapIsEmptyFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamGapIsEmpty",
+    parameters: [
+      { name: "previousEnd", type: "u32" },
+      { name: "nextStart", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("previousEnd"), local("nextStart")),
+        consequent: [{
+          kind: "return",
+          expression: u32(1),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(0),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamCanAdvanceFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamCanAdvance",
+    parameters: [
+      { name: "previousEnd", type: "u32" },
+      { name: "nextStart", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: ltu(local("nextStart"), local("previousEnd")),
+        consequent: [{
+          kind: "return",
+          expression: u32(0),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(1),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamTokenMatchStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamTokenMatchStatus",
+    parameters: [
+      { name: "leftClass", type: "u32" },
+      { name: "rightClass", type: "u32" },
+      { name: "leftSpecIndex", type: "u32" },
+      { name: "rightSpecIndex", type: "u32" },
+      { name: "leftTerminal", type: "u32" },
+      { name: "rightTerminal", type: "u32" },
+      { name: "leftStart", type: "u32" },
+      { name: "leftEnd", type: "u32" },
+      { name: "rightStart", type: "u32" },
+      { name: "rightEnd", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      tokenMatchMismatchIf("leftClass", "rightClass"),
+      tokenMatchMismatchIf("leftSpecIndex", "rightSpecIndex"),
+      tokenMatchMismatchIf("leftTerminal", "rightTerminal"),
+      tokenMatchMismatchIf("leftStart", "rightStart"),
+      tokenMatchMismatchIf("leftEnd", "rightEnd"),
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamCanonicalMatchStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamCanonicalMatchStatus",
+    parameters: [
+      { name: "canonicalClass", type: "u32" },
+      { name: "tokenMatchStatus", type: "u32" },
+      { name: "canonicalEnd", type: "u32" },
+      { name: "suppliedStart", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("tokenMatchStatus"),
+          u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MATCH),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          call("parserTraceTokenStreamStatus", [local("canonicalClass")]),
+          u32(RUNTIME_TRACE_TOKEN_STREAM_SKIP),
+        ),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH),
+        }],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("suppliedStart"), local("canonicalEnd")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_MISMATCH),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_CANONICAL_SKIP),
+      },
+    ],
+  };
+}
+
+function parserTokenStreamFinalStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTokenStreamFinalStatus",
+    parameters: [
+      { name: "hasEof", type: "u32" },
+      { name: "eofIndex", type: "u32" },
+      { name: "tokenCount", type: "u32" },
+      { name: "previousEnd", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("hasEof"), u32(1)),
+        consequent: [
+          {
+            kind: "if",
+            condition: eq(add(local("eofIndex"), u32(1)), local("tokenCount")),
+            consequent: [{
+              kind: "return",
+              expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+            }],
+            alternate: [{
+              kind: "return",
+              expression: u32(RUNTIME_TOKEN_STREAM_STATUS_INVALID_EOF),
+            }],
+          },
+        ],
+      },
+      {
+        kind: "if",
+        condition: ltu(local("previousEnd"), local("sourceLength")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TOKEN_STREAM_STATUS_GAP),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_TOKEN_STREAM_STATUS_OK),
+      },
+    ],
+  };
+}
+
+function tokenMatchMismatchIf(
+  leftName: string,
+  rightName: string,
+): RuntimeStatement {
+  return {
+    kind: "if",
+    condition: eq(local(leftName), local(rightName)),
+    consequent: [],
+    alternate: [{
+      kind: "return",
+      expression: u32(RUNTIME_TOKEN_STREAM_STATUS_TOKEN_MISMATCH),
+    }],
+  };
+}
+
 function parserTraceTokenStreamStatusFunction(): RuntimeLanguageFunction {
   return {
     name: "parserTraceTokenStreamStatus",
@@ -3292,11 +3758,32 @@ function parserTraceTokenStreamStepFunction(): RuntimeLanguageFunction {
             local("status"),
             u32(RUNTIME_TRACE_TOKEN_STREAM_STEP_FACTOR),
           ),
-          and(
-            local("terminal"),
-            u32(RUNTIME_TRACE_TOKEN_STREAM_STEP_TERMINAL_MASK),
-          ),
+          call("parserTraceTokenStreamEncodedTerminal", [local("terminal")]),
         ),
+      },
+    ],
+  };
+}
+
+function parserTraceTokenStreamEncodedTerminalFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserTraceTokenStreamEncodedTerminal",
+    parameters: [
+      { name: "terminal", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("terminal"), u32(RUNTIME_NO_TERMINAL)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_TRACE_TOKEN_STREAM_STEP_TERMINAL_MASK),
+        }],
+      },
+      {
+        kind: "return",
+        expression: local("terminal"),
       },
     ],
   };
@@ -3667,6 +4154,7 @@ function lexerScanResetFunction(): RuntimeLanguageFunction {
       storeScratch(u32(LEXER_SCAN_BEST_SPEC), u32(RUNTIME_NO_ACCEPT)),
       storeScratch(u32(LEXER_SCAN_BEST_END), u32(0)),
       storeScratch(u32(LEXER_SCAN_DONE), u32(0)),
+      storeScratch(u32(LEXER_SCAN_BEST_STATE), u32(RUNTIME_NO_ACCEPT)),
       { kind: "return", expression: u32(0) },
     ],
   };
@@ -3722,6 +4210,7 @@ function lexerScanAdvanceFunction(): RuntimeLanguageFunction {
         alternate: [
           storeScratch(u32(LEXER_SCAN_BEST_SPEC), local("accept")),
           storeScratch(u32(LEXER_SCAN_BEST_END), local("length")),
+          storeScratch(u32(LEXER_SCAN_BEST_STATE), local("target")),
         ],
       },
       { kind: "return", expression: u32(1) },
@@ -3775,6 +4264,16 @@ function lexerScanBestEndFunction(): RuntimeLanguageFunction {
   };
 }
 
+function lexerScanBestStateFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerScanBestState",
+    result: "u32",
+    body: [
+      { kind: "return", expression: loadScratch(u32(LEXER_SCAN_BEST_STATE)) },
+    ],
+  };
+}
+
 function lexerScanCandidateEndFunction(): RuntimeLanguageFunction {
   return {
     name: "lexerScanCandidateEnd",
@@ -3794,8 +4293,86 @@ function lexerScanCandidateEndFunction(): RuntimeLanguageFunction {
   };
 }
 
+function lexerAcceptCandidateFunctions(
+  stateCount: number,
+): RuntimeLanguageFunction[] {
+  return [
+    {
+      name: "lexerAcceptCandidateCount",
+      parameters: [
+        { name: "state", type: "u32" },
+      ],
+      locals: [
+        { name: "next", type: "u32" },
+      ],
+      result: "u32",
+      body: [
+        {
+          kind: "if",
+          condition: lt(local("state"), u32(stateCount)),
+          consequent: [
+            setLocal("next", add(local("state"), u32(1))),
+            {
+              kind: "return",
+              expression: sub(
+                load("dfaAcceptCandidateRows", local("next")),
+                load("dfaAcceptCandidateRows", local("state")),
+              ),
+            },
+          ],
+        },
+        { kind: "return", expression: u32(0) },
+      ],
+    },
+    {
+      name: "lexerAcceptCandidateSpec",
+      parameters: [
+        { name: "state", type: "u32" },
+        { name: "index", type: "u32" },
+      ],
+      locals: [
+        { name: "start", type: "u32" },
+        { name: "end", type: "u32" },
+        { name: "next", type: "u32" },
+        { name: "position", type: "u32" },
+      ],
+      result: "u32",
+      body: [
+        {
+          kind: "if",
+          condition: lt(local("state"), u32(stateCount)),
+          consequent: [],
+          alternate: [{
+            kind: "return",
+            expression: u32(RUNTIME_NO_ACCEPT),
+          }],
+        },
+        setLocal("start", load("dfaAcceptCandidateRows", local("state"))),
+        setLocal("next", add(local("state"), u32(1))),
+        setLocal("end", load("dfaAcceptCandidateRows", local("next"))),
+        setLocal("position", add(local("start"), local("index"))),
+        {
+          kind: "if",
+          condition: lt(local("position"), local("end")),
+          consequent: [{
+            kind: "return",
+            expression: load(
+              "dfaAcceptCandidateValues",
+              local("position"),
+            ),
+          }],
+        },
+        { kind: "return", expression: u32(RUNTIME_NO_ACCEPT) },
+      ],
+    },
+  ];
+}
+
 function lexerDriverFunctions(): RuntimeLanguageFunction[] {
   return [
+    lexerDriverBeginEventFunction(),
+    lexerDriverFinalizeEventFunction(),
+    lexerDriverConsumeEventFunction(),
     lexerDriverStartFunction(),
     lexerDriverBeginScanFunction(),
     lexerDriverAdvanceFunction(),
@@ -3816,6 +4393,116 @@ function lexerDriverFunctions(): RuntimeLanguageFunction[] {
       LEXER_DRIVER_TOKEN_TERMINAL,
     ),
   ];
+}
+
+function lexerDriverBeginEventFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerDriverBeginEvent",
+    parameters: [
+      { name: "offset", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("offset"), local("sourceLength")),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+        }],
+      },
+      {
+        kind: "return",
+        expression: u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
+      },
+    ],
+  };
+}
+
+function lexerDriverFinalizeEventFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerDriverFinalizeEvent",
+    parameters: [
+      { name: "specIndex", type: "u32" },
+      { name: "tokenClass", type: "u32" },
+      { name: "preserveTrivia", type: "u32" },
+      { name: "tokenEnd", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("specIndex"), u32(RUNTIME_NO_ACCEPT)),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_LEXER_DRIVER_EVENT_ERROR),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          call("lexerTokenEmitStatus", [
+            local("tokenClass"),
+            local("preserveTrivia"),
+          ]),
+          u32(RUNTIME_LEXER_TOKEN_EMIT_TOKEN),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_LEXER_DRIVER_EVENT_TOKEN),
+        }],
+      },
+      {
+        kind: "return",
+        expression: call("lexerDriverBeginEvent", [
+          local("tokenEnd"),
+          local("sourceLength"),
+        ]),
+      },
+    ],
+  };
+}
+
+function lexerDriverConsumeEventFunction(): RuntimeLanguageFunction {
+  return {
+    name: "lexerDriverConsumeEvent",
+    parameters: [
+      { name: "currentEvent", type: "u32" },
+      { name: "tokenEnd", type: "u32" },
+      { name: "sourceLength", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(
+          local("currentEvent"),
+          u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
+        ),
+        consequent: [{
+          kind: "return",
+          expression: u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
+        }],
+      },
+      {
+        kind: "if",
+        condition: eq(
+          local("currentEvent"),
+          u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+        ),
+        consequent: [{ kind: "return", expression: u32(0xffff_ffff) }],
+      },
+      {
+        kind: "return",
+        expression: call("lexerDriverBeginEvent", [
+          local("tokenEnd"),
+          local("sourceLength"),
+        ]),
+      },
+    ],
+  };
 }
 
 function lexerDriverStartFunction(): RuntimeLanguageFunction {
@@ -3848,7 +4535,10 @@ function lexerDriverBeginScanFunction(): RuntimeLanguageFunction {
     parameters: [
       { name: "offset", type: "u32" },
     ],
-    locals: [{ name: "discard", type: "u32" }],
+    locals: [
+      { name: "discard", type: "u32" },
+      { name: "event", type: "u32" },
+    ],
     result: "u32",
     body: [
       setLocal("discard", call("lexerScanReset", [])),
@@ -3863,28 +4553,35 @@ function lexerDriverBeginScanFunction(): RuntimeLanguageFunction {
       storeScratch(u32(LEXER_DRIVER_TOKEN_TERMINAL), u32(RUNTIME_NO_TERMINAL)),
       storeScratch(u32(LEXER_DRIVER_READ_OFFSET), local("offset")),
       storeScratch(u32(LEXER_DRIVER_ERROR_END), local("offset")),
-      {
-        kind: "if",
-        condition: lt(
+      setLocal(
+        "event",
+        call("lexerDriverBeginEvent", [
           local("offset"),
           loadScratch(u32(LEXER_DRIVER_SOURCE_LENGTH)),
+        ]),
+      ),
+      {
+        kind: "if",
+        condition: eq(
+          local("event"),
+          u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
         ),
         consequent: [
           storeScratch(
             u32(LEXER_DRIVER_EVENT),
-            u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+            local("event"),
           ),
           {
             kind: "return",
-            expression: u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+            expression: local("event"),
           },
         ],
       },
       storeScratch(
         u32(LEXER_DRIVER_EVENT),
-        u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
+        local("event"),
       ),
-      { kind: "return", expression: u32(RUNTIME_LEXER_DRIVER_EVENT_DONE) },
+      { kind: "return", expression: local("event") },
     ],
   };
 }
@@ -3898,6 +4595,7 @@ function lexerDriverAdvanceFunction(): RuntimeLanguageFunction {
     locals: [
       { name: "advanced", type: "u32" },
       { name: "nextOffset", type: "u32" },
+      { name: "event", type: "u32" },
     ],
     result: "u32",
     body: [
@@ -3924,20 +4622,27 @@ function lexerDriverAdvanceFunction(): RuntimeLanguageFunction {
         condition: eq(local("advanced"), u32(1)),
         consequent: [
           storeScratch(u32(LEXER_DRIVER_READ_OFFSET), local("nextOffset")),
-          {
-            kind: "if",
-            condition: lt(
+          setLocal(
+            "event",
+            call("lexerDriverBeginEvent", [
               local("nextOffset"),
               loadScratch(u32(LEXER_DRIVER_SOURCE_LENGTH)),
+            ]),
+          ),
+          {
+            kind: "if",
+            condition: eq(
+              local("event"),
+              u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
             ),
             consequent: [
               storeScratch(
                 u32(LEXER_DRIVER_EVENT),
-                u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+                local("event"),
               ),
               {
                 kind: "return",
-                expression: u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
+                expression: local("event"),
               },
             ],
           },
@@ -3959,13 +4664,48 @@ function lexerDriverFinalizeFunction(): RuntimeLanguageFunction {
       { name: "tokenClass", type: "u32" },
       { name: "payload", type: "u32" },
       { name: "end", type: "u32" },
+      { name: "event", type: "u32" },
     ],
     result: "u32",
     body: [
       setLocal("specIndex", call("lexerScanBestSpec", [])),
+      setLocal(
+        "tokenClass",
+        u32(RUNTIME_LEXER_TOKEN_UNKNOWN),
+      ),
       {
         kind: "if",
         condition: eq(local("specIndex"), u32(RUNTIME_NO_ACCEPT)),
+        consequent: [],
+        alternate: [
+          setLocal(
+            "tokenClass",
+            call("lexerSpecTokenClass", [local("specIndex")]),
+          ),
+        ],
+      },
+      setLocal(
+        "end",
+        call("lexerScanCandidateEnd", [
+          loadScratch(u32(LEXER_DRIVER_TOKEN_START)),
+        ]),
+      ),
+      setLocal(
+        "event",
+        call("lexerDriverFinalizeEvent", [
+          local("specIndex"),
+          local("tokenClass"),
+          loadScratch(u32(LEXER_DRIVER_PRESERVE_TRIVIA)),
+          local("end"),
+          loadScratch(u32(LEXER_DRIVER_SOURCE_LENGTH)),
+        ]),
+      ),
+      {
+        kind: "if",
+        condition: eq(
+          local("event"),
+          u32(RUNTIME_LEXER_DRIVER_EVENT_ERROR),
+        ),
         consequent: [
           storeScratch(
             u32(LEXER_DRIVER_TOKEN_END),
@@ -3982,30 +4722,17 @@ function lexerDriverFinalizeFunction(): RuntimeLanguageFunction {
           ),
           storeScratch(
             u32(LEXER_DRIVER_EVENT),
-            u32(RUNTIME_LEXER_DRIVER_EVENT_ERROR),
+            local("event"),
           ),
           {
             kind: "return",
-            expression: u32(RUNTIME_LEXER_DRIVER_EVENT_ERROR),
+            expression: local("event"),
           },
         ],
       },
-      setLocal(
-        "end",
-        call("lexerScanCandidateEnd", [
-          loadScratch(u32(LEXER_DRIVER_TOKEN_START)),
-        ]),
-      ),
-      setLocal("tokenClass", call("lexerSpecTokenClass", [local("specIndex")])),
       {
         kind: "if",
-        condition: eq(
-          call("lexerTokenEmitStatus", [
-            local("tokenClass"),
-            loadScratch(u32(LEXER_DRIVER_PRESERVE_TRIVIA)),
-          ]),
-          u32(RUNTIME_LEXER_TOKEN_EMIT_TOKEN),
-        ),
+        condition: eq(local("event"), u32(RUNTIME_LEXER_DRIVER_EVENT_TOKEN)),
         consequent: [
           storeScratch(u32(LEXER_DRIVER_TOKEN_SPEC), local("specIndex")),
           storeScratch(u32(LEXER_DRIVER_TOKEN_END), local("end")),
@@ -4026,11 +4753,11 @@ function lexerDriverFinalizeFunction(): RuntimeLanguageFunction {
           ),
           storeScratch(
             u32(LEXER_DRIVER_EVENT),
-            u32(RUNTIME_LEXER_DRIVER_EVENT_TOKEN),
+            local("event"),
           ),
           {
             kind: "return",
-            expression: u32(RUNTIME_LEXER_DRIVER_EVENT_TOKEN),
+            expression: local("event"),
           },
         ],
       },
@@ -4045,25 +4772,32 @@ function lexerDriverFinalizeFunction(): RuntimeLanguageFunction {
 function lexerDriverConsumeFunction(): RuntimeLanguageFunction {
   return {
     name: "lexerDriverConsume",
+    locals: [
+      { name: "event", type: "u32" },
+      { name: "nextEvent", type: "u32" },
+    ],
     result: "u32",
     body: [
+      setLocal("event", loadScratch(u32(LEXER_DRIVER_EVENT))),
       {
         kind: "if",
-        condition: eq(
-          loadScratch(u32(LEXER_DRIVER_EVENT)),
-          u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
-        ),
+        condition: eq(local("event"), u32(RUNTIME_LEXER_DRIVER_EVENT_DONE)),
         consequent: [{
           kind: "return",
           expression: u32(RUNTIME_LEXER_DRIVER_EVENT_DONE),
         }],
       },
+      setLocal(
+        "nextEvent",
+        call("lexerDriverConsumeEvent", [
+          local("event"),
+          loadScratch(u32(LEXER_DRIVER_TOKEN_END)),
+          loadScratch(u32(LEXER_DRIVER_SOURCE_LENGTH)),
+        ]),
+      ),
       {
         kind: "if",
-        condition: eq(
-          loadScratch(u32(LEXER_DRIVER_EVENT)),
-          u32(RUNTIME_LEXER_DRIVER_EVENT_NEED_CODE_POINT),
-        ),
+        condition: eq(local("nextEvent"), u32(0xffff_ffff)),
         consequent: [{ kind: "trap" }],
       },
       {
@@ -6910,6 +7644,8 @@ function parserTraceFunction(
       { name: "depth", type: "u32" },
       { name: "streamIndex", type: "u32" },
       { name: "traceCount", type: "u32" },
+      { name: "traceStoreStatus", type: "u32" },
+      { name: "stackAppendStatus", type: "u32" },
       { name: "loop", type: "u32" },
       { name: "state", type: "u32" },
       { name: "terminal", type: "u32" },
@@ -6970,7 +7706,10 @@ function parserTraceFunction(
         body: [
           {
             kind: "if",
-            condition: lt(local("streamIndex"), local("terminalCount")),
+            condition: call("branchHasTerminal", [
+              local("streamIndex"),
+              local("terminalCount"),
+            ]),
             consequent: [],
             alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
           },
@@ -7007,9 +7746,16 @@ function parserTraceFunction(
             condition: eq(local("actionKind"), u32(RUNTIME_ACTION_SHIFT)),
             consequent: [
               ...traceStoreActionStatements(),
+              setLocal(
+                "stackAppendStatus",
+                call("branchStackAppendStatus", [
+                  local("depth"),
+                  local("stackCapacity"),
+                ]),
+              ),
               {
                 kind: "if",
-                condition: lt(local("depth"), local("stackCapacity")),
+                condition: eq(local("stackAppendStatus"), u32(TRACE_STATUS_OK)),
                 consequent: [],
                 alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
               },
@@ -7020,7 +7766,13 @@ function parserTraceFunction(
                   local("actionPayload"),
                 ]),
               ),
-              setLocal("depth", add(local("depth"), u32(1))),
+              setLocal(
+                "depth",
+                call("branchNextDepth", [
+                  local("depth"),
+                  local("stackCapacity"),
+                ]),
+              ),
               setLocal("streamIndex", add(local("streamIndex"), u32(1))),
             ],
             alternate: [{
@@ -7074,9 +7826,19 @@ function parserTraceFunction(
                   consequent: traceReturnStatements(TRACE_STATUS_INTERNAL),
                   alternate: [
                     ...traceStoreActionStatements(),
+                    setLocal(
+                      "stackAppendStatus",
+                      call("branchStackAppendStatus", [
+                        local("depth"),
+                        local("stackCapacity"),
+                      ]),
+                    ),
                     {
                       kind: "if",
-                      condition: lt(local("depth"), local("stackCapacity")),
+                      condition: eq(
+                        local("stackAppendStatus"),
+                        u32(TRACE_STATUS_OK),
+                      ),
                       consequent: [],
                       alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
                     },
@@ -7087,7 +7849,13 @@ function parserTraceFunction(
                         local("gotoState"),
                       ]),
                     ),
-                    setLocal("depth", add(local("depth"), u32(1))),
+                    setLocal(
+                      "depth",
+                      call("branchNextDepth", [
+                        local("depth"),
+                        local("stackCapacity"),
+                      ]),
+                    ),
                   ],
                 },
               ],
@@ -7141,6 +7909,8 @@ function parserConflictTraceFunction(
       { name: "depth", type: "u32" },
       { name: "streamIndex", type: "u32" },
       { name: "traceCount", type: "u32" },
+      { name: "traceStoreStatus", type: "u32" },
+      { name: "stackAppendStatus", type: "u32" },
       { name: "loop", type: "u32" },
       { name: "hasPendingAction", type: "u32" },
       { name: "actionReady", type: "u32" },
@@ -7158,6 +7928,9 @@ function parserConflictTraceFunction(
       { name: "gotoState", type: "u32" },
       { name: "bestState", type: "u32" },
       { name: "bestIndex", type: "u32" },
+      { name: "acceptOutcome", type: "u32" },
+      { name: "branchLimitStatus", type: "u32" },
+      { name: "restoreOutcome", type: "u32" },
     ],
     result: "u32",
     body: [
@@ -7243,7 +8016,10 @@ function parserConflictTraceFunction(
             alternate: [
               {
                 kind: "if",
-                condition: lt(local("streamIndex"), local("terminalCount")),
+                condition: call("branchHasTerminal", [
+                  local("streamIndex"),
+                  local("terminalCount"),
+                ]),
                 consequent: [
                   setLocal(
                     "terminal",
@@ -7260,13 +8036,16 @@ function parserConflictTraceFunction(
                   ),
                   {
                     kind: "if",
-                    condition: eq(local("actionCount"), u32(0)),
-                    consequent: conflictRestoreBranchOrReturnUnexpected(),
-                    alternate: [
+                    condition: call("branchHasAction", [
+                      local("actionCount"),
+                    ]),
+                    consequent: [
                       setLocal("ordinal", sub(local("actionCount"), u32(1))),
                       {
                         kind: "while",
-                        condition: lt(u32(0), local("ordinal")),
+                        condition: call("branchHasDeferredAction", [
+                          local("ordinal"),
+                        ]),
                         body: [
                           setLocal(
                             "pendingAction",
@@ -7290,6 +8069,7 @@ function parserConflictTraceFunction(
                       ),
                       setLocal("actionReady", u32(1)),
                     ],
+                    alternate: conflictRestoreBranchOrReturnUnexpected(),
                   },
                 ],
                 alternate: conflictRestoreBranchOrReturnUnexpected(),
@@ -7313,9 +8093,19 @@ function parserConflictTraceFunction(
                 condition: eq(local("actionKind"), u32(RUNTIME_ACTION_SHIFT)),
                 consequent: [
                   ...conflictTraceStoreAction(),
+                  setLocal(
+                    "stackAppendStatus",
+                    call("branchStackAppendStatus", [
+                      local("depth"),
+                      local("stateCapacity"),
+                    ]),
+                  ),
                   {
                     kind: "if",
-                    condition: lt(local("depth"), local("stateCapacity")),
+                    condition: eq(
+                      local("stackAppendStatus"),
+                      u32(TRACE_STATUS_OK),
+                    ),
                     consequent: [
                       setLocal(
                         "capacity",
@@ -7324,7 +8114,13 @@ function parserConflictTraceFunction(
                           local("actionPayload"),
                         ]),
                       ),
-                      setLocal("depth", add(local("depth"), u32(1))),
+                      setLocal(
+                        "depth",
+                        call("branchNextDepth", [
+                          local("depth"),
+                          local("stateCapacity"),
+                        ]),
+                      ),
                       setLocal(
                         "streamIndex",
                         add(local("streamIndex"), u32(1)),
@@ -7404,11 +8200,18 @@ function parserConflictTraceFunction(
                                 conflictRestoreBranchOrReturnUnexpected(),
                               alternate: [
                                 ...conflictTraceStoreAction(),
-                                {
-                                  kind: "if",
-                                  condition: lt(
+                                setLocal(
+                                  "stackAppendStatus",
+                                  call("branchStackAppendStatus", [
                                     local("depth"),
                                     local("stateCapacity"),
+                                  ]),
+                                ),
+                                {
+                                  kind: "if",
+                                  condition: eq(
+                                    local("stackAppendStatus"),
+                                    u32(TRACE_STATUS_OK),
                                   ),
                                   consequent: [
                                     setLocal(
@@ -7420,7 +8223,10 @@ function parserConflictTraceFunction(
                                     ),
                                     setLocal(
                                       "depth",
-                                      add(local("depth"), u32(1)),
+                                      call("branchNextDepth", [
+                                        local("depth"),
+                                        local("stateCapacity"),
+                                      ]),
                                     ),
                                   ],
                                   alternate: traceReturnStatements(
@@ -7442,22 +8248,25 @@ function parserConflictTraceFunction(
                     ),
                     consequent: [
                       ...conflictTraceStoreAction(),
+                      setLocal(
+                        "acceptOutcome",
+                        call("branchAcceptOutcome", [
+                          local("ambiguityMode"),
+                          local("successFound"),
+                          local("branchCount"),
+                        ]),
+                      ),
                       {
                         kind: "if",
-                        condition: eq(local("ambiguityMode"), u32(0)),
+                        condition: eq(local("acceptOutcome"), u32(1)),
                         consequent: traceReturnStatements(TRACE_STATUS_OK),
                       },
                       {
                         kind: "if",
-                        condition: local("successFound"),
+                        condition: eq(local("acceptOutcome"), u32(2)),
                         consequent: traceReturnStatements(
                           TRACE_STATUS_AMBIGUOUS,
                         ),
-                      },
-                      {
-                        kind: "if",
-                        condition: eq(local("branchCount"), u32(0)),
-                        consequent: traceReturnStatements(TRACE_STATUS_OK),
                       },
                       setLocal("successFound", u32(1)),
                       setLocal("successTraceCount", local("traceCount")),
@@ -7482,6 +8291,255 @@ function parserConflictTraceFunction(
 
 function parserTraceErrorStateFunction(): RuntimeLanguageFunction {
   return traceHeaderLoadFunction("parserTraceErrorState", TRACE_ERROR_STATE);
+}
+
+function branchAcceptOutcomeFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchAcceptOutcome",
+    parameters: [
+      { name: "ambiguityMode", type: "u32" },
+      { name: "successFound", type: "u32" },
+      { name: "branchCount", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("ambiguityMode"), u32(0)),
+        consequent: [{ kind: "return", expression: u32(1) }],
+      },
+      {
+        kind: "if",
+        condition: local("successFound"),
+        consequent: [{ kind: "return", expression: u32(2) }],
+      },
+      {
+        kind: "if",
+        condition: eq(local("branchCount"), u32(0)),
+        consequent: [{ kind: "return", expression: u32(1) }],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function branchHasTerminalFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchHasTerminal",
+    parameters: [
+      { name: "streamIndex", type: "u32" },
+      { name: "terminalCount", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("streamIndex"), local("terminalCount")),
+        consequent: [{ kind: "return", expression: u32(1) }],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function branchHasActionFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchHasAction",
+    parameters: [
+      { name: "actionCount", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("actionCount"), u32(0)),
+        consequent: [{ kind: "return", expression: u32(0) }],
+      },
+      { kind: "return", expression: u32(1) },
+    ],
+  };
+}
+
+function branchHasDeferredActionFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchHasDeferredAction",
+    parameters: [
+      { name: "ordinal", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("ordinal"), u32(0)),
+        consequent: [{ kind: "return", expression: u32(0) }],
+      },
+      { kind: "return", expression: u32(1) },
+    ],
+  };
+}
+
+function branchShouldRecordFailureFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchShouldRecordFailure",
+    parameters: [
+      { name: "bestIndex", type: "u32" },
+      { name: "streamIndex", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("bestIndex"), u32(0xffff_ffff)),
+        consequent: [{ kind: "return", expression: u32(1) }],
+      },
+      {
+        kind: "if",
+        condition: lt(local("bestIndex"), local("streamIndex")),
+        consequent: [{ kind: "return", expression: u32(1) }],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function branchNextDepthFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchNextDepth",
+    parameters: [
+      { name: "depth", type: "u32" },
+      { name: "maxDepth", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("depth"), local("maxDepth")),
+        consequent: [{
+          kind: "return",
+          expression: add(local("depth"), u32(1)),
+        }],
+      },
+      { kind: "return", expression: local("maxDepth") },
+    ],
+  };
+}
+
+function branchCanEnqueueFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchCanEnqueue",
+    parameters: [
+      { name: "active", type: "u32" },
+      { name: "limit", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("active"), local("limit")),
+        consequent: [{ kind: "return", expression: u32(1) }],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function branchTraceAppendStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchTraceAppendStatus",
+    parameters: [
+      { name: "traceCount", type: "u32" },
+      { name: "maxTraceActions", type: "u32" },
+      { name: "traceCapacity", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("traceCount"), local("maxTraceActions")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(TRACE_STATUS_TRACE_LIMIT),
+        }],
+      },
+      {
+        kind: "if",
+        condition: lt(local("traceCount"), local("traceCapacity")),
+        consequent: [],
+        alternate: [{
+          kind: "return",
+          expression: u32(TRACE_STATUS_INTERNAL),
+        }],
+      },
+      { kind: "return", expression: u32(TRACE_STATUS_OK) },
+    ],
+  };
+}
+
+function branchStackAppendStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchStackAppendStatus",
+    parameters: [
+      { name: "depth", type: "u32" },
+      { name: "capacity", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("depth"), local("capacity")),
+        consequent: [{ kind: "return", expression: u32(TRACE_STATUS_OK) }],
+      },
+      { kind: "return", expression: u32(TRACE_STATUS_INTERNAL) },
+    ],
+  };
+}
+
+function branchExplorationStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchExplorationStatus",
+    parameters: [
+      { name: "exploredBranches", type: "u32" },
+      { name: "maxBranches", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("maxBranches"), local("exploredBranches")),
+        consequent: [{
+          kind: "return",
+          expression: u32(TRACE_STATUS_BRANCH_LIMIT),
+        }],
+      },
+      { kind: "return", expression: u32(TRACE_STATUS_OK) },
+    ],
+  };
+}
+
+function branchRestoreOutcomeFunction(): RuntimeLanguageFunction {
+  return {
+    name: "branchRestoreOutcome",
+    parameters: [
+      { name: "successFound", type: "u32" },
+      { name: "branchCount", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: eq(local("branchCount"), u32(0)),
+        consequent: [],
+        alternate: [{ kind: "return", expression: u32(0) }],
+      },
+      {
+        kind: "if",
+        condition: local("successFound"),
+        consequent: [{ kind: "return", expression: u32(1) }],
+      },
+      { kind: "return", expression: u32(2) },
+    ],
+  };
 }
 
 function parserTraceErrorIndexFunction(): RuntimeLanguageFunction {
@@ -7586,6 +8644,25 @@ function parserExpectedHasEofFunction(
           kind: "return",
           expression: load("parserExpectedFlags", local("state")),
         }],
+      },
+      { kind: "return", expression: u32(0) },
+    ],
+  };
+}
+
+function parserExpectedRowStatusFunction(): RuntimeLanguageFunction {
+  return {
+    name: "parserExpectedRowStatus",
+    parameters: [
+      { name: "start", type: "u32" },
+      { name: "end", type: "u32" },
+    ],
+    result: "u32",
+    body: [
+      {
+        kind: "if",
+        condition: lt(local("start"), local("end")),
+        consequent: [{ kind: "return", expression: u32(1) }],
       },
       { kind: "return", expression: u32(0) },
     ],
@@ -7709,9 +8786,17 @@ function traceHeaderLoadFunction(
 
 function traceStoreActionStatements(): RuntimeStatement[] {
   return [
+    setLocal(
+      "traceStoreStatus",
+      call("branchTraceAppendStatus", [
+        local("traceCount"),
+        local("maxTraceActions"),
+        local("maxTraceActions"),
+      ]),
+    ),
     {
       kind: "if",
-      condition: lt(local("traceCount"), local("maxTraceActions")),
+      condition: eq(local("traceStoreStatus"), u32(TRACE_STATUS_OK)),
       consequent: [
         setLocal(
           "capacity",
@@ -7738,35 +8823,51 @@ function traceReturnStatements(status: number): RuntimeStatement[] {
 }
 
 function conflictTraceStoreAction(): RuntimeStatement[] {
-  return [{
-    kind: "if",
-    condition: lt(local("traceCount"), local("maxTraceActions")),
-    consequent: [
-      {
-        kind: "if",
-        condition: lt(local("traceCount"), local("traceCapacity")),
-        consequent: [
-          setLocal(
-            "capacity",
-            call("runtimeVectorAppend", [
-              local("traceHandle"),
-              local("action"),
-            ]),
+  return [
+    setLocal(
+      "traceStoreStatus",
+      call("branchTraceAppendStatus", [
+        local("traceCount"),
+        local("maxTraceActions"),
+        local("traceCapacity"),
+      ]),
+    ),
+    {
+      kind: "if",
+      condition: eq(local("traceStoreStatus"), u32(TRACE_STATUS_OK)),
+      consequent: [
+        setLocal(
+          "capacity",
+          call("runtimeVectorAppend", [
+            local("traceHandle"),
+            local("action"),
+          ]),
+        ),
+        setLocal("traceCount", add(local("traceCount"), u32(1))),
+      ],
+      alternate: [
+        {
+          kind: "if",
+          condition: eq(
+            local("traceStoreStatus"),
+            u32(TRACE_STATUS_TRACE_LIMIT),
           ),
-          setLocal("traceCount", add(local("traceCount"), u32(1))),
-        ],
-        alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
-      },
-    ],
-    alternate: traceReturnStatements(TRACE_STATUS_TRACE_LIMIT),
-  }];
+          consequent: traceReturnStatements(TRACE_STATUS_TRACE_LIMIT),
+          alternate: traceReturnStatements(TRACE_STATUS_INTERNAL),
+        },
+      ],
+    },
+  ];
 }
 
 function conflictSaveBranchFrame(): RuntimeStatement[] {
   return [
     {
       kind: "if",
-      condition: lt(local("branchCount"), local("maxQueuedBranches")),
+      condition: call("branchCanEnqueue", [
+        local("branchCount"),
+        local("maxQueuedBranches"),
+      ]),
       consequent: [],
       alternate: traceReturnStatements(TRACE_STATUS_BRANCH_LIMIT),
     },
@@ -7820,27 +8921,36 @@ function conflictRestoreBranchOrReturnUnexpected(): RuntimeStatement[] {
   return [
     ...conflictRecordBestFailure(),
     setLocal("actionReady", u32(0)),
+    setLocal(
+      "restoreOutcome",
+      call("branchRestoreOutcome", [
+        local("successFound"),
+        local("branchCount"),
+      ]),
+    ),
     {
       kind: "if",
-      condition: eq(local("branchCount"), u32(0)),
+      condition: eq(local("restoreOutcome"), u32(1)),
       consequent: [
-        {
-          kind: "if",
-          condition: local("successFound"),
-          consequent: [
-            setLocal("traceHandle", local("successTraceHandle")),
-            setLocal("traceCount", local("successTraceCount")),
-            storeScratch(u32(TRACE_BASE), local("traceHandle")),
-            ...traceReturnStatements(TRACE_STATUS_OK),
-          ],
-          alternate: [
-            setLocal("state", local("bestState")),
-            setLocal("streamIndex", local("bestIndex")),
-            ...traceReturnStatements(TRACE_STATUS_UNEXPECTED),
-          ],
-        },
+        setLocal("traceHandle", local("successTraceHandle")),
+        setLocal("traceCount", local("successTraceCount")),
+        storeScratch(u32(TRACE_BASE), local("traceHandle")),
+        ...traceReturnStatements(TRACE_STATUS_OK),
       ],
-      alternate: [
+    },
+    {
+      kind: "if",
+      condition: eq(local("restoreOutcome"), u32(2)),
+      consequent: [
+        setLocal("state", local("bestState")),
+        setLocal("streamIndex", local("bestIndex")),
+        ...traceReturnStatements(TRACE_STATUS_UNEXPECTED),
+      ],
+    },
+    {
+      kind: "if",
+      condition: eq(local("restoreOutcome"), u32(0)),
+      consequent: [
         setLocal("branchCount", sub(local("branchCount"), u32(1))),
         setLocal(
           "pendingAction",
@@ -7887,9 +8997,19 @@ function conflictRestoreBranchOrReturnUnexpected(): RuntimeStatement[] {
         storeScratch(u32(TRACE_BASE), local("traceHandle")),
         ...truncateBranchSnapshotVectors(),
         setLocal("exploredBranches", add(local("exploredBranches"), u32(1))),
+        setLocal(
+          "branchLimitStatus",
+          call("branchExplorationStatus", [
+            local("exploredBranches"),
+            local("maxBranches"),
+          ]),
+        ),
         {
           kind: "if",
-          condition: lt(local("maxBranches"), local("exploredBranches")),
+          condition: eq(
+            local("branchLimitStatus"),
+            u32(TRACE_STATUS_BRANCH_LIMIT),
+          ),
           consequent: [
             setLocal("state", local("bestState")),
             setLocal("streamIndex", local("bestIndex")),
@@ -7950,19 +9070,16 @@ function truncateBranchSnapshotVectors(): RuntimeStatement[] {
 }
 
 function conflictRecordBestFailure(): RuntimeStatement[] {
-  const update = [
-    setLocal("bestIndex", local("streamIndex")),
-    setLocal("bestState", local("state")),
-  ];
   return [{
     kind: "if",
-    condition: eq(local("bestIndex"), u32(0xffff_ffff)),
-    consequent: update,
-    alternate: [{
-      kind: "if",
-      condition: lt(local("bestIndex"), local("streamIndex")),
-      consequent: update,
-    }],
+    condition: call("branchShouldRecordFailure", [
+      local("bestIndex"),
+      local("streamIndex"),
+    ]),
+    consequent: [
+      setLocal("bestIndex", local("streamIndex")),
+      setLocal("bestState", local("state")),
+    ],
   }];
 }
 

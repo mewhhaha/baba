@@ -23,9 +23,10 @@ The generated descriptor has:
 }
 ```
 
-The core module exports `abi_version() -> i32` and `plan_version() -> i32`. For
-ABI version 1, both the descriptor and generated adapter must agree with the
-core exports before the adapter uses the module.
+The core module exports `abi_version() -> i32`, `plan_version() -> i32`, and
+`semantics_version() -> i32`. For ABI version 1, both the descriptor and
+generated adapter must agree with the core exports before the adapter uses the
+module.
 
 The descriptor also records:
 
@@ -48,6 +49,7 @@ ABI version 1 core modules export:
 | `parser_goto(state, nonterminal) -> i32`                       | function | Returns a parser state, or `-1` when absent.                                     |
 | `abi_version() -> i32`                                         | function | Returns the core ABI version.                                                    |
 | `plan_version() -> i32`                                        | function | Returns the portable parser-plan version.                                        |
+| `semantics_version() -> i32`                                   | function | Returns the runtime implementation semantics version.                            |
 | `reset() -> void`                                              | function | Clears reusable core runtime state.                                              |
 | `input_base() -> i32`                                          | function | Returns the first byte offset available for host input.                          |
 | `max_pages() -> i32`                                           | function | Returns the configured maximum linear-memory page count.                         |
@@ -120,16 +122,28 @@ JavaScript capabilities, not raw ABI handles. The adapter epoch-checks them:
 handles. It does not promise to shrink linear memory; repeated parses may reuse
 the previous high-water allocation.
 
-ABI version 1 has instance-owned core memory, but the generated embedded adapter
-exposes a module-level convenience instance. External-binary adapters must be
-initialized with `createParserFromBytes()`, `createParserFromModule()`, or
-`createParserFromUrl()` before use. Fully independent public parser-instance
-factories and disposal semantics are planned separately from this core ABI
-surface.
+ABI version 1 has instance-owned core memory. Generated adapters expose
+`createParser()` and `createParserAsync()` as the public lifecycle API. Each
+parser instance owns its `WebAssembly.Instance`, memory, source buffers, trace
+runtime, reset epoch, configured limits, and disposed state. `reset()` on a
+parser instance clears reusable state and invalidates that instance's
+adapter-owned handles. `dispose()` invalidates the parser instance; subsequent
+`lex()`, `parse()`, or token-stream calls on that instance throw from the
+generated adapter.
+
+Module-level `lex()`, `parse()`, `parseTokens()`, and `parseTokensUnchecked()`
+are convenience wrappers over an active/default parser instance. Embedded
+adapters create that default instance lazily. External-binary adapters can
+create isolated instances with `createParser({ bytes })`,
+`createParser({ module })`, `createParser({ wasm })`, or
+`createParserAsync({ url })`; the low-level `createParserFromBytes()`,
+`createParserFromModule()`, and `createParserFromUrl()` helpers remain available
+and also install the module-level default instance for compatibility.
 
 Calls into one core instance are not specified as thread-safe or reentrant.
-Hosts that need interleaved parsing should instantiate separate modules or use
-separate adapter instances when available.
+Hosts that need interleaved parsing should use separate parser instances. CI
+coverage includes interleaved instances and concurrent JavaScript module workers
+where the host permits workers.
 
 ## Limits And Overflow
 

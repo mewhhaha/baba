@@ -1,4 +1,5 @@
 import type {
+  ParserConflictDeclarationMetadata,
   ParserConflictResolutionMetadata,
   ParserRuntimeMetadata,
   TreeSitterCaptureQueryEntry,
@@ -127,7 +128,10 @@ function parseParserRuntimeMetadata(
   if (hasKey(object, "conflicts")) {
     metadata.conflicts = expectArray(object.conflicts, `${path}.conflicts`)
       .map((conflict, index) =>
-        expectStringArray(conflict, `${path}.conflicts[${index}]`)
+        parseParserConflictDeclaration(
+          conflict,
+          `${path}.conflicts[${index}]`,
+        )
       );
   }
   if (hasKey(object, "resolutions")) {
@@ -142,6 +146,16 @@ function parseParserRuntimeMetadata(
     );
   }
   return metadata;
+}
+
+function parseParserConflictDeclaration(
+  value: unknown,
+  path: string,
+): ParserConflictDeclarationMetadata {
+  if (Array.isArray(value)) return expectStringArray(value, path);
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["conflict"]);
+  return { conflict: expectString(object.conflict, `${path}.conflict`) };
 }
 
 function parseParserConflictResolution(

@@ -24,6 +24,7 @@ import { BabaError, formatDiagnostic, toBabaError } from "./errors.ts";
 import { parseEbnf } from "./parser.ts";
 import { generatedBundle } from "./bundle.ts";
 import { analyzeGrammar } from "./compiler/analyze.ts";
+import { DEFAULT_REGEX_NESTING_LIMIT } from "./compiler/regex/limits.ts";
 import { emitTreeSitterTarget } from "./targets/tree_sitter/plan.ts";
 import {
   emitTypeScriptTarget,
@@ -87,8 +88,10 @@ export function validateGrammar(
     metadata: options.metadata,
     regexLimits: {
       sourceLengthLimit: runtimeOptions?.regexSourceLengthLimit,
-      nestingLimit: runtimeOptions?.regexNestingLimit,
+      nestingLimit: runtimeOptions?.regexNestingLimit ??
+        DEFAULT_REGEX_NESTING_LIMIT,
     },
+    grammarExpressionDepthLimit: runtimeOptions?.grammarExpressionDepthLimit,
   });
   const diagnostics = [...analyzed.diagnostics];
   if (hasErrors(diagnostics)) return diagnostics;
@@ -196,8 +199,10 @@ export function compile(
     metadata,
     regexLimits: {
       sourceLengthLimit: runtimeOptions?.regexSourceLengthLimit,
-      nestingLimit: runtimeOptions?.regexNestingLimit,
+      nestingLimit: runtimeOptions?.regexNestingLimit ??
+        DEFAULT_REGEX_NESTING_LIMIT,
     },
+    grammarExpressionDepthLimit: runtimeOptions?.grammarExpressionDepthLimit,
   });
   const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
   let typeScriptPlan:
@@ -346,6 +351,7 @@ export function compileParserKit(
       sourceLengthLimit: options.kit?.regexSourceLengthLimit,
       nestingLimit: options.kit?.regexNestingLimit,
     },
+    grammarExpressionDepthLimit: options.kit?.grammarExpressionDepthLimit,
   });
   const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
   let kitPlan: KitPlan | { diagnostics: readonly Diagnostic[] } | undefined;
@@ -471,8 +477,10 @@ function sharedRuntimePlanningOptions(
     regexDfaStateLimit: minOption("regexDfaStateLimit"),
     regexOverlapStateLimit: minOption("regexOverlapStateLimit"),
     regexOverlapPairLimit: minOption("regexOverlapPairLimit"),
+    grammarExpressionDepthLimit: minOption("grammarExpressionDepthLimit"),
     parserStateLimit: minOption("parserStateLimit"),
     parserItemLimit: minOption("parserItemLimit"),
+    lrClosureWorkLimit: minOption("lrClosureWorkLimit"),
     parserTableEntryLimit: minOption("parserTableEntryLimit"),
     diagnosticLimit: minOption("diagnosticLimit"),
   };

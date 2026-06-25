@@ -215,6 +215,7 @@ export interface ParserKitLrStats {
   states: number;
   coreItems: number;
   items: number;
+  closureWork: number;
   actionEntries: number;
   gotoEntries: number;
   tableEntries: number;
@@ -2351,6 +2352,7 @@ function validateLrStats(
       "states",
       "coreItems",
       "items",
+      "closureWork",
       "actionEntries",
       "gotoEntries",
       "tableEntries",
@@ -2831,6 +2833,11 @@ function validateParserKitReferences(
       kit.lr.stats.items,
       items,
       "$.lr.stats.items",
+      issues,
+    );
+    requireNumber(
+      kit.lr.stats.closureWork,
+      "$.lr.stats.closureWork",
       issues,
     );
     validateExactNumber(

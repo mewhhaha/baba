@@ -11,6 +11,16 @@ export function emitPublicDiagnosticMaterializer(): string {
   return [...left, ...right];
 }
 
+function enforceParseDiagnosticLimit(
+  diagnostics: readonly ParseDiagnostic[],
+): void {
+  const limit = currentParserDiagnosticLimit();
+  if (limit === undefined) return;
+  if (diagnostics.length > limit) {
+    throw diagnosticResourceLimitError(limit, diagnostics.length);
+  }
+}
+
 function parseDiagnostic(
   runtimeCode: number,
   message: string,
@@ -115,7 +125,7 @@ function lexicalTokenDiagnostics(
 function expectedTerminals(state: number): readonly string[] {
   const start = parserExpectedStart(state);
   const end = parserExpectedEnd(state);
-  if (end <= start) return [];
+  if (parserExpectedRowStatus(start, end) === 0) return [];
   return EXPECTED_TERMINALS.slice(start, end);
 }
 

@@ -26,6 +26,8 @@ import {
 import { isRegexNullable } from "./regex/nullable.ts";
 import { parsePortableRegex } from "./regex/parser.ts";
 
+export const DEFAULT_GRAMMAR_EXPRESSION_DEPTH_LIMIT = 1_024;
+
 /** Builds the shared resolved grammar model used by target planners. */
 export function analyzeGrammar(
   grammar: EbnfGrammar,
@@ -34,6 +36,7 @@ export function analyzeGrammar(
     rootRule?: string;
     metadata?: BabaMetadata;
     regexLimits?: RegexCompilerLimits;
+    grammarExpressionDepthLimit?: number;
   } = {},
 ): AnalyzedGrammar {
   const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
@@ -55,6 +58,7 @@ export function analyzeGrammar(
   grammar.rules.forEach((rule, index) => rulesByName.set(rule.name, index));
   grammar.tokens.forEach((token, index) => tokensByName.set(token.name, index));
   const externals = new Set(options.metadata?.externals ?? []);
+  let expressionDepthLimitReported = false;
 
   const literalIds = new Map<string, LiteralId>();
   const literals: AnalyzedLiteral[] = [];
@@ -76,15 +80,37 @@ export function analyzeGrammar(
 
   const analyzeExpression = (
     expression: EbnfExpression,
+    depth = 1,
   ): AnalyzedExpression => {
     const id = expressionIds.next++;
+    const depthLimit = options.grammarExpressionDepthLimit ??
+      DEFAULT_GRAMMAR_EXPRESSION_DEPTH_LIMIT;
+    if (depth > depthLimit) {
+      if (!expressionDepthLimitReported) {
+        diagnostics.push({
+          code: "PORTABLE_GRAMMAR_EXPRESSION_DEPTH_LIMIT",
+          severity: "error",
+          message:
+            `Grammar expression depth exceeded the configured limit (${depthLimit}).`,
+          span: expression.span,
+        });
+        expressionDepthLimitReported = true;
+      }
+      return {
+        id,
+        kind: "literal",
+        value: "",
+        literalId: analyzeLiteralId(""),
+        span: expression.span,
+      };
+    }
     switch (expression.kind) {
       case "field":
         return {
           id,
           kind: "field",
           name: expression.name,
-          expression: analyzeExpression(expression.expression),
+          expression: analyzeExpression(expression.expression, depth + 1),
           span: expression.span,
         };
       case "ref":
@@ -101,43 +127,47 @@ export function analyzeGrammar(
         return {
           id,
           kind: "sequence",
-          items: expression.items.map(analyzeExpression),
+          items: expression.items.map((item) =>
+            analyzeExpression(item, depth + 1)
+          ),
           span: expression.span,
         };
       case "choice":
         return {
           id,
           kind: "choice",
-          options: expression.options.map(analyzeExpression),
+          options: expression.options.map((option) =>
+            analyzeExpression(option, depth + 1)
+          ),
           span: expression.span,
         };
       case "optional":
         return {
           id,
           kind: "optional",
-          expression: analyzeExpression(expression.expression),
+          expression: analyzeExpression(expression.expression, depth + 1),
           span: expression.span,
         };
       case "repeat":
         return {
           id,
           kind: "repeat",
-          expression: analyzeExpression(expression.expression),
+          expression: analyzeExpression(expression.expression, depth + 1),
           span: expression.span,
         };
       case "repeat1":
         return {
           id,
           kind: "repeat1",
-          expression: analyzeExpression(expression.expression),
+          expression: analyzeExpression(expression.expression, depth + 1),
           span: expression.span,
         };
       case "separated":
         return {
           id,
           kind: "separated",
-          item: analyzeExpression(expression.item),
-          separator: analyzeExpression(expression.separator),
+          item: analyzeExpression(expression.item, depth + 1),
+          separator: analyzeExpression(expression.separator, depth + 1),
           span: expression.span,
         };
     }
@@ -149,14 +179,7 @@ export function analyzeGrammar(
   ): LiteralExpression => {
     let literalId = literalIds.get(expression.value);
     if (literalId === undefined) {
-      literalId = literals.length;
-      literalIds.set(expression.value, literalId);
-      literals.push({
-        id: literalId,
-        value: expression.value,
-        sourceOrder: literalId,
-        span: expression.span,
-      });
+      literalId = analyzeLiteralId(expression.value, expression.span);
     }
     return {
       id,
@@ -165,6 +188,24 @@ export function analyzeGrammar(
       literalId,
       span: expression.span,
     };
+  };
+
+  const analyzeLiteralId = (
+    value: string,
+    span: Diagnostic["span"] = { start: 0, end: 0, line: 1, column: 1 },
+  ): LiteralId => {
+    let literalId = literalIds.get(value);
+    if (literalId === undefined) {
+      literalId = literals.length;
+      literalIds.set(value, literalId);
+      literals.push({
+        id: literalId,
+        value,
+        sourceOrder: literalId,
+        span,
+      });
+    }
+    return literalId;
   };
 
   const rules: AnalyzedRule[] = grammar.rules.map((rule, id) => ({
@@ -245,6 +286,7 @@ function collectGrammarHardeningDiagnostics(
 ): Diagnostic[] {
   const productiveRules = computeProductiveRules(rules);
   const nullableRules = computeNullableRuleSet(rules);
+  const nonemptyRules = computeNonemptyRuleSet(rules);
   const diagnostics: Diagnostic[] = [];
   for (const rule of rules) {
     if (!reachableRules.has(rule.id)) continue;
@@ -260,6 +302,16 @@ function collectGrammarHardeningDiagnostics(
         span: rule.span,
       });
       continue;
+    }
+    if (!nonemptyRules.has(rule.id)) {
+      diagnostics.push({
+        code: "EMPTY_ONLY_RULE",
+        severity: "warning",
+        message: rule.id === rootRule
+          ? `Root rule '${rule.name}' can only derive empty text.`
+          : `Rule '${rule.name}' can only derive empty text.`,
+        span: rule.span,
+      });
     }
   }
   diagnostics.push(
@@ -338,6 +390,62 @@ function computeNullableRuleSet(
     }
   }
   return nullable;
+}
+
+function computeNonemptyRuleSet(
+  rules: readonly AnalyzedRule[],
+): ReadonlySet<RuleId> {
+  const nonempty = new Set<RuleId>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const rule of rules) {
+      if (nonempty.has(rule.id)) continue;
+      if (canExpressionDeriveNonempty(rule.expression, nonempty)) {
+        nonempty.add(rule.id);
+        changed = true;
+      }
+    }
+  }
+  return nonempty;
+}
+
+function canExpressionDeriveNonempty(
+  expression: AnalyzedExpression,
+  nonemptyRules: ReadonlySet<RuleId>,
+): boolean {
+  switch (expression.kind) {
+    case "field":
+      return canExpressionDeriveNonempty(
+        expression.expression,
+        nonemptyRules,
+      );
+    case "ref":
+      return expression.reference.kind === "token" ||
+        expression.reference.kind === "external" ||
+        (expression.reference.kind === "rule" &&
+          nonemptyRules.has(expression.reference.ruleId));
+    case "literal":
+      return expression.value.length > 0;
+    case "sequence":
+      return expression.items.some((item) =>
+        canExpressionDeriveNonempty(item, nonemptyRules)
+      );
+    case "choice":
+      return expression.options.some((option) =>
+        canExpressionDeriveNonempty(option, nonemptyRules)
+      );
+    case "optional":
+    case "repeat":
+    case "repeat1":
+      return canExpressionDeriveNonempty(
+        expression.expression,
+        nonemptyRules,
+      );
+    case "separated":
+      return canExpressionDeriveNonempty(expression.item, nonemptyRules) ||
+        canExpressionDeriveNonempty(expression.separator, nonemptyRules);
+  }
 }
 
 function collectNullableRecursiveCycleDiagnostics(
@@ -529,6 +637,74 @@ export function computeNullableRules(
     }
   }
   return nullable;
+}
+
+export interface GrammarAnalysisStatistics {
+  readonly stronglyConnectedComponents: number;
+  readonly productiveIterations: number;
+  readonly nullableIterations: number;
+}
+
+export function grammarAnalysisStatistics(
+  rules: readonly AnalyzedRule[],
+  reachableRules: ReadonlySet<RuleId>,
+): GrammarAnalysisStatistics {
+  const graph = new Map<RuleId, Set<RuleId>>();
+  for (const rule of rules) {
+    if (!reachableRules.has(rule.id)) continue;
+    const edges = new Set<RuleId>();
+    visitAnalyzedExpression(rule.expression, (expression) => {
+      if (
+        expression.kind === "ref" &&
+        expression.reference.kind === "rule" &&
+        reachableRules.has(expression.reference.ruleId)
+      ) {
+        edges.add(expression.reference.ruleId);
+      }
+    });
+    graph.set(rule.id, edges);
+  }
+  return {
+    stronglyConnectedComponents: stronglyConnectedComponents(graph).length,
+    productiveIterations: countProductiveIterations(rules),
+    nullableIterations: countNullableIterations(rules),
+  };
+}
+
+function countProductiveIterations(rules: readonly AnalyzedRule[]): number {
+  const productive = new Set<RuleId>();
+  let iterations = 0;
+  let changed = true;
+  while (changed) {
+    iterations++;
+    changed = false;
+    for (const rule of rules) {
+      if (productive.has(rule.id)) continue;
+      if (isExpressionProductive(rule.expression, productive)) {
+        productive.add(rule.id);
+        changed = true;
+      }
+    }
+  }
+  return iterations;
+}
+
+function countNullableIterations(rules: readonly AnalyzedRule[]): number {
+  const nullable = new Set<RuleId>();
+  let iterations = 0;
+  let changed = true;
+  while (changed) {
+    iterations++;
+    changed = false;
+    for (const rule of rules) {
+      if (nullable.has(rule.id)) continue;
+      if (isExpressionNullable(rule.expression, nullable)) {
+        nullable.add(rule.id);
+        changed = true;
+      }
+    }
+  }
+  return iterations;
 }
 
 export function isExpressionNullable(

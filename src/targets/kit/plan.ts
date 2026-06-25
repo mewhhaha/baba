@@ -362,8 +362,10 @@ function runtimePlanningOptions(
     regexDfaStateLimit: options.regexDfaStateLimit,
     regexOverlapStateLimit: options.regexOverlapStateLimit,
     regexOverlapPairLimit: options.regexOverlapPairLimit,
+    grammarExpressionDepthLimit: options.grammarExpressionDepthLimit,
     parserStateLimit: options.parserStateLimit,
     parserItemLimit: options.parserItemLimit,
+    lrClosureWorkLimit: options.lrClosureWorkLimit,
     parserTableEntryLimit: options.parserTableEntryLimit,
     diagnosticLimit: options.diagnosticLimit,
   };

@@ -81,6 +81,79 @@ Deno.test("grammar analysis reports nullable recursive cycles", () => {
   );
 });
 
+Deno.test("grammar analysis reports rules that only derive empty text", () => {
+  const emptyRoot = validateGrammar(
+    parseGrammar(`module = "" ;`),
+    { targets: ["typescript"] },
+  );
+  assertEquals(emptyRoot[0].code, "EMPTY_ONLY_RULE");
+  assertEquals(emptyRoot[0].severity, "warning");
+  assertIncludes(emptyRoot[0].message, "can only derive empty text");
+
+  const emptyHelper = validateGrammar(
+    parseGrammar(`
+      module = empty? "ok" ;
+      empty = "" ;
+    `),
+    { targets: ["typescript"] },
+  );
+  const diagnostic = emptyHelper.find((entry) =>
+    entry.code === "EMPTY_ONLY_RULE"
+  );
+  assertEquals(diagnostic?.severity, "warning");
+  assertIncludes(diagnostic?.message ?? "", "Rule 'empty'");
+});
+
+Deno.test("grammar analysis reports expression depth limit exhaustion", () => {
+  const diagnostics = validateGrammar(
+    parseGrammar(`module = ((("ok")?)?)? ;`),
+    {
+      targets: ["typescript"],
+      typescript: { grammarExpressionDepthLimit: 2 },
+    },
+  );
+  assertEquals(diagnostics[0].code, "PORTABLE_GRAMMAR_EXPRESSION_DEPTH_LIMIT");
+  assertEquals(diagnostics[0].severity, "error");
+  assertIncludes(diagnostics[0].message, "configured limit (2)");
+});
+
+Deno.test("deep EBNF expressions hit default depth diagnostics before stack overflow", () => {
+  let sourceExpression = `"ok"`;
+  for (let index = 0; index < 1_100; index++) {
+    sourceExpression = `(${sourceExpression})`;
+  }
+  const parsed = compile(`module = ${sourceExpression} ;`, {
+    targets: ["typescript"],
+  });
+  assertEquals(parsed.bundle, undefined);
+  assertEquals(parsed.diagnostics[0].code, "EBNF_PARSE_ERROR");
+  assertIncludes(parsed.diagnostics[0].message, "expression depth");
+
+  let expression: any = {
+    kind: "literal" as const,
+    value: "ok",
+    span: { start: 0, end: 4, line: 1, column: 1 },
+  };
+  for (let index = 0; index < 1_100; index++) {
+    expression = {
+      kind: "optional" as const,
+      expression,
+      span: { start: 0, end: 4, line: 1, column: 1 },
+    };
+  }
+  const analyzed = validateGrammar({
+    tokens: [],
+    rules: [{
+      name: "module",
+      expression,
+      span: { start: 0, end: 4, line: 1, column: 1 },
+    }],
+    span: { start: 0, end: 4, line: 1, column: 1 },
+  }, { targets: ["typescript"] });
+  assertEquals(analyzed[0].code, "PORTABLE_GRAMMAR_EXPRESSION_DEPTH_LIMIT");
+  assertIncludes(analyzed[0].message, "configured limit (1024)");
+});
+
 Deno.test("TypeScript parser target supports left-recursive arithmetic", async () => {
   const source = `
     token INTEGER = /[0-9]+/ ;
@@ -534,7 +607,10 @@ Deno.test("TypeScript parser ignores trivia in parseTokens and rejects unknown t
 
 Deno.test("TypeScript parseTokens rejects EOF before source end and nontrivia gaps", async () => {
   const result = compile(`module = ;`, { targets: ["typescript"] });
-  assertEquals(result.diagnostics.length, 0);
+  assertEquals(
+    result.diagnostics.map((diagnostic) => diagnostic.code).join(","),
+    "EMPTY_ONLY_RULE",
+  );
   assert(result.bundle);
 
   const dir = await Deno.makeTempDir();
@@ -647,7 +723,10 @@ Deno.test("TypeScript parser assigns current offsets to empty rule spans", async
     empty = ;
   `;
   const result = compile(source, { targets: ["typescript"] });
-  assertEquals(result.diagnostics.length, 0);
+  assertEquals(
+    result.diagnostics.map((diagnostic) => diagnostic.code).join(","),
+    "EMPTY_ONLY_RULE",
+  );
   assert(result.bundle);
 
   const dir = await Deno.makeTempDir();
@@ -784,9 +863,10 @@ Deno.test("TypeScript target rejects unsafe options and zero-length literals", (
   const source = `module = "" ;`;
   const emptyLiteral = compile(source, { targets: ["typescript"] });
   assertEquals(emptyLiteral.bundle, undefined);
-  assertEquals(
-    emptyLiteral.diagnostics[0].code,
-    "PORTABLE_LEXER_GENERATION_ERROR",
+  assert(
+    emptyLiteral.diagnostics.some((diagnostic) =>
+      diagnostic.code === "PORTABLE_LEXER_GENERATION_ERROR"
+    ),
   );
 
   const invalidDirectory = compile(`module = "ok" ;`, {
@@ -859,9 +939,10 @@ Deno.test("TypeScript target rejects nullable separated-list parts", () => {
     { targets: ["typescript"], rootRule: "module" },
   );
   assertEquals(nullableItem.bundle, undefined);
-  assertEquals(
-    nullableItem.diagnostics[0].code,
-    "PORTABLE_PARSER_NULLABLE_LIST_ITEM",
+  assert(
+    nullableItem.diagnostics.some((diagnostic) =>
+      diagnostic.code === "PORTABLE_PARSER_NULLABLE_LIST_ITEM"
+    ),
   );
 
   const nullableSeparator = compile(
@@ -873,9 +954,10 @@ Deno.test("TypeScript target rejects nullable separated-list parts", () => {
     { targets: ["typescript"], rootRule: "module" },
   );
   assertEquals(nullableSeparator.bundle, undefined);
-  assertEquals(
-    nullableSeparator.diagnostics[0].code,
-    "PORTABLE_PARSER_NULLABLE_LIST_SEPARATOR",
+  assert(
+    nullableSeparator.diagnostics.some((diagnostic) =>
+      diagnostic.code === "PORTABLE_PARSER_NULLABLE_LIST_SEPARATOR"
+    ),
   );
 });
 
@@ -905,6 +987,16 @@ Deno.test("TypeScript parser reports deliberately small state limits", () => {
   });
   assertEquals(itemLimit.bundle, undefined);
   assertEquals(itemLimit.diagnostics[0].code, "PORTABLE_PARSER_ITEM_LIMIT");
+
+  const closureLimit = compile(`module = "a" | "b" ;`, {
+    targets: ["typescript"],
+    typescript: { lrClosureWorkLimit: 1 },
+  });
+  assertEquals(closureLimit.bundle, undefined);
+  assertEquals(
+    closureLimit.diagnostics[0].code,
+    "PORTABLE_LR_CLOSURE_WORK_LIMIT",
+  );
 
   const tableLimit = compile(`module = "a" | "b" ;`, {
     targets: ["typescript"],
@@ -949,8 +1041,21 @@ Deno.test("TypeScript parser can report planning statistics", () => {
     result.diagnostics[0].message,
     "lexer ambiguous accept states:",
   );
+  assertIncludes(result.diagnostics[0].message, "regex AST nodes:");
+  assertIncludes(result.diagnostics[0].message, "regex NFA states:");
+  assertIncludes(result.diagnostics[0].message, "regex DFA states:");
+  assertIncludes(
+    result.diagnostics[0].message,
+    "overlap token pairs compared:",
+  );
+  assertIncludes(result.diagnostics[0].message, "grammar SCCs:");
+  assertIncludes(result.diagnostics[0].message, "nullable iterations:");
+  assertIncludes(result.diagnostics[0].message, "productive iterations:");
   assertIncludes(result.diagnostics[0].message, "LR states:");
   assertIncludes(result.diagnostics[0].message, "LR core items:");
+  assertIncludes(result.diagnostics[0].message, "LR closure work:");
   assertIncludes(result.diagnostics[0].message, "ACTION entries:");
+  assertIncludes(result.diagnostics[0].message, "diagnostics emitted:");
+  assertIncludes(result.diagnostics[0].message, "diagnostics suppressed:");
   assertIncludes(result.diagnostics[0].message, "generated bytes:");
 });

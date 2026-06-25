@@ -15,6 +15,8 @@ type TokenKind =
   | "symbol"
   | "eof";
 
+export const DEFAULT_EBNF_EXPRESSION_DEPTH_LIMIT = 256;
+
 interface Token {
   kind: TokenKind;
   text: string;
@@ -240,6 +242,7 @@ function lexEbnf(source: string, lines: number[]): Token[] {
 
 class Parser {
   #current = 0;
+  #expressionDepth = 0;
 
   constructor(
     private readonly source: string,
@@ -416,15 +419,12 @@ class Parser {
     }
 
     if (this.matchText("(")) {
-      const start = this.previous().span.start;
-      const expression = this.parseChoice();
-      const close = this.expectText(")");
-      return this.withSpan(expression, this.span(start, close.span.end));
+      return this.parseDelimitedExpression(")");
     }
 
     if (this.matchText("[")) {
       const start = this.previous().span.start;
-      const expression = this.parseChoice();
+      const expression = this.withExpressionDepth(() => this.parseChoice());
       const close = this.expectText("]");
       return {
         kind: "optional",
@@ -435,7 +435,7 @@ class Parser {
 
     if (this.matchText("{")) {
       const start = this.previous().span.start;
-      const expression = this.parseChoice();
+      const expression = this.withExpressionDepth(() => this.parseChoice());
       const close = this.expectText("}");
       return {
         kind: "repeat",
@@ -445,6 +445,27 @@ class Parser {
     }
 
     throw this.error("Expected expression");
+  }
+
+  private parseDelimitedExpression(closeText: string): EbnfExpression {
+    const start = this.previous().span.start;
+    const expression = this.withExpressionDepth(() => this.parseChoice());
+    const close = this.expectText(closeText);
+    return this.withSpan(expression, this.span(start, close.span.end));
+  }
+
+  private withExpressionDepth<T>(callback: () => T): T {
+    this.#expressionDepth++;
+    if (this.#expressionDepth > DEFAULT_EBNF_EXPRESSION_DEPTH_LIMIT) {
+      throw this.error(
+        `Grammar expression depth exceeded the default limit (${DEFAULT_EBNF_EXPRESSION_DEPTH_LIMIT})`,
+      );
+    }
+    try {
+      return callback();
+    } finally {
+      this.#expressionDepth--;
+    }
   }
 
   private isExpressionStart(): boolean {

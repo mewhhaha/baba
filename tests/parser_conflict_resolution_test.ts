@@ -77,7 +77,7 @@ Deno.test("TypeScript parser resolves declared shift/reduce conflicts determinis
     parser: {
       resolutions: [
         {
-          rules: ["generic", "identifier"],
+          rules: ["generic", "primary"],
           on: "[",
           prefer: "shift",
         },
@@ -181,6 +181,49 @@ Deno.test("TypeScript parser resolves conflicts by stable conflict ID", () => {
   });
   assertEquals(resolved.diagnostics.length, 0);
   assert(resolved.bundle);
+});
+
+Deno.test("legacy conflict selectors require exact origin names", () => {
+  const exactMetadata = parseMetadata(JSON.stringify({
+    version: 1,
+    parser: {
+      resolutions: [
+        {
+          rules: ["generic", "primary"],
+          on: "[",
+          prefer: "shift",
+        },
+      ],
+    },
+  }));
+  const exact = compile(genericPostfixGrammar, {
+    targets: ["typescript"],
+    metadata: exactMetadata,
+  });
+  assert(exact.bundle);
+  assertEquals(exact.diagnostics[0]?.severity, "information");
+
+  const substringMetadata = parseMetadata(JSON.stringify({
+    version: 1,
+    parser: {
+      resolutions: [
+        {
+          rules: ["gener", "primary"],
+          on: "[",
+          prefer: "shift",
+        },
+      ],
+    },
+  }));
+  const substring = compile(genericPostfixGrammar, {
+    targets: ["typescript"],
+    metadata: substringMetadata,
+  });
+  assertEquals(substring.bundle, undefined);
+  assertEquals(
+    substring.diagnostics[0].code,
+    "PORTABLE_PARSER_SHIFT_REDUCE_CONFLICT",
+  );
 });
 
 Deno.test("TypeScript parser rejects stale stable conflict IDs", () => {
@@ -376,6 +419,41 @@ Deno.test("TypeScript parser branches through declared local grammar conflicts",
     const mod = await import(`file://${dir}/typescript/mod.ts`);
     for (const source of ["(a)", "(a, b)", "((a))"]) {
       assertEquals(mod.parse(source).ok, true);
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("parser branches through stable declared conflict IDs", async () => {
+  const unresolved = compile(shiftFirstRestoreGrammar, {
+    targets: ["typescript"],
+  });
+  assertEquals(unresolved.bundle, undefined);
+  const conflict = conflictIdFromMessage(unresolved.diagnostics[0].message);
+  const metadata = parseMetadata(JSON.stringify({
+    version: 1,
+    parser: {
+      conflicts: [{ conflict }],
+    },
+  }));
+  const result = compile(shiftFirstRestoreGrammar, {
+    targets: ["typescript", "wasm"],
+    metadata,
+  });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    await denoCheck(`${dir}/wasm/mod.ts`);
+    const ts = await import(`file://${dir}/typescript/mod.ts`);
+    const wasm = await import(`file://${dir}/wasm/mod.ts`);
+    for (const mod of [ts, wasm]) {
+      assertEquals(mod.parse("a b").ok, true);
+      assertEquals(mod.parse("a b c").ok, true);
     }
   } finally {
     await Deno.remove(dir, { recursive: true });

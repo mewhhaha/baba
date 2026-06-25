@@ -18,6 +18,7 @@ function failedParseResult(
   tokens: readonly Token[],
   diagnostics: readonly ParseDiagnostic[],
 ): ParseResult<RootNode> {
+  enforceParseDiagnosticLimit(diagnostics);
   return {
     ok: false,
     root: null,

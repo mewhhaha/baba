@@ -26,3 +26,113 @@ fn cst_child_span_end(left: u32, right: u32) -> u32 {
   }
   return right;
 }
+
+fn cst_field_value_class(flags: u32) -> u32 {
+  if (flags % 2) != 0 {
+    return 3;
+  }
+  if ((flags / 2) % 2) != 0 {
+    return 2;
+  }
+  return 1;
+}
+
+fn cst_field_entry_status(entry: u32) -> u32 {
+  if entry == 4294967295 {
+    return 1;
+  }
+  return 0;
+}
+
+fn cst_field_storage_status(value_class: u32) -> u32 {
+  if value_class == 3 {
+    return 1;
+  }
+  return 0;
+}
+
+fn cst_field_schema_status(start: u32, end: u32, capture_count: u32) -> u32 {
+  if start < end {
+    return 0;
+  }
+  if capture_count == 0 {
+    return 0;
+  }
+  return 1;
+}
+
+fn cst_field_build_status(start: u32, end: u32, schema_status: u32) -> u32 {
+  if schema_status == 1 {
+    return 2;
+  }
+  if start < end {
+    return 1;
+  }
+  return 0;
+}
+
+fn cst_field_array_value_status(vector_handle: u32) -> u32 {
+  if vector_handle == 0 {
+    return 1;
+  }
+  return 0;
+}
+
+fn cst_field_scalar_value_status(count: u32) -> u32 {
+  if count == 0 {
+    return 0;
+  }
+  return 1;
+}
+
+fn cst_field_capture_status(entry_is_known: u32, value_class: u32, count: u32) -> u32 {
+  if entry_is_known == 0 {
+    return 0;
+  }
+  if value_class == 3 {
+    return 2;
+  }
+  if count > 1 {
+    return 3;
+  }
+  return 1;
+}
+
+fn cst_field_final_status(entry_is_known: u32, value_class: u32, count: u32) -> u32 {
+  if entry_is_known == 0 {
+    return 0;
+  }
+  if value_class == 3 {
+    return 0;
+  }
+  if (value_class == 2) && (count > 1) {
+    return 2;
+  }
+  if value_class == 2 {
+    return 0;
+  }
+  if count == 1 {
+    return 0;
+  }
+  return 1;
+}
+
+fn cst_field_final_build_status(storage_status: u32, final_status: u32) -> u32 {
+  if storage_status == 1 {
+    return 0;
+  }
+  if final_status == 1 {
+    return 2;
+  }
+  if final_status == 2 {
+    return 3;
+  }
+  return 1;
+}
+
+fn cst_child_list_status(count: u32) -> u32 {
+  if count == 0 {
+    return 0;
+  }
+  return 1;
+}

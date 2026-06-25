@@ -11,13 +11,23 @@ const grammar = `
 const runtimes = Deno.args.length ? Deno.args : ["deno"];
 const root = await Deno.makeTempDir();
 try {
-  await applyBundle(generate(grammar, { targets: ["typescript"] }), { root });
+  await applyBundle(generate(grammar, { targets: ["typescript", "wasm"] }), {
+    root,
+  });
   for (const runtime of runtimes) {
     if (runtime === "deno") {
-      await writeRunner(`${root}/deno_smoke.ts`, "./typescript/mod.ts");
+      await writeRunner(
+        `${root}/deno_smoke.ts`,
+        "./typescript/mod.ts",
+        "./wasm/mod.ts",
+      );
       await run("deno", ["run", "--allow-read", `${root}/deno_smoke.ts`], root);
     } else if (runtime === "bun") {
-      await writeRunner(`${root}/bun_smoke.ts`, "./typescript/mod.ts");
+      await writeRunner(
+        `${root}/bun_smoke.ts`,
+        "./typescript/mod.ts",
+        "./wasm/mod.ts",
+      );
       await run("bun", ["run", `${root}/bun_smoke.ts`], root);
     } else if (runtime === "node") {
       await Deno.writeTextFile(
@@ -29,11 +39,11 @@ try {
               module: "NodeNext",
               moduleResolution: "NodeNext",
               strict: true,
-              rootDir: "typescript",
+              rootDir: ".",
               outDir: "node",
               rewriteRelativeImportExtensions: true,
             },
-            include: ["typescript/**/*.ts"],
+            include: ["typescript/**/*.ts", "wasm/**/*.ts"],
           },
           null,
           2,
@@ -51,7 +61,11 @@ try {
         ],
         root,
       );
-      await writeRunner(`${root}/node_smoke.mjs`, "./node/mod.js");
+      await writeRunner(
+        `${root}/node_smoke.mjs`,
+        "./node/typescript/mod.js",
+        "./node/wasm/mod.js",
+      );
       await run("node", [`${root}/node_smoke.mjs`], root);
     } else {
       throw new Error(`Unknown runtime '${runtime}'`);
@@ -61,22 +75,36 @@ try {
   await Deno.remove(root, { recursive: true });
 }
 
-async function writeRunner(path: string, specifier: string): Promise<void> {
+async function writeRunner(
+  path: string,
+  typeScriptSpecifier: string,
+  wasmSpecifier: string,
+): Promise<void> {
   await Deno.writeTextFile(
     path,
-    `import { lex, parse } from ${JSON.stringify(specifier)};
+    `import { lex as lexTypeScript, parse as parseTypeScript } from ${
+      JSON.stringify(typeScriptSpecifier)
+    };
+import { lex as lexWasm, parse as parseWasm } from ${
+      JSON.stringify(wasmSpecifier)
+    };
 
 const source = "let value = 42;";
-const lexed = lex(source);
-if (lexed.diagnostics.length !== 0) {
-  throw new Error("lex failed");
-}
-const parsed = parse(source);
-if (!parsed.ok) {
-  throw new Error("parse failed");
-}
-if (parsed.root.fields.name.text !== "value") {
-  throw new Error("unexpected name field");
+for (const [name, lex, parse] of [
+  ["typescript", lexTypeScript, parseTypeScript],
+  ["wasm", lexWasm, parseWasm],
+]) {
+  const lexed = lex(source);
+  if (lexed.diagnostics.length !== 0) {
+    throw new Error(name + " lex failed");
+  }
+  const parsed = parse(source);
+  if (!parsed.ok) {
+    throw new Error(name + " parse failed");
+  }
+  if (parsed.root.fields.name.text !== "value") {
+    throw new Error(name + " unexpected name field");
+  }
 }
 `,
   );
@@ -87,7 +115,11 @@ async function run(
   args: readonly string[],
   cwd: string,
 ): Promise<void> {
-  const command = new Deno.Command(commandName, { args: [...args], cwd });
+  const command = new Deno.Command(commandName, {
+    args: [...args],
+    cwd,
+    env: commandName === "npx" ? { NPM_CONFIG_CACHE: `${cwd}/.npm-cache` } : {},
+  });
   const output = await command.output();
   if (output.success) return;
   const decoder = new TextDecoder();

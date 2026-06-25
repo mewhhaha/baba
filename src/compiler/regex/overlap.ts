@@ -1,5 +1,5 @@
 import { buildDfa, type Dfa } from "./dfa.ts";
-import { dfaIntersectionWitness } from "./intersect.ts";
+import { dfaDifferenceWitness, dfaIntersectionWitness } from "./intersect.ts";
 import type { RegexCompilerLimits } from "./limits.ts";
 import { buildRegexNfa } from "./nfa.ts";
 import type { RegexAst } from "./ast.ts";
@@ -29,4 +29,12 @@ export function dfaOverlapWitness(
   limits: RegexCompilerLimits = {},
 ): string | null {
   return dfaIntersectionWitness(leftDfa, rightDfa, limits)?.text ?? null;
+}
+
+export function dfaUncoveredWitness(
+  leftDfa: Dfa,
+  rightDfas: readonly Dfa[],
+  limits: RegexCompilerLimits = {},
+): string | null {
+  return dfaDifferenceWitness(leftDfa, rightDfas, limits)?.text ?? null;
 }

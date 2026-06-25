@@ -55,6 +55,7 @@ Deno.test("runtime planner exposes a versioned portable parser plan", () => {
 
 Deno.test("runtime source-of-truth cutline tracks final gate", async () => {
   const docs = await Deno.readTextFile("docs/runtime-language.md");
+  const adr = await Deno.readTextFile("docs/adr/0003-runtime-language.md");
 
   assertIncludes(docs, "## Runtime Source-Of-Truth Cutline");
   assertIncludes(docs, "Runtime-owned semantics:");
@@ -73,6 +74,15 @@ Deno.test("runtime source-of-truth cutline tracks final gate", async () => {
   );
   assertIncludes(docs, "Parser-kit");
   assertIncludes(docs, "tooling/convenience");
+  assertIncludes(
+    adr,
+    "now satisfy the source-of-truth cutline",
+  );
+  assertNotIncludes(adr, "has not yet completed the T04/T05 migration");
+  assertNotIncludes(
+    adr,
+    "not a claim that every TypeScript and Wasm parser algorithm",
+  );
 });
 
 Deno.test("TypeScript target emitters package shared runtime source", async () => {
@@ -94,6 +104,12 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
       assertNotIncludes(source, marker);
     }
   }
+  const lexerEmitSource = await Deno.readTextFile(
+    "src/targets/typescript/lexer_emit.ts",
+  );
+  assertNotIncludes(lexerEmitSource, "buildLexerDfa");
+  assertNotIncludes(lexerEmitSource, "AnalyzedGrammar");
+  assertNotIncludes(lexerEmitSource, "export function emitLexer(");
 
   const lexerRuntimeSource = await Deno.readTextFile(
     "src/targets/runtime/typescript_lexer_runtime.ts",
@@ -131,6 +147,9 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(runtimeLanguageSourcesSource, "lexerSpecTerminal");
   assertIncludes(runtimeLanguageSourcesSource, "lexerPublicTokenClass");
   assertIncludes(runtimeLanguageSourcesSource, "lexerTokenEmitStatus");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerDriverBeginEvent");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerDriverFinalizeEvent");
+  assertIncludes(runtimeLanguageSourcesSource, "lexerDriverConsumeEvent");
   assertIncludes(runtimeLanguageSourcesSource, "lexerDriverFinalize");
   assertIncludes(lexerRuntimeSource, "createLexerRuntimeProgram");
   assertIncludes(lexerRuntimeSource, "emitRuntimeLanguageTypeScriptFunction");
@@ -228,7 +247,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertNotIncludes(lexerRuntimeSource, "interface Candidate");
   assertNotIncludes(lexerRuntimeSource, "function bestCandidate");
   assertNotIncludes(lexerRuntimeSource, "const candidate =");
-  assertNotIncludes(lexerRuntimeSource, "lexerScanAdvance(codePoint)");
+  assertIncludes(lexerRuntimeSource, "lexerScanAdvance(codePoint)");
+  assertIncludes(lexerRuntimeSource, "lexerScanBestState()");
+  assertIncludes(lexerRuntimeSource, "lexerAcceptCandidateCount(state)");
+  assertIncludes(lexerRuntimeSource, "lexerAcceptCandidateSpec(state, index)");
   assertNotIncludes(
     lexerRuntimeSource,
     "lexerTokenEmitStatus(tokenClass, preserveTrivia",
@@ -270,6 +292,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "createParserConflictTraceRuntimeProgram",
   );
   assertIncludes(parserRuntimeSource, "createParserTraceRuntimeProgram");
+  assertIncludes(runtimeLanguageSourcesSource, "branchNextDepth");
   assertIncludes(parserRuntimeSource, "createParserReducerRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createParserFieldRuntimeProgram");
   assertIncludes(parserRuntimeSource, "createLexerSpecRuntimeProgram");
@@ -390,7 +413,15 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "parserTokenStreamSpanBoundsStatus",
   );
   assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTokenStreamSpanBoundsStatus",
+  );
+  assertIncludes(
     parserRuntimeSource,
+    "parserTokenStreamSpanPositionStatus",
+  );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
     "parserTokenStreamSpanPositionStatus",
   );
   assertIncludes(
@@ -399,10 +430,46 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   );
   assertIncludes(
     parserRuntimeSource,
+    "parserTokenStreamEofSequenceStatus",
+  );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTokenStreamEofStatus",
+  );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTokenStreamEofSequenceStatus",
+  );
+  assertIncludes(
+    parserRuntimeSource,
     "parserTokenStreamGapTokenStatus",
   );
   assertIncludes(
     parserRuntimeSource,
+    "parserTokenStreamGapIsEmpty",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTokenStreamCanAdvance",
+  );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTokenStreamGapTokenStatus",
+  );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTokenStreamGapIsEmpty",
+  );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTokenStreamCanAdvance",
+  );
+  assertIncludes(
+    parserRuntimeSource,
+    "parserTokenStreamTokenMatchStatus",
+  );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
     "parserTokenStreamTokenMatchStatus",
   );
   assertIncludes(
@@ -410,9 +477,24 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     "parserTokenStreamCanonicalMatchStatus",
   );
   assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTokenStreamCanonicalMatchStatus",
+  );
+  assertIncludes(
     parserRuntimeSource,
     "parserTokenStreamFinalStatus",
   );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTokenStreamFinalStatus",
+  );
+  assertNotIncludes(
+    parserRuntimeSource,
+    "Generated from src/runtime/token_stream.brl",
+  );
+  assertNotIncludes(parserRuntimeSource, "if (start === end) return null");
+  assertIncludes(runtimeLanguageSourcesSource, "parserExpectedRowStatus");
+  assertNotIncludes(publicDiagnosticMaterializerSource, "end <= start");
   assertIncludes(
     parserRuntimeSource,
     "parserTokenStreamPublicTokenStatus",
@@ -432,6 +514,10 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
   assertIncludes(
     parserRuntimeSource,
     "parserTraceTokenStreamStep",
+  );
+  assertIncludes(
+    runtimeLanguageSourcesSource,
+    "parserTraceTokenStreamEncodedTerminal",
   );
   assertIncludes(
     parserRuntimeSource,
@@ -457,6 +543,7 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "eofIndex !== -1 && eofIndex !== tokens.length - 1",
   );
+  assertNotIncludes(parserRuntimeSource, "if (eofIndex !== -1)");
   assertNotIncludes(
     parserRuntimeSource,
     "previousEnd < sourceText.length && eofIndex === -1",
@@ -484,6 +571,8 @@ Deno.test("TypeScript target emitters package shared runtime source", async () =
     parserRuntimeSource,
     "canonical.span.end <= token.span.start",
   );
+  assertNotIncludes(parserRuntimeSource, "token.span.end <= start");
+  assertNotIncludes(parserRuntimeSource, "token.span.start >= end");
   assertNotIncludes(
     parserRuntimeSource,
     "if (isTraceTriviaToken(canonical))",
@@ -674,10 +763,13 @@ Deno.test("Wasm target packages shared core runtime source", async () => {
   const wasmLexerSource = await Deno.readTextFile(
     "src/targets/wasm/lexer_emit.ts",
   );
-  assertIncludes(wasmLexerSource, "createParserTokenRecordRuntimeProgram");
-  assertIncludes(wasmLexerSource, "createSourceTextRuntimeProgram");
+  assertIncludes(wasmLexerSource, "createLexerRuntimeProgram");
   assertIncludes(wasmLexerSource, "emitPublicTokenMaterializer");
   assertNotIncludes(wasmLexerSource, "const SPECS:");
+  assertNotIncludes(wasmLexerSource, "DFA_TRANSITIONS");
+  assertNotIncludes(wasmLexerSource, "DFA_ASCII_TRANSITIONS");
+  assertNotIncludes(wasmLexerSource, "DFA_ACCEPT_CANDIDATES");
+  assertNotIncludes(wasmLexerSource, "contextualDfaTransition");
 
   const wasmAdapterSource = await Deno.readTextFile(
     "src/targets/wasm/runtime_emit.ts",
@@ -700,7 +792,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 24);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 25);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
@@ -715,6 +807,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
   assert(roles.includes("public-source-text-boundary"));
   assert(roles.includes("parser-diagnostic-codes"));
   assert(roles.includes("wasm-abi-constants"));
+  assert(roles.includes("generated-source-provenance"));
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {

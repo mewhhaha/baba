@@ -12,3 +12,99 @@ fn branch_next_depth(depth: u32, max_depth: u32) -> u32 {
 fn branch_is_exhausted(active: u32, cursor: u32) -> bool {
   return cursor >= active;
 }
+
+fn branch_trace_status_kind(status: u32) -> u32 {
+  if status == 0 {
+    return 0;
+  }
+  if status == 1 {
+    return 1;
+  }
+  if status == 2 {
+    return 2;
+  }
+  if status == 3 {
+    return 3;
+  }
+  if status == 4 {
+    return 4;
+  }
+  if status == 5 {
+    return 5;
+  }
+  return 2;
+}
+
+fn branch_should_record_failure(best_index: u32, stream_index: u32) -> bool {
+  if best_index == 4294967295 {
+    return true;
+  }
+  return best_index < stream_index;
+}
+
+fn branch_accept_outcome(
+  ambiguity_mode: u32,
+  success_found: u32,
+  branch_count: u32,
+) -> u32 {
+  if ambiguity_mode == 0 {
+    return 1;
+  }
+  if success_found != 0 {
+    return 2;
+  }
+  if branch_count == 0 {
+    return 1;
+  }
+  return 0;
+}
+
+fn branch_trace_append_status(
+  trace_count: u32,
+  max_trace_actions: u32,
+  trace_capacity: u32,
+) -> u32 {
+  if trace_count >= max_trace_actions {
+    return 4;
+  }
+  if trace_count >= trace_capacity {
+    return 2;
+  }
+  return 0;
+}
+
+fn branch_stack_append_status(depth: u32, capacity: u32) -> u32 {
+  if depth < capacity {
+    return 0;
+  }
+  return 2;
+}
+
+fn branch_exploration_status(explored_branches: u32, max_branches: u32) -> u32 {
+  if max_branches < explored_branches {
+    return 3;
+  }
+  return 0;
+}
+
+fn branch_restore_outcome(success_found: u32, branch_count: u32) -> u32 {
+  if branch_count != 0 {
+    return 0;
+  }
+  if success_found != 0 {
+    return 1;
+  }
+  return 2;
+}
+
+fn branch_has_terminal(stream_index: u32, terminal_count: u32) -> bool {
+  return stream_index < terminal_count;
+}
+
+fn branch_has_action(action_count: u32) -> bool {
+  return action_count != 0;
+}
+
+fn branch_has_deferred_action(ordinal: u32) -> bool {
+  return ordinal != 0;
+}

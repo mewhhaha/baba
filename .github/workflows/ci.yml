@@ -49,11 +49,26 @@ jobs:
       - name: Test
         run: deno task test
 
+      - name: Exact TypeScript/Wasm parity gate
+        run: deno task test:parity
+
+      - name: BRL backend conformance gate
+        run: deno task test:brl-conformance
+
+      - name: Portable fixture and plan gates
+        run: deno task test:portable
+
+      - name: Tree-sitter acceptance gate
+        run: deno task test:tree-sitter
+
+      - name: Short deterministic fuzz seeds
+        run: deno task test:fuzz
+
       - name: Bootstrap drift check
         run: deno task bootstrap:check
 
-      - name: Runtime smoke
-        run: deno run --allow-read --allow-write --allow-run tests/runtime_smoke.ts deno node bun
+      - name: Deno Node Bun TypeScript and Wasm runtime smoke
+        run: deno task test:runtime-smoke
 
       - name: Size budget check
         run: deno task size:check

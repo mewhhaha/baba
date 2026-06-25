@@ -11,9 +11,16 @@ declared ambiguous local grammars.
 ## Decision
 
 Baba emits stable structural conflict IDs in diagnostics. Metadata can resolve a
-conflict by stable ID, while legacy rule/token selectors remain compatible with
-replacement guidance. Declared branch conflicts use bounded deterministic branch
-search with configurable explored-branch, queued-branch, and trace-action
+conflict by stable ID, and `metadata.parser.conflicts` can declare a branchable
+conflict with the same stable ID shape:
+
+```json
+{ "conflict": "c_91a8..." }
+```
+
+Legacy rule/token selectors and rule-group branch declarations remain compatible
+with replacement guidance. Declared branch conflicts use bounded deterministic
+branch search with configurable explored-branch, queued-branch, and trace-action
 limits. `ambiguityMode` controls whether the first success is accepted or
 multiple successful branches are rejected.
 
@@ -31,6 +38,6 @@ diagnostics when configured budgets are exceeded.
 
 ## Compatibility Impact
 
-Stable conflict IDs are the preferred metadata selector. Legacy selectors remain
-supported for compatibility but can produce informational replacement
-diagnostics.
+Stable conflict IDs are the preferred metadata selector for deterministic
+resolutions and branch declarations. Legacy selectors remain supported for
+compatibility but can produce informational replacement diagnostics.

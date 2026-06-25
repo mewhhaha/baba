@@ -16,7 +16,7 @@ jobs:
           deno-version: v2.8.0
 
       - name: Deterministic fuzz seeds
-        run: deno test --allow-read --allow-write --allow-run tests/fuzz_test.ts
+        run: deno task test:fuzz
 
       - name: Benchmark JSON report
         run: deno task bench -- --samples 3 --json bench-results.json

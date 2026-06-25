@@ -301,6 +301,39 @@ Deno.test("Lexical priority can keep a token above overlapping trivia", async ()
   }
 });
 
+Deno.test("TypeScript lexer reports unused skip declarations", async () => {
+  const source = `
+    skip IGNORED_X priority 0 = /x/ ;
+    token X priority 10 = /x/ ;
+    module = X ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assert(result.bundle);
+  const diagnostic = result.diagnostics.find((item) =>
+    item.code === "PORTABLE_UNUSED_SKIP_DECLARATION"
+  );
+  assert(diagnostic);
+  assertEquals(diagnostic.severity, "warning");
+  assertIncludes(diagnostic.message, "skip IGNORED_X");
+  assertIncludes(diagnostic.message, "portable trivia");
+  assertRelatedMessages(diagnostic, [
+    "Covering candidate: token X",
+  ]);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const lexed = mod.lex("x");
+    assertEquals(lexed.tokens[0].kind, "X");
+    assertEquals(lexed.tokens[0].channel, "main");
+    assertEquals(mod.parse("x").ok, true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("Lexical priority cannot let trivia shadow a reachable token", () => {
   const result = compile(
     `
@@ -317,6 +350,64 @@ Deno.test("Lexical priority cannot let trivia shadow a reachable token", () => {
     "Left declaration: skip IGNORED_X",
     "Right declaration: token X",
   ]);
+});
+
+Deno.test("TypeScript lexer reports completely shadowed token languages", () => {
+  const result = compile(
+    `
+    token WIN priority 10 = /x/ ;
+    token LOSE priority 0 = /x/ ;
+    module = WIN | LOSE ;
+  `,
+    { targets: ["typescript"] },
+  );
+  assert(result.bundle);
+  const diagnostic = result.diagnostics.find((item) =>
+    item.code === "PORTABLE_SHADOWED_TOKEN_LANGUAGE"
+  );
+  assert(diagnostic);
+  assertEquals(diagnostic.severity, "warning");
+  assertIncludes(diagnostic.message, "token LOSE");
+  assertIncludes(diagnostic.message, "standalone lex()");
+  assertIncludes(diagnostic.message, "No parser context can recover");
+  assertRelatedMessages(diagnostic, [
+    "Covering candidate: token WIN",
+  ]);
+});
+
+Deno.test("contextual parsing can recover a globally shadowed token", async () => {
+  const result = compile(
+    `
+    token A priority 10 = /x/ ;
+    token B priority 0 = /x/ ;
+    module = first | second ;
+    first = "a" item:A ;
+    second = "b" item:B ;
+  `,
+    { targets: ["typescript"] },
+  );
+  assert(result.bundle);
+  const diagnostic = result.diagnostics.find((item) =>
+    item.code === "PORTABLE_SHADOWED_TOKEN_LANGUAGE"
+  );
+  assert(diagnostic);
+  assertEquals(diagnostic.severity, "warning");
+  assertIncludes(diagnostic.message, "Contextual parse()");
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const lexed = mod.lex("bx");
+    assertEquals(lexed.tokens[1].kind, "A");
+    const parsed = mod.parse("bx");
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.children[0].name, "second");
+    assertEquals(parsed.root.children[0].fields.item.kind, "B");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("Lexical priority cannot hide a reachable literal", () => {
@@ -561,6 +652,24 @@ Deno.test("TypeScript target reports regex resource limits", () => {
   assertEquals(nesting.bundle, undefined);
   assertEquals(nesting.diagnostics[0].code, "PORTABLE_REGEX_NESTING_LIMIT");
   assertIncludes(nesting.diagnostics[0].message, "regex nesting depth");
+
+  const defaultNestedPattern = `${"(".repeat(300)}a${")".repeat(300)}`;
+  const defaultNesting = compile(
+    `
+    token NESTED = /${defaultNestedPattern}/ ;
+    module = NESTED ;
+  `,
+    { targets: ["typescript"] },
+  );
+  assertEquals(defaultNesting.bundle, undefined);
+  assertEquals(
+    defaultNesting.diagnostics[0].code,
+    "PORTABLE_REGEX_NESTING_LIMIT",
+  );
+  assertIncludes(
+    defaultNesting.diagnostics[0].message,
+    "configured limit (256)",
+  );
 
   const ast = compile(
     `

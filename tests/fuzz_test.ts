@@ -11,6 +11,38 @@ import { buildDfa } from "../src/compiler/regex/dfa.ts";
 import { buildRegexNfa } from "../src/compiler/regex/nfa.ts";
 import { parsePortableRegex } from "../src/compiler/regex/parser.ts";
 
+Deno.test("fuzz context reports seed, case, input, and persistence guidance", () => {
+  let message = "";
+  try {
+    withFuzzContext(
+      {
+        test: "diagnostic harness",
+        seed: 0xBAD,
+        index: 7,
+        source: "bad input",
+        pattern: "a+",
+      },
+      () => {
+        throw new Error("boom");
+      },
+    );
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+
+  assert(message.includes("Fuzz failure in diagnostic harness."));
+  assert(message.includes("seed: 0xbad"));
+  assert(message.includes("case index: 7"));
+  assert(message.includes('regex pattern: "a+"'));
+  assert(message.includes('source: "bad input"'));
+  assert(
+    message.includes(
+      "Persist this case as a minimal fixture before changing semantics.",
+    ),
+  );
+  assert(message.includes("boom"));
+});
+
 Deno.test("fuzz: generated EBNF sources parse and compile deterministically", () => {
   const seed = 0xBABA;
   const random = seededRandom(seed);

@@ -306,6 +306,14 @@ function parseArgs(args: string[]): Options {
         options.kit.regexOverlapStateLimit =
           options.typescript.regexOverlapStateLimit;
         break;
+      case "--grammar-expression-depth-limit":
+        options.typescript.grammarExpressionDepthLimit =
+          parsePositiveIntegerArg(args[++i], arg);
+        options.wasm.grammarExpressionDepthLimit =
+          options.typescript.grammarExpressionDepthLimit;
+        options.kit.grammarExpressionDepthLimit =
+          options.typescript.grammarExpressionDepthLimit;
+        break;
       case "--parser-state-limit":
         options.typescript.parserStateLimit = parsePositiveIntegerArg(
           args[++i],
@@ -321,6 +329,14 @@ function parseArgs(args: string[]): Options {
         );
         options.wasm.parserItemLimit = options.typescript.parserItemLimit;
         options.kit.parserItemLimit = options.typescript.parserItemLimit;
+        break;
+      case "--lr-closure-work-limit":
+        options.typescript.lrClosureWorkLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
+        options.wasm.lrClosureWorkLimit = options.typescript.lrClosureWorkLimit;
+        options.kit.lrClosureWorkLimit = options.typescript.lrClosureWorkLimit;
         break;
       case "--parser-table-entry-limit":
         options.typescript.parserTableEntryLimit = parsePositiveIntegerArg(
@@ -480,8 +496,10 @@ Options:
   --regex-nfa-state-limit       Maximum regex NFA state count
   --regex-dfa-state-limit       Maximum regex DFA state count
   --regex-overlap-state-limit   Maximum overlap-analysis product states
+  --grammar-expression-depth-limit  Maximum nested EBNF expression depth
   --parser-state-limit  Maximum portable runtime LR state count
   --parser-item-limit   Maximum total portable runtime LR item count
+  --lr-closure-work-limit  Maximum portable runtime LR closure work units
   --parser-table-entry-limit  Maximum portable runtime ACTION/GOTO entry count
   --generated-byte-limit  Compatibility alias for TypeScript and Wasm byte limits
   --wasm-generated-byte-limit  Maximum generated Wasm bytes

@@ -132,7 +132,7 @@ export interface PortableRuntimePlanningOptions {
   lexerStateLimit?: number;
   /** Maximum regex source length in UTF-16 code units per token pattern. Defaults to unlimited. */
   regexSourceLengthLimit?: number;
-  /** Maximum nested regex group depth per token pattern. Defaults to unlimited. */
+  /** Maximum nested regex group depth per token pattern. Defaults to 256. */
   regexNestingLimit?: number;
   /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
   regexAstNodeLimit?: number;
@@ -146,10 +146,14 @@ export interface PortableRuntimePlanningOptions {
   regexOverlapStateLimit?: number;
   /** Maximum token/literal pairs compared during overlap analysis. Defaults to unlimited. */
   regexOverlapPairLimit?: number;
+  /** Maximum nested EBNF expression depth during grammar analysis. Defaults to 1,024. */
+  grammarExpressionDepthLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
   /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
   parserItemLimit?: number;
+  /** Maximum LR(1) closure expansion work units. Defaults to unlimited. */
+  lrClosureWorkLimit?: number;
   /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
   parserTableEntryLimit?: number;
   /** Maximum runtime-planning diagnostics returned before a summary is appended. Defaults to unlimited. */
@@ -191,7 +195,7 @@ export interface KitTargetOptions {
   lexerStateLimit?: number;
   /** Maximum regex source length in UTF-16 code units per token pattern. Defaults to unlimited. */
   regexSourceLengthLimit?: number;
-  /** Maximum nested regex group depth per token pattern. Defaults to unlimited. */
+  /** Maximum nested regex group depth per token pattern. Defaults to 256. */
   regexNestingLimit?: number;
   /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
   regexAstNodeLimit?: number;
@@ -205,10 +209,14 @@ export interface KitTargetOptions {
   regexOverlapStateLimit?: number;
   /** Maximum token/literal pairs compared during overlap analysis. Defaults to unlimited. */
   regexOverlapPairLimit?: number;
+  /** Maximum nested EBNF expression depth during grammar analysis. Defaults to 1,024. */
+  grammarExpressionDepthLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;
   /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
   parserItemLimit?: number;
+  /** Maximum LR(1) closure expansion work units. Defaults to unlimited. */
+  lrClosureWorkLimit?: number;
   /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
   parserTableEntryLimit?: number;
   /** Maximum runtime-planning diagnostics returned before a summary is appended. Defaults to unlimited. */
@@ -217,23 +225,31 @@ export interface KitTargetOptions {
 
 /** Conflict policy for standalone parser runtimes. */
 export interface ParserRuntimeMetadata {
-  /** Conflict groups that may be explored by the TypeScript parser runtime. */
-  conflicts?: string[][];
+  /** LR conflicts that may be explored by standalone parser runtimes. */
+  conflicts?: ParserConflictDeclarationMetadata[];
   /** Deterministic conflict resolutions applied while building LR tables. */
   resolutions?: ParserConflictResolutionMetadata[];
 }
+
+/** One LR parser conflict declaration that enables bounded branch search. */
+export type ParserConflictDeclarationMetadata =
+  | string[]
+  | {
+    /** Stable conflict ID reported by parser conflict diagnostics. */
+    readonly conflict: string;
+  };
 
 /** One deterministic LR parser conflict resolution. */
 export interface ParserConflictResolutionMetadata {
   /** Stable conflict ID reported by parser conflict diagnostics. */
   conflict?: string;
-  /** Rule names or expression descriptions that must be involved. */
+  /** Exact rule names or exact expression descriptions that must be involved. */
   rules?: string[];
   /** Terminal display or literal text that must trigger the conflict. */
   on?: string;
   /** Which LR action kind should win. */
   prefer: "shift" | "reduce";
-  /** Rule name or expression text to select when more than one reduce action exists. */
+  /** Exact rule name or exact expression text to select when more than one reduce action exists. */
   reduce?: string;
 }
 

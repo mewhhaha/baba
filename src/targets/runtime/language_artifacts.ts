@@ -293,16 +293,16 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_object_runtime",
       entry: "parserFragmentNew",
-      sourceHash: "fnv1a64:dd3a355f9dc2f0b9",
-      typescriptHash: "fnv1a64:da0d034c517484cb",
-      wasmHash: "fnv1a64:3c6a36db9fe37d30",
+      sourceHash: "fnv1a64:684696c13008904d",
+      typescriptHash: "fnv1a64:a6bc8fce7a0e72bf",
+      wasmHash: "fnv1a64:3e003452851c7896",
     },
     {
       name: "lexer_runtime",
       entry: "dfaTransition",
-      sourceHash: "fnv1a64:a3b069a62660c7a0",
-      typescriptHash: "fnv1a64:7cd1b56a45dc7d88",
-      wasmHash: "fnv1a64:de9f226a06eca3e5",
+      sourceHash: "fnv1a64:0eebfa2c4834d898",
+      typescriptHash: "fnv1a64:2f0c550419e49c0d",
+      wasmHash: "fnv1a64:a9a68aa8e001f29a",
     },
     {
       name: "parser_table_runtime",
@@ -328,9 +328,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_conflict_trace_runtime",
       entry: "parserTrace",
-      sourceHash: "fnv1a64:f17ca000b1baacfd",
-      typescriptHash: "fnv1a64:2f1f3c6d3f6733c4",
-      wasmHash: "fnv1a64:c2601fee84fe3797",
+      sourceHash: "fnv1a64:e6b5f0dffbbdff59",
+      typescriptHash: "fnv1a64:fecf14b600caef58",
+      wasmHash: "fnv1a64:6d02d73dfd6e7791",
     },
     {
       name: "parser_goto_runtime",
@@ -342,9 +342,9 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_expected_runtime",
       entry: "parserExpectedStart",
-      sourceHash: "fnv1a64:c52cde3bb27d0ce5",
-      typescriptHash: "fnv1a64:8be2da8393428d93",
-      wasmHash: "fnv1a64:d5dd585a1203ec35",
+      sourceHash: "fnv1a64:47830592e5ab2c8f",
+      typescriptHash: "fnv1a64:5bd11049130ccf81",
+      wasmHash: "fnv1a64:0b32f9c527a17861",
     },
     {
       name: "parser_range_runtime",
@@ -377,14 +377,14 @@ export const RUNTIME_LANGUAGE_ARTIFACTS:
     {
       name: "parser_trace_runtime",
       entry: "parserTrace",
-      sourceHash: "fnv1a64:330ed46bc1502540",
-      typescriptHash: "fnv1a64:5f190655e923a9b8",
-      wasmHash: "fnv1a64:ae0ecadd7ac08379",
+      sourceHash: "fnv1a64:3c81b3f309d71ee9",
+      typescriptHash: "fnv1a64:33caac2507ba8f5b",
+      wasmHash: "fnv1a64:53a33f1c18612729",
     },
   ] as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_HASH =
-  "fnv1a64:292abfe96a1228f8" as const;
+  "fnv1a64:35e956fbcafd57aa" as const;
 
 export const RUNTIME_LANGUAGE_ARTIFACTS_METADATA:
   RuntimeLanguageArtifactsMetadata = {
