@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "word": "IDENT",
+  "parser": {
+    "conflicts": [
+      ["type_tuple", "type_atom"]
+    ]
+  },
+  "queries": {
+    "highlights": {
+      "entries": [
+        { "node": "INTEGER", "capture": "number" },
+        { "node": "STRING", "capture": "string" },
+        { "node": "TYPE_IDENT", "capture": "type" },
+        { "literal": "@", "capture": "keyword" },
+        { "literal": "#", "capture": "keyword" },
+        { "literal": "?", "capture": "keyword" },
+        { "literal": "!", "capture": "operator" }
+      ]
+    },
+    "locals": [
+      { "node": "IDENT", "capture": "local.definition" }
+    ],
+    "folds": [
+      { "node": "list", "capture": "fold" },
+      { "node": "type_tuple", "capture": "fold" }
+    ],
+    "tags": [
+      { "node": "declaration", "capture": "tag.definition" },
+      { "node": "type_alias", "capture": "tag.definition" }
+    ],
+    "textobjects": [
+      { "node": "declaration", "capture": "function.outer" },
+      { "node": "type_alias", "capture": "class.outer" }
+    ],
+    "rainbows": {
+      "scopes": ["list", "type_tuple", "type_group"],
+      "brackets": ["[", "]", "(", ")"]
+    }
+  }
+}

@@ -42,6 +42,10 @@
 - Added focused documentation for grammar syntax, metadata, portable runtime,
   TypeScript target, Wasm target, Wasm ABI, diagnostics, limits, examples,
   contributing, stability levels, and architecture decision records.
+- Added a `feature-tour` example covering contextual lexing, parser conflicts,
+  generated query metadata, TypeScript/Wasm APIs, parser-kit, parser-plan and
+  runtime identity, token-stream validation, Wasm limits, and external Wasm
+  packaging.
 
 ### Changed
 

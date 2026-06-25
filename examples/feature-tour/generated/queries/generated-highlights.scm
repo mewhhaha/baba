@@ -1,0 +1,30 @@
+(INTEGER) @number
+(STRING) @string
+(TYPE_IDENT) @type
+"@" @keyword
+"#" @keyword
+"?" @keyword
+(modifier) @operator
+"(" @punctuation.bracket
+")" @punctuation.bracket
+"," @punctuation.delimiter
+":" @punctuation.delimiter
+";" @punctuation.delimiter
+"<" @operator
+"=" @operator
+">" @operator
+"[" @punctuation.bracket
+"]" @punctuation.bracket
+(type_annotation) @type
+(type_alias) @type
+(integer) @number
+(string) @string
+(type_expr) @type
+(type_primary) @type
+(type_tuple) @type
+(type_group) @type
+(type_atom) @type
+(type_term) @type
+(COMMENT) @comment
+(call callee: (IDENT) @function.call)
+(type_alias name: (TYPE_IDENT) @type)

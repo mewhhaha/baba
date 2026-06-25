@@ -26,6 +26,7 @@ interface ExampleConfig {
   rootRule: string;
   metadataPath: string;
   typescriptDir: string;
+  allowedDiagnosticCodes?: readonly string[];
 }
 
 const EXAMPLES: readonly ExampleConfig[] = [
@@ -35,6 +36,17 @@ const EXAMPLES: readonly ExampleConfig[] = [
     rootRule: "module",
     metadataPath: "baba.json",
     typescriptDir: "ts",
+  },
+  {
+    dir: "examples/feature-tour",
+    name: "feature_tour",
+    rootRule: "module",
+    metadataPath: "baba.json",
+    typescriptDir: "ts",
+    allowedDiagnosticCodes: [
+      "PORTABLE_LEXER_TOKEN_OVERLAP",
+      "PORTABLE_SHADOWED_TOKEN_LANGUAGE",
+    ],
   },
   {
     dir: "examples/funcfuck",
@@ -194,8 +206,13 @@ async function compileExample(example: ExampleConfig) {
     targets: ["tree-sitter", "typescript", "wasm"],
     typescript: { directory: example.typescriptDir },
   });
-  if (result.diagnostics.length > 0 || !result.bundle) {
-    const messages = result.diagnostics.map((diagnostic) =>
+  const allowedDiagnosticCodes = new Set(example.allowedDiagnosticCodes ?? []);
+  const unexpectedDiagnostics = result.diagnostics.filter((diagnostic) =>
+    (diagnostic.severity ?? "error") === "error" ||
+    !allowedDiagnosticCodes.has(diagnostic.code)
+  );
+  if (unexpectedDiagnostics.length > 0 || !result.bundle) {
+    const messages = unexpectedDiagnostics.map((diagnostic) =>
       `${diagnostic.code}: ${diagnostic.message}`
     );
     throw new Error(

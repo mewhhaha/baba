@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name feature_tour --root module --metadata baba.json --target all --typescript-dir ts --portability warn",
+    "check": "deno check interpreter.ts",
+    "run": "deno run --allow-read --allow-write interpreter.ts programs/tour.ft",
+    "test": "deno task check && deno task run && deno task external",
+    "external": "deno run --allow-read --allow-write interpreter.ts programs/tour.ft --external-wasm",
+    "tree-sitter:generate": "cd generated && tree-sitter generate",
+    "tree-sitter:build": "XDG_CACHE_HOME=$PWD/.cache sh -c 'cd generated && tree-sitter build -o parser.so'",
+    "tree-sitter:parse": "XDG_CACHE_HOME=$PWD/.cache tree-sitter parse --lib-path generated/parser.so --lang-name feature_tour programs/tour.ft"
+  }
+}

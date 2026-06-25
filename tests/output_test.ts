@@ -236,7 +236,9 @@ Deno.test("size budget check reports pass and fail states", async () => {
 });
 
 Deno.test("examples expose one-command reproducibility tasks", async () => {
-  for (const example of ["brainfuck", "funcfuck", "thunkwasm"]) {
+  for (
+    const example of ["brainfuck", "feature-tour", "funcfuck", "thunkwasm"]
+  ) {
     const config = JSON.parse(
       await Deno.readTextFile(`examples/${example}/deno.json`),
     );

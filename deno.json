@@ -33,6 +33,7 @@
   "fmt": {
     "exclude": [
       "examples/brainfuck/generated",
+      "examples/feature-tour/generated",
       "examples/funcfuck/generated",
       "examples/thunkwasm/generated",
       "src/runtime_language/SPEC.md",

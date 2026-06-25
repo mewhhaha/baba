@@ -1,0 +1,33 @@
+token A priority 10 = /x/ ;
+token B priority 0 = /x/ ;
+token IDENT = /[a-wy-z][A-Za-z0-9_]*/ ;
+token TYPE_IDENT = /[A-Z][A-Za-z0-9_]*/ ;
+token INTEGER = /[0-9]+/ ;
+token STRING = /"([^"\\]|\\.)*"/ ;
+skip WS = /[ \t\r\n]+/ ;
+skip COMMENT = /\/\/[^\n]*/ ;
+
+module = items:item* ;
+
+item = declaration | type_alias | check | contextual ;
+
+declaration = "@" name:IDENT annotation:type_annotation? "=" value:expr ";" ;
+type_annotation = ":" value:type_expr ;
+type_alias = "#" name:TYPE_IDENT "=" value:type_expr ";" ;
+check = "?" value:type_expr ";" ;
+contextual = "<" value:A ";" | ">" value:B ";" ;
+
+expr = call | list | integer | string | variable ;
+call = callee:IDENT "(" args:(expr % ",")? ")" ;
+list = "[" items:(expr % ",")? "]" ;
+integer = INTEGER ;
+string = STRING ;
+variable = IDENT ;
+
+type_expr = type_primary ;
+type_primary = type_tuple | type_group | type_atom ;
+type_tuple = "(" left:type_atom "," right:type_atom ")" ;
+type_group = "(" value:type_atom ")" ;
+type_atom = modifiers:modifier* value:type_term ;
+modifier = "!" ;
+type_term = TYPE_IDENT | "(" type_expr ")" ;
