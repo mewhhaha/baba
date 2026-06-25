@@ -181,7 +181,7 @@ import { emitPublicSourceTextBoundary } from "./public_source_text.ts";
 import { emitPublicEofTokenMaterializer } from "./public_token_materializer.ts";
 import { generatedSourceBanner } from "./provenance.ts";
 import type {
-  PortableParserPlanV1,
+  PortableParserPlan,
   PortableReducerPlan,
 } from "./portable_plan.ts";
 
@@ -240,7 +240,7 @@ export function emitParser(
 }
 
 export function emitParserFromPortablePlan(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
   options: ParserEmitOptions = {},
 ): string {
   return emitParserModel(parserRuntimeModelFromPortablePlan(plan), {
@@ -445,7 +445,7 @@ function parserRuntimeModelFromCompiler(
 }
 
 function parserRuntimeModelFromPortablePlan(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
 ): ParserRuntimeModel {
   const fieldNames = [...plan.symbols.fields]
     .sort((left, right) => left.id - right.id)
@@ -539,7 +539,7 @@ function parserRuntimeModelFromPortablePlan(
 }
 
 function actionRowsFromPortablePlan(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
 ): EncodedAction[][] {
   const byState = new Map(plan.parser.actions.map((row) => [row.state, row]));
   return plan.parser.states.map((state) =>
@@ -557,7 +557,7 @@ function actionRowsFromPortablePlan(
   );
 }
 
-function gotoRowsFromPortablePlan(plan: PortableParserPlanV1): GotoEntry[][] {
+function gotoRowsFromPortablePlan(plan: PortableParserPlan): GotoEntry[][] {
   const byState = new Map(plan.parser.gotos.map((row) => [row.state, row]));
   return plan.parser.states.map((state) =>
     (byState.get(state.id)?.entries ?? []).map((entry) =>

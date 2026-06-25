@@ -11,7 +11,7 @@ import {
 } from "../src/compiler/portable_plan/serialize_json.ts";
 import { portablePlanStatistics } from "../src/compiler/portable_plan/statistics.ts";
 import { validatePortableParserPlan } from "../src/compiler/portable_plan/validate.ts";
-import type { PortableParserPlanV1 } from "../src/compiler/portable_plan/plan.ts";
+import type { PortableParserPlan } from "../src/compiler/portable_plan/plan.ts";
 import {
   assert,
   assertEquals,
@@ -19,7 +19,7 @@ import {
   parseGrammar,
 } from "./helpers.ts";
 
-function portablePlanFor(source: string): PortableParserPlanV1 {
+function portablePlanFor(source: string): PortableParserPlan {
   const grammar = parseGrammar(source);
   const analyzed = analyzeGrammar(grammar, { name: "portable_fixture" });
   assertEquals(analyzed.diagnostics.length, 0);
@@ -29,7 +29,7 @@ function portablePlanFor(source: string): PortableParserPlanV1 {
   return result.runtime.portable;
 }
 
-function portableFixturePlan(): PortableParserPlanV1 {
+function portableFixturePlan(): PortableParserPlan {
   return portablePlanFor(`
     token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
     token INTEGER = /[0-9]+/ ;
@@ -87,7 +87,7 @@ Deno.test("portable parser plan production stable IDs are structural", () => {
     item = IDENT "," ;
   `);
 
-  const stableIds = (plan: PortableParserPlanV1) =>
+  const stableIds = (plan: PortableParserPlan) =>
     plan.parser.productions.map((production) => production.stableId).join(",");
   assertEquals(stableIds(reformatted), stableIds(left));
   assert(stableIds(changed) !== stableIds(left));

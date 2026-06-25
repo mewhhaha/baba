@@ -1,5 +1,94 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- Added `PortableParserPlan`, a versioned target-neutral parser-plan contract
+  with canonical lexer DFA tables, LR action/goto tables, reducer opcodes, CST
+  schema, diagnostic schema, statistics, deterministic JSON serialization,
+  metadata hashes, validation, and parser-kit/TypeScript/Wasm adapters.
+- Added stable structural production IDs and stable LR conflict IDs, plus
+  metadata selectors that can target conflicts by ID while preserving legacy
+  selectors with exact matching and migration diagnostics.
+- Added bounded parser branch-search semantics, shared branch/resource limits,
+  ambiguity diagnostics, and TypeScript/Wasm parity coverage for declared parser
+  conflicts.
+- Added parser-contextual token selection for overlapping tokens while keeping
+  standalone `lex()` globally deterministic and documenting the relationship
+  between `lex()`, `parse()`, `parseTokens()`, and `parseTokensUnchecked()`.
+- Added first-class binary generated artifacts, binary-safe manifests and output
+  writes, Wasm packaging modes, external `parser.wasm` output, and generated
+  Wasm ABI/runtime descriptors.
+- Added the private BRL runtime-language frontend, typed IR, verifier,
+  TypeScript backend, Wasm backend, runtime source modules, conformance
+  fixtures, compiler manifests, artifact manifests, and bootstrap drift checks.
+- Added generated parser runtime implementation identity metadata with checked
+  source hashes and provenance banners in generated runtime outputs.
+- Added a versioned Wasm ABI document and generated exports for ABI version,
+  parser-plan version, runtime semantics version, memory layout, encoding,
+  ownership, result lifetime, reset, resource limits, and adapter capability
+  metadata.
+- Added parser instance APIs for generated Wasm adapters, including
+  `createParser`, `createParserAsync`, reset/dispose behavior, instance-owned
+  memory/state, repeated parse reuse, and worker/concurrency coverage.
+- Added compiler hardening for parsed regex reuse, regex/NFA/DFA/overlap work
+  limits, grammar depth/productivity/nullability diagnostics, diagnostic caps,
+  lexical shadowing analysis, and analysis statistics.
+- Added portable fixture corpora, exact TypeScript/Wasm parity gates,
+  Tree-sitter portable-subset acceptance gates, BRL backend conformance gates,
+  deterministic fuzz seeds, machine-readable benchmark output, bootstrap drift
+  checks, size budgets, and scheduled quality workflows.
+- Added focused documentation for grammar syntax, metadata, portable runtime,
+  TypeScript target, Wasm target, Wasm ABI, diagnostics, limits, examples,
+  contributing, stability levels, and architecture decision records.
+
+### Changed
+
+- TypeScript, Wasm, and parser-kit targets now share one runtime planning pass
+  and consume the same portable parser plan instead of rebuilding runtime data
+  independently.
+- Generated TypeScript and JavaScript-hosted Wasm parser runtimes now use the
+  shared runtime-language helper layer for lexer scan/candidate lookup, parser
+  traces, branch scheduling, token-stream validation, reducer dispatch, CST
+  field assembly, accepted-root classification, and runtime diagnostic payloads.
+- Wasm target packaging now separates the core Wasm runtime, parser trace Wasm
+  helper, JavaScript adapter, ABI descriptor, manifest, and optional external
+  binary artifact.
+- Generated examples were refreshed against the current parser plan, runtime
+  implementation identity, Wasm ABI metadata, provenance banners, and shared
+  runtime-language helper artifacts.
+- CLI help, target options, diagnostics, docs, and tests now describe shared
+  portable runtime limits and Wasm-specific size/stat flags consistently.
+- Package publish contents now exclude generated example snapshots while size
+  reports and budgets explicitly track publish payload and checked-in generated
+  snapshots.
+- Release CI now installs independent Wasm and Tree-sitter tools and runs named
+  gates for formatting, lint, type checking, full tests, parity, BRL
+  conformance, portable fixtures, Tree-sitter acceptance, fuzz seeds, bootstrap
+  drift, runtime smoke, size budgets, benchmark JSON, and publish dry run.
+
+### Fixed
+
+- Fixed multi-target portability defaults so one semantic target defaults to
+  warnings, multiple semantic targets default to strict portability, and
+  explicit user settings are preserved.
+- Fixed duplicate TypeScript/Wasm planning work by proving TypeScript plus Wasm
+  builds the shared portable runtime plan once per compile.
+- Fixed `validateGrammar()` and `compile()` drift for shared planning
+  diagnostics.
+- Removed diagnostic message rewriting that replaced TypeScript wording with
+  Wasm wording; shared planning diagnostics are now backend-neutral.
+- Removed substring-based parser conflict matching through
+  `description.includes(...)`; legacy selectors now require exact structural
+  origin matches.
+- Removed legacy target-local TypeScript lexer emitter responsibilities and
+  target-local Wasm contextual DFA scan tables from generated runtime emitters
+  where shared runtime-language helpers own the behavior.
+- Fixed Wasm memory/lifetime hazards through instance-owned memory, reset and
+  disposal checks, source-buffer ownership, handle provenance, memory growth
+  view refresh, overflow checks, and structured resource-limit failures.
+
 ## 1.5.2
 
 ### Changed

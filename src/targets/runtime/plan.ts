@@ -26,9 +26,9 @@ import { type BnfGrammar, lowerToBnf } from "../typescript/bnf.ts";
 import { buildCanonicalLr1Table, type LrTable } from "../typescript/lr1.ts";
 import {
   createPortableParserPlanV1,
+  type PortableParserPlan,
   type PortableParserPlanMetadata,
   portableParserPlanMetadata,
-  type PortableParserPlanV1,
 } from "./portable_plan.ts";
 
 export interface RuntimeParserPlan {
@@ -36,7 +36,7 @@ export interface RuntimeParserPlan {
   bnf: BnfGrammar;
   lr: LrTable;
   dfa: Dfa;
-  portable: PortableParserPlanV1;
+  portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
   analysisStats: RuntimeParserAnalysisStatistics;
   diagnostics: readonly Diagnostic[];

@@ -37,7 +37,7 @@ release.
 
 ## Parser-Plan Format
 
-`PortableParserPlanV1` is a versioned runtime data contract, not a package
+`PortableParserPlan` is a versioned runtime data contract, not a package
 implementation detail. Plan version `1` is stable for its current serialized
 fields, canonical ordering, reducer opcodes, diagnostic schema, and validation
 rules. Breaking changes require a new plan version or a separately versioned

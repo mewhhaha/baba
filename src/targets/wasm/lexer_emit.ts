@@ -21,7 +21,7 @@ import { emitPublicSourceTextBoundary } from "../runtime/public_source_text.ts";
 import { emitPublicTokenMaterializer } from "../runtime/public_token_materializer.ts";
 import { generatedSourceBanner } from "../runtime/provenance.ts";
 import {
-  type PortableParserPlanV1,
+  type PortableParserPlan,
   portablePlanToDfa,
 } from "../runtime/portable_plan.ts";
 import type { BnfGrammar } from "../typescript/bnf.ts";
@@ -82,7 +82,7 @@ export function emitWasmLexer(
 }
 
 export function emitWasmLexerFromPortablePlan(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
   preserveTrivia: boolean,
 ): string {
   const namedSpecs = plan.lexer.specifications

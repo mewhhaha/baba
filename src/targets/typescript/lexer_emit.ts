@@ -2,10 +2,10 @@ import type { TypeScriptTargetOptions } from "../../ast.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
 import { emitTypeScriptLexerRuntime } from "../runtime/typescript_lexer_runtime.ts";
 import { portablePlanToDfa } from "../runtime/portable_plan.ts";
-import type { PortableParserPlanV1 } from "../runtime/portable_plan.ts";
+import type { PortableParserPlan } from "../runtime/portable_plan.ts";
 
 export function emitLexerFromPortablePlan(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
   options: TypeScriptTargetOptions = {},
 ): string {
   const namedSpecs = plan.lexer.specifications

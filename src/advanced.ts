@@ -88,7 +88,7 @@ export { portablePlanStatistics } from "./compiler/portable_plan/statistics.ts";
 export { validatePortableParserPlan } from "./compiler/portable_plan/validate.ts";
 export type {
   PortableDiagnosticPlan,
-  PortableParserPlanV1,
+  PortableParserPlan,
   PortablePlanStatistics,
   PortableReducerPlan,
 } from "./compiler/portable_plan/plan.ts";

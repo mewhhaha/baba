@@ -1,7 +1,7 @@
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import { collectRuleFieldSchemas } from "../runtime/field_schema.ts";
 import { generatedSourceBanner } from "../runtime/provenance.ts";
-import type { PortableParserPlanV1 } from "../runtime/portable_plan.ts";
+import type { PortableParserPlan } from "../runtime/portable_plan.ts";
 
 export function emitSyntax(analyzed: AnalyzedGrammar): string {
   const namedTokens = analyzed.tokens.filter((token) =>
@@ -33,7 +33,7 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
 }
 
 export function emitSyntaxFromPortablePlan(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
 ): string {
   const namedTokens = plan.symbols.tokens.filter((token) => token.reachable);
   const mainTokens = namedTokens.filter((token) => token.kind === "token");

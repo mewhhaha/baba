@@ -4,7 +4,7 @@ Status: current portable-runtime architecture.
 
 The portable runtime is the shared execution contract for generated TypeScript,
 Wasm, and parser-kit outputs. Analysis lowers an `AnalyzedGrammar` into a
-versioned `PortableParserPlanV1`; target packages consume that plan instead of
+versioned `PortableParserPlan`; target packages consume that plan instead of
 reconstructing grammar, lexer, parser, reducer, or CST semantics independently.
 
 ## Parser Plan

@@ -30,7 +30,7 @@ const MAX_SAFE_SERIALIZED_INTEGER = Number.MAX_SAFE_INTEGER;
  * separately versioned subsection; additive debug-only metadata may be ignored
  * by older tools after validation succeeds.
  */
-export interface PortableParserPlanV1 {
+export interface PortableParserPlan {
   readonly format: "baba-parser-plan";
   readonly version: 1;
   readonly semantics: "baba-portable-v1";
@@ -46,9 +46,9 @@ export interface PortableParserPlanV1 {
 }
 
 export interface PortableParserPlanMetadata {
-  readonly format: PortableParserPlanV1["format"];
-  readonly version: PortableParserPlanV1["version"];
-  readonly semantics: PortableParserPlanV1["semantics"];
+  readonly format: PortableParserPlan["format"];
+  readonly version: PortableParserPlan["version"];
+  readonly semantics: PortableParserPlan["semantics"];
   readonly hash: string;
 }
 
@@ -304,7 +304,7 @@ export function createPortableParserPlanV1(
   bnf: BnfGrammar,
   lr: LrTable,
   dfa: Dfa,
-): PortableParserPlanV1 {
+): PortableParserPlan {
   const rootRule = analyzed.rules[analyzed.rootRule];
   const cstRules = collectRuleFieldSchemas(analyzed);
   const rootCstRule = cstRules.find((rule) =>
@@ -421,7 +421,7 @@ export function createPortableParserPlanV1(
         display: rule.name,
       })),
     },
-  } satisfies Omit<PortableParserPlanV1, "statistics">;
+  } satisfies Omit<PortableParserPlan, "statistics">;
   const statistics = portablePlanStatistics({
     ...planWithoutStatistics,
     statistics: zeroPortablePlanStatistics(),
@@ -430,7 +430,7 @@ export function createPortableParserPlanV1(
 }
 
 export function portableParserPlanMetadata(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
 ): PortableParserPlanMetadata {
   return {
     format: plan.format,
@@ -709,7 +709,7 @@ function zeroPortablePlanStatistics(): PortablePlanStatistics {
 }
 
 export function portablePlanStatistics(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
 ): PortablePlanStatistics {
   const lexerAcceptCounts = plan.lexer.states.map((state) =>
     state.accepts.length
@@ -764,14 +764,14 @@ export function portablePlanStatistics(
 }
 
 export function serializePortableParserPlanJson(
-  plan: PortableParserPlanV1,
+  plan: PortableParserPlan,
 ): string {
   return `${JSON.stringify(canonicalValue(plan), null, 2)}\n`;
 }
 
 export function parsePortableParserPlanJson(
   source: string,
-): PortableParserPlanV1 | { diagnostics: readonly Diagnostic[] } {
+): PortableParserPlan | { diagnostics: readonly Diagnostic[] } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(source);
@@ -788,10 +788,10 @@ export function parsePortableParserPlanJson(
   }
   const diagnostics = validatePortableParserPlan(parsed);
   if (diagnostics.length > 0) return { diagnostics };
-  return parsed as PortableParserPlanV1;
+  return parsed as PortableParserPlan;
 }
 
-export function portablePlanToBnf(plan: PortableParserPlanV1): BnfGrammar {
+export function portablePlanToBnf(plan: PortableParserPlan): BnfGrammar {
   return {
     startNonterminal: plan.symbols.nonterminals[0]?.id ?? 0,
     rootRuleNonterminal:
@@ -815,7 +815,7 @@ export function portablePlanToBnf(plan: PortableParserPlanV1): BnfGrammar {
   };
 }
 
-export function portablePlanToLrTable(plan: PortableParserPlanV1): LrTable {
+export function portablePlanToLrTable(plan: PortableParserPlan): LrTable {
   return {
     states: plan.parser.states.map((state) => ({
       id: state.id,
@@ -844,7 +844,7 @@ export function portablePlanToLrTable(plan: PortableParserPlanV1): LrTable {
   };
 }
 
-export function portablePlanToDfa(plan: PortableParserPlanV1): Dfa {
+export function portablePlanToDfa(plan: PortableParserPlan): Dfa {
   return {
     start: plan.lexer.startState,
     states: plan.lexer.states.map((state) => ({
@@ -1292,7 +1292,7 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
   return diagnostics;
 }
 
-function hashPortableParserPlan(plan: PortableParserPlanV1): string {
+function hashPortableParserPlan(plan: PortableParserPlan): string {
   const bytes = new TextEncoder().encode(serializePortableParserPlanJson(plan));
   let hash = 0xcbf29ce484222325n;
   for (const byte of bytes) {

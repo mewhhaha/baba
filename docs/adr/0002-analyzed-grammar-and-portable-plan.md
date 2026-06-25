@@ -11,9 +11,9 @@ regex, conflict, and diagnostic behavior to diverge.
 ## Decision
 
 Generic compiler analysis produces an `AnalyzedGrammar`. Standalone parser
-targets lower that analysis into `PortableParserPlanV1`, a versioned data
-contract with deterministic symbol tables, lexer DFA data, LR tables, reducer
-metadata, CST schema, diagnostic schema, statistics, and a stable plan hash.
+targets lower that analysis into `PortableParserPlan`, a versioned data contract
+with deterministic symbol tables, lexer DFA data, LR tables, reducer metadata,
+CST schema, diagnostic schema, statistics, and a stable plan hash.
 
 ## Consequences
 

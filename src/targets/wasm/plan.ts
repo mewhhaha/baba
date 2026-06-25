@@ -31,8 +31,8 @@ import {
   RUNTIME_TRACE_STATUS_UNEXPECTED,
 } from "../runtime/language_sources.ts";
 import type {
+  PortableParserPlan,
   PortableParserPlanMetadata,
-  PortableParserPlanV1,
 } from "../runtime/portable_plan.ts";
 import {
   portablePlanToBnf,
@@ -71,7 +71,7 @@ export interface WasmPlan {
   bnf: BnfGrammar;
   lr: LrTable;
   dfa: Dfa;
-  portable: PortableParserPlanV1;
+  portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
   wasm: WasmModuleImage;
   parserTraceWasm: Uint8Array;

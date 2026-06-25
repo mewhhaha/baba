@@ -10,8 +10,8 @@ import type { Dfa } from "../../compiler/regex/dfa.ts";
 import type { BnfGrammar } from "./bnf.ts";
 import type { LrTable } from "./lr1.ts";
 import type {
+  PortableParserPlan,
   PortableParserPlanMetadata,
-  PortableParserPlanV1,
 } from "../runtime/portable_plan.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
 import { emitLexerFromPortablePlan } from "./lexer_emit.ts";
@@ -34,7 +34,7 @@ export interface TypeScriptPlan {
   bnf: BnfGrammar;
   lr: LrTable;
   dfa: Dfa;
-  portable: PortableParserPlanV1;
+  portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
   directory: string;
   generatedBytes: number;
@@ -129,7 +129,7 @@ function typeScriptSources(
   _analyzed: AnalyzedGrammar,
   _bnf: BnfGrammar,
   _lr: LrTable,
-  portable: PortableParserPlanV1,
+  portable: PortableParserPlan,
   portableMetadata: PortableParserPlanMetadata,
   options: TypeScriptTargetOptions,
 ): Array<{ path: string; content: string }> {
