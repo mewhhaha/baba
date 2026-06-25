@@ -1596,7 +1596,6 @@ function validateBabaMetadataSemantics(
       ruleMeta,
       expression,
       ruleName,
-      metadata.version,
       rulePath,
     );
   }
@@ -2258,7 +2257,6 @@ function collectGeneratedTreeSitterFieldNames(
       ruleMeta,
       expression,
       ruleName,
-      metadata.version,
       `metadata.rules.${ruleName}`,
     );
     for (const pathMeta of normalized.paths.values()) {
@@ -2380,7 +2378,6 @@ function resolveMetadataPathSelector(
   expression: TreeSitterExpression,
   selector: string,
   ruleName: string,
-  _metadataVersion?: BabaMetadata["version"],
   metadataPath?: string,
 ): string {
   if (selector === "") return "";
@@ -2598,7 +2595,6 @@ function renderRuleExpression(
       metadata,
       expression,
       ruleName,
-      context?.metadata.version,
     );
   const renderContext = context ?? {
     metadata: {},
@@ -2890,7 +2886,6 @@ function normalizeRuleMetadata(
   metadata?: TreeSitterRuleMetadata,
   expression?: TreeSitterExpression,
   ruleName?: string,
-  metadataVersion?: BabaMetadata["version"],
   metadataPath?: string,
 ): NormalizedRuleMetadata {
   const paths = new Map<string, TreeSitterPathMetadata>();
@@ -2911,7 +2906,6 @@ function normalizeRuleMetadata(
         expression,
         path,
         ruleName,
-        metadataVersion,
         `${metadataPath ?? `metadata.rules.${ruleName}`}.paths.${path}`,
       )
       : path;
@@ -2967,7 +2961,6 @@ function createRenderContext(
         ruleMeta,
         expression,
         ruleName,
-        metadata.version,
       ),
     );
   }
@@ -2979,7 +2972,6 @@ function createRenderContext(
           metadata.rules.source_file,
           ruleExpressions.get("source_file"),
           "source_file",
-          metadata.version,
         ),
       );
     }
@@ -3000,7 +2992,6 @@ function validateRuleMetadata(
   metadata: TreeSitterRuleMetadata,
   expression: TreeSitterExpression,
   ruleName: string,
-  metadataVersion?: BabaMetadata["version"],
   metadataPath = `metadata.rules.${ruleName}`,
 ): void {
   if (metadata.token) {
@@ -3026,7 +3017,6 @@ function validateRuleMetadata(
     metadata,
     expression,
     ruleName,
-    metadataVersion,
     metadataPath,
   );
   for (const [path, pathMeta] of normalized.paths) {

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.1
+
+### Changed
+
+- Removed obsolete cleanup task notes from the repository.
+- Updated README metadata examples to match the schema 2 conflict and path
+  selector requirements.
+
+### Fixed
+
+- Removed leftover metadata-version plumbing from Tree-sitter metadata path
+  validation.
+
 ## 2.0.0
 
 ### Removed

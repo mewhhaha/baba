@@ -615,8 +615,8 @@ block = "{" embedded_source "}" ;
 
 EBNF fields generate Tree-sitter fields directly. Versioned metadata may use
 those field names as selectors for additional shaping, such as aliases or
-precedence wrappers. Numeric expression paths are accepted only for unversioned
-legacy metadata.
+precedence wrappers. Numeric expression paths are rejected; use generated field
+names as selectors instead.
 
 Supported top-level keys:
 
@@ -677,14 +677,9 @@ separate from Tree-sitter shaping metadata:
   "version": 2,
   "parser": {
     "resolutions": [
-      {
-        "rules": ["generic_expression", "qualified_identifier"],
-        "on": "[",
-        "prefer": "shift"
-      }
+      { "conflict": "c_91a8...", "prefer": "shift" }
     ],
     "conflicts": [
-      { "conflict": "c_91a8..." },
       { "conflict": "c_ef90..." }
     ]
   }
@@ -726,8 +721,8 @@ Generation failures caused by grammar or metadata input are reported as
 structured diagnostics rather than generic internal errors. Diagnostics include
 a stable `code`, a clear `message`, and may include `backend`, metadata `path`,
 and source `span` fields. Examples include unknown metadata references, invalid
-aliases, invalid external token declarations, legacy path misuse, query selector
-errors, and Tree-sitter validation failures.
+aliases, invalid external token declarations, numeric path misuse, query
+selector errors, and Tree-sitter validation failures.
 
 External scanner symbols are declared in metadata:
 
