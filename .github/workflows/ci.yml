@@ -26,7 +26,7 @@ jobs:
         run: npm install --no-save typescript@5.9.3
 
       - name: Install Tree-sitter CLI
-        run: deno install -g -A npm:tree-sitter-cli@0.25.8
+        run: npm install --global tree-sitter-cli@0.25.8
 
       - uses: bytecodealliance/actions/wasm-tools/setup@v1
 
