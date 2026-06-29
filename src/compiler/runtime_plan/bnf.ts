@@ -3,13 +3,13 @@ import {
   computeNullableRules,
   isExpressionNullable,
   visitAnalyzedExpression,
-} from "../../compiler/analyze.ts";
+} from "../analyze.ts";
 import type {
   AnalyzedExpression,
   AnalyzedGrammar,
   AnalyzedRule,
   RuleId,
-} from "../../compiler/ir.ts";
+} from "../ir.ts";
 
 export type TerminalKind = "eof" | "named" | "literal";
 
@@ -167,9 +167,9 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
         isExpressionNullable(expression.expression, state.nullableRules)
       ) {
         diagnostics.push({
-          code: "TS_PARSER_NULLABLE_REPETITION",
+          code: "RUNTIME_PARSER_NULLABLE_REPETITION",
           severity: "error",
-          backend: "typescript",
+          backend: "runtime",
           message:
             "The portable parser cannot lower repetition whose body is nullable.",
           span: expression.span,
@@ -180,9 +180,9 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
         isExpressionNullable(expression.item, state.nullableRules)
       ) {
         diagnostics.push({
-          code: "TS_PARSER_NULLABLE_LIST_ITEM",
+          code: "RUNTIME_PARSER_NULLABLE_LIST_ITEM",
           severity: "error",
-          backend: "typescript",
+          backend: "runtime",
           message:
             "The portable parser cannot lower a separated list whose item is nullable.",
           span: expression.item.span,
@@ -193,9 +193,9 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
         isExpressionNullable(expression.separator, state.nullableRules)
       ) {
         diagnostics.push({
-          code: "TS_PARSER_NULLABLE_LIST_SEPARATOR",
+          code: "RUNTIME_PARSER_NULLABLE_LIST_SEPARATOR",
           severity: "error",
-          backend: "typescript",
+          backend: "runtime",
           message:
             "The portable parser cannot lower a separated list whose separator is nullable.",
           span: expression.separator.span,

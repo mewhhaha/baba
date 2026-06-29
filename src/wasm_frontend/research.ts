@@ -147,7 +147,7 @@ export const wasmFrontendCandidates: readonly WasmFrontendCandidate[] = [
     requiredSpikeChecks: [
       "Generated parser.wasm validates with WebAssembly.validate.",
       "Generated abi.json matches babaWasmFrontendRequirements.",
-      "No TypeScript parser runtime is emitted into the public bundle.",
+      "No per-grammar parser runtime is emitted into the public bundle.",
     ],
   },
   {

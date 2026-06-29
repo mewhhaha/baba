@@ -180,16 +180,6 @@ export function assertThrowsIncludes(
   assertIncludes(message, expected);
 }
 
-export async function assertMissing(path: string): Promise<void> {
-  try {
-    await Deno.stat(path);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return;
-    throw error;
-  }
-  throw new Error(`Expected ${path} to be missing`);
-}
-
 export async function denoCheck(path: string): Promise<void> {
   const command = new Deno.Command(Deno.execPath(), {
     args: ["check", path],

@@ -22,8 +22,14 @@ import {
   regexDfa,
 } from "../../compiler/regex/overlap.ts";
 import { buildRegexNfa } from "../../compiler/regex/nfa.ts";
-import { type BnfGrammar, lowerToBnf } from "../typescript/bnf.ts";
-import { buildCanonicalLr1Table, type LrTable } from "../typescript/lr1.ts";
+import {
+  type BnfGrammar,
+  lowerToBnf,
+} from "../../compiler/runtime_plan/bnf.ts";
+import {
+  buildCanonicalLr1Table,
+  type LrTable,
+} from "../../compiler/runtime_plan/lr1.ts";
 import {
   createPortableParserPlanV1,
   type PortableParserPlan,

@@ -6,13 +6,13 @@ import type {
   BnfProduction,
   BnfSymbol,
   ReducerSpec,
-} from "../typescript/bnf.ts";
+} from "../../compiler/runtime_plan/bnf.ts";
 import type {
   LookaheadBitset,
   LrAction,
   LrActionSet,
   LrTable,
-} from "../typescript/lr1.ts";
+} from "../../compiler/runtime_plan/lr1.ts";
 import { collectRuleFieldSchemas } from "./field_schema.ts";
 
 const PORTABLE_PLAN_FORMAT = "baba-parser-plan";

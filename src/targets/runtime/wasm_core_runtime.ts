@@ -1,6 +1,10 @@
 // Core Wasm parser runtime byte emitter shared by Wasm target packaging.
 import type { Dfa } from "../../compiler/regex/dfa.ts";
-import type { LrAction, LrActionSet, LrTable } from "../typescript/lr1.ts";
+import type {
+  LrAction,
+  LrActionSet,
+  LrTable,
+} from "../../compiler/runtime_plan/lr1.ts";
 import {
   RUNTIME_ACTION_ACCEPT as ACTION_ACCEPT,
   RUNTIME_ACTION_PAYLOAD_MASK,

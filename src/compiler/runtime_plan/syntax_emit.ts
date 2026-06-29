@@ -1,7 +1,7 @@
-import type { AnalyzedGrammar } from "../../compiler/ir.ts";
-import { collectRuleFieldSchemas } from "../runtime/field_schema.ts";
-import { generatedSourceBanner } from "../runtime/provenance.ts";
-import type { PortableParserPlan } from "../runtime/portable_plan.ts";
+import type { AnalyzedGrammar } from "../ir.ts";
+import { collectRuleFieldSchemas } from "../../targets/runtime/field_schema.ts";
+import { generatedSourceBanner } from "../../targets/runtime/provenance.ts";
+import type { PortableParserPlan } from "../../targets/runtime/portable_plan.ts";
 
 export function emitSyntax(analyzed: AnalyzedGrammar): string {
   const namedTokens = analyzed.tokens.filter((token) =>

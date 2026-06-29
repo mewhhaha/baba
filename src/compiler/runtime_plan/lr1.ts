@@ -107,7 +107,7 @@ export function buildCanonicalLr1Table(
       diagnostics.push({
         code: "TS_LR_CLOSURE_WORK_LIMIT",
         severity: "error",
-        backend: "typescript",
+        backend: "runtime",
         message:
           `The portable parser exceeded the canonical LR(1) closure work limit (${options.closureWorkLimit}).`,
       });
@@ -119,9 +119,9 @@ export function buildCanonicalLr1Table(
     const closedItemCount = countLookaheadEntries(closed);
     if (states.length >= options.stateLimit) {
       diagnostics.push({
-        code: "TS_PARSER_STATE_LIMIT",
+        code: "RUNTIME_PARSER_STATE_LIMIT",
         severity: "error",
-        backend: "typescript",
+        backend: "runtime",
         message:
           `The portable parser exceeded the canonical LR(1) state limit (${options.stateLimit}).`,
       });
@@ -132,9 +132,9 @@ export function buildCanonicalLr1Table(
       totalItems + closedItemCount > options.itemLimit
     ) {
       diagnostics.push({
-        code: "TS_PARSER_ITEM_LIMIT",
+        code: "RUNTIME_PARSER_ITEM_LIMIT",
         severity: "error",
-        backend: "typescript",
+        backend: "runtime",
         message:
           `The portable parser exceeded the canonical LR(1) item limit (${options.itemLimit}).`,
       });
@@ -284,9 +284,9 @@ export function buildCanonicalLr1Table(
     tableEntries > options.tableEntryLimit
   ) {
     diagnostics.push({
-      code: "TS_PARSER_TABLE_ENTRY_LIMIT",
+      code: "RUNTIME_PARSER_TABLE_ENTRY_LIMIT",
       severity: "error",
-      backend: "typescript",
+      backend: "runtime",
       message:
         `The portable parser exceeded the ACTION/GOTO table entry limit (${options.tableEntryLimit}).`,
     });
@@ -508,8 +508,8 @@ function conflictDiagnostic(
   const isShiftReduce = context.shiftProductions.length > 0 &&
     context.reductionProductions.length > 0;
   const code = isShiftReduce
-    ? "TS_PARSER_SHIFT_REDUCE_CONFLICT"
-    : "TS_PARSER_REDUCE_REDUCE_CONFLICT";
+    ? "RUNTIME_PARSER_SHIFT_REDUCE_CONFLICT"
+    : "RUNTIME_PARSER_REDUCE_REDUCE_CONFLICT";
   const details = [
     `${
       isShiftReduce ? "Shift/reduce" : "Reduce/reduce"
@@ -535,7 +535,7 @@ function conflictDiagnostic(
   return {
     code,
     severity: "error",
-    backend: "typescript",
+    backend: "runtime",
     message: details.join("\n"),
     span: primaryOrigin?.span,
     related: origins.slice(1).map((origin) => ({
@@ -754,9 +754,9 @@ function unusedConflictResolutionDiagnostics(
   for (const [index, resolution] of resolutions.entries()) {
     if ((useCounts[index] ?? 0) > 0) continue;
     diagnostics.push({
-      code: "TS_PARSER_CONFLICT_METADATA",
+      code: "RUNTIME_PARSER_CONFLICT_METADATA",
       severity: "error",
-      backend: "typescript",
+      backend: "runtime",
       message:
         `metadata.parser.resolutions[${index}].conflict references unknown conflict ID ${
           JSON.stringify(resolution.conflict)
@@ -774,9 +774,9 @@ function unusedConflictGroupDiagnostics(
   for (const [index, group] of conflictGroups.entries()) {
     if ((useCounts[index] ?? 0) > 0) continue;
     diagnostics.push({
-      code: "TS_PARSER_CONFLICT_METADATA",
+      code: "RUNTIME_PARSER_CONFLICT_METADATA",
       severity: "error",
-      backend: "typescript",
+      backend: "runtime",
       message:
         `metadata.parser.conflicts[${index}] did not match any LR conflict. Regenerate the conflict diagnostic and update this branch declaration, or remove the stale declaration ${
           JSON.stringify(group)
@@ -808,9 +808,9 @@ function duplicateConflictResolutionDiagnostics(
     const contradictory = previous.prefer !== resolution.prefer ||
       previous.reduce !== resolution.reduce;
     diagnostics.push({
-      code: "TS_PARSER_CONFLICT_METADATA",
+      code: "RUNTIME_PARSER_CONFLICT_METADATA",
       severity: "error",
-      backend: "typescript",
+      backend: "runtime",
       message:
         `metadata.parser.resolutions[${index}].conflict duplicates metadata.parser.resolutions[${previous.index}].conflict for ${
           JSON.stringify(resolution.conflict)

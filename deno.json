@@ -66,9 +66,9 @@
       "src/targets/runtime/public_token_materializer.ts",
       "src/targets/runtime/wasm_abi.ts",
       "src/targets/runtime/wasm_core_runtime.ts",
-      "src/targets/typescript/bnf.ts",
-      "src/targets/typescript/lr1.ts",
-      "src/targets/typescript/syntax_emit.ts",
+      "src/compiler/runtime_plan/bnf.ts",
+      "src/compiler/runtime_plan/lr1.ts",
+      "src/compiler/runtime_plan/syntax_emit.ts",
       "src/targets/wasm/module_emit.ts",
       "src/targets/wasm/plan.ts"
     ]

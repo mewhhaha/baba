@@ -3,10 +3,10 @@
 Status: versioned core ABI for generated Wasm parser artifacts.
 
 This document defines the contract between Baba's generated Wasm core module,
-the generated TypeScript adapter, and non-JavaScript hosts that choose to call
+the generated JavaScript adapter, and non-JavaScript hosts that choose to call
 the core module directly. The current target kind is
 `javascript-hosted-core-wasm`: Baba emits a generic core WebAssembly module, an
-external parser plan, plus a TypeScript adapter. It does not yet emit a Wasm
+external parser plan, plus a JavaScript adapter. It does not yet emit a Wasm
 Component Model package, WIT bindings, WASI library, or browser-only package.
 
 Generated Wasm bundles also include `wasm/abi.json` and `wasm/parser.plan`.

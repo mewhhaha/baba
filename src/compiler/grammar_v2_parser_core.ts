@@ -19,12 +19,12 @@ import type {
   NonterminalInfo,
   ReducerSpec,
   TerminalInfo,
-} from "../targets/typescript/bnf.ts";
+} from "./runtime_plan/bnf.ts";
 import {
   buildCanonicalLr1Table,
   type LrAction,
   type LrTable,
-} from "../targets/typescript/lr1.ts";
+} from "./runtime_plan/lr1.ts";
 
 export interface GrammarV2ParserCorePlan {
   readonly bnf: BnfGrammar;

@@ -55,7 +55,7 @@ Deno.test("grammar v2 parser core reports LR conflicts with stable metadata", ()
   `);
 
   const conflict = plan.diagnostics.find((diagnostic) =>
-    diagnostic.code === "TS_PARSER_REDUCE_REDUCE_CONFLICT"
+    diagnostic.code === "RUNTIME_PARSER_REDUCE_REDUCE_CONFLICT"
   );
   assert(conflict);
   assert(conflict.message.includes("Conflict ID: c_"));
@@ -73,7 +73,7 @@ Deno.test("grammar v2 parser core passes LR construction limits through", () => 
 
   assertEquals(
     plan.diagnostics.map((diagnostic) => diagnostic.code).join(","),
-    "TS_PARSER_STATE_LIMIT",
+    "RUNTIME_PARSER_STATE_LIMIT",
   );
 });
 

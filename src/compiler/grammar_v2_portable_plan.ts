@@ -35,12 +35,12 @@ import type {
   BnfSymbol,
   NonterminalInfo,
   TerminalInfo,
-} from "../targets/typescript/bnf.ts";
+} from "./runtime_plan/bnf.ts";
 import type {
   LookaheadBitset,
   LrAction,
   LrPlanningStats,
-} from "../targets/typescript/lr1.ts";
+} from "./runtime_plan/lr1.ts";
 
 const FORMAT = "baba-portable-plan";
 const VERSION = 2;

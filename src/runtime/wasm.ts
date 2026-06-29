@@ -2,7 +2,7 @@
  * Async parser-engine facade for the future shared generic Wasm executor.
  *
  * The current implementation prepares one process-local generic runtime slot and
- * delegates execution to the shared TypeScript parser. Keeping this boundary
+ * delegates execution to the shared parser-plan adapter. Keeping this boundary
  * explicit lets generated adapters and callers opt into async Wasm/auto parser
  * lifecycles without reintroducing per-grammar Wasm payloads.
  *
@@ -10,7 +10,7 @@
  */
 
 import {
-  createParser as createTypeScriptParser,
+  createParser as createPlanParser,
   type CreateParserOptions,
   inflateCompactRuntimePlan,
   type ParseOptions,
@@ -41,9 +41,9 @@ import {
   WASM_TOKEN_RECORD_I32_COUNT,
 } from "../targets/runtime/wasm_abi.ts";
 
-export type RuntimeEnginePolicy = "typescript" | "wasm" | "auto";
-export type RuntimeEngine = "typescript" | "wasm";
-export type RuntimeBackend = "typescript" | "generic-wasm" | "wasm+typescript";
+export type RuntimeEnginePolicy = "shared" | "wasm" | "auto";
+export type RuntimeEngine = "shared" | "wasm";
+export type RuntimeBackend = "shared" | "generic-wasm" | "wasm+shared";
 export type RuntimeTimingPhase =
   | "load runtime"
   | "prepare runtime"
@@ -77,7 +77,7 @@ export interface AutoParserOptions extends WasmParserOptions {
 export interface AutoRuntimeParser<Root extends RuleNode = RuleNode>
   extends RuntimeParser<Root> {
   readonly engines: {
-    readonly typescript: RuntimeParser<Root>;
+    readonly shared: RuntimeParser<Root>;
     readonly wasm: RuntimeParser<Root>;
   };
   readonly root?: Root;
@@ -172,7 +172,7 @@ export function createParser<Root extends RuleNode = RuleNode>(
   validateStaticExternalWasmAbi(wasm);
   loadExternalWasmPlan(wasm, options.plan);
   validateLoadedExternalWasmAbi(wasm, decoded.parserPlanVersion);
-  const parser = createTypeScriptParser<Root>(runtimePlan, options);
+  const parser = createPlanParser<Root>(runtimePlan, options);
   return new ExternalWasmParserInstance(runtimePlan, parser, wasm);
 }
 
@@ -390,18 +390,18 @@ export async function createAutoParser(
   plan: RuntimeParserPlan,
   options: AutoParserOptions = {},
 ): Promise<AutoRuntimeParser> {
-  const typescript = createTypeScriptParser(plan, options);
+  const shared = createPlanParser(plan, options);
   const wasm = await createWasmParser(plan, options);
   const threshold = options.smallInputThreshold ?? 16_384;
   const select = (source: string): RuntimeParser => {
-    const engine = source.length < threshold ? "typescript" : "wasm";
+    const engine = source.length < threshold ? "shared" : "wasm";
     emitTiming(options.timing, {
       phase: "select engine",
       engine,
-      backend: engine === "wasm" ? "wasm+typescript" : "typescript",
+      backend: engine === "wasm" ? "wasm+shared" : "shared",
       elapsedMs: 0,
     });
-    return engine === "wasm" ? wasm : typescript;
+    return engine === "wasm" ? wasm : shared;
   };
   const parse: RuntimeParser["parse"] = ((
     source: string,
@@ -429,7 +429,7 @@ export async function createAutoParser(
     )) as RuntimeParser["parseTokensUnchecked"];
   return {
     plan,
-    engines: { typescript, wasm },
+    engines: { shared, wasm },
     lex(source, lexOptions) {
       return select(source).lex(source, lexOptions);
     },
@@ -468,7 +468,7 @@ function timed<T>(
     emitTiming(timing, {
       phase,
       engine,
-      backend: engine === "wasm" ? "wasm+typescript" : "typescript",
+      backend: engine === "wasm" ? "wasm+shared" : "shared",
       elapsedMs: performance.now() - start,
     });
   }
@@ -487,7 +487,7 @@ async function timedAsync<T>(
     emitTiming(timing, {
       phase,
       engine,
-      backend: engine === "wasm" ? "generic-wasm" : "typescript",
+      backend: engine === "wasm" ? "generic-wasm" : "shared",
       elapsedMs: performance.now() - start,
     });
   }
@@ -504,7 +504,7 @@ function createWasmRuntimeParser(
   plan: RuntimeParserPlan,
   options: WasmParserOptions,
 ): RuntimeParser {
-  const fallback = createTypeScriptParser(plan, options);
+  const fallback = createPlanParser(plan, options);
   const state = createWasmPlanState(plan);
   const parser = {
     plan,

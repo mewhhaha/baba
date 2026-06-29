@@ -30,13 +30,16 @@ import {
   createGrammarV2IncrementalParser,
   type GrammarV2IncrementalParser,
 } from "../compiler/grammar_v2_incremental.ts";
-import type { BnfGrammar, BnfProduction } from "../targets/typescript/bnf.ts";
+import type {
+  BnfGrammar,
+  BnfProduction,
+} from "../compiler/runtime_plan/bnf.ts";
 import type {
   LookaheadBitset,
   LrAction,
   LrActionSet,
   LrTable,
-} from "../targets/typescript/lr1.ts";
+} from "../compiler/runtime_plan/lr1.ts";
 
 export interface GrammarV2RuntimeOptions {
   readonly validatePlan?: boolean;

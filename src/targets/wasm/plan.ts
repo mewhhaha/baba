@@ -7,9 +7,9 @@ import type {
 } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
-import type { BnfGrammar } from "../typescript/bnf.ts";
-import type { LrAction } from "../typescript/lr1.ts";
-import type { LrTable } from "../typescript/lr1.ts";
+import type { BnfGrammar } from "../../compiler/runtime_plan/bnf.ts";
+import type { LrAction } from "../../compiler/runtime_plan/lr1.ts";
+import type { LrTable } from "../../compiler/runtime_plan/lr1.ts";
 import { collectRuleFieldSchemas } from "../runtime/field_schema.ts";
 import {
   PARSER_DIAGNOSTIC_CODES,
@@ -49,7 +49,7 @@ import {
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
 } from "../runtime/wasm_abi.ts";
-import { emitSyntaxFromPortablePlan } from "../typescript/syntax_emit.ts";
+import { emitSyntaxFromPortablePlan } from "../../compiler/runtime_plan/syntax_emit.ts";
 import {
   planPortableRuntime,
   type RuntimeParserPlan,

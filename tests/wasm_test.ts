@@ -173,30 +173,43 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
   }
 });
 
-Deno.test("legacy kit and TypeScript parser target files are removed", async () => {
-  for (
-    const path of [
-      "src/kit.ts",
-      "src/targets/kit/plan.ts",
-      "src/targets/kit/schema.ts",
-      "src/targets/typescript/plan.ts",
-      "src/targets/typescript/lexer_emit.ts",
-      "src/targets/typescript/parser_emit.ts",
-      "src/targets/runtime/typescript_lexer_runtime.ts",
-      "src/targets/runtime/typescript_parser_runtime.ts",
-    ]
-  ) {
-    await assertMissing(path);
-  }
-
+Deno.test("runtime manifest contains only active shared sources", async () => {
   assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 27);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
-  assert(roles.includes("shared-runtime-parser-plan"));
-  assertEquals(roles.includes("parser-kit-shared-runtime"), false);
-  assertEquals(roles.includes("typescript-lexer-runtime"), false);
-  assertEquals(roles.includes("typescript-parser-runtime"), false);
+  assertEquals(
+    roles.join("\n"),
+    [
+      "shared-brl-source-map",
+      "shared-brl-lexer",
+      "shared-brl-parser",
+      "shared-brl-branch-search",
+      "shared-brl-reductions",
+      "shared-brl-cst",
+      "shared-brl-token-stream",
+      "shared-brl-diagnostics",
+      "public-source-text-boundary",
+      "public-lex-diagnostic-materializer",
+      "public-lex-result-materializer",
+      "public-token-materializer",
+      "public-diagnostic-materializer",
+      "public-parse-result-materializer",
+      "public-field-materializer",
+      "public-rule-node-materializer",
+      "parser-diagnostic-codes",
+      "runtime-language-source",
+      "runtime-language-compiler",
+      "runtime-language-artifact-manifest",
+      "wasm-abi-constants",
+      "wasm-core-runtime",
+      "shared-parser-plan-adapter-api",
+      "shared-wasm-runtime-api",
+      "shared-generic-wasm-executor",
+      "shared-runtime-parser-plan",
+      "generated-source-provenance",
+    ].join("\n"),
+  );
 
   const sources = [];
   for (const source of RUNTIME_IMPLEMENTATION_METADATA.sources) {
@@ -415,14 +428,4 @@ function dataUrl(bytes: Uint8Array, mime: string): URL {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return new URL(`data:${mime};base64,${btoa(binary)}`);
-}
-
-async function assertMissing(path: string): Promise<void> {
-  try {
-    await Deno.stat(path);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return;
-    throw error;
-  }
-  throw new Error(`Expected ${path} to be removed.`);
 }

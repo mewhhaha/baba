@@ -9,8 +9,7 @@ The public flow is intentionally small:
 grammar.ebnf + baba.json -> generated/wasm parser and lexer
 ```
 
-No Tree-sitter target, TypeScript parser target, parser-kit output, or shared
-runtime plan is part of the public generation path.
+Only the Wasm parser/lexer bundle is part of the public generation path.
 
 ## Quick Start
 
