@@ -1,5 +1,5 @@
 /**
- * Command-line entrypoint for compiling explicit EBNF to Tree-sitter outputs.
+ * Command-line entrypoint for compiling explicit EBNF to Wasm lexer/parser outputs.
  *
  * @module
  */
@@ -7,9 +7,7 @@
 import type {
   Diagnostic,
   GenerateTarget,
-  KitTargetOptions,
   PortabilityMode,
-  TypeScriptTargetOptions,
   WasmTargetOptions,
 } from "./ast.ts";
 import {
@@ -30,9 +28,7 @@ interface Options {
   rootRule?: string;
   targets: GenerateTarget[];
   portability?: PortabilityMode;
-  typescript: TypeScriptTargetOptions;
   wasm: WasmTargetOptions;
-  kit: KitTargetOptions;
   listFiles: boolean;
   explainTargets: boolean;
   diagnosticFormat: "text" | "json";
@@ -97,11 +93,7 @@ export async function main(args: string[]): Promise<void> {
     metadata,
     targets: options.targets.length ? options.targets : undefined,
     portability: options.portability,
-    typescript: hasTypeScriptOptions(options.typescript)
-      ? options.typescript
-      : undefined,
     wasm: hasWasmOptions(options.wasm) ? options.wasm : undefined,
-    kit: hasKitOptions(options.kit) ? options.kit : undefined,
   });
   if (hasErrors(result.diagnostics)) {
     throw new CliDiagnosticsError(result.diagnostics, options.diagnosticFormat);
@@ -127,9 +119,7 @@ function parseArgs(args: string[]): Options {
     command: "generate",
     name: "grammar",
     targets: [],
-    typescript: {},
     wasm: {},
-    kit: {},
     listFiles: false,
     explainTargets: false,
     diagnosticFormat: "text",
@@ -192,18 +182,6 @@ function parseArgs(args: string[]): Options {
         addTarget(options, target);
         break;
       }
-      case "--typescript-dir":
-      case "--ts-out": {
-        const directory = args[++i];
-        if (!directory) {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: `Expected directory after ${arg}`,
-          });
-        }
-        options.typescript.directory = directory;
-        break;
-      }
       case "--wasm-dir": {
         const directory = args[++i];
         if (!directory) {
@@ -215,210 +193,85 @@ function parseArgs(args: string[]): Options {
         options.wasm.directory = directory;
         break;
       }
-      case "--kit-dir": {
-        const directory = args[++i];
-        if (!directory) {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: `Expected directory after ${arg}`,
-          });
-        }
-        options.kit.directory = directory;
-        break;
-      }
-      case "--kit-profile":
-      case "--kit-mode": {
-        const profile = args[++i];
-        if (!profile) {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: `Expected profile after ${arg}`,
-          });
-        }
-        if (profile !== "full" && profile !== "runtime") {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: "Expected kit profile full or runtime",
-          });
-        }
-        options.kit.profile = profile;
-        break;
-      }
       case "--preserve-trivia":
-        options.typescript.preserveTrivia = true;
         options.wasm.preserveTrivia = true;
-        options.kit.preserveTrivia = true;
         break;
       case "--discard-trivia":
-        options.typescript.preserveTrivia = false;
         options.wasm.preserveTrivia = false;
-        options.kit.preserveTrivia = false;
         break;
       case "--lexer-state-limit":
-        options.typescript.lexerStateLimit = parsePositiveIntegerArg(
+        options.wasm.lexerStateLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.lexerStateLimit = options.typescript.lexerStateLimit;
-        options.kit.lexerStateLimit = options.typescript.lexerStateLimit;
         break;
       case "--regex-ast-node-limit":
-        options.typescript.regexAstNodeLimit = parsePositiveIntegerArg(
+        options.wasm.regexAstNodeLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.regexAstNodeLimit = options.typescript.regexAstNodeLimit;
-        options.kit.regexAstNodeLimit = options.typescript.regexAstNodeLimit;
         break;
       case "--regex-bounded-repeat-limit":
-        options.typescript.regexBoundedRepeatLimit = parsePositiveIntegerArg(
+        options.wasm.regexBoundedRepeatLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.regexBoundedRepeatLimit =
-          options.typescript.regexBoundedRepeatLimit;
-        options.kit.regexBoundedRepeatLimit =
-          options.typescript.regexBoundedRepeatLimit;
         break;
       case "--regex-nfa-state-limit":
-        options.typescript.regexNfaStateLimit = parsePositiveIntegerArg(
+        options.wasm.regexNfaStateLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.regexNfaStateLimit = options.typescript.regexNfaStateLimit;
-        options.kit.regexNfaStateLimit = options.typescript.regexNfaStateLimit;
         break;
       case "--regex-dfa-state-limit":
-        options.typescript.regexDfaStateLimit = parsePositiveIntegerArg(
+        options.wasm.regexDfaStateLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.regexDfaStateLimit = options.typescript.regexDfaStateLimit;
-        options.kit.regexDfaStateLimit = options.typescript.regexDfaStateLimit;
         break;
       case "--regex-overlap-state-limit":
-        options.typescript.regexOverlapStateLimit = parsePositiveIntegerArg(
+        options.wasm.regexOverlapStateLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.regexOverlapStateLimit =
-          options.typescript.regexOverlapStateLimit;
-        options.kit.regexOverlapStateLimit =
-          options.typescript.regexOverlapStateLimit;
         break;
       case "--grammar-expression-depth-limit":
-        options.typescript.grammarExpressionDepthLimit =
-          parsePositiveIntegerArg(args[++i], arg);
-        options.wasm.grammarExpressionDepthLimit =
-          options.typescript.grammarExpressionDepthLimit;
-        options.kit.grammarExpressionDepthLimit =
-          options.typescript.grammarExpressionDepthLimit;
+        options.wasm.grammarExpressionDepthLimit = parsePositiveIntegerArg(
+          args[++i],
+          arg,
+        );
         break;
       case "--parser-state-limit":
-        options.typescript.parserStateLimit = parsePositiveIntegerArg(
+        options.wasm.parserStateLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.parserStateLimit = options.typescript.parserStateLimit;
-        options.kit.parserStateLimit = options.typescript.parserStateLimit;
         break;
       case "--parser-item-limit":
-        options.typescript.parserItemLimit = parsePositiveIntegerArg(
+        options.wasm.parserItemLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.parserItemLimit = options.typescript.parserItemLimit;
-        options.kit.parserItemLimit = options.typescript.parserItemLimit;
         break;
       case "--lr-closure-work-limit":
-        options.typescript.lrClosureWorkLimit = parsePositiveIntegerArg(
+        options.wasm.lrClosureWorkLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
-        options.wasm.lrClosureWorkLimit = options.typescript.lrClosureWorkLimit;
-        options.kit.lrClosureWorkLimit = options.typescript.lrClosureWorkLimit;
         break;
       case "--parser-table-entry-limit":
-        options.typescript.parserTableEntryLimit = parsePositiveIntegerArg(
-          args[++i],
-          arg,
-        );
-        options.wasm.parserTableEntryLimit =
-          options.typescript.parserTableEntryLimit;
-        options.kit.parserTableEntryLimit =
-          options.typescript.parserTableEntryLimit;
-        break;
-      case "--typescript-generated-byte-limit":
-        options.typescript.generatedByteLimit = parsePositiveIntegerArg(
+        options.wasm.parserTableEntryLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
         break;
-      case "--typescript-runtime-packaging": {
-        const packaging = args[++i];
-        if (!packaging) {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: `Expected packaging mode after ${arg}`,
-          });
-        }
-        if (packaging !== "shared" && packaging !== "legacy-generated") {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message:
-              "Expected TypeScript runtime packaging shared or legacy-generated",
-          });
-        }
-        options.typescript.runtimePackaging = packaging;
-        break;
-      }
-      case "--typescript-plan-data": {
-        const planData = args[++i];
-        if (!planData) {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: `Expected plan data mode after ${arg}`,
-          });
-        }
-        if (planData !== "inline" && planData !== "json") {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: "Expected TypeScript plan data inline or json",
-          });
-        }
-        options.typescript.planData = planData;
-        break;
-      }
       case "--wasm-generated-byte-limit":
         options.wasm.generatedByteLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
         break;
-      case "--wasm-packaging": {
-        const packaging = args[++i];
-        if (!packaging) {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: `Expected packaging mode after ${arg}`,
-          });
-        }
-        if (
-          packaging !== "shared-generic" &&
-          packaging !== "external-binary" &&
-          packaging !== "embedded-typescript"
-        ) {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message:
-              "Expected Wasm packaging shared-generic, external-binary, or embedded-typescript",
-          });
-        }
-        options.wasm.packaging = packaging;
-        break;
-      }
       case "--parser-stats":
-        options.typescript.reportParserStats = true;
         options.wasm.reportParserStats = true;
         break;
       case "--wasm-stats":
@@ -494,7 +347,7 @@ function parseArgs(args: string[]): Options {
 }
 
 function helpText(): string {
-  return `baba - compile explicit EBNF to syntax infrastructure
+  return `baba - compile explicit EBNF to a Wasm lexer/parser
 
 Usage:
   baba <grammar.ebnf> --out generated
@@ -504,13 +357,8 @@ Usage:
 Options:
   --name        Grammar/target name. Defaults to grammar
   --root        Root grammar rule. Defaults to the first grammar rule
-  --target      Output target: tree-sitter, typescript, wasm, kit, or all. May repeat.
-                all expands to tree-sitter and typescript; request wasm or kit explicitly
-  --typescript-dir  TypeScript target output directory. Defaults to typescript
-  --ts-out      Alias for --typescript-dir
+  --target      Output target: wasm. "all" is accepted as an alias for wasm
   --wasm-dir    Wasm target output directory. Defaults to wasm
-  --kit-dir     Parser-kit target output directory. Defaults to kit
-  --kit-profile Parser-kit detail profile: full or runtime. Defaults to full
   --preserve-trivia  Preserve skip matches as trivia tokens
   --discard-trivia   Omit skip matches from generated lexer output
   --lexer-state-limit  Maximum portable runtime lexer DFA state count
@@ -524,15 +372,11 @@ Options:
   --parser-item-limit   Maximum total portable runtime LR item count
   --lr-closure-work-limit  Maximum portable runtime LR closure work units
   --parser-table-entry-limit  Maximum portable runtime ACTION/GOTO entry count
-  --typescript-generated-byte-limit  Maximum generated TypeScript bytes
-  --typescript-runtime-packaging  TypeScript packaging: shared or legacy-generated
-  --typescript-plan-data  TypeScript shared-runtime parser plan data: inline or json
   --wasm-generated-byte-limit  Maximum generated Wasm bytes
-  --wasm-packaging  Wasm packaging: shared-generic, embedded-typescript, or external-binary
-  --parser-stats  Emit runtime parser planning statistics for TypeScript and Wasm
+  --parser-stats  Emit Wasm runtime parser planning statistics
   --wasm-stats   Emit Wasm runtime parser planning statistics
   --portability  Cross-target portability mode: strict, warn, or off
-  --metadata    JSON metadata for Tree-sitter shaping and query generation
+  --metadata    JSON metadata for parser conflict policy and token/runtime options
   --meta        Alias for --metadata
   --diagnostic-format  Diagnostic output format: text or json. Defaults to text
   --explain-targets  Print target support and portability diagnostics
@@ -559,15 +403,7 @@ function parsePositiveIntegerArg(
   return parsed;
 }
 
-function hasTypeScriptOptions(options: TypeScriptTargetOptions): boolean {
-  return Object.keys(options).length > 0;
-}
-
 function hasWasmOptions(options: WasmTargetOptions): boolean {
-  return Object.keys(options).length > 0;
-}
-
-function hasKitOptions(options: KitTargetOptions): boolean {
   return Object.keys(options).length > 0;
 }
 
@@ -610,25 +446,13 @@ function emitTargetExplanation(
 
   console.log("");
   console.log("Portable guarantees and limitations:");
-  if (
-    reports
-      .filter((report) => report.target !== "tree-sitter")
-      .every((report) => !hasErrors(report.diagnostics))
-  ) {
+  if (reports.every((report) => !hasErrors(report.diagnostics))) {
     console.log(
-      "  ✓ TypeScript, Wasm, and kit share portable parser plan v1 and identical Baba regex/DFA semantics",
+      "  ✓ generated Wasm parser and lexer use portable parser plan v1 and Baba regex/DFA semantics",
     );
   }
-  if (
-    !hasErrors(reports.find((report) => report.target === "kit")!.diagnostics)
-  ) {
-    console.log("  ✓ parser-kit schema v1 is available");
-  }
   console.log(
-    "  - Tree-sitter regex output is lowered from the same Baba regex AST; unsupported backend constructs are reported per target",
-  );
-  console.log(
-    "  - External tokens are not supported by portable runtime targets; reachable externals are reported per target",
+    "  - External tokens are not supported by the Wasm parser/lexer target",
   );
   console.log(
     "  - Contextual token overlap status is reported through target capability diagnostics",
@@ -651,10 +475,7 @@ function explainTargets(
   options: Options,
 ): TargetExplanation[] {
   const targets: Array<[GenerateTarget, string]> = [
-    ["tree-sitter", "Tree-sitter"],
-    ["typescript", "TypeScript"],
     ["wasm", "Wasm"],
-    ["kit", "Kit"],
   ];
   return targets.map(([target, label]) => {
     const result = compile(grammar, {
@@ -663,11 +484,7 @@ function explainTargets(
       metadata,
       targets: [target],
       portability: options.portability,
-      typescript: hasTypeScriptOptions(options.typescript)
-        ? options.typescript
-        : undefined,
       wasm: hasWasmOptions(options.wasm) ? options.wasm : undefined,
-      kit: hasKitOptions(options.kit) ? options.kit : undefined,
     });
     return { target, label, diagnostics: result.diagnostics };
   });
@@ -703,16 +520,15 @@ function diagnosticFormatFromArgs(
 }
 
 function addTarget(options: Options, target: string): void {
-  const targets: GenerateTarget[] = target === "all"
-    ? ["tree-sitter", "typescript"]
-    : target === "tree-sitter" || target === "typescript" ||
-        target === "wasm" || target === "kit"
-    ? [target]
-    : [];
+  let targets: GenerateTarget[] = [];
+  if (target === "all" || target === "wasm") {
+    targets = ["wasm"];
+  }
   if (targets.length === 0) {
     throw new BabaError({
       code: "CLI_BAD_ARGS",
-      message: `Unknown target '${target}'`,
+      message:
+        `Unknown target '${target}'. Baba generates the wasm target only.`,
     });
   }
   for (const value of targets) {

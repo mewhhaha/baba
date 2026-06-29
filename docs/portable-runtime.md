@@ -2,14 +2,28 @@
 
 Status: current portable-runtime architecture.
 
-The portable runtime is the shared execution contract for generated TypeScript,
-Wasm, and parser-kit outputs. Analysis lowers an `AnalyzedGrammar` into a
-versioned `PortableParserPlan`; target packages consume that plan instead of
+The portable runtime is the shared execution contract for generated Wasm
+outputs. Analysis lowers an `AnalyzedGrammar` into a versioned
+`PortableParserPlan`; target packages consume that plan instead of
 reconstructing grammar, lexer, parser, reducer, or CST semantics independently.
 
 ## Parser Plan
 
-The plan format is identified by:
+Grammar v2 uses the new portable syntax-runtime plan:
+
+```text
+format: baba-portable-plan
+version: 2
+semantics: baba-portable-v2
+```
+
+It packages grammar identity, stable symbols, lexer modes, DFA tables, token
+channels, contextual candidates, layout hooks, LR parser tables, Pratt
+expression plans, recovery metadata, CST schema, AST schema, diagnostics,
+statistics, hashes, debug profile, and target capability metadata. The
+TypeScript v2 runtime adapter validates the plan before executing it.
+
+The legacy generated-target plan is separate:
 
 ```text
 format: baba-parser-plan
@@ -19,8 +33,8 @@ semantics: baba-portable-v1
 
 It contains symbol tables, canonical lexer data, LR action/goto tables,
 reducers, CST schema data, diagnostics, conflict metadata, and statistics.
-Generated runtimes export the plan format, version, semantics tag, and hash so
-callers can identify the exact runtime contract.
+Generated runtimes export the plan format, version, and semantics tag so callers
+can identify the exact runtime contract.
 
 ## Lexing
 

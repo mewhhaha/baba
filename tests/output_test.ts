@@ -249,78 +249,6 @@ Deno.test("examples expose one-command reproducibility tasks", async () => {
   }
 });
 
-Deno.test("benchmark command writes machine-readable metrics", async () => {
-  const dir = await Deno.makeTempDir();
-  try {
-    const jsonPath = `${dir}/bench-results.json`;
-    const result = await runCommand(Deno.execPath(), [
-      "run",
-      "--allow-read",
-      "--allow-write",
-      "bench/ts_vs_wasm.ts",
-      "--quick",
-      "--samples",
-      "1",
-      "--json",
-      jsonPath,
-    ]);
-    assertIncludes(result.stdout, "preserveTrivia=true");
-    assertIncludes(result.stdout, "sink=");
-
-    const report = JSON.parse(await Deno.readTextFile(jsonPath));
-    assertEquals(report.format, "baba-benchmark-results");
-    assertEquals(report.version, 1);
-    assertEquals(report.quick, true);
-    assertEquals(report.samples, 1);
-    assertEquals(report.cases.length, 6);
-    assert(
-      report.cases.every((
-        entry: {
-          compiler: { totalGenerationMs: number; diagnostics: number };
-          artifacts: {
-            totalBytes: number;
-            textBytes: number;
-            binaryBytes: number;
-            typescriptRuntimeBytes: number;
-            wasmAdapterBytes: number;
-            wasmBinaryBytes: number;
-            treeSitterArtifactBytes: number;
-            largestFile: { path: string; bytes: number } | null;
-          };
-          setup: {
-            applyBundleMs: number;
-            tsImportMs: number;
-            wasmImportMs: number;
-          };
-          metrics: Array<{ operation: string; tsMs: number; wasmMs: number }>;
-        },
-      ) =>
-        entry.compiler.totalGenerationMs >= 0 &&
-        entry.compiler.diagnostics >= 0 &&
-        entry.artifacts.totalBytes > 0 &&
-        entry.artifacts.textBytes > 0 &&
-        entry.artifacts.binaryBytes >= 0 &&
-        entry.artifacts.typescriptRuntimeBytes > 0 &&
-        entry.artifacts.wasmAdapterBytes > 0 &&
-        entry.artifacts.wasmBinaryBytes >= 0 &&
-        entry.artifacts.treeSitterArtifactBytes >= 0 &&
-        entry.artifacts.largestFile !== null &&
-        entry.artifacts.largestFile.bytes > 0 &&
-        entry.setup.applyBundleMs >= 0 &&
-        entry.setup.tsImportMs >= 0 &&
-        entry.setup.wasmImportMs >= 0 &&
-        entry.metrics.some((metric) =>
-          metric.operation === "parse" && metric.tsMs >= 0 &&
-          metric.wasmMs >= 0
-        )
-      ),
-      "Expected each benchmark case to include parse metrics.",
-    );
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
 Deno.test("runtime benchmark reports lexer row-kind counters", async () => {
   const dir = await Deno.makeTempDir();
   try {
@@ -342,6 +270,123 @@ Deno.test("runtime benchmark reports lexer row-kind counters", async () => {
     assert(typeof rowKinds.small === "number");
     assert(typeof rowKinds.binary === "number");
     assert(typeof rowKinds.empty === "number");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("parser pipeline benchmark exposes task-plan metrics", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const jsonPath = `${dir}/parser-pipeline-bench-results.json`;
+    const result = await runCommand(Deno.execPath(), [
+      "run",
+      "--allow-read",
+      "--allow-write",
+      "--allow-run",
+      "scripts/parser_pipeline_bench.ts",
+      "--budget",
+      "size-budgets.json",
+      "--fixture",
+      "large-runtime",
+      "--lexer-only",
+      "--json",
+      jsonPath,
+    ]);
+    assertIncludes(result.stdout, "Baba parser pipeline benchmark");
+    assertIncludes(result.stdout, "profile: lexer-only");
+
+    const report = JSON.parse(await Deno.readTextFile(jsonPath));
+    assertEquals(report.format, "baba-parser-pipeline-benchmark");
+    assertEquals(report.version, 1);
+    assertEquals(report.profile, "lexer-only");
+    assertEquals(report.fixtures.length, 1);
+    const fixture = report.fixtures[0];
+    assertEquals(fixture.fixture, "large-runtime");
+    for (
+      const key of [
+        "lexerMs",
+        "parserConstructMs",
+        "validationParseMs",
+        "cstParseMs",
+        "astMaterializeMs",
+        "generatedBytes",
+        "tokens",
+        "cstNodes",
+      ]
+    ) {
+      const value = fixture.metrics[key];
+      assert(
+        typeof value === "number" && Number.isFinite(value) && value >= 0,
+        `Expected metric ${key} to be a finite nonnegative number.`,
+      );
+    }
+    assertEquals(
+      fixture.metrics.astMaterializeStatus,
+      "measured-public-tree-delta",
+    );
+    assert(fixture.plan.lexerStateCount > 0);
+    assert(fixture.plan.lrStateCount > 0);
+    assert(fixture.metrics.cstNodes > 0);
+    assertEquals(report.budget.ok, true);
+    assert(
+      report.budget.checks.some((check: { name: string }) =>
+        check.name === "lexerMsMax"
+      ),
+      "Expected parser pipeline budget checks to include lexerMsMax.",
+    );
+    assert(
+      report.budget.checks.some((check: { name: string }) =>
+        check.name === "cstNodesMax"
+      ),
+      "Expected parser pipeline budget checks to include cstNodesMax.",
+    );
+
+    const comparison = await runCommand(Deno.execPath(), [
+      "run",
+      "--allow-read",
+      "scripts/parser_pipeline_bench.ts",
+      "--compare",
+      jsonPath,
+      jsonPath,
+    ]);
+    assertIncludes(comparison.stdout, "large-runtime lexerMs:");
+    assertIncludes(comparison.stdout, "large-runtime cstNodes:");
+
+    const parserV2JsonPath = `${dir}/parser-v2-bench.json`;
+    const parserV2 = await runCommand(Deno.execPath(), [
+      "run",
+      "--allow-read",
+      "--allow-write",
+      "--allow-run",
+      "scripts/parser_pipeline_bench.ts",
+      "--budget",
+      "size-budgets.json",
+      "--fixtures-root",
+      "fixtures/perf/parser-v2",
+      "--cst",
+      "--json",
+      parserV2JsonPath,
+    ]);
+    assertIncludes(parserV2.stdout, "profile: cst");
+    const parserV2Report = JSON.parse(
+      await Deno.readTextFile(parserV2JsonPath),
+    );
+    const parserV2FixtureNames = parserV2Report.fixtures.map((
+      entry: { fixture: string },
+    ) => entry.fixture);
+    assertEquals(
+      parserV2FixtureNames.join(","),
+      "expression-heavy,normal-subset,tiny-dsl",
+    );
+    for (
+      const entry of parserV2Report.fixtures as Array<{
+        metrics: { cstNodes: number; tokens: number };
+      }>
+    ) {
+      assert(entry.metrics.tokens > 0);
+      assert(entry.metrics.cstNodes > 0);
+    }
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -406,51 +451,11 @@ Deno.test("shared TypeScript output can externalize parser plan JSON", async () 
   }
 });
 
-Deno.test("parser-kit target emits inspectable compact binary plan", async () => {
-  const result = compile(
-    `
-      token ID = /[A-Za-z_][A-Za-z0-9_]*/ ;
-      skip WS = /[ \\t\\r\\n]+/ ;
-      module = "let" name:ID ;
-    `,
-    { targets: ["kit"], kit: { profile: "runtime" } },
-  );
-  assertEquals(result.diagnostics.length, 0);
-  assert(result.bundle);
-  const planBinary = result.bundle.files.find((file) =>
-    file.path === "kit/parser-plan.bin"
-  );
-  const planJson = generatedTextContent(result.bundle, "kit/parser-kit.json");
-  assert(planBinary?.encoding === "binary");
-  const planInfo = inspectCompactPlanBinary(planBinary.content);
-  assertEquals(planInfo.format, "baba-compact-plan");
-  assert(planInfo.bytes < new TextEncoder().encode(planJson).length);
-  const dir = await Deno.makeTempDir();
-  try {
-    const path = `${dir}/parser-plan.bin`;
-    await Deno.writeFile(path, planBinary.content);
-    const inspected = await runCommand(Deno.execPath(), [
-      "run",
-      "--allow-read",
-      "scripts/inspect_plan.ts",
-      path,
-    ]);
-    assertIncludes(inspected.stdout, '"format": "baba-compact-plan"');
-    assertIncludes(inspected.stdout, '"parserPlanVersion": 1');
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
 Deno.test("CI exposes named release gates for runtime quality", async () => {
   const denoConfig = JSON.parse(await Deno.readTextFile("deno.json"));
   for (
     const task of [
-      "test:parity",
       "test:brl-conformance",
-      "test:portable",
-      "test:runtime-smoke",
-      "test:tree-sitter",
       "test:fuzz",
     ]
   ) {
@@ -463,15 +468,10 @@ Deno.test("CI exposes named release gates for runtime quality", async () => {
   const ci = await Deno.readTextFile(".github/workflows/ci.yml");
   for (
     const gate of [
-      "Exact TypeScript/Wasm parity gate",
       "BRL backend conformance gate",
-      "Portable fixture and plan gates",
-      "Tree-sitter acceptance gate",
-      "Deno Node Bun TypeScript and Wasm runtime smoke",
       "Short deterministic fuzz seeds",
       "Bootstrap drift check",
       "Size budget check",
-      "Benchmark JSON smoke",
       "Publish dry run",
     ]
   ) {
@@ -479,15 +479,10 @@ Deno.test("CI exposes named release gates for runtime quality", async () => {
   }
   for (
     const command of [
-      "deno task test:parity",
       "deno task test:brl-conformance",
-      "deno task test:portable",
-      "deno task test:runtime-smoke",
-      "deno task test:tree-sitter",
       "deno task test:fuzz",
       "deno task bootstrap:check",
       "deno task size:check",
-      "deno task bench -- --quick --samples 1 --json bench-results.json",
       "deno task publish:dry-run",
     ]
   ) {
@@ -504,6 +499,7 @@ Deno.test("architecture decision records cover required contracts", async () => 
     "docs/adr/0005-contextual-lexing.md",
     "docs/adr/0006-conflict-policy.md",
     "docs/adr/0007-generated-file-ownership.md",
+    "docs/adr/0008-lexer-parser-v2.md",
   ];
   for (const path of requiredAdrs) {
     const source = await Deno.readTextFile(path);
@@ -535,7 +531,7 @@ Deno.test("stability policy documents required compatibility levels", async () =
       "## EBNF Syntax",
       "## Metadata Schema",
       "## Parser-Plan Format",
-      "## Generated TypeScript API",
+      "## Generated Wasm API",
       "## Wasm ABI",
       "## Internal BRL",
       "## Tree-Sitter Compatibility",
@@ -551,7 +547,6 @@ Deno.test("README links split user documentation", async () => {
     "docs/grammar.md",
     "docs/metadata.md",
     "docs/portable-runtime.md",
-    "docs/typescript.md",
     "docs/wasm.md",
     "docs/diagnostics.md",
     "docs/limits.md",
@@ -799,40 +794,6 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
       "parseTokens",
     );
     await assertMissing(`${allOutDir}/wasm/mod.ts`);
-    await assertMissing(`${allOutDir}/kit/parser-kit.json`);
-
-    const kitOutDir = `${dir}/kit-out`;
-    await captureConsoleError(() =>
-      main([
-        "generate",
-        grammarPath,
-        "--target",
-        "kit",
-        "--out",
-        kitOutDir,
-        "--kit-dir",
-        "parser-data",
-        "--kit-profile",
-        "runtime",
-        "--discard-trivia",
-      ])
-    );
-    const kitText = await Deno.readTextFile(
-      `${kitOutDir}/parser-data/parser-kit.json`,
-    );
-    assertNotIncludes(kitText, "\n  ");
-    const kit = JSON.parse(
-      kitText,
-    ) as {
-      profile?: string;
-      schemaVersion?: number;
-      lexer?: { defaultPreserveTrivia?: boolean };
-      lr?: { states?: Array<{ items?: unknown[] }> };
-    };
-    assertEquals(kit.schemaVersion, 1);
-    assertEquals(kit.profile, "runtime");
-    assertEquals(kit.lexer?.defaultPreserveTrivia, false);
-    assertEquals(kit.lr?.states?.[0]?.items?.length, 0);
 
     const rootedGrammarPath = `${dir}/rooted.ebnf`;
     await Deno.writeTextFile(

@@ -28,12 +28,10 @@ refcounts, function table ids, environments, and cached thunk results.
 
 All commands assume your current directory is `examples/thunkwasm`.
 
-Generate the parser artifacts, including the explicitly requested
-legacy-specialized Wasm-backed parser used by the AOT compiler:
+Generate the Wasm parser artifacts used by the AOT compiler:
 
 ```sh
 deno task generate
-deno task helix:sync
 ```
 
 Run the AOT compiler and execute the generated Wasm in memory:
@@ -96,29 +94,3 @@ code, once without metadata and once with branch-hint metadata. It instantiates
 both modules, resets their linear memory before each sample, and performs
 repeated calls where each call forces the same thunk 500 times. The counters
 verify that the thunk body runs once per call.
-
-## Helix
-
-Helix needs both query files and a compiled Tree-sitter parser before it can
-highlight `.tw` files. To prepare the local runtime:
-
-```sh
-deno task helix:build
-deno task helix:health
-```
-
-Plain `hx --health thunkwasm` can still show missing highlights from this
-directory because Helix does not add project-local `.helix/runtime` to the
-runtime search path automatically.
-
-Open files with:
-
-```sh
-deno task helix:open
-```
-
-or:
-
-```sh
-HELIX_RUNTIME=$PWD/.helix/runtime hx programs/cached.tw
-```

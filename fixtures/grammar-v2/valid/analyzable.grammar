@@ -1,0 +1,11 @@
+grammar Analyze
+
+token Ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
+skip Space channel trivia = /[ \t\r\n]+/ ;
+
+module = items:item+ -> Module(items) ;
+item = "let" name:Ident value:expr -> Let(name, value) ;
+expr = atom {
+  infix left 10 "+"
+}
+atom = Ident -> Name(text) ;

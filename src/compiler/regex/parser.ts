@@ -1,5 +1,6 @@
 import {
   type CharRange,
+  invertRanges,
   MAX_CODE_POINT,
   normalizeRanges,
   type RegexAst,
@@ -18,6 +19,7 @@ export class RegexSyntaxError extends Error {
 }
 
 let parsePortableRegexInvocationCountForTesting = 0;
+const unicodePropertyRangeCache = new Map<string, readonly CharRange[]>();
 
 export function parsePortableRegex(
   pattern: string,
@@ -63,7 +65,11 @@ class RegexParser {
   }
 
   peek(): string {
-    return this.source[this.#index] ?? "";
+    const char = this.source[this.#index];
+    if (char === undefined) {
+      return "";
+    }
+    return char;
   }
 
   parseChoice(): RegexAst {
@@ -71,7 +77,10 @@ class RegexParser {
     while (this.match("|")) {
       options.push(this.parseSequence());
     }
-    return options.length === 1 ? options[0] : { kind: "choice", options };
+    if (options.length === 1) {
+      return options[0];
+    }
+    return { kind: "choice", options };
   }
 
   private parseSequence(): RegexAst {
@@ -84,7 +93,10 @@ class RegexParser {
       items.push(this.parseQuantified());
     }
     if (items.length === 0) return { kind: "empty" };
-    return items.length === 1 ? items[0] : { kind: "sequence", items };
+    if (items.length === 1) {
+      return items[0];
+    }
+    return { kind: "sequence", items };
   }
 
   private parseQuantified(): RegexAst {
@@ -133,6 +145,14 @@ class RegexParser {
     if (char === "(") return this.parseGroup();
     if (char === "[") return this.parseClass();
     if (char === "\\") {
+      if (this.peekNext() === "p" || this.peekNext() === "P") {
+        const property = this.parsePropertyEscape();
+        return {
+          kind: "class",
+          ranges: property.ranges,
+          negated: property.negated,
+        };
+      }
       return { kind: "literal", codePoint: this.parseEscape(false) };
     }
     if ("|)*+?{}".includes(char)) {
@@ -177,23 +197,45 @@ class RegexParser {
         return { kind: "class", ranges: normalizeRanges(ranges), negated };
       }
       first = false;
-      const start = this.parseClassCodePoint();
-      if (this.peek() === "-" && this.source[this.#index + 1] !== "]") {
+      const startRanges = this.parseClassRanges();
+      if (
+        startRanges.length === 1 &&
+        startRanges[0].start === startRanges[0].end &&
+        this.peek() === "-" && this.source[this.#index + 1] !== "]"
+      ) {
         this.#index++;
-        const end = this.parseClassCodePoint();
+        const endRanges = this.parseClassRanges();
+        if (
+          endRanges.length !== 1 || endRanges[0].start !== endRanges[0].end
+        ) {
+          throw this.error("Character class range endpoint must be literal");
+        }
+        const start = startRanges[0].start;
+        const end = endRanges[0].start;
         if (end < start) throw this.error("Character class range is reversed");
         ranges.push({ start, end });
       } else {
-        ranges.push({ start, end: start });
+        ranges.push(...startRanges);
       }
     }
     throw this.error("Unterminated character class");
   }
 
-  private parseClassCodePoint(): number {
-    if (this.peek() === "\\") return this.parseEscape(true);
+  private parseClassRanges(): CharRange[] {
+    if (this.peek() === "\\") {
+      if (this.peekNext() === "p" || this.peekNext() === "P") {
+        const property = this.parsePropertyEscape();
+        if (property.negated) {
+          return invertRanges(property.ranges);
+        }
+        return [...property.ranges];
+      }
+      const codePoint = this.parseEscape(true);
+      return [{ start: codePoint, end: codePoint }];
+    }
     if (this.peek() === "") throw this.error("Expected character class member");
-    return this.advanceCodePoint();
+    const codePoint = this.advanceCodePoint();
+    return [{ start: codePoint, end: codePoint }];
   }
 
   private parseEscape(inClass: boolean): number {
@@ -268,6 +310,33 @@ class RegexParser {
     );
   }
 
+  private parsePropertyEscape(): {
+    readonly ranges: readonly CharRange[];
+    readonly negated: boolean;
+  } {
+    const slash = this.#index;
+    this.expect("\\");
+    const escaped = this.peek();
+    if (escaped !== "p" && escaped !== "P") {
+      throw new RegexSyntaxError("Expected Unicode property escape", slash);
+    }
+    this.#index++;
+    this.expect("{");
+    const propertyStart = this.#index;
+    while (!this.atEnd() && this.peek() !== "}") {
+      this.#index++;
+    }
+    if (this.atEnd()) {
+      throw new RegexSyntaxError("Unterminated Unicode property escape", slash);
+    }
+    const property = this.source.slice(propertyStart, this.#index);
+    this.expect("}");
+    return {
+      ranges: unicodePropertyRanges(property, slash),
+      negated: escaped === "P",
+    };
+  }
+
   private parseBraceQuantifier(): { min: number; max: number | null } {
     const start = this.#index;
     this.expect("{");
@@ -279,7 +348,11 @@ class RegexParser {
     let max: number | null = min;
     if (this.match(",")) {
       const maxText = this.readDigits();
-      max = maxText ? Number(maxText) : null;
+      if (maxText) {
+        max = Number(maxText);
+      } else {
+        max = null;
+      }
     }
     this.expect("}");
     if (!Number.isSafeInteger(min) || min < 0) {
@@ -310,7 +383,11 @@ class RegexParser {
     if (codePoint === undefined || codePoint > MAX_CODE_POINT) {
       throw this.error("Expected Unicode code point");
     }
-    this.#index += codePoint > 0xffff ? 2 : 1;
+    if (codePoint > 0xffff) {
+      this.#index += 2;
+    } else {
+      this.#index++;
+    }
     return codePoint;
   }
 
@@ -320,6 +397,14 @@ class RegexParser {
     return true;
   }
 
+  private peekNext(): string {
+    const next = this.source[this.#index + 1];
+    if (next === undefined) {
+      return "";
+    }
+    return next;
+  }
+
   private expect(text: string): void {
     if (!this.match(text)) throw this.error(`Expected ${JSON.stringify(text)}`);
   }
@@ -327,4 +412,55 @@ class RegexParser {
   error(message: string): RegexSyntaxError {
     return new RegexSyntaxError(message, this.#index);
   }
+}
+
+function unicodePropertyRanges(
+  property: string,
+  index: number,
+): readonly CharRange[] {
+  const normalized = normalizeUnicodeProperty(property);
+  const existing = unicodePropertyRangeCache.get(normalized);
+  if (existing !== undefined) {
+    return existing;
+  }
+  let matcher: RegExp;
+  try {
+    matcher = new RegExp(`^\\p{${normalized}}$`, "u");
+  } catch (_error) {
+    throw new RegexSyntaxError(
+      `Unsupported Unicode property ${JSON.stringify(property)}`,
+      index,
+    );
+  }
+  const ranges: CharRange[] = [];
+  let activeStart: number | undefined;
+  for (let codePoint = 0; codePoint <= MAX_CODE_POINT; codePoint++) {
+    const matches = matcher.test(String.fromCodePoint(codePoint));
+    if (matches) {
+      if (activeStart === undefined) {
+        activeStart = codePoint;
+      }
+      continue;
+    }
+    if (activeStart !== undefined) {
+      ranges.push({ start: activeStart, end: codePoint - 1 });
+      activeStart = undefined;
+    }
+  }
+  if (activeStart !== undefined) {
+    ranges.push({ start: activeStart, end: MAX_CODE_POINT });
+  }
+  const normalizedRanges = normalizeRanges(ranges);
+  unicodePropertyRangeCache.set(normalized, normalizedRanges);
+  return normalizedRanges;
+}
+
+function normalizeUnicodeProperty(property: string): string {
+  if (property === "Letter") {
+    return "L";
+  }
+  if (property === "Number") {
+    return "N";
+  }
+  return property;
 }

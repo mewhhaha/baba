@@ -43,17 +43,16 @@ fields, canonical ordering, reducer opcodes, diagnostic schema, and validation
 rules. Breaking changes require a new plan version or a separately versioned
 subsection.
 
-## Generated TypeScript API
+## Generated Wasm API
 
-Generated TypeScript parser modules expose a stable ergonomic API:
+Generated Wasm parser modules expose a stable ergonomic API:
 
-- `lex(source, options?)`;
-- `parse(source, options?)`;
-- `parseTokens(source, tokens)`;
-- `parseTokensUnchecked(source, tokens)`;
-- `positionAt(source, offset)`;
-- `createSourceMap(source)`;
-- generated token, node, result, and diagnostic types.
+- `createParser({ bytes, plan })`;
+- `createParser({ module, plan })`;
+- `createParserAsync(options)`;
+- parser instances with `lex`, `parse`, `parseTokens`, `parseTokensUnchecked`,
+  `reset`, and `dispose`;
+- generated token, node, result, and diagnostic types in `syntax.ts`.
 
 Generated source layout and private helper names are not stable. Consumers
 should import from the generated module entrypoint rather than reaching into

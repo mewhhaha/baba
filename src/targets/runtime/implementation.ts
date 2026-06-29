@@ -61,11 +61,6 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
       hash: "fnv1a64:ce4d444938367a40",
     },
     {
-      path: "src/targets/runtime/typescript_lexer_runtime.ts",
-      role: "typescript-lexer-runtime",
-      hash: "fnv1a64:7d3d196b8d7cd3e7",
-    },
-    {
       path: "src/targets/runtime/public_source_text.ts",
       role: "public-source-text-boundary",
       hash: "fnv1a64:85aedc2a4c7538d6",
@@ -126,11 +121,6 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
       hash: "fnv1a64:495f395c96083fb6",
     },
     {
-      path: "src/targets/runtime/typescript_parser_runtime.ts",
-      role: "typescript-parser-runtime",
-      hash: "fnv1a64:d789152721162f21",
-    },
-    {
       path: "src/targets/runtime/wasm_abi.ts",
       role: "wasm-abi-constants",
       hash: "fnv1a64:e38a60d5bef05b49",
@@ -138,27 +128,27 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_core_runtime.ts",
       role: "wasm-core-runtime",
-      hash: "fnv1a64:e5cf31c35671bb24",
+      hash: "fnv1a64:2b3e9a798b992e2c",
     },
     {
       path: "src/runtime/mod.ts",
       role: "shared-typescript-runtime-api",
-      hash: "fnv1a64:269dbd5f58083d30",
+      hash: "fnv1a64:65a8f8cf90ac1708",
     },
     {
       path: "src/runtime/wasm.ts",
       role: "shared-wasm-runtime-api",
-      hash: "fnv1a64:4b6e90a6ad6c5bb1",
+      hash: "fnv1a64:317473fbac282d7e",
     },
     {
       path: "src/runtime/wasm_executor.ts",
       role: "shared-generic-wasm-executor",
-      hash: "fnv1a64:0801f392e31575a8",
+      hash: "fnv1a64:0ef417aba3bc8330",
     },
     {
-      path: "src/targets/kit/schema.ts",
-      role: "parser-kit-shared-runtime",
-      hash: "fnv1a64:129905edadc37c6f",
+      path: "src/runtime/parser_plan.ts",
+      role: "shared-runtime-parser-plan",
+      hash: "fnv1a64:b597ee740a82bf7a",
     },
     {
       path: "src/targets/runtime/provenance.ts",
@@ -167,7 +157,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:f07242f41f5a0348" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:7035b1778ee90bc6" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

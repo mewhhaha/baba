@@ -15,7 +15,7 @@ export {
   parserDiagnosticCodeTraceLimit,
   parserDiagnosticDetailKindNone,
   parserDiagnosticDetailKindParserState,
-} from "../targets/kit/schema.ts";
+} from "./parser_plan.ts";
 export type {
   KitEofToken as EofToken,
   KitErrorToken as ErrorToken,
@@ -31,7 +31,7 @@ export type {
   KitToken as Token,
   KitTriviaToken as TriviaToken,
   ParserKit as RuntimeParserPlan,
-} from "../targets/kit/schema.ts";
+} from "./parser_plan.ts";
 import {
   assertParserKit,
   type KitLexOptions,
@@ -45,6 +45,7 @@ import {
   parseEventsWithKit,
   parseLazyWithKit,
   type ParserKit,
+  type ParserKitValidationIssue,
   parseTokenEventsUncheckedWithKit,
   parseTokenEventsWithKit,
   parseTokensLazyUncheckedWithKit,
@@ -56,7 +57,7 @@ import {
   validateTokensUncheckedWithKit,
   validateTokensWithKit,
   validateWithKit,
-} from "../targets/kit/schema.ts";
+} from "./parser_plan.ts";
 
 export type { KitParseEvent as ParseEvent };
 
@@ -222,7 +223,7 @@ export function createParser<Root extends KitRuleNode = KitRuleNode>(
   };
 }
 
-export function validatePlan(plan: unknown) {
+export function validatePlan(plan: unknown): ParserKitValidationIssue[] {
   return validateParserKit(plan);
 }
 

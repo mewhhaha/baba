@@ -22,10 +22,11 @@ import {
 
 export interface WasmModuleImage {
   bytes: Uint8Array;
+  planBytes: Uint8Array;
   inputBase: number;
 }
 
-interface DataLayout {
+interface PlanDataLayout {
   accepts: number;
   asciiTransitions: number | null;
   transitionRows: number;
@@ -41,56 +42,73 @@ interface DataLayout {
 const I32 = 0x7f;
 const FUNC = 0x60;
 const EMPTY_BLOCK = 0x40;
+const PLAN_MAGIC = 0x31505742;
+const PLAN_FORMAT_VERSION = 1;
+const PLAN_HEADER_MAGIC = 0;
+const PLAN_HEADER_FORMAT_VERSION = 1;
+const PLAN_HEADER_PARSER_PLAN_VERSION = 2;
+const PLAN_HEADER_DFA_STATE_COUNT = 3;
+const PLAN_HEADER_PARSER_STATE_COUNT = 4;
+const PLAN_HEADER_ACCEPTS = 5;
+const PLAN_HEADER_ASCII_TRANSITIONS = 6;
+const PLAN_HEADER_TRANSITION_ROWS = 7;
+const PLAN_HEADER_TRANSITIONS = 8;
+const PLAN_HEADER_ACTION_ROWS = 9;
+const PLAN_HEADER_ACTION_PAIRS = 10;
+const PLAN_HEADER_GOTO_ROWS = 11;
+const PLAN_HEADER_GOTO_PAIRS = 12;
+const PLAN_HEADER_BYTE_LENGTH = 13;
+const PLAN_HEADER_I32_COUNT = 14;
+const PLAN_HEADER_BYTES = PLAN_HEADER_I32_COUNT * 4;
 
 export function emitWasmModule(
   dfa: Dfa,
   lr: LrTable,
   parserPlanVersion = 1,
 ): WasmModuleImage {
-  const layout = buildDataLayout(dfa, lr);
-  const initialPages = Math.max(1, Math.ceil(layout.inputBase / PAGE_SIZE));
+  const layout = buildPlanDataLayout(dfa, lr, parserPlanVersion);
+  const bytes = emitGenericWasmModule();
+  const inputBase = align(layout.bytes.length, 8);
+  const initialPages = Math.max(1, Math.ceil(inputBase / PAGE_SIZE));
   if (initialPages > MAX_WASM_PAGES) {
     throw new Error(
-      `Wasm static data needs ${initialPages} pages, exceeding the maximum ${MAX_WASM_PAGES}.`,
+      `Wasm external plan needs ${initialPages} pages, exceeding the maximum ${MAX_WASM_PAGES}.`,
     );
   }
-  const sections = [
-    section(1, typeSection()),
-    section(3, functionSection()),
-    section(5, memorySection(initialPages)),
-    section(7, exportSection()),
-    section(
-      10,
-      codeSection(
-        layout,
-        dfa.states.length,
-        lr.states.length,
-        parserPlanVersion,
-      ),
-    ),
-    section(11, dataSection(layout.bytes)),
-  ];
   return {
-    bytes: Uint8Array.from([
-      0x00,
-      0x61,
-      0x73,
-      0x6d,
-      0x01,
-      0x00,
-      0x00,
-      0x00,
-      ...sections.flat(),
-    ]),
-    inputBase: layout.inputBase,
+    bytes,
+    planBytes: layout.bytes,
+    inputBase,
   };
 }
 
-function buildDataLayout(
+function emitGenericWasmModule(): Uint8Array {
+  const sections = [
+    section(1, typeSection()),
+    section(3, functionSection()),
+    section(5, memorySection(1)),
+    section(7, exportSection()),
+    section(10, codeSection()),
+  ];
+  return Uint8Array.from([
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    ...sections.flat(),
+  ]);
+}
+
+function buildPlanDataLayout(
   dfa: Dfa,
   lr: LrTable,
-): DataLayout {
-  const data: number[] = [];
+  parserPlanVersion: number,
+): PlanDataLayout {
+  const data = new Array(PLAN_HEADER_BYTES).fill(0);
   const appendI32s = (values: readonly number[]): number => {
     const offset = data.length;
     for (const value of values) {
@@ -147,6 +165,25 @@ function buildDataLayout(
   const gotoRowsOffset = appendI32s(gotoRows);
   const gotoPairsOffset = appendI32s(gotoPairs);
 
+  const bytes = Uint8Array.from(data);
+  const header = [
+    PLAN_MAGIC,
+    PLAN_FORMAT_VERSION,
+    parserPlanVersion,
+    dfa.states.length,
+    lr.states.length,
+    accepts,
+    asciiTransitionsOffset === null ? -1 : asciiTransitionsOffset,
+    transitionRowsOffset,
+    transitionsOffset,
+    actionRowsOffset,
+    actionPairsOffset,
+    gotoRowsOffset,
+    gotoPairsOffset,
+    bytes.length,
+  ];
+  writeHeader(bytes, header);
+
   return {
     accepts,
     asciiTransitions: asciiTransitionsOffset,
@@ -156,9 +193,14 @@ function buildDataLayout(
     actionPairs: actionPairsOffset,
     gotoRows: gotoRowsOffset,
     gotoPairs: gotoPairsOffset,
-    inputBase: align(data.length, 8),
-    bytes: Uint8Array.from(data),
+    inputBase: align(bytes.length, 8),
+    bytes,
   };
+}
+
+function writeHeader(bytes: Uint8Array, values: readonly number[]): void {
+  const view = new DataView(bytes.buffer);
+  values.forEach((value, index) => view.setInt32(index * 4, value, true));
 }
 
 function sortedActionEntries(
@@ -242,6 +284,7 @@ function functionSection(): number[] {
     u32(0),
     u32(0),
     u32(1),
+    u32(0),
     u32(2),
     u32(2),
     u32(2),
@@ -268,54 +311,51 @@ function exportSection(): number[] {
     exportEntry("parser_action", 0x00, 2),
     exportEntry("parser_goto", 0x00, 3),
     exportEntry("lex_all", 0x00, 4),
-    exportEntry("abi_version", 0x00, 5),
-    exportEntry("plan_version", 0x00, 6),
-    exportEntry("semantics_version", 0x00, 7),
-    exportEntry("reset", 0x00, 8),
-    exportEntry("input_base", 0x00, 9),
-    exportEntry("max_pages", 0x00, 10),
-    exportEntry("source_encoding", 0x00, 11),
-    exportEntry("span_unit", 0x00, 12),
-    exportEntry("lex_result_i32_count", 0x00, 13),
-    exportEntry("token_record_i32_count", 0x00, 14),
-    exportEntry("host_ownership_model", 0x00, 15),
-    exportEntry("result_lifetime_model", 0x00, 16),
+    exportEntry("load_plan", 0x00, 5),
+    exportEntry("abi_version", 0x00, 6),
+    exportEntry("plan_version", 0x00, 7),
+    exportEntry("semantics_version", 0x00, 8),
+    exportEntry("reset", 0x00, 9),
+    exportEntry("input_base", 0x00, 10),
+    exportEntry("max_pages", 0x00, 11),
+    exportEntry("source_encoding", 0x00, 12),
+    exportEntry("span_unit", 0x00, 13),
+    exportEntry("lex_result_i32_count", 0x00, 14),
+    exportEntry("token_record_i32_count", 0x00, 15),
+    exportEntry("host_ownership_model", 0x00, 16),
+    exportEntry("result_lifetime_model", 0x00, 17),
   ]);
 }
 
-function codeSection(
-  layout: DataLayout,
-  dfaStateCount: number,
-  parserStateCount: number,
-  parserPlanVersion: number,
-): number[] {
+function codeSection(): number[] {
   return vec([
-    functionBody(3, transitionFunction(layout, dfaStateCount)),
-    functionBody(10, lexOneFunction(layout.accepts)),
+    functionBody(4, transitionFunction()),
+    functionBody(10, lexOneFunction()),
     functionBody(
       3,
       tableLookupFunction({
-        rows: layout.actionRows,
-        pairs: layout.actionPairs,
-        stateCount: parserStateCount,
+        rowsHeader: PLAN_HEADER_ACTION_ROWS,
+        pairsHeader: PLAN_HEADER_ACTION_PAIRS,
+        stateCountHeader: PLAN_HEADER_PARSER_STATE_COUNT,
         missing: 0,
       }),
     ),
     functionBody(
       3,
       tableLookupFunction({
-        rows: layout.gotoRows,
-        pairs: layout.gotoPairs,
-        stateCount: parserStateCount,
+        rowsHeader: PLAN_HEADER_GOTO_ROWS,
+        pairsHeader: PLAN_HEADER_GOTO_PAIRS,
+        stateCountHeader: PLAN_HEADER_PARSER_STATE_COUNT,
         missing: -1,
       }),
     ),
-    functionBody(15, lexAllFunction(layout)),
+    functionBody(15, lexAllFunction()),
+    functionBody(0, loadPlanFunction()),
     functionBody(0, versionFunction(WASM_ABI_VERSION)),
-    functionBody(0, versionFunction(parserPlanVersion)),
+    functionBody(0, planVersionFunction()),
     functionBody(0, versionFunction(RUNTIME_IMPLEMENTATION_VERSION)),
     functionBody(0, resetFunction()),
-    functionBody(0, versionFunction(layout.inputBase)),
+    functionBody(0, inputBaseFunction()),
     functionBody(0, versionFunction(MAX_WASM_PAGES)),
     functionBody(0, versionFunction(WASM_SOURCE_ENCODING_UTF16)),
     functionBody(0, versionFunction(WASM_SPAN_UNIT_UTF16)),
@@ -330,33 +370,72 @@ function versionFunction(version: number): number[] {
   return i32(version);
 }
 
+function planVersionFunction(): number[] {
+  return loadHeaderValue(PLAN_HEADER_PARSER_PLAN_VERSION);
+}
+
+function inputBaseFunction(): number[] {
+  return [
+    ...loadHeaderValue(PLAN_HEADER_BYTE_LENGTH),
+    ...i32(7),
+    0x6a,
+    ...i32(-8),
+    0x71,
+  ];
+}
+
 function resetFunction(): number[] {
   return [];
 }
 
-function dataSection(data: Uint8Array): number[] {
-  return vec([[
-    0x00,
-    0x41,
-    ...s32(0),
-    0x0b,
-    ...u32(data.length),
-    ...data,
-  ]]);
+function loadPlanFunction(): number[] {
+  const ptr = 0;
+  const len = 1;
+  return [
+    ...get(ptr),
+    ...i32(0),
+    0x47,
+    ...returnIfTrue(0),
+    ...get(len),
+    ...i32(PLAN_HEADER_BYTES),
+    0x49,
+    ...returnIfTrue(0),
+    ...loadHeaderValue(PLAN_HEADER_MAGIC),
+    ...i32(PLAN_MAGIC),
+    0x47,
+    ...returnIfTrue(0),
+    ...loadHeaderValue(PLAN_HEADER_FORMAT_VERSION),
+    ...i32(PLAN_FORMAT_VERSION),
+    0x47,
+    ...returnIfTrue(0),
+    ...loadHeaderValue(PLAN_HEADER_BYTE_LENGTH),
+    ...get(len),
+    0x4b,
+    ...returnIfTrue(0),
+    ...i32(1),
+  ];
 }
 
-function transitionFunction(
-  layout: DataLayout,
-  dfaStateCount: number,
-): number[] {
+function returnIfTrue(value: number): number[] {
+  return [
+    0x04,
+    EMPTY_BLOCK,
+    ...i32(value),
+    0x0f,
+    0x0b,
+  ];
+}
+
+function transitionFunction(): number[] {
   const state = 0;
   const codePoint = 1;
   const index = 2;
   const end = 3;
   const base = 4;
+  const asciiOffset = 5;
   return [
     ...get(state),
-    ...i32(dfaStateCount),
+    ...loadHeaderValue(PLAN_HEADER_DFA_STATE_COUNT),
     0x4f,
     0x04,
     EMPTY_BLOCK,
@@ -364,32 +443,36 @@ function transitionFunction(
     0x0f,
     0x0b,
 
-    ...(layout.asciiTransitions === null ? [] : [
-      ...get(codePoint),
-      ...i32(128),
-      0x49,
-      0x04,
-      EMPTY_BLOCK,
-      ...loadAsciiTransition(
-        layout.asciiTransitions,
-        state,
-        codePoint,
-      ),
-      ...set(base),
-      ...get(base),
-      ...i32(0),
-      0x4e,
-      0x04,
-      EMPTY_BLOCK,
-      ...get(base),
-      0x0f,
-      0x0b,
-      0x0b,
-    ]),
+    ...get(codePoint),
+    ...i32(128),
+    0x49,
+    0x04,
+    EMPTY_BLOCK,
+    ...loadHeaderValue(PLAN_HEADER_ASCII_TRANSITIONS),
+    ...set(asciiOffset),
+    ...get(asciiOffset),
+    ...i32(0),
+    0x4e,
+    0x04,
+    EMPTY_BLOCK,
+    ...loadAsciiTransition(asciiOffset, state, codePoint),
+    ...set(base),
+    ...get(base),
+    ...i32(0),
+    0x4e,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(base),
+    0x0f,
+    0x0b,
+    0x0b,
+    0x0b,
 
-    ...loadTableValue(layout.transitionRows, state),
+    ...loadHeaderValue(PLAN_HEADER_TRANSITION_ROWS),
+    ...set(base),
+    ...loadTableValueFromLocal(base, state),
     ...set(index),
-    ...loadTableValuePlusOne(layout.transitionRows, state),
+    ...loadTableValuePlusOneFromLocal(base, state),
     ...set(end),
 
     0x02,
@@ -402,7 +485,7 @@ function transitionFunction(
     0x0d,
     ...u32(1),
 
-    ...i32(layout.transitions),
+    ...loadHeaderValue(PLAN_HEADER_TRANSITIONS),
     ...get(index),
     ...i32(12),
     0x6c,
@@ -444,7 +527,7 @@ function transitionFunction(
   ];
 }
 
-function lexOneFunction(acceptsOffset: number): number[] {
+function lexOneFunction(): number[] {
   const src = 0;
   const len = 1;
   const offset = 2;
@@ -553,7 +636,7 @@ function lexOneFunction(acceptsOffset: number): number[] {
     ...get(target),
     ...set(state),
 
-    ...loadTableValue(acceptsOffset, state),
+    ...loadTableValueFromHeader(PLAN_HEADER_ACCEPTS, state),
     ...set(accept),
     ...get(accept),
     ...i32(0),
@@ -592,7 +675,7 @@ function lexOneFunction(acceptsOffset: number): number[] {
   ];
 }
 
-function lexAllFunction(layout: DataLayout): number[] {
+function lexAllFunction(): number[] {
   const src = 0;
   const len = 1;
   const tokens = 3;
@@ -647,7 +730,6 @@ function lexAllFunction(layout: DataLayout): number[] {
     ...u32(1),
 
     ...decodeAndTransition(
-      layout,
       src,
       index,
       len,
@@ -671,7 +753,7 @@ function lexAllFunction(layout: DataLayout): number[] {
     ...get(target),
     ...set(state),
 
-    ...loadTableValue(layout.accepts, state),
+    ...loadTableValueFromHeader(PLAN_HEADER_ACCEPTS, state),
     ...set(accept),
     ...get(accept),
     ...i32(0),
@@ -768,7 +850,6 @@ function decodeCodePoint(
 }
 
 function decodeAndTransition(
-  layout: DataLayout,
   srcLocal: number,
   indexLocal: number,
   lenLocal: number,
@@ -782,56 +863,20 @@ function decodeAndTransition(
   return [
     ...loadUtf16(srcLocal, indexLocal),
     ...set(unitLocal),
-    ...(layout.asciiTransitions === null
-      ? [
-        ...decodeCodePointFromLoadedUnit(
-          srcLocal,
-          indexLocal,
-          lenLocal,
-          unitLocal,
-          nextUnitLocal,
-          codePointLocal,
-          widthLocal,
-        ),
-        ...get(stateLocal),
-        ...get(codePointLocal),
-        0x10,
-        ...u32(0),
-        ...set(targetLocal),
-      ]
-      : [
-        ...get(unitLocal),
-        ...i32(128),
-        0x49,
-        0x04,
-        EMPTY_BLOCK,
-        ...get(unitLocal),
-        ...set(codePointLocal),
-        ...i32(1),
-        ...set(widthLocal),
-        ...loadAsciiTransition(
-          layout.asciiTransitions,
-          stateLocal,
-          unitLocal,
-        ),
-        ...set(targetLocal),
-        0x05,
-        ...decodeCodePointFromLoadedUnit(
-          srcLocal,
-          indexLocal,
-          lenLocal,
-          unitLocal,
-          nextUnitLocal,
-          codePointLocal,
-          widthLocal,
-        ),
-        ...get(stateLocal),
-        ...get(codePointLocal),
-        0x10,
-        ...u32(0),
-        ...set(targetLocal),
-        0x0b,
-      ]),
+    ...decodeCodePointFromLoadedUnit(
+      srcLocal,
+      indexLocal,
+      lenLocal,
+      unitLocal,
+      nextUnitLocal,
+      codePointLocal,
+      widthLocal,
+    ),
+    ...get(stateLocal),
+    ...get(codePointLocal),
+    0x10,
+    ...u32(0),
+    ...set(targetLocal),
   ];
 }
 
@@ -902,12 +947,12 @@ function decodeCodePointFromLoadedUnit(
 }
 
 function loadAsciiTransition(
-  asciiTransitionsOffset: number,
+  asciiTransitionsOffsetLocal: number,
   stateLocal: number,
   unitLocal: number,
 ): number[] {
   return [
-    ...i32(asciiTransitionsOffset),
+    ...get(asciiTransitionsOffsetLocal),
     ...get(stateLocal),
     ...i32(128),
     0x6c,
@@ -921,9 +966,9 @@ function loadAsciiTransition(
 }
 
 function tableLookupFunction(options: {
-  rows: number;
-  pairs: number;
-  stateCount: number;
+  rowsHeader: number;
+  pairsHeader: number;
+  stateCountHeader: number;
   missing: number;
 }): number[] {
   const state = 0;
@@ -933,7 +978,7 @@ function tableLookupFunction(options: {
   const base = 4;
   return [
     ...get(state),
-    ...i32(options.stateCount),
+    ...loadHeaderValue(options.stateCountHeader),
     0x4f,
     0x04,
     EMPTY_BLOCK,
@@ -941,9 +986,11 @@ function tableLookupFunction(options: {
     0x0f,
     0x0b,
 
-    ...loadTableValue(options.rows, state),
+    ...loadHeaderValue(options.rowsHeader),
+    ...set(base),
+    ...loadTableValueFromLocal(base, state),
     ...set(index),
-    ...loadTableValuePlusOne(options.rows, state),
+    ...loadTableValuePlusOneFromLocal(base, state),
     ...set(end),
 
     0x02,
@@ -956,7 +1003,7 @@ function tableLookupFunction(options: {
     0x0d,
     ...u32(1),
 
-    ...i32(options.pairs),
+    ...loadHeaderValue(options.pairsHeader),
     ...get(index),
     ...i32(8),
     0x6c,
@@ -988,9 +1035,19 @@ function tableLookupFunction(options: {
   ];
 }
 
-function loadTableValue(offset: number, indexLocal: number): number[] {
+function loadHeaderValue(field: number): number[] {
   return [
-    ...i32(offset),
+    ...i32(field * 4),
+    ...load32(),
+  ];
+}
+
+function loadTableValueFromHeader(
+  field: number,
+  indexLocal: number,
+): number[] {
+  return [
+    ...loadHeaderValue(field),
     ...get(indexLocal),
     ...i32(4),
     0x6c,
@@ -999,9 +1056,26 @@ function loadTableValue(offset: number, indexLocal: number): number[] {
   ];
 }
 
-function loadTableValuePlusOne(offset: number, indexLocal: number): number[] {
+function loadTableValueFromLocal(
+  offsetLocal: number,
+  indexLocal: number,
+): number[] {
   return [
-    ...i32(offset),
+    ...get(offsetLocal),
+    ...get(indexLocal),
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...load32(),
+  ];
+}
+
+function loadTableValuePlusOneFromLocal(
+  offsetLocal: number,
+  indexLocal: number,
+): number[] {
+  return [
+    ...get(offsetLocal),
     ...get(indexLocal),
     ...i32(1),
     0x6a,

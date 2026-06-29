@@ -1,11 +1,5 @@
 import { compile, formatDiagnostic, parseMetadata } from "../../src/mod.ts";
 import { applyBundle } from "../../src/output.ts";
-import {
-  compileParserKit,
-  parseWithKit,
-  validateParserKit,
-} from "../../src/kit.ts";
-import * as ts from "./generated/ts/mod.ts";
 import * as wasm from "./generated/wasm/mod.ts";
 
 const here = new URL(".", import.meta.url);
@@ -15,98 +9,80 @@ const source = await Deno.readTextFile(new URL(sourcePath, here));
 const grammar = await Deno.readTextFile(new URL("grammar.ebnf", here));
 const metadataSource = await Deno.readTextFile(new URL("baba.json", here));
 const metadata = parseMetadata(metadataSource);
+const wasmBytes = await Deno.readFile(
+  new URL("generated/wasm/parser.wasm", here),
+);
+const wasmPlan = await Deno.readFile(
+  new URL("generated/wasm/parser.plan", here),
+);
 
-assertSameParse("TypeScript", ts.parse(source));
-
-const wasmParser = wasm.createParser();
+const wasmParser = wasm.createParser({ bytes: wasmBytes, plan: wasmPlan });
+const parsedSource = wasmParser.parse(source);
 try {
-  assertSameParse("Wasm instance", wasmParser.parse(source));
+  assertSameParse("Wasm instance", parsedSource);
   wasmParser.reset();
   assertEquals(wasmParser.lex("< x;").diagnostics.length, 0);
+
+  const wasmParserAsync = await wasm.createParserAsync({
+    bytes: wasmBytes,
+    plan: wasmPlan,
+  });
+  try {
+    assertSameParse("async Wasm instance", wasmParserAsync.parse(source));
+  } finally {
+    wasmParserAsync.dispose();
+  }
+
+  assertEquals(wasm.parserPlanFormat, "baba-parser-plan");
+  assertEquals(wasm.parserPlanVersion, 1);
+  assertEquals(wasm.parserPlanSemantics, "baba-portable-v1");
+  assertEquals(wasm.wasmAbiVersion, 1);
+
+  const abi = JSON.parse(
+    await Deno.readTextFile(new URL("generated/wasm/abi.json", here)),
+  );
+  assertEquals(abi.runtimeImplementation.hash, wasm.runtimeImplementationHash);
+
+  const lexed = wasmParser.lex(source, { preserveTrivia: true });
+  assertEquals(lexed.diagnostics.length, 0);
+  assert(
+    lexed.tokens.some((token) => token.type === "named" && token.kind === "A"),
+    "standalone lex should choose the higher-priority A token for x",
+  );
+
+  const leftTokens = wasmParser.lex("< x;").tokens;
+  const checkedTokens = wasmParser.parseTokens("< x;", leftTokens);
+  assertSameParse("checked token stream", checkedTokens);
+  assertSameParse(
+    "unchecked token stream",
+    wasmParser.parseTokensUnchecked("< x;", leftTokens),
+  );
+
+  const globallyLexedRight = wasmParser.lex("> x;");
+  assert(
+    globallyLexedRight.tokens.some((token) =>
+      token.type === "named" && token.kind === "A"
+    ),
+    "standalone lex should choose the higher-priority A token for x",
+  );
+  const contextualRight = wasmParser.parse("> x;");
+  assertSameParse("contextual right branch", contextualRight);
+  const checkedRight = wasmParser.parseTokens(
+    "> x;",
+    globallyLexedRight.tokens,
+  );
+  assertEquals(checkedRight.ok, false);
+  assert(
+    checkedRight.diagnostics.some((diagnostic) =>
+      diagnostic.code === "PARSE_UNEXPECTED_TOKEN" ||
+      diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
+    ),
+    "checked token streams should report the globally lexed A token as invalid where B is required",
+  );
 } finally {
   wasmParser.dispose();
 }
 
-const wasmParserAsync = await wasm.createParserAsync();
-try {
-  assertSameParse("async Wasm instance", wasmParserAsync.parse(source));
-} finally {
-  wasmParserAsync.dispose();
-}
-
-assertEquals(ts.parserPlanFormat, "baba-parser-plan");
-assertEquals(ts.parserPlanVersion, 1);
-assertEquals(ts.parserPlanSemantics, "baba-portable-v1");
-assertEquals(ts.parserPlanHash, wasm.parserPlanHash);
-assertEquals(wasm.wasmAbiVersion, 1);
-assertEquals(wasm.runtimeImplementationHash, ts.runtimeImplementationHash);
-
-const abi = JSON.parse(
-  await Deno.readTextFile(new URL("generated/wasm/abi.json", here)),
-);
-assertEquals(abi.parserPlan.hash, ts.parserPlanHash);
-assertEquals(abi.runtimeImplementation.hash, ts.runtimeImplementationHash);
-
-const lexed = ts.lex(source, { preserveTrivia: true });
-assertEquals(lexed.diagnostics.length, 0);
-assert(
-  lexed.tokens.some((token) => token.type === "named" && token.kind === "A"),
-  "standalone lex should choose the higher-priority A token for x",
-);
-
-const checkedTokens = ts.parseTokens("< x;", ts.lex("< x;").tokens);
-assertSameParse("checked token stream", checkedTokens);
-assertSameParse(
-  "unchecked token stream",
-  ts.parseTokensUnchecked("< x;", ts.lex("< x;").tokens),
-);
-
-const globallyLexedRight = ts.lex("> x;");
-assert(
-  globallyLexedRight.tokens.some((token) =>
-    token.type === "named" && token.kind === "A"
-  ),
-  "standalone lex should choose the higher-priority A token for x",
-);
-const contextualRight = ts.parse("> x;");
-assertSameParse("contextual right branch", contextualRight);
-const checkedRight = ts.parseTokens("> x;", globallyLexedRight.tokens);
-assertEquals(checkedRight.ok, false);
-assert(
-  checkedRight.diagnostics.some((diagnostic) =>
-    diagnostic.code === "PARSE_UNEXPECTED_TOKEN" ||
-    diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
-  ),
-  "checked token streams should report the globally lexed A token as invalid where B is required",
-);
-
-const tooSmall = wasm.createParser({ limits: { maxInputUnits: 4 } });
-try {
-  let sawLimit = false;
-  try {
-    tooSmall.parse(source);
-  } catch (error) {
-    sawLimit = error instanceof wasm.WasmResourceLimitError &&
-      error.code === "INPUT_LIMIT_EXCEEDED";
-  }
-  assert(sawLimit, "small Wasm parser limits should throw a stable limit code");
-} finally {
-  tooSmall.dispose();
-}
-
-const kitResult = compileParserKit(grammar, {
-  name: "feature_tour",
-  rootRule: "module",
-  metadata,
-});
-assertNoErrors(kitResult.diagnostics);
-assert(kitResult.kit !== undefined, "parser-kit should be emitted");
-const kitIssues = validateParserKit(kitResult.kit);
-assertEquals(kitIssues.length, 0);
-const kitParsed = parseWithKit(kitResult.kit, "< x;");
-assertSameParse("parser-kit", kitParsed);
-
-await assertGeneratedQueries();
 assertStableConflictIdExample();
 
 if (Deno.args.includes("--external-wasm")) {
@@ -115,27 +91,12 @@ if (Deno.args.includes("--external-wasm")) {
 
 console.log(
   [
-    `parsed ${
-      ts.parse(source).root?.fields.items.length ?? 0
-    } feature-tour items`,
-    `plan ${ts.parserPlanVersion} ${ts.parserPlanHash}`,
-    `runtime ${ts.runtimeImplementationVersion} ${ts.runtimeImplementationHash}`,
+    `parsed ${parsedSource.root?.fields.items.length ?? 0} feature-tour items`,
+    `plan ${wasm.parserPlanVersion}`,
+    `runtime ${wasm.runtimeImplementationVersion} ${wasm.runtimeImplementationHash}`,
     `wasm ABI ${wasm.wasmAbiVersion}`,
   ].join("\n"),
 );
-
-async function assertGeneratedQueries(): Promise<void> {
-  const highlights = await Deno.readTextFile(
-    new URL("generated/queries/generated-highlights.scm", here),
-  );
-  assert(highlights.includes("@number"), "highlight query should tag numbers");
-  assert(highlights.includes("@type"), "highlight query should tag types");
-
-  const folds = await Deno.readTextFile(
-    new URL("generated/queries/generated-folds.scm", here),
-  );
-  assert(folds.includes("@fold"), "fold query should be generated");
-}
 
 function assertStableConflictIdExample(): void {
   const conflictGrammar = `
@@ -150,12 +111,12 @@ function assertStableConflictIdExample(): void {
     modifier = "mut" ;
     term = ID | "(" primary ")" ;
   `;
-  const unresolved = compile(conflictGrammar, { targets: ["typescript"] });
+  const unresolved = compile(conflictGrammar, { targets: ["wasm"] });
   const conflict = conflictIdFromDiagnostics(unresolved.diagnostics);
   assert(conflict !== undefined, "unresolved conflict should report stable ID");
 
   const resolved = compile(conflictGrammar, {
-    targets: ["typescript", "wasm", "kit"],
+    targets: ["wasm"],
     metadata: parseMetadata(JSON.stringify({
       version: 2,
       parser: { conflicts: [{ conflict }] },
@@ -171,7 +132,6 @@ async function assertExternalWasmPackaging(): Promise<void> {
     rootRule: "module",
     metadata,
     targets: ["wasm"],
-    wasm: { packaging: "external-binary" },
   });
   assertNoErrors(result.diagnostics);
   assert(result.bundle !== undefined, "external Wasm bundle should be emitted");
@@ -180,9 +140,10 @@ async function assertExternalWasmPackaging(): Promise<void> {
   try {
     await applyBundle(result.bundle, { root: dir });
     const bytes = await Deno.readFile(`${dir}/wasm/parser.wasm`);
+    const plan = await Deno.readFile(`${dir}/wasm/parser.plan`);
     assert(WebAssembly.validate(bytes), "external parser.wasm should validate");
     const external = await import(`file://${dir}/wasm/mod.ts`);
-    const parser = external.createParser({ bytes });
+    const parser = external.createParser({ bytes, plan });
     try {
       assertSameParse("external Wasm binary", parser.parse(source));
     } finally {
@@ -192,7 +153,7 @@ async function assertExternalWasmPackaging(): Promise<void> {
       await Deno.readTextFile(`${dir}/wasm/manifest.json`),
     );
     assertEquals(manifest.module, "parser.wasm");
-    assertEquals(manifest.parserPlanVersion, 1);
+    assertEquals(manifest.plan, "parser.plan");
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

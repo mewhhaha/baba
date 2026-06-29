@@ -10,60 +10,35 @@ grammar.ebnf
   -> shared runtime executor
 ```
 
-The desired generated parser directory is:
+The default generated parser directory is:
 
 ```text
 generated/
-  plan.bin or plan.ts
-  types.ts
-  mod.ts
+  wasm/
+    abi.json
+    manifest.json
+    mod.ts
+    parser.plan
+    parser.wasm
+    syntax.ts
 ```
 
-`mod.ts` should be a small adapter that imports the shared runtime, loads the
-plan data, and reexports `lex`, `parse`, `parseTokens`, and
-`parseTokensUnchecked`. Grammar-specific structural types may stay generated,
-but lexer and parser algorithms should live once in package runtime source.
+`mod.ts` is a small adapter that imports the shared Wasm runtime and requires
+callers to pass `parser.wasm` plus `parser.plan` into `createParser()`.
+Grammar-specific structural types stay in `syntax.ts`, but lexer and parser
+algorithms live once in package runtime source.
 
 ## Output Models
 
-Tree-sitter remains a generated target:
+Wasm is the generated target:
 
 ```text
-grammar.ebnf -> grammar.js + queries/*.scm
+grammar.ebnf -> parser.wasm + parser.plan + syntax.ts -> @mewhhaha/baba/runtime/wasm
 ```
 
-TypeScript should use shared runtime packaging:
-
-```text
-grammar.ebnf -> parser plan + optional types -> @mewhhaha/baba/runtime
-```
-
-Wasm should be optional and generic:
-
-```text
-grammar.ebnf -> parser plan -> @mewhhaha/baba/runtime/wasm
-```
-
-Parser-kit remains a data target for tooling:
-
-```text
-grammar.ebnf -> parser-kit JSON + parser-plan.bin
-```
-
-`kit/parser-plan.bin` is a compact binary encoding of the parser-kit plan data
-for size inspection and future binary loading. Inspect it with:
-
-```sh
-deno task inspect-plan generated/kit/parser-plan.bin
-```
-
-The TypeScript default now emits shared-runtime data and wrappers. The legacy
-TypeScript generated-program path is available with
-`--typescript-runtime-packaging legacy-generated` for compatibility tests. The
-Wasm target defaults to shared-generic data packaging; grammar-specialized
-embedded or external Wasm is legacy and requires
-`--wasm-packaging
-embedded-typescript` or `--wasm-packaging external-binary`.
+The Wasm target emits shared-generic data packaging only: a generic
+`parser.wasm`, grammar-specific `parser.plan`, small `mod.ts` wrapper, and typed
+`syntax.ts`.
 
 ## Parse Modes
 

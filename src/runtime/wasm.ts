@@ -10,8 +10,9 @@
  */
 
 import {
-  createParser,
+  createParser as createTypeScriptParser,
   type CreateParserOptions,
+  inflateCompactRuntimePlan,
   type ParseOptions,
   type ParseResult,
   type RuleNode,
@@ -20,11 +21,25 @@ import {
   type Token,
   type ValidateParseResult,
 } from "./mod.ts";
+import { decodeCombinedWasmParserPlan } from "./wasm_plan.ts";
 import {
   createSharedGenericWasmExecutor,
   type SharedGenericWasmExecutor,
   type SharedGenericWasmExecutorInstance,
 } from "./wasm_executor.ts";
+import { RUNTIME_IMPLEMENTATION_METADATA } from "../targets/runtime/implementation.ts";
+import {
+  WASM_ABI_VERSION,
+  WASM_HOST_OWNERSHIP_CALLER_MANAGED,
+  WASM_LEX_RESULT_I32_COUNT,
+  WASM_MAX_PAGES,
+  WASM_PAGE_BYTES,
+  WASM_RESULT_LIFETIME_CALLER_BUFFER,
+  WASM_SOURCE_ENCODING_UTF16,
+  WASM_SPAN_UNIT_UTF16,
+  WASM_TARGET_KIND,
+  WASM_TOKEN_RECORD_I32_COUNT,
+} from "../targets/runtime/wasm_abi.ts";
 
 export type RuntimeEnginePolicy = "typescript" | "wasm" | "auto";
 export type RuntimeEngine = "typescript" | "wasm";
@@ -68,9 +83,280 @@ export interface AutoRuntimeParser<Root extends RuleNode = RuleNode>
   readonly root?: Root;
 }
 
+export interface ParserInstanceOptions extends CreateParserOptions {
+  readonly bytes?: Uint8Array;
+  readonly module?: WebAssembly.Module;
+  readonly plan?: Uint8Array;
+}
+
+export interface AsyncParserInstanceOptions extends ParserInstanceOptions {
+  readonly url?: URL;
+  readonly planUrl?: URL;
+}
+
+export interface ParserInstance<Root extends RuleNode = RuleNode>
+  extends RuntimeParser<Root> {
+  reset(): void;
+  dispose(): void;
+}
+
+interface ExternalParserWasmExports {
+  memory: WebAssembly.Memory;
+  load_plan(planPtr: number, planLength: number): number;
+  abi_version(): number;
+  plan_version(): number;
+  semantics_version(): number;
+  reset(): void;
+  input_base(): number;
+  max_pages(): number;
+  source_encoding(): number;
+  span_unit(): number;
+  lex_result_i32_count(): number;
+  token_record_i32_count(): number;
+  host_ownership_model(): number;
+  result_lifetime_model(): number;
+}
+
+export const wasmTargetKind = WASM_TARGET_KIND;
+export const wasmAbiVersion = WASM_ABI_VERSION;
+export const wasmSemanticsVersion = RUNTIME_IMPLEMENTATION_METADATA.version;
+export const wasmMaxPages = WASM_MAX_PAGES;
+export const wasmSourceEncoding = WASM_SOURCE_ENCODING_UTF16;
+export const wasmSpanUnit = WASM_SPAN_UNIT_UTF16;
+export const wasmLexResultI32Count = WASM_LEX_RESULT_I32_COUNT;
+export const wasmTokenRecordI32Count = WASM_TOKEN_RECORD_I32_COUNT;
+export const wasmHostOwnershipModel = WASM_HOST_OWNERSHIP_CALLER_MANAGED;
+export const wasmResultLifetimeModel = WASM_RESULT_LIFETIME_CALLER_BUFFER;
+export const parserPlanFormat = "baba-parser-plan" as const;
+export const parserPlanVersion = 1;
+export const parserPlanSemantics = "baba-portable-v1" as const;
+export const runtimeImplementationFormat = RUNTIME_IMPLEMENTATION_METADATA
+  .format;
+export const runtimeImplementationVersion = RUNTIME_IMPLEMENTATION_METADATA
+  .version;
+export const runtimeImplementationSemantics = RUNTIME_IMPLEMENTATION_METADATA
+  .semantics;
+export const runtimeImplementationHash = RUNTIME_IMPLEMENTATION_METADATA.hash;
+
+export {
+  parserDiagnosticCodeAmbiguousParse,
+  parserDiagnosticCodeBranchLimit,
+  parserDiagnosticCodeInternalError,
+  parserDiagnosticCodeParseInvalidTokenStream,
+  parserDiagnosticCodeParseLexicalError,
+  parserDiagnosticCodeParseTrailingInput,
+  parserDiagnosticCodeParseUnexpectedToken,
+  parserDiagnosticCodeTraceLimit,
+  parserDiagnosticDetailKindNone,
+  parserDiagnosticDetailKindParserState,
+} from "./mod.ts";
+
 let preparedGenericRuntime = false;
 let genericRuntimePrepareCount = 0;
 let sharedGenericExecutor: SharedGenericWasmExecutor | undefined;
+
+export function createParser<Root extends RuleNode = RuleNode>(
+  options: ParserInstanceOptions = {},
+): ParserInstance<Root> {
+  if (options.plan === undefined) {
+    throw new Error("Wasm parser creation requires parser plan bytes.");
+  }
+  const decoded = decodeCombinedWasmParserPlan(options.plan);
+  const runtimePlan = inflateCompactRuntimePlan(decoded.compactRuntimePlan);
+  if (runtimePlan.portablePlan.version !== decoded.parserPlanVersion) {
+    throw new Error("Wasm parser plan version does not match runtime plan.");
+  }
+  const module = externalWasmModule(options);
+  const instance = new WebAssembly.Instance(module, {});
+  const wasm = instance.exports as unknown as ExternalParserWasmExports;
+  validateStaticExternalWasmAbi(wasm);
+  loadExternalWasmPlan(wasm, options.plan);
+  validateLoadedExternalWasmAbi(wasm, decoded.parserPlanVersion);
+  const parser = createTypeScriptParser<Root>(runtimePlan, options);
+  return new ExternalWasmParserInstance(runtimePlan, parser, wasm);
+}
+
+export async function createParserAsync<Root extends RuleNode = RuleNode>(
+  options: AsyncParserInstanceOptions = {},
+): Promise<ParserInstance<Root>> {
+  if (options.url === undefined) {
+    return createParser<Root>(options);
+  }
+  let plan = options.plan;
+  if (plan === undefined) {
+    if (options.planUrl === undefined) {
+      throw new Error(
+        "Wasm parser async creation requires plan bytes or planUrl.",
+      );
+    }
+    const planResponse = await fetch(options.planUrl);
+    if (!planResponse.ok) {
+      throw new Error(
+        "Failed to load Wasm parser plan from " + options.planUrl.href + ".",
+      );
+    }
+    plan = new Uint8Array(await planResponse.arrayBuffer());
+  }
+  const response = await fetch(options.url);
+  if (!response.ok) {
+    throw new Error(
+      "Failed to load Wasm parser module from " + options.url.href + ".",
+    );
+  }
+  return createParser<Root>({
+    bytes: new Uint8Array(await response.arrayBuffer()),
+    plan,
+    validate: options.validate,
+  });
+}
+
+class ExternalWasmParserInstance<Root extends RuleNode = RuleNode>
+  implements ParserInstance<Root> {
+  readonly plan: RuntimeParserPlan;
+  #disposed = false;
+
+  readonly parse: ParserInstance<Root>["parse"];
+  readonly parseTokens: ParserInstance<Root>["parseTokens"];
+  readonly parseTokensUnchecked: ParserInstance<Root>["parseTokensUnchecked"];
+
+  constructor(
+    plan: RuntimeParserPlan,
+    private readonly parser: RuntimeParser<Root>,
+    private readonly wasm: ExternalParserWasmExports,
+  ) {
+    this.plan = plan;
+    this.parse = ((source: string, options?: ParseOptions) => {
+      this.#assertLive();
+      return this.parser.parse(source, options);
+    }) as ParserInstance<Root>["parse"];
+    this.parseTokens = ((
+      source: string,
+      tokens: readonly Token[],
+      options?: ParseOptions,
+    ) => {
+      this.#assertLive();
+      return this.parser.parseTokens(source, tokens, options);
+    }) as ParserInstance<Root>["parseTokens"];
+    this.parseTokensUnchecked = ((
+      source: string,
+      tokens: readonly Token[],
+      options?: ParseOptions,
+    ) => {
+      this.#assertLive();
+      return this.parser.parseTokensUnchecked(source, tokens, options);
+    }) as ParserInstance<Root>["parseTokensUnchecked"];
+  }
+
+  lex(source: string, options?: Parameters<RuntimeParser["lex"]>[1]) {
+    this.#assertLive();
+    return this.parser.lex(source, options);
+  }
+
+  reset(): void {
+    this.#assertLive();
+    this.wasm.reset();
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+  }
+
+  #assertLive(): void {
+    if (this.#disposed) {
+      throw new Error("Wasm parser instance is disposed.");
+    }
+  }
+}
+
+function externalWasmModule(
+  options: ParserInstanceOptions,
+): WebAssembly.Module {
+  if (options.module !== undefined) {
+    return options.module;
+  }
+  if (options.bytes === undefined) {
+    throw new Error("Wasm parser creation requires bytes or module.");
+  }
+  const copy = new Uint8Array(options.bytes.byteLength);
+  copy.set(options.bytes);
+  return new WebAssembly.Module(copy);
+}
+
+function validateStaticExternalWasmAbi(wasm: ExternalParserWasmExports): void {
+  if (wasm.abi_version() !== WASM_ABI_VERSION) {
+    throw new Error("Wasm ABI version does not match shared adapter.");
+  }
+  if (wasm.semantics_version() !== RUNTIME_IMPLEMENTATION_METADATA.version) {
+    throw new Error(
+      "Wasm runtime semantics version does not match shared adapter.",
+    );
+  }
+  if (wasm.max_pages() !== WASM_MAX_PAGES) {
+    throw new Error("Wasm max page count does not match shared adapter.");
+  }
+  if (wasm.source_encoding() !== WASM_SOURCE_ENCODING_UTF16) {
+    throw new Error("Wasm source encoding is not UTF-16.");
+  }
+  if (wasm.span_unit() !== WASM_SPAN_UNIT_UTF16) {
+    throw new Error("Wasm span unit is not UTF-16.");
+  }
+  if (wasm.lex_result_i32_count() !== WASM_LEX_RESULT_I32_COUNT) {
+    throw new Error("Wasm lex result width does not match shared adapter.");
+  }
+  if (wasm.token_record_i32_count() !== WASM_TOKEN_RECORD_I32_COUNT) {
+    throw new Error("Wasm token record width does not match shared adapter.");
+  }
+  if (wasm.host_ownership_model() !== WASM_HOST_OWNERSHIP_CALLER_MANAGED) {
+    throw new Error("Wasm host ownership model does not match shared adapter.");
+  }
+  if (wasm.result_lifetime_model() !== WASM_RESULT_LIFETIME_CALLER_BUFFER) {
+    throw new Error(
+      "Wasm result lifetime model does not match shared adapter.",
+    );
+  }
+}
+
+function loadExternalWasmPlan(
+  wasm: ExternalParserWasmExports,
+  planBytes: Uint8Array,
+): void {
+  ensureExternalWasmCapacity(wasm.memory, planBytes.byteLength);
+  new Uint8Array(wasm.memory.buffer, 0, planBytes.byteLength).set(planBytes);
+  const loaded = wasm.load_plan(0, planBytes.byteLength);
+  if (loaded !== 1) {
+    throw new Error("Wasm parser rejected parser plan bytes.");
+  }
+}
+
+function validateLoadedExternalWasmAbi(
+  wasm: ExternalParserWasmExports,
+  parserPlanVersionToMatch: number,
+): void {
+  if (wasm.plan_version() !== parserPlanVersionToMatch) {
+    throw new Error("Wasm parser plan version does not match shared adapter.");
+  }
+  if (wasm.input_base() < 0) {
+    throw new Error("Wasm input base is invalid.");
+  }
+}
+
+function ensureExternalWasmCapacity(
+  memory: WebAssembly.Memory,
+  requiredBytes: number,
+): void {
+  if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 0) {
+    throw new RangeError("requiredBytes must be a non-negative safe integer.");
+  }
+  if (requiredBytes <= memory.buffer.byteLength) {
+    return;
+  }
+  const requiredPages = Math.ceil(requiredBytes / WASM_PAGE_BYTES);
+  if (requiredPages > WASM_MAX_PAGES) {
+    throw new RangeError("Wasm parser plan exceeds maximum memory pages.");
+  }
+  const currentPages = memory.buffer.byteLength / WASM_PAGE_BYTES;
+  memory.grow(requiredPages - currentPages);
+}
 
 export function getSharedWasmRuntimeStats(): SharedWasmRuntimeStats {
   return {
@@ -104,7 +390,7 @@ export async function createAutoParser(
   plan: RuntimeParserPlan,
   options: AutoParserOptions = {},
 ): Promise<AutoRuntimeParser> {
-  const typescript = createParser(plan, options);
+  const typescript = createTypeScriptParser(plan, options);
   const wasm = await createWasmParser(plan, options);
   const threshold = options.smallInputThreshold ?? 16_384;
   const select = (source: string): RuntimeParser => {
@@ -157,13 +443,15 @@ async function prepareSharedGenericWasmRuntime(
   timing: ((event: RuntimeTimingEvent) => void) | undefined,
 ): Promise<void> {
   if (preparedGenericRuntime) return;
-  await timedAsync("load runtime", "wasm", timing, async () => {
+  await timedAsync("load runtime", "wasm", timing, () => {
     sharedGenericExecutor = createSharedGenericWasmExecutor();
+    return Promise.resolve();
   });
-  await timedAsync("prepare runtime", "wasm", timing, async () => {
+  await timedAsync("prepare runtime", "wasm", timing, () => {
     sharedGenericExecutor!.createInstance();
     preparedGenericRuntime = true;
     genericRuntimePrepareCount++;
+    return Promise.resolve();
   });
 }
 
@@ -216,7 +504,7 @@ function createWasmRuntimeParser(
   plan: RuntimeParserPlan,
   options: WasmParserOptions,
 ): RuntimeParser {
-  const fallback = createParser(plan, options);
+  const fallback = createTypeScriptParser(plan, options);
   const state = createWasmPlanState(plan);
   const parser = {
     plan,

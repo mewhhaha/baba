@@ -25,7 +25,6 @@ interface ExampleConfig {
   name: string;
   rootRule: string;
   metadataPath: string;
-  typescriptDir: string;
   allowedDiagnosticCodes?: readonly string[];
 }
 
@@ -35,14 +34,12 @@ const EXAMPLES: readonly ExampleConfig[] = [
     name: "brainfuck",
     rootRule: "module",
     metadataPath: "baba.json",
-    typescriptDir: "ts",
   },
   {
     dir: "examples/feature-tour",
     name: "feature_tour",
     rootRule: "module",
     metadataPath: "baba.json",
-    typescriptDir: "ts",
     allowedDiagnosticCodes: [
       "PORTABLE_LEXER_TOKEN_OVERLAP",
       "PORTABLE_SHADOWED_TOKEN_LANGUAGE",
@@ -53,14 +50,12 @@ const EXAMPLES: readonly ExampleConfig[] = [
     name: "funcfuck",
     rootRule: "module",
     metadataPath: "baba.json",
-    typescriptDir: "ts",
   },
   {
     dir: "examples/thunkwasm",
     name: "thunkwasm",
     rootRule: "module",
     metadataPath: "baba.json",
-    typescriptDir: "ts",
   },
 ];
 
@@ -183,7 +178,7 @@ async function checkExample(example: ExampleConfig): Promise<void> {
   try {
     const tempGenerated = `${tempDir}/generated`;
     await applyBundle(bundle, { root: tempGenerated });
-    await validateGeneratedExample(tempGenerated, example);
+    await validateGeneratedExample(tempGenerated);
     console.log(`verified regenerated ${example.dir}/generated`);
   } finally {
     await Deno.remove(tempDir, { recursive: true });
@@ -199,9 +194,7 @@ async function compileExample(example: ExampleConfig) {
     name: example.name,
     rootRule: example.rootRule,
     metadata,
-    targets: ["tree-sitter", "typescript", "wasm"],
-    typescript: { directory: example.typescriptDir },
-    wasm: { packaging: "embedded-typescript" },
+    targets: ["wasm"],
   });
   const allowedDiagnosticCodes = new Set(example.allowedDiagnosticCodes ?? []);
   const unexpectedDiagnostics = result.diagnostics.filter((diagnostic) =>
@@ -221,23 +214,23 @@ async function compileExample(example: ExampleConfig) {
 
 async function validateGeneratedExample(
   root: string,
-  example: ExampleConfig,
 ): Promise<void> {
   const files = await manifestOwnedFiles(root);
   for (
     const required of [
       ".baba-manifest.json",
-      "grammar.js",
-      `${example.typescriptDir}/mod.ts`,
-      "wasm/mod.ts",
       "wasm/abi.json",
+      "wasm/manifest.json",
+      "wasm/mod.ts",
+      "wasm/parser.plan",
+      "wasm/parser.wasm",
+      "wasm/syntax.ts",
     ]
   ) {
     if (!files.includes(required)) {
       throw new Error(`${root} is missing generated file ${required}.`);
     }
   }
-  await denoCheck(`${root}/${example.typescriptDir}/mod.ts`);
   await denoCheck(`${root}/wasm/mod.ts`);
 }
 

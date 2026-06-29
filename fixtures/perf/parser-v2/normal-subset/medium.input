@@ -1,0 +1,4 @@
+fn add(left, right) {
+  let total = left + right;
+  return total;
+}

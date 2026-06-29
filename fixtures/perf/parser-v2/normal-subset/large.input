@@ -1,0 +1,13 @@
+fn main(input) {
+  let greeting = "hello";
+  let total = add(input, 3);
+  if (total == 10) {
+    print(greeting);
+    return total;
+  } else {
+    let fallback = total * 2;
+    return fallback;
+  }
+}
+
+let seed = 42;

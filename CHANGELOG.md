@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added grammar v2 documentation, conformance fixtures, seedable fuzzing,
+  portable plan v2 validation, and the shared TypeScript grammar-v2 runtime
+  adapter.
+- Added parser-v2 performance gates and final cutover benchmark guidance.
+
+### Changed
+
+- Updated primary docs to present grammar v2 as the documented parser path and
+  to isolate the legacy EBNF CLI/generated-target path as compatibility
+  infrastructure.
+
 ## 2.0.1
 
 ### Changed

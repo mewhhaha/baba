@@ -536,7 +536,6 @@ Deno.test("Wasm parser target traces declared conflict branches", async () => {
   const result = compile(parenthesizedTypeGrammar, {
     targets: ["wasm"],
     metadata,
-    wasm: { packaging: "embedded-typescript" },
   });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
@@ -544,18 +543,19 @@ Deno.test("Wasm parser target traces declared conflict branches", async () => {
   const dir = await Deno.makeTempDir();
   try {
     await applyBundle(result.bundle, { root: dir });
-    const parserSource = await Deno.readTextFile(`${dir}/wasm/parser.ts`);
-    assertIncludes(parserSource, "parseTrace");
-    assertIncludes(parserSource, "function replayTrace(");
-    assertNotIncludes(parserSource, "const ACTIONS");
-    assertNotIncludes(parserSource, "const GOTOS");
-    assertNotIncludes(parserSource, "function findActions(");
-    assertNotIncludes(parserSource, "TERMINAL_NAMES");
+    const paths = result.bundle.files.map((file) => file.path).join(",");
+    assertNotIncludes(paths, "wasm/parser.ts");
+    assertIncludes(paths, "wasm/parser.plan");
     await denoCheck(`${dir}/wasm/mod.ts`);
     const mod = await import(`file://${dir}/wasm/mod.ts`);
+    const parser = mod.createParser({
+      bytes: await Deno.readFile(`${dir}/wasm/parser.wasm`),
+      plan: await Deno.readFile(`${dir}/wasm/parser.plan`),
+    });
     for (const source of ["(a)", "(a, b)", "((a))"]) {
-      assertEquals(mod.parse(source).ok, true);
+      assertEquals(parser.parse(source).ok, true);
     }
+    parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

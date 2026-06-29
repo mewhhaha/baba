@@ -13,6 +13,12 @@ target support, planning limits, output packaging, and generated-size checks.
 Target-neutral planning diagnostics use portable codes. Target-specific
 packaging diagnostics remain owned by their target.
 
+Grammar v2 diagnostics use stable `GRAMMAR_V2_*` codes for syntax, analysis,
+token conflicts, lexer modes, layout, parser planning, recovery, modules, and
+portable-plan validation. Runtime v2 recovery diagnostics include expected token
+names, actual token name, and a structured recovery action (`insert`, `delete`,
+or `abort`).
+
 Examples include:
 
 - `PORTABLE_EXTERNAL_TOKENS_UNSUPPORTED`;
@@ -42,3 +48,8 @@ compatibility break when the code and payload semantics stay the same.
 Repository parity tests include reproducible mismatch diagnostics: fixture name,
 source path, operation, first differing normalized JSON path, actual and
 expected values, options, and a command that reproduces the case.
+
+For grammar v2, TypeScript runtime behavior is the executable target. Wasm v2
+parity currently records an explicit deferred target status in the portable plan
+instead of pretending that the v1 generic Wasm executor can consume v2 mode,
+CST, AST, and recovery sections.

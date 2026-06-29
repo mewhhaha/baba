@@ -34,7 +34,6 @@ export interface SharedGenericWasmExecutorExports {
   ): number;
 }
 
-const PAGE_BYTES = 65_536;
 let cachedBytes: Uint8Array | undefined;
 
 export function createSharedGenericWasmExecutor(): SharedGenericWasmExecutor {

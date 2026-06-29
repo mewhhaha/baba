@@ -1,0 +1,6 @@
+grammar Broken
+token MissingEquals /[a-z]+/ ;
+skip Space = /[ \t]+/
+rule = "ok" ;
+@
+other = ;

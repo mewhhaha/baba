@@ -11,21 +11,17 @@ It demonstrates:
 - parser-contextual token selection with `A` and `B`, where standalone `lex()`
   chooses `A` for `x`, but `parse()` can select `B` in the `> x;` context;
 - declared parser conflicts for tuple/group type syntax;
-- generated Tree-sitter grammar and highlight/fold/tag/textobject/rainbow
-  queries from `baba.json`;
-- generated TypeScript and Wasm parser APIs, including parser-plan identity,
-  runtime implementation identity, `parseTokens`, `parseTokensUnchecked`, Wasm
-  parser instances, reset/dispose, ABI metadata, and resource limits;
-- parser-kit compilation and validation;
-- external `parser.wasm` packaging through the API.
+- generated Wasm parser API, including parser-plan identity, runtime
+  implementation identity, `parseTokens`, `parseTokensUnchecked`, parser
+  instances, reset/dispose, and ABI metadata;
+- external `parser.wasm` and `parser.plan` loading through the API.
 
 ## Recreate This Example
 
 All commands in this section assume your current directory is
 `examples/feature-tour`.
 
-Generate the checked artifacts. The task explicitly requests legacy-specialized
-Wasm packaging so the tour can exercise the Wasm parser APIs:
+Generate the checked artifacts:
 
 ```sh
 deno task generate
@@ -37,7 +33,7 @@ Run the feature tour:
 deno task run
 ```
 
-Exercise external Wasm binary packaging too:
+Exercise direct `parser.wasm` and `parser.plan` loading too:
 
 ```sh
 deno task external
@@ -47,14 +43,6 @@ Validate the example:
 
 ```sh
 deno task test
-```
-
-Optionally validate the Tree-sitter grammar:
-
-```sh
-deno task tree-sitter:generate
-deno task tree-sitter:build
-deno task tree-sitter:parse
 ```
 
 The generated files under `generated/` are ignored reproducible output.

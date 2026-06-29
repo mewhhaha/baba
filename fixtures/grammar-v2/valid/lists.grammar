@@ -1,0 +1,7 @@
+grammar Lists
+
+import "core" ;
+token Ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token Comma = /,/ ;
+
+list = item:Ident % "," -> List(item) ;

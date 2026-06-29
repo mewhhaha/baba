@@ -1,5 +1,3 @@
-import type { ParserKit } from "./targets/kit/schema.ts";
-
 /** A parsed EBNF grammar with terminal declarations and grammar rules. */
 export interface EbnfGrammar {
   /** Explicit token and skip declarations from the grammar header. */
@@ -115,8 +113,164 @@ export interface Diagnostic {
   }[];
 }
 
-/** Output target selected for a generation run. */
-export type GenerateTarget = "tree-sitter" | "typescript" | "wasm" | "kit";
+/** Result returned by the grammar v2 bootstrap parser. */
+export interface GrammarV2ParseResult {
+  /** Parsed grammar when enough structure was present to build one. */
+  grammar?: GrammarV2Document;
+  /** Structured syntax diagnostics collected without semantic analysis. */
+  diagnostics: Diagnostic[];
+}
+
+/** A parsed grammar v2 source document. */
+export interface GrammarV2Document {
+  /** Optional `grammar Name` header. */
+  name?: string;
+  /** Top-level declarations in source order. */
+  declarations: GrammarV2Declaration[];
+  /** Source span covering the complete grammar source. */
+  span: SourceSpan;
+}
+
+/** Top-level grammar v2 declaration. */
+export type GrammarV2Declaration =
+  | GrammarV2TokenDeclaration
+  | GrammarV2ModeDeclaration
+  | GrammarV2LayoutDeclaration
+  | GrammarV2ExportDeclaration
+  | GrammarV2ImportDeclaration
+  | GrammarV2ModuleDeclaration
+  | GrammarV2ExtensionDeclaration
+  | GrammarV2Rule;
+
+/** Token, skip, or contextual keyword declaration in grammar v2. */
+export interface GrammarV2TokenDeclaration {
+  kind: "token" | "skip" | "contextual";
+  name: string;
+  pattern: GrammarV2TerminalPattern;
+  channel?: string;
+  mode?: string;
+  transition?: GrammarV2ModeTransition;
+  span: SourceSpan;
+}
+
+/** Lexer-mode transition attached to a terminal declaration. */
+export type GrammarV2ModeTransition =
+  | { kind: "push"; mode: string; span: SourceSpan }
+  | { kind: "mode"; mode: string; span: SourceSpan }
+  | { kind: "pop"; span: SourceSpan };
+
+/** Lexer mode declaration in grammar v2. */
+export interface GrammarV2ModeDeclaration {
+  kind: "mode";
+  name: string;
+  declarations: GrammarV2TokenDeclaration[];
+  span: SourceSpan;
+}
+
+/** Optional layout rule declaration in grammar v2. */
+export interface GrammarV2LayoutDeclaration {
+  kind: "layout";
+  name: string;
+  expression: GrammarV2Expression;
+  span: SourceSpan;
+}
+
+/** A literal or regex terminal pattern. */
+export type GrammarV2TerminalPattern =
+  | { kind: "regex"; pattern: string; span: SourceSpan }
+  | { kind: "literal"; value: string; span: SourceSpan };
+
+/** Exported grammar symbol declaration. */
+export interface GrammarV2ExportDeclaration {
+  kind: "export";
+  name: string;
+  span: SourceSpan;
+}
+
+/** Imported grammar module declaration. */
+export interface GrammarV2ImportDeclaration {
+  kind: "import";
+  source: string;
+  span: SourceSpan;
+}
+
+/** Named grammar module declaration. */
+export interface GrammarV2ModuleDeclaration {
+  kind: "module";
+  name: string;
+  span: SourceSpan;
+}
+
+/** Extension declaration for grammar v2 extension points. */
+export interface GrammarV2ExtensionDeclaration {
+  kind: "extend";
+  target: string;
+  expression: GrammarV2Expression;
+  span: SourceSpan;
+}
+
+/** Grammar v2 parser rule. */
+export interface GrammarV2Rule {
+  kind: "rule";
+  name: string;
+  annotations: GrammarV2RuleAnnotation[];
+  expression: GrammarV2Expression;
+  span: SourceSpan;
+}
+
+/** Rule-level syntax annotation. */
+export interface GrammarV2RuleAnnotation {
+  kind: "sync";
+  expression: GrammarV2Expression;
+  span: SourceSpan;
+}
+
+/** Grammar v2 expression node. */
+export type GrammarV2Expression =
+  | {
+    kind: "field";
+    name: string;
+    expression: GrammarV2Expression;
+    span: SourceSpan;
+  }
+  | { kind: "ref"; name: string; span: SourceSpan }
+  | { kind: "literal"; value: string; span: SourceSpan }
+  | { kind: "sequence"; items: GrammarV2Expression[]; span: SourceSpan }
+  | { kind: "choice"; options: GrammarV2Expression[]; span: SourceSpan }
+  | { kind: "optional"; expression: GrammarV2Expression; span: SourceSpan }
+  | { kind: "repeat"; expression: GrammarV2Expression; span: SourceSpan }
+  | { kind: "repeat1"; expression: GrammarV2Expression; span: SourceSpan }
+  | {
+    kind: "separated";
+    item: GrammarV2Expression;
+    separator: GrammarV2Expression;
+    span: SourceSpan;
+  }
+  | {
+    kind: "constructor";
+    expression: GrammarV2Expression;
+    name: string;
+    arguments: string[];
+    span: SourceSpan;
+  }
+  | {
+    kind: "expressionIsland";
+    atom: GrammarV2Expression;
+    operators: GrammarV2ExpressionOperator[];
+    span: SourceSpan;
+  };
+
+/** Expression-island operator declaration. */
+export interface GrammarV2ExpressionOperator {
+  kind: "infix" | "prefix" | "postfix";
+  associativity?: "left" | "right" | "none";
+  precedence: number;
+  token: GrammarV2TerminalPattern;
+  span: SourceSpan;
+}
+
+/** Output target selected for a generation run. Baba currently generates Wasm only. */
+export type GenerateTarget = "wasm";
 
 /** Cross-target portability diagnostic policy. */
 export type PortabilityMode = "strict" | "warn" | "off";
@@ -157,21 +311,6 @@ export interface PortableRuntimePlanningOptions {
   diagnosticLimit?: number;
 }
 
-/** Options for the standalone TypeScript lexer/parser target. */
-export interface TypeScriptTargetOptions
-  extends PortableRuntimePlanningOptions {
-  /** Relative directory inside the generated bundle. Defaults to `typescript`. */
-  directory?: string;
-  /** Runtime packaging mode. Defaults to shared runtime plus parser data. */
-  runtimePackaging?: "shared" | "legacy-generated";
-  /** Shared-runtime parser plan data packaging. Defaults to an inline TypeScript literal. */
-  planData?: "inline" | "json";
-  /** Maximum generated TypeScript source bytes. Defaults to unlimited. */
-  generatedByteLimit?: number;
-  /** Emit an informational parser planning statistics diagnostic. */
-  reportParserStats?: boolean;
-}
-
 /** Options for the standalone Wasm lexer/parser target. */
 export interface WasmTargetOptions extends PortableRuntimePlanningOptions {
   /** Relative directory inside the generated bundle. Defaults to `wasm`. */
@@ -180,48 +319,6 @@ export interface WasmTargetOptions extends PortableRuntimePlanningOptions {
   generatedByteLimit?: number;
   /** Emit an informational parser planning statistics diagnostic. */
   reportParserStats?: boolean;
-  /** Wasm packaging mode. Defaults to a shared-runtime data adapter. */
-  packaging?: "shared-generic" | "external-binary" | "embedded-typescript";
-}
-
-/** Options for the generic parser-kit target. */
-export interface KitTargetOptions {
-  /** Relative directory inside the generated bundle. Defaults to `kit`. */
-  directory?: string;
-  /** Parser-kit detail profile. Defaults to `full`; use `runtime` for compact helper-only artifacts. */
-  profile?: "full" | "runtime";
-  /** Preserve skip-token matches in reference helper lexing. Defaults to true. */
-  preserveTrivia?: boolean;
-  /** Maximum generated lexer DFA state count. Defaults to 50,000. */
-  lexerStateLimit?: number;
-  /** Maximum regex source length in UTF-16 code units per token pattern. Defaults to unlimited. */
-  regexSourceLengthLimit?: number;
-  /** Maximum nested regex group depth per token pattern. Defaults to 256. */
-  regexNestingLimit?: number;
-  /** Maximum regex AST node count per token pattern. Defaults to 100,000. */
-  regexAstNodeLimit?: number;
-  /** Maximum regex bounded-repeat expansion count. Defaults to 10,000. */
-  regexBoundedRepeatLimit?: number;
-  /** Maximum regex NFA state count per planning operation. Defaults to 100,000. */
-  regexNfaStateLimit?: number;
-  /** Maximum regex DFA state count per planning operation. Defaults to 50,000. */
-  regexDfaStateLimit?: number;
-  /** Maximum DFA product states explored during overlap analysis. Defaults to 250,000. */
-  regexOverlapStateLimit?: number;
-  /** Maximum token/literal pairs compared during overlap analysis. Defaults to unlimited. */
-  regexOverlapPairLimit?: number;
-  /** Maximum nested EBNF expression depth during grammar analysis. Defaults to 1,024. */
-  grammarExpressionDepthLimit?: number;
-  /** Maximum canonical LR(1) state count. Defaults to 20,000. */
-  parserStateLimit?: number;
-  /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
-  parserItemLimit?: number;
-  /** Maximum LR(1) closure expansion work units. Defaults to unlimited. */
-  lrClosureWorkLimit?: number;
-  /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
-  parserTableEntryLimit?: number;
-  /** Maximum runtime-planning diagnostics returned before a summary is appended. Defaults to unlimited. */
-  diagnosticLimit?: number;
 }
 
 /** Conflict policy for standalone parser runtimes. */
@@ -250,22 +347,18 @@ export interface ParserConflictResolutionMetadata {
 
 /** Options for the stable high-level `generate` API. */
 export interface GenerateOptions {
-  /** Language/tree-sitter grammar name. */
+  /** Language/grammar name. */
   name?: string;
   /** Root grammar rule. Defaults to the first rule. */
   rootRule?: string;
   /** Optional generation metadata. */
   metadata?: BabaMetadata;
-  /** Output targets. Defaults to ["tree-sitter"]. */
+  /** Output targets. Defaults to ["wasm"]. */
   targets?: readonly GenerateTarget[];
-  /** Cross-target portability policy. Defaults to strict for Tree-sitter plus another target, warn otherwise. */
+  /** Portability diagnostic policy. Defaults to warn. */
   portability?: PortabilityMode;
-  /** Standalone TypeScript target options. */
-  typescript?: TypeScriptTargetOptions;
   /** Standalone Wasm target options. */
   wasm?: WasmTargetOptions;
-  /** Generic parser-kit target options. */
-  kit?: KitTargetOptions;
 }
 
 /** Options for the nonthrowing compiler API. */
@@ -279,44 +372,18 @@ export interface CompileResult {
   bundle?: GeneratedBundle;
 }
 
-/** Options for compiling only a generic parser-kit artifact. */
-export interface CompileParserKitOptions {
-  /** Language/grammar name. */
-  name?: string;
-  /** Root grammar rule. Defaults to the first rule. */
-  rootRule?: string;
-  /** Optional generation metadata. */
-  metadata?: BabaMetadata;
-  /** Cross-target portability policy. Defaults to warn. */
-  portability?: PortabilityMode;
-  /** Parser-kit target options. */
-  kit?: KitTargetOptions;
-}
-
-/** Nonthrowing parser-kit compiler result. */
-export interface CompileParserKitResult {
-  /** All diagnostics collected while analyzing and planning the kit. */
-  diagnostics: readonly Diagnostic[];
-  /** Present only when no error diagnostics were produced. */
-  kit?: ParserKit;
-}
-
 /** Options for grammar and target validation without output generation. */
 export interface ValidateOptions {
   /** Root grammar rule. Defaults to the first rule. */
   rootRule?: string;
   /** Optional generation metadata. */
   metadata?: BabaMetadata;
-  /** Output targets to validate. Defaults to ["tree-sitter"]. */
+  /** Output targets to validate. Defaults to ["wasm"]. */
   targets?: readonly GenerateTarget[];
-  /** Cross-target portability policy. Defaults to strict for Tree-sitter plus another target, warn otherwise. */
+  /** Portability diagnostic policy. Defaults to warn. */
   portability?: PortabilityMode;
-  /** Standalone TypeScript target options. */
-  typescript?: TypeScriptTargetOptions;
   /** Standalone Wasm target options. */
   wasm?: WasmTargetOptions;
-  /** Generic parser-kit target options. */
-  kit?: KitTargetOptions;
 }
 
 export type TextGeneratedFileKind =

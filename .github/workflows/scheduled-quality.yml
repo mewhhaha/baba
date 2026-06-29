@@ -18,9 +18,6 @@ jobs:
       - name: Deterministic fuzz seeds
         run: deno task test:fuzz
 
-      - name: Benchmark JSON report
-        run: deno task bench -- --samples 3 --json bench-results.json
-
       - name: Runtime benchmark JSON report
         run: deno task bench:runtime -- --json runtime-bench-results.json
 
@@ -29,5 +26,4 @@ jobs:
         with:
           name: benchmark-results
           path: |
-            bench-results.json
             runtime-bench-results.json

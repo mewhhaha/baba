@@ -1,8 +1,17 @@
 import {
   type AnyRuleNode,
-  parse,
+  createParser,
   type SyntaxElement,
 } from "./generated/wasm/mod.ts";
+
+const parser = createParser({
+  bytes: Deno.readFileSync(
+    new URL("generated/wasm/parser.wasm", import.meta.url),
+  ),
+  plan: Deno.readFileSync(
+    new URL("generated/wasm/parser.plan", import.meta.url),
+  ),
+});
 
 interface Program {
   definitions: readonly Definition[];
@@ -521,7 +530,7 @@ class Compiler {
       ? expr.callee.name
       : undefined;
 
-    let remaining = [...expr.argLists];
+    const remaining = [...expr.argLists];
     if (directName && remaining.length > 0) {
       const args = remaining.shift() ?? [];
       const definition = this.definitions.get(directName);
@@ -1320,7 +1329,7 @@ class WasmBuilder {
 }
 
 function parseProgram(source: string): Program {
-  const parsed = parse(source, { preserveTrivia: false });
+  const parsed = parser.parse(source, { preserveTrivia: false });
   if (!parsed.ok || !parsed.root) {
     const diagnostics = parsed.diagnostics.map((diagnostic) =>
       `${diagnostic.code} at ${diagnostic.span.start}: ${diagnostic.message}`

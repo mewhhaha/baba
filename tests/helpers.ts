@@ -11,6 +11,41 @@ export {
   parseMetadata,
   validateGrammar,
 } from "../src/mod.ts";
+export { analyzeGrammarV2 } from "../src/compiler/grammar_v2_analysis.ts";
+export {
+  buildGrammarV2AstSchema,
+  emitGrammarV2AstTypes,
+  materializeGrammarV2Ast,
+} from "../src/compiler/grammar_v2_ast.ts";
+export {
+  buildGrammarV2CstSchema,
+  buildGrammarV2TokenCst,
+  collectGrammarV2CstStats,
+  debugGrammarV2Cst,
+  grammarV2CstText,
+  missingGrammarV2CstNode,
+} from "../src/compiler/grammar_v2_cst.ts";
+export {
+  applyGrammarV2TextEdits,
+  createGrammarV2IncrementalParser,
+} from "../src/compiler/grammar_v2_incremental.ts";
+export {
+  buildGrammarV2LexerPlan,
+  lexGrammarV2,
+  validateGrammarV2TokenStream,
+} from "../src/compiler/grammar_v2_lexer.ts";
+export { composeGrammarV2Modules } from "../src/compiler/grammar_v2_modules.ts";
+export {
+  buildGrammarV2ParserCorePlan,
+  lowerGrammarV2ToBnf,
+  recoverGrammarV2Parse,
+  validateGrammarV2Parse,
+} from "../src/compiler/grammar_v2_parser_core.ts";
+export {
+  buildGrammarV2PrattPlan,
+  parseGrammarV2PrattExpression,
+} from "../src/compiler/grammar_v2_pratt.ts";
+export { parseGrammarV2 } from "../src/grammar_v2.ts";
 export {
   collectReachabilityDiagnostics,
   collectTreeSitterHighlightDiagnostics,

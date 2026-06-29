@@ -2,16 +2,25 @@ import {
   type AnyRuleNode,
   type BuiltinNode,
   type CompositionNode,
+  createParser,
   type DefinitionNode,
   type EmitNode,
   type FanoutNode,
   type GroupNode,
   type IntegerValuesNode,
-  parse,
   type RepeatNode,
   type StreamNode,
   type TermNode,
 } from "./generated/wasm/mod.ts";
+
+const parser = createParser({
+  bytes: Deno.readFileSync(
+    new URL("generated/wasm/parser.wasm", import.meta.url),
+  ),
+  plan: Deno.readFileSync(
+    new URL("generated/wasm/parser.plan", import.meta.url),
+  ),
+});
 
 type Func = (input: readonly number[]) => readonly number[];
 
@@ -150,7 +159,7 @@ export function runFuncfuck(source: string): string {
 }
 
 function parseProgram(source: string): Program {
-  const parsed = parse(source, { preserveTrivia: false });
+  const parsed = parser.parse(source, { preserveTrivia: false });
   if (!parsed.ok || !parsed.root) {
     const diagnostics = parsed.diagnostics.map((diagnostic) =>
       `${diagnostic.code} at ${diagnostic.span.start}: ${diagnostic.message}`

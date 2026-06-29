@@ -20,6 +20,20 @@ Deno.test("regex nullable analysis uses the shared AST", () => {
   assertEquals(regexCanMatchEmpty(parsePortableRegex("a+")), false);
 });
 
+Deno.test("portable regex parser supports Unicode letter and number properties", () => {
+  const identifier = buildDfa(
+    buildRegexNfa(parsePortableRegex("[_\\p{L}][_\\p{L}\\p{N}]*")),
+  );
+  const greekName = buildDfa(buildRegexNfa(parsePortableRegex("λ2")));
+  const greekWitness = dfaIntersectionWitness(identifier, greekName);
+  assert(greekWitness);
+  assertEquals(greekWitness.text, "λ2");
+
+  const nonNumber = buildDfa(buildRegexNfa(parsePortableRegex("\\P{N}+")));
+  const digits = buildDfa(buildRegexNfa(parsePortableRegex("[0-9]+")));
+  assertEquals(dfaIntersectionWitness(nonNumber, digits), null);
+});
+
 Deno.test("DFA intersection produces concrete witnesses", () => {
   const left = buildDfa(buildRegexNfa(parsePortableRegex("[A-Z][A-Za-z]*")));
   const right = buildDfa(buildRegexNfa(parsePortableRegex("[A-Za-z]+")));

@@ -14,8 +14,7 @@ runtime boundary.
 
 The runtime implementation metadata exported by generated parsers identifies the
 checked-in runtime source family. Runtime-language versioning is separate from
-the Baba package version, parser-plan version, parser-kit schema version, and
-Wasm adapter ABI version.
+the Baba package version, parser-plan version, and Wasm adapter ABI version.
 
 ## Runtime Source-Of-Truth Cutline
 
@@ -66,14 +65,10 @@ Forbidden source-of-truth duplication:
 - generated TypeScript/Wasm adapter branches that decide parser semantics while
   bypassing the runtime-language source.
 
-The generated TypeScript and JavaScript-hosted Wasm parser runtimes now satisfy
-this cutline. The remaining JavaScript code in those targets is the documented
-host boundary: source/string capabilities, public object allocation, diagnostic
-rendering, adapter handle provenance, and packaging. Parser-kit helpers remain
-tooling/convenience interpreters for `parser-kit.json`, not one of the two
-generated runtime targets in this proof; they are covered by parity tests and
-may be lowered or split into a separate helper runtime in a future compatibility
-task.
+The JavaScript-hosted Wasm parser runtime now satisfies this cutline. The
+remaining JavaScript code is the documented host boundary: source/string
+capabilities, public object allocation, diagnostic rendering, adapter handle
+provenance, and packaging.
 
 `deno task bootstrap:check` verifies the Stage-0 runtime-language compiler
 source hash before it checks regenerated example artifacts. This catches
@@ -488,6 +483,5 @@ work:
 - host source-text handles fully lowered into the runtime language for a future
   non-JavaScript dynamic source-buffer ABI;
 - a richer structured-error taxonomy for a future host-neutral Wasm ABI;
-- optional parser-kit helper lowering, if Baba later wants `parser-kit.json`
-  convenience execution to share the same runtime-language artifact path as the
-  generated TypeScript and Wasm targets.
+- additional host-boundary lowering if future non-JavaScript Wasm hosts need to
+  share more of the current JavaScript materialization path.

@@ -14,20 +14,6 @@ jobs:
         with:
           deno-version: v2.8.0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.2.21"
-
-      - name: Install Node smoke dependencies
-        run: npm install --no-save typescript@5.9.3
-
-      - name: Install Tree-sitter CLI
-        run: npm install --global tree-sitter-cli@0.26.3
-
       - uses: bytecodealliance/actions/wasm-tools/setup@v1
 
       - uses: bytecodealliance/actions/wasmtime/setup@v1
@@ -49,17 +35,8 @@ jobs:
       - name: Test
         run: deno task test
 
-      - name: Exact TypeScript/Wasm parity gate
-        run: deno task test:parity
-
       - name: BRL backend conformance gate
         run: deno task test:brl-conformance
-
-      - name: Portable fixture and plan gates
-        run: deno task test:portable
-
-      - name: Tree-sitter acceptance gate
-        run: deno task test:tree-sitter
 
       - name: Short deterministic fuzz seeds
         run: deno task test:fuzz
@@ -67,17 +44,11 @@ jobs:
       - name: Bootstrap drift check
         run: deno task bootstrap:check
 
-      - name: Deno Node Bun TypeScript and Wasm runtime smoke
-        run: deno task test:runtime-smoke
-
       - name: Size budget check
         run: deno task size:check
 
       - name: Runtime size and cold-start budget check
         run: deno task bench:runtime -- --json runtime-bench-results.json
-
-      - name: Benchmark JSON smoke
-        run: deno task bench -- --quick --samples 1 --json bench-results.json
 
       - name: Publish dry run
         run: deno task publish:dry-run

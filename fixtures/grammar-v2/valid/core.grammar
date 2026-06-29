@@ -1,0 +1,35 @@
+grammar Core
+
+token Ident = /[_\p{L}][_\p{L}\p{N}]*/ ;
+token Int = /[0-9]+/ ;
+skip Space channel trivia = /[ \t\r\n]+/ ;
+contextual Async = "async" ;
+
+export module
+export expr
+
+module =
+  items:item* EOF
+  -> Module(items)
+;
+
+item sync = ";" | "}" | EOF ;
+item =
+    "let" name:Ident "=" value:expr ";"
+      -> Let(name, value)
+  | Async? "fn" name:Ident "(" params:param_list? ")" body:block
+      -> Fn(name, params, body)
+;
+
+expr = atom {
+  infix left 10 "+"
+  infix left 20 "*"
+  prefix 30 "-"
+  postfix 40 "?"
+}
+
+atom =
+    Int -> IntLiteral(text)
+  | Ident -> Name(text)
+  | "(" expr ")"
+;

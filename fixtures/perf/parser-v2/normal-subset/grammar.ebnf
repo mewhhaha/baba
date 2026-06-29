@@ -1,0 +1,25 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token INTEGER = /[0-9]+/ ;
+token STRING = /"([^"\\]|\\.)*"/ ;
+skip WS = /[ \t\r\n]+/ ;
+skip COMMENT = /#[^\r\n]*/ ;
+
+module = item* ;
+item = fn_decl | let_decl ;
+fn_decl = "fn" name:IDENT "(" params? ")" block ;
+params = IDENT params_tail* ;
+params_tail = "," IDENT ;
+block = "{" statement* "}" ;
+statement = let_decl | return_stmt | expr_stmt | if_stmt ;
+let_decl = "let" name:IDENT "=" value:expr ";" ;
+return_stmt = "return" expr ";" ;
+expr_stmt = expr ";" ;
+if_stmt = "if" "(" condition:expr ")" then:block else_clause? ;
+else_clause = "else" block ;
+expr = atom expr_tail* ;
+expr_tail = op atom ;
+op = "==" | "+" | "-" | "*" ;
+atom = call | INTEGER | STRING | IDENT | "(" expr ")" ;
+call = callee:IDENT "(" args? ")" ;
+args = expr args_tail* ;
+args_tail = "," expr ;

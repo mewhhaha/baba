@@ -1,6 +1,7 @@
 # Grammar
 
-Status: current user-facing grammar guide.
+Status: legacy EBNF compatibility guide. New parser work should start with
+[Grammar v2](grammar-v2.md).
 
 Baba grammars are explicit EBNF files. They describe concrete syntax only:
 tokens, skips, literals, rules, groups, alternatives, optionals, repetitions,

@@ -1,0 +1,18 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token INTEGER = /[0-9]+/ ;
+token STRING = /"([^"\\]|\\.)*"/ ;
+skip WS = /[ \t\r\n]+/ ;
+skip COMMENT = /#[^\r\n]*/ ;
+
+module = statement* ;
+statement = let_decl | print_stmt | block ;
+let_decl = "let" name:IDENT "=" value:expr ";" ;
+print_stmt = "print" value:expr ";" ;
+block = "block" name:IDENT "{" statement* "}" ;
+expr = term add_tail* ;
+add_tail = add_op term ;
+add_op = "+" | "-" ;
+term = atom mul_tail* ;
+mul_tail = mul_op atom ;
+mul_op = "*" | "/" ;
+atom = INTEGER | STRING | IDENT | "(" expr ")" ;

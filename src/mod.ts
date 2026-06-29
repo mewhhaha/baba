@@ -1,6 +1,6 @@
 /**
- * baba compiles explicit EBNF grammars into syntax artifacts for Tree-sitter,
- * TypeScript, Wasm, and parser-kit consumers.
+ * Baba compiles explicit EBNF grammars plus metadata into usable Wasm
+ * lexer/parser bundles.
  *
  * ```ts
  * import { applyBundle, generate, parseGrammar, parseMetadata } from "jsr:@mewhhaha/baba";
@@ -17,8 +17,6 @@
 export type {
   BabaMetadata,
   CompileOptions,
-  CompileParserKitOptions,
-  CompileParserKitResult,
   CompileResult,
   Diagnostic,
   EbnfExpression,
@@ -29,19 +27,20 @@ export type {
   GeneratedFile,
   GenerateOptions,
   GenerateTarget,
-  KitTargetOptions,
+  ParserConflictDeclarationMetadata,
+  ParserConflictResolutionMetadata,
+  ParserRuntimeMetadata,
   PortabilityMode,
   PortableRuntimePlanningOptions,
   SourceSpan,
-  TypeScriptTargetOptions,
   ValidateOptions,
   WasmTargetOptions,
 } from "./ast.ts";
+
 export {
   applyBundle,
   BabaError,
   compile,
-  compileParserKit,
   formatDiagnostic,
   generate,
   parseGrammar,

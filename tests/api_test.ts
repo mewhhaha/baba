@@ -402,14 +402,11 @@ Deno.test("public entrypoints type-check", async () => {
       path,
       `import { applyBundle, generate, parseGrammar, parseMetadata, validateGrammar } from "${Deno.cwd()}/src/mod.ts";
 import { generateTreeSitterGrammar, generateTreeSitterQueries } from "${Deno.cwd()}/src/advanced.ts";
-import { compileParserKit, validateParserKit } from "${Deno.cwd()}/src/kit.ts";
 const source = 'token ident = /[a-z]+/ ; module = ident ;';
 const grammar = parseGrammar(source);
 const metadata = parseMetadata("{}");
 const diagnostics = validateGrammar(grammar);
 const bundle = generate(grammar, { metadata });
-const kit = compileParserKit(grammar).kit;
-if (kit) console.log(validateParserKit(kit).length);
 void applyBundle;
 console.log(diagnostics.length, bundle.files.length, generateTreeSitterGrammar(grammar).length, generateTreeSitterQueries(grammar)["highlights.scm"].length);
 `,

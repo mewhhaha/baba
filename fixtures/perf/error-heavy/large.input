@@ -1,0 +1,12 @@
+let count = 1;
+let offset = 2;
+print count + offset;
+block repairs {
+  let value = (count + 3) * 4;
+  print value;
+  print (value + offset) * (count + 1);
+}
+block more {
+  let value = 5;
+  print value + count + offset;
+}

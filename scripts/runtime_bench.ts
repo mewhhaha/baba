@@ -2,30 +2,30 @@ import {
   applyBundle,
   type BabaMetadata,
   compile,
-  compileParserKit,
   type GeneratedBundle,
   type GeneratedFile,
   parseMetadata,
 } from "../src/mod.ts";
+import { inflateCompactRuntimePlan } from "../src/runtime/mod.ts";
+import { decodeCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
 
-interface RuntimeBenchReport {
+export interface RuntimeBenchReport {
   readonly generatedAt: string;
   readonly fixtures: readonly FixtureReport[];
   readonly budget?: RuntimeBudgetResult;
 }
 
-interface FixtureReport {
+export interface FixtureReport {
   readonly name: string;
   readonly path: string;
   readonly planStats: PlanStats;
   readonly artifactSizes: ArtifactSizes;
   readonly targets: {
-    readonly typescript?: TargetTiming;
     readonly wasm?: WasmTargetTiming;
   };
 }
 
-interface TargetTiming {
+export interface TargetTiming {
   readonly generatedBytes: number;
   readonly compileGrammarMs: number;
   readonly writeBundleMs: number;
@@ -45,34 +45,27 @@ interface TargetTiming {
   readonly cstLazySmallMs: number;
   readonly cstLazyChildrenSmallMs: number;
   readonly cstFullSmallMs: number;
+  readonly cstFullSmallNodeCount: number;
   readonly mediumParseMs: number;
   readonly largeParseMs: number;
 }
 
-interface WasmTargetTiming extends TargetTiming {
+export interface WasmTargetTiming extends TargetTiming {
   readonly wasmBytes: number;
   readonly compileModuleMs: number | null;
   readonly instantiateMs: number;
 }
 
-interface ArtifactSizes {
-  readonly treeSitterGrammarBytes: number;
-  readonly queryBytes: number;
-  readonly typeScriptSyntaxBytes: number;
-  readonly typeScriptLexerBytes: number;
-  readonly typeScriptParserBytes: number;
-  readonly typeScriptModBytes: number;
+export interface ArtifactSizes {
   readonly wasmAdapterSourceBytes: number;
-  readonly embeddedWasmBytes: number;
   readonly externalWasmBytes: number;
   readonly abiJsonBytes: number;
-  readonly parserKitJsonBytes: number;
   readonly parserPlanBinaryBytes: number;
   readonly totalGeneratedBytes: number;
   readonly largestFile: { readonly path: string; readonly bytes: number };
 }
 
-interface PlanStats {
+export interface PlanStats {
   readonly tokenCount: number;
   readonly literalCount: number;
   readonly lexerStateCount: number;
@@ -89,7 +82,7 @@ interface PlanStats {
   readonly portablePlanJsonBytes: number;
 }
 
-interface LexerRowKindStats {
+export interface LexerRowKindStats {
   empty: number;
   single: number;
   small: number;
@@ -105,7 +98,6 @@ interface RuntimeFixtureBudget {
   readonly wasmBytesMax?: number | BudgetPair;
   readonly wasmColdInstantiateMsMax?: number | BudgetPair;
   readonly smallParseMsMax?: number | BudgetPair;
-  readonly typescriptGeneratedBytesMax?: number | BudgetPair;
   readonly portablePlanJsonBytesMax?: number | BudgetPair;
   readonly parserPlanBinaryBytesMax?: number | BudgetPair;
 }
@@ -115,7 +107,7 @@ interface BudgetPair {
   readonly targetBudget?: number;
 }
 
-interface RuntimeBudgetResult {
+export interface RuntimeBudgetResult {
   readonly path: string;
   readonly ok: boolean;
   readonly checks: readonly RuntimeBudgetCheck[];
@@ -198,34 +190,15 @@ async function benchFixture(
     compile(grammarSource, {
       name,
       metadata,
-      targets: ["tree-sitter", "typescript", "kit"],
-      kit: { profile: "runtime" },
+      targets: ["wasm"],
     })
   );
   throwOnDiagnostics(name, allCompile.value.diagnostics);
   const bundle = allCompile.value.bundle;
   if (!bundle) throw new Error(`Fixture ${name} did not produce a bundle.`);
 
-  const kitCompile = compileParserKit(grammarSource, {
-    name,
-    metadata,
-    kit: { profile: "runtime" },
-  });
-  throwOnDiagnostics(name, kitCompile.diagnostics);
-  if (!kitCompile.kit) {
-    throw new Error(`Fixture ${name} did not produce parser-kit data.`);
-  }
-
-  const planStats = planStatsFromKit(kitCompile.kit);
+  const planStats = planStatsFromRuntimePlan(runtimePlanFromBundle(bundle));
   const artifactSizes = artifactSizesFromBundle(bundle);
-  const typeScript = await benchTypeScriptTarget(
-    name,
-    grammarSource,
-    metadata,
-    smallInput,
-    mediumInput,
-    largeInput,
-  );
   const wasm = await benchWasmTarget(
     name,
     grammarSource,
@@ -241,76 +214,8 @@ async function benchFixture(
     planStats,
     artifactSizes,
     targets: {
-      typescript: typeScript,
       wasm,
     },
-  };
-}
-
-async function benchTypeScriptTarget(
-  name: string,
-  grammarSource: string,
-  metadata: BabaMetadata | undefined,
-  smallInput: string,
-  mediumInput: string,
-  largeInput: string,
-): Promise<TargetTiming> {
-  const compileResult = time(() =>
-    compile(grammarSource, { name, metadata, targets: ["typescript"] })
-  );
-  throwOnDiagnostics(name, compileResult.value.diagnostics);
-  const bundle = requireBundle(name, compileResult.value.bundle);
-  const tempDir = await Deno.makeTempDir({ prefix: "baba-runtime-bench-ts-" });
-  const write = await timeAsync(() => applyBundle(bundle, { root: tempDir }));
-  const imported = await timeAsync(() =>
-    import(pathToFileUrl(`${tempDir}/typescript/mod.ts`).href)
-  );
-  const parse = imported.value.parse as (
-    source: string,
-    options?: {
-      mode?: "tokens" | "validate" | "events" | "cst-lazy" | "cst-full";
-    },
-  ) => RuntimeParseLike;
-  const first = time(() => parse(smallInput));
-  const second = time(() => parse(smallInput));
-  const tokensSmall = time(() => parse(smallInput, { mode: "tokens" }));
-  const tokensMedium = time(() => parse(mediumInput, { mode: "tokens" }));
-  const tokensSmallCount = tokensSmall.value.tokens?.length ?? 0;
-  const validateSmall = time(() => parse(smallInput, { mode: "validate" }));
-  const validateMedium = time(() => parse(mediumInput, { mode: "validate" }));
-  const eventsSmall = time(() => parse(smallInput, { mode: "events" }));
-  const eventsMedium = time(() => parse(mediumInput, { mode: "events" }));
-  const cstLazySmall = time(() => parse(smallInput, { mode: "cst-lazy" }));
-  const cstLazyChildrenSmall = time(() => {
-    const result = parse(smallInput, { mode: "cst-lazy" });
-    if (result.ok && result.root) result.root.children;
-    return result;
-  });
-  const cstFullSmall = time(() => parse(smallInput, { mode: "cst-full" }));
-  const medium = time(() => parse(mediumInput));
-  const large = time(() => parse(largeInput));
-  return {
-    generatedBytes: generatedBytes(bundle.files),
-    compileGrammarMs: compileResult.ms,
-    writeBundleMs: write.ms,
-    importMs: imported.ms,
-    createParserMs: 0,
-    firstParseMs: first.ms,
-    secondParseMs: second.ms,
-    tokensSmallMs: tokensSmall.ms,
-    tokensMediumMs: tokensMedium.ms,
-    tokensSmallCount,
-    tokensSmallNsPerToken: nsPerUnit(tokensSmall.ms, tokensSmallCount),
-    tokensSmallNsPerCodeUnit: nsPerUnit(tokensSmall.ms, smallInput.length),
-    validateSmallMs: validateSmall.ms,
-    validateMediumMs: validateMedium.ms,
-    eventsSmallMs: eventsSmall.ms,
-    eventsMediumMs: eventsMedium.ms,
-    cstLazySmallMs: cstLazySmall.ms,
-    cstLazyChildrenSmallMs: cstLazyChildrenSmall.ms,
-    cstFullSmallMs: cstFullSmall.ms,
-    mediumParseMs: medium.ms,
-    largeParseMs: large.ms,
   };
 }
 
@@ -327,7 +232,6 @@ async function benchWasmTarget(
       name,
       metadata,
       targets: ["wasm"],
-      wasm: { packaging: "embedded-typescript" },
     })
   );
   throwOnDiagnostics(name, compileResult.value.diagnostics);
@@ -339,11 +243,16 @@ async function benchWasmTarget(
   const imported = await timeAsync(() =>
     import(pathToFileUrl(`${tempDir}/wasm/mod.ts`).href)
   );
-  const wasmBytes = imported.value.wasmBytes as Uint8Array | undefined;
-  const compileModule = wasmBytes
-    ? time(() => new WebAssembly.Module(arrayBufferFor(wasmBytes))).ms
-    : null;
-  const create = time(() => imported.value.createParser());
+  const wasmBytes = await Deno.readFile(`${tempDir}/wasm/parser.wasm`);
+  const planBytes = await Deno.readFile(`${tempDir}/wasm/parser.plan`);
+  const compileModule = time(() =>
+    new WebAssembly.Module(
+      arrayBufferFor(wasmBytes),
+    )
+  ).ms;
+  const create = time(() =>
+    imported.value.createParser({ bytes: wasmBytes, plan: planBytes })
+  );
   const parser = create.value as {
     parse(
       source: string,
@@ -380,6 +289,7 @@ async function benchWasmTarget(
   const cstFullSmall = time(() =>
     parser.parse(smallInput, { mode: "cst-full" })
   );
+  const cstFullSmallNodeCount = countParseResultRuleNodes(cstFullSmall.value);
   const medium = time(() => parser.parse(mediumInput));
   const large = time(() => parser.parse(largeInput));
   return {
@@ -405,6 +315,7 @@ async function benchWasmTarget(
     cstLazySmallMs: cstLazySmall.ms,
     cstLazyChildrenSmallMs: cstLazyChildrenSmall.ms,
     cstFullSmallMs: cstFullSmall.ms,
+    cstFullSmallNodeCount,
     mediumParseMs: medium.ms,
     largeParseMs: large.ms,
   };
@@ -412,11 +323,51 @@ async function benchWasmTarget(
 
 interface RuntimeParseLike {
   readonly ok?: boolean;
-  readonly root?: { readonly children: unknown } | null;
+  readonly root?: RuntimeRuleNodeLike | null;
   readonly tokens?: readonly unknown[];
 }
 
-function planStatsFromKit(kit: {
+interface RuntimeRuleNodeLike {
+  readonly type?: string;
+  readonly children: readonly unknown[];
+}
+
+function countParseResultRuleNodes(result: RuntimeParseLike): number {
+  if (!result.ok) {
+    return 0;
+  }
+  if (!result.root) {
+    return 0;
+  }
+  return countRuleNodes(result.root);
+}
+
+function countRuleNodes(value: unknown): number {
+  if (!isRuntimeRuleNode(value)) {
+    return 0;
+  }
+  let count = 1;
+  for (const child of value.children) {
+    count += countRuleNodes(child);
+  }
+  return count;
+}
+
+function isRuntimeRuleNode(value: unknown): value is RuntimeRuleNodeLike {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as { type?: unknown; children?: unknown };
+  if (candidate.type !== "rule") {
+    return false;
+  }
+  if (!Array.isArray(candidate.children)) {
+    return false;
+  }
+  return true;
+}
+
+function planStatsFromRuntimePlan(kit: {
   tokens: { named: readonly unknown[]; literals: readonly unknown[] };
   lexer: {
     dfa: {
@@ -457,6 +408,18 @@ function planStatsFromKit(kit: {
       kit.lr.actions.filter((entry) => entry.actions.length > 1).length,
     portablePlanJsonBytes: portableJsonBytes,
   };
+}
+
+function runtimePlanFromBundle(bundle: GeneratedBundle) {
+  const file = bundle.files.find((entry) => entry.path === "wasm/parser.plan");
+  if (file === undefined) {
+    throw new Error("Wasm bundle did not include wasm/parser.plan.");
+  }
+  if (file.encoding !== "binary") {
+    throw new Error("wasm/parser.plan must be binary.");
+  }
+  const decoded = decodeCombinedWasmParserPlan(file.content);
+  return inflateCompactRuntimePlan(decoded.compactRuntimePlan);
 }
 
 function lexerRowKindStats(
@@ -509,35 +472,20 @@ function artifactSizesFromBundle(bundle: GeneratedBundle): ArtifactSizes {
     { path: "", bytes: 0 },
   );
   return {
-    treeSitterGrammarBytes: byPath.get("grammar.js") ??
-      byPath.get("tree-sitter/grammar.js") ?? 0,
-    queryBytes: files.filter((file) => file.path.endsWith(".scm")).reduce(
-      (sum, file) => sum + file.bytes,
-      0,
-    ),
-    typeScriptSyntaxBytes: byPath.get("typescript/syntax.ts") ?? 0,
-    typeScriptLexerBytes: byPath.get("typescript/lexer.ts") ?? 0,
-    typeScriptParserBytes: byPath.get("typescript/parser.ts") ?? 0,
-    typeScriptModBytes: byPath.get("typescript/mod.ts") ?? 0,
     wasmAdapterSourceBytes: files.filter((file) =>
       file.path.startsWith("wasm/") && file.path.endsWith(".ts")
     ).reduce((sum, file) => sum + file.bytes, 0),
-    embeddedWasmBytes: embeddedWasmBytes(bundle.files),
     externalWasmBytes: binaryBytes(bundle.files, ".wasm"),
     abiJsonBytes: byPath.get("wasm/abi.json") ?? 0,
-    parserKitJsonBytes: byPath.get("kit/parser-kit.json") ?? 0,
     parserPlanBinaryBytes: files
-      .filter((file) =>
-        file.path.endsWith("/plan.bin") ||
-        file.path.endsWith("/parser-plan.bin")
-      )
+      .filter((file) => file.path.endsWith("/parser.plan"))
       .reduce((sum, file) => sum + file.bytes, 0),
     totalGeneratedBytes: files.reduce((sum, file) => sum + file.bytes, 0),
     largestFile,
   };
 }
 
-async function applyRuntimeBudgets(
+export async function applyRuntimeBudgets(
   report: RuntimeBenchReport,
   budgetPath: string,
 ): Promise<RuntimeBenchReport> {
@@ -549,7 +497,6 @@ async function applyRuntimeBudgets(
     const budget = config.runtimeBudgets?.[fixture.name];
     if (!budget) continue;
     const wasm = fixture.targets.wasm;
-    const typescript = fixture.targets.typescript;
     addRuntimeBudgetCheck(
       checks,
       fixture.name,
@@ -568,15 +515,8 @@ async function applyRuntimeBudgets(
       checks,
       fixture.name,
       "smallParseMsMax",
-      typescript?.firstParseMs,
+      wasm?.firstParseMs,
       budget.smallParseMsMax,
-    );
-    addRuntimeBudgetCheck(
-      checks,
-      fixture.name,
-      "typescriptGeneratedBytesMax",
-      typescript?.generatedBytes,
-      budget.typescriptGeneratedBytesMax,
     );
     addRuntimeBudgetCheck(
       checks,
@@ -640,28 +580,9 @@ function renderTextReport(report: RuntimeBenchReport): string {
       } ${fixture.artifactSizes.largestFile.path}`,
       `  plan: ${fixture.planStats.tokenCount} tokens, ${fixture.planStats.literalCount} literals, ${fixture.planStats.lexerStateCount} lexer states, ${fixture.planStats.lrStateCount} LR states, ${
         formatBytes(fixture.planStats.portablePlanJsonBytes)
-      } parser-kit JSON`,
+      } runtime plan JSON`,
       `  lexer rows: ${fixture.planStats.lexerRowKinds.ascii} ascii, ${fixture.planStats.lexerRowKinds.single} single, ${fixture.planStats.lexerRowKinds.small} small, ${fixture.planStats.lexerRowKinds.binary} binary, ${fixture.planStats.lexerRowKinds.empty} empty`,
     );
-    const ts = fixture.targets.typescript;
-    if (ts) {
-      lines.push(
-        `  typescript: ${formatBytes(ts.generatedBytes)} generated, import ${
-          formatMs(ts.importMs)
-        }, first parse ${formatMs(ts.firstParseMs)}, second ${
-          formatMs(ts.secondParseMs)
-        }, tokens ${formatMs(ts.tokensSmallMs)}, validate ${
-          formatMs(ts.validateSmallMs)
-        }, events ${formatMs(ts.eventsSmallMs)}, cst-lazy ${
-          formatMs(ts.cstLazySmallMs)
-        }, lazy children ${formatMs(ts.cstLazyChildrenSmallMs)}, cst-full ${
-          formatMs(ts.cstFullSmallMs)
-        }`,
-        `    lexer: ${formatNumber(ts.tokensSmallCount)} small tokens, ${
-          formatNumber(ts.tokensSmallNsPerToken)
-        } ns/token, ${formatNumber(ts.tokensSmallNsPerCodeUnit)} ns/code unit`,
-      );
-    }
     const wasm = fixture.targets.wasm;
     if (wasm) {
       lines.push(
@@ -712,9 +633,9 @@ function renderComparison(
     pushDelta(
       lines,
       current.name,
-      "typescript generated bytes",
-      previous.targets.typescript?.generatedBytes,
-      current.targets.typescript?.generatedBytes,
+      "wasm generated bytes",
+      previous.targets.wasm?.generatedBytes,
+      current.targets.wasm?.generatedBytes,
       formatBytes,
     );
     pushDelta(
@@ -737,8 +658,8 @@ function renderComparison(
       lines,
       current.name,
       "first parse",
-      previous.targets.typescript?.firstParseMs,
-      current.targets.typescript?.firstParseMs,
+      previous.targets.wasm?.firstParseMs,
+      current.targets.wasm?.firstParseMs,
       formatMs,
     );
   }
@@ -765,7 +686,21 @@ function pushDelta(
 async function discoverFixtures(fixturesRoot: string): Promise<string[]> {
   const names: string[] = [];
   for await (const entry of Deno.readDir(fixturesRoot)) {
-    if (entry.isDirectory) names.push(entry.name);
+    if (!entry.isDirectory) {
+      continue;
+    }
+    const grammarPath = `${fixturesRoot}/${entry.name}/grammar.ebnf`;
+    try {
+      const info = await Deno.stat(grammarPath);
+      if (info.isFile) {
+        names.push(entry.name);
+      }
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        continue;
+      }
+      throw error;
+    }
   }
   return names.sort();
 }
@@ -803,22 +738,6 @@ function requireBundle(
 ): GeneratedBundle {
   if (!bundle) throw new Error(`Fixture ${fixture} did not produce a bundle.`);
   return bundle;
-}
-
-function embeddedWasmBytes(files: readonly GeneratedFile[]): number {
-  for (const file of files) {
-    if (
-      file.encoding === "utf-8" && file.path === "wasm/wasm.ts" &&
-      file.content.includes("new Uint8Array")
-    ) {
-      const arrayBody = file.content.match(
-        /new Uint8Array\(\[([\s\S]*?)\]\)/,
-      )?.[1] ?? "";
-      const numbers = arrayBody.match(/0x[0-9a-fA-F]+|\b\d+\b/g);
-      return numbers?.length ?? 0;
-    }
-  }
-  return 0;
 }
 
 function binaryBytes(files: readonly GeneratedFile[], suffix: string): number {
@@ -877,7 +796,9 @@ function parseArgs(args: readonly string[]): CliOptions {
   let compare: readonly [string, string] | undefined;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
-    if (arg === "--fixtures-root") {
+    if (arg === "--") {
+      continue;
+    } else if (arg === "--fixtures-root") {
       fixturesRoot = args[++index] ?? fixturesRoot;
     } else if (arg === "--fixture") {
       const name = args[++index];

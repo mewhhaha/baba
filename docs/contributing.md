@@ -20,10 +20,7 @@ deno task publish:dry-run
 Runtime changes should also run the named release gates:
 
 ```sh
-deno task test:parity
 deno task test:brl-conformance
-deno task test:portable
-deno task test:tree-sitter
 deno task test:fuzz
 ```
 

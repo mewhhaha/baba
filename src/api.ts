@@ -1,8 +1,6 @@
 import type {
   BabaMetadata,
   CompileOptions,
-  CompileParserKitOptions,
-  CompileParserKitResult,
   CompileResult,
   Diagnostic,
   EbnfGrammar,
@@ -13,25 +11,12 @@ import type {
   PortabilityMode,
   ValidateOptions,
 } from "./ast.ts";
-import {
-  collectAnalyzedTreeSitterHighlightDiagnostics,
-  validateAnalyzedTreeSitterBackendCapabilities,
-  validateTreeSitterBackendCapabilities,
-  validateTreeSitterGenerationMetadataSemantics,
-} from "./generate.ts";
 import { parseMetadata as parseBabaMetadata } from "./metadata.ts";
 import { BabaError, formatDiagnostic, toBabaError } from "./errors.ts";
 import { parseEbnf } from "./parser.ts";
 import { generatedBundle } from "./bundle.ts";
 import { analyzeGrammar } from "./compiler/analyze.ts";
 import { DEFAULT_REGEX_NESTING_LIMIT } from "./compiler/regex/limits.ts";
-import { emitTreeSitterTarget } from "./targets/tree_sitter/plan.ts";
-import {
-  emitTypeScriptTarget,
-  planTypeScriptTarget,
-  type TypeScriptPlan,
-  typeScriptRuntimePlanningOptions,
-} from "./targets/typescript/plan.ts";
 import {
   emitWasmTarget,
   planWasmTarget,
@@ -39,14 +24,7 @@ import {
   wasmRuntimePlanningOptions,
 } from "./targets/wasm/plan.ts";
 import {
-  emitKitTarget,
-  type KitPlan,
-  kitRuntimePlanningOptions,
-  planKitTarget,
-} from "./targets/kit/plan.ts";
-import {
   planPortableRuntime,
-  type RuntimeParserPlan,
   type RuntimeParserPlanningOptions,
 } from "./targets/runtime/plan.ts";
 export { applyBundle } from "./output.ts";
@@ -69,7 +47,7 @@ export function parseMetadata(source: string): BabaMetadata {
   }
 }
 
-/** Validates a grammar and returns diagnostics instead of throwing. */
+/** Validates a grammar for the Wasm lexer/parser target. */
 export function validateGrammar(
   grammar: EbnfGrammar,
   options: ValidateOptions = {},
@@ -80,6 +58,7 @@ export function validateGrammar(
   } catch (error) {
     return [toBabaError(error, "VALIDATION_ERROR").toDiagnostic()];
   }
+
   const portability = normalizePortability(options.portability, targets);
   const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
   const analyzed = analyzeGrammar(grammar, {
@@ -87,94 +66,52 @@ export function validateGrammar(
     rootRule: options.rootRule,
     metadata: options.metadata,
     regexLimits: {
-      sourceLengthLimit: runtimeOptions?.regexSourceLengthLimit,
-      nestingLimit: runtimeOptions?.regexNestingLimit ??
-        DEFAULT_REGEX_NESTING_LIMIT,
+      sourceLengthLimit: runtimeOptions.regexSourceLengthLimit,
+      nestingLimit: regexNestingLimit(runtimeOptions),
     },
-    grammarExpressionDepthLimit: runtimeOptions?.grammarExpressionDepthLimit,
+    grammarExpressionDepthLimit: runtimeOptions.grammarExpressionDepthLimit,
   });
   const diagnostics = [...analyzed.diagnostics];
   if (hasErrors(diagnostics)) return diagnostics;
-  const runtimePlan = planSharedRuntimeForTargets(
+
+  const metadata = metadataOrEmpty(options.metadata);
+  const runtimePlan = planPortableRuntime(
     analyzed,
-    targets,
-    options,
-    options.metadata ?? {},
+    runtimeOptions,
+    metadata,
     portability,
   );
-  if (runtimePlan) diagnostics.push(...runtimePlan.diagnostics);
-  if (targets.includes("tree-sitter")) {
-    diagnostics.push(...treeSitterValidationDiagnostics(
-      grammar,
-      options.rootRule ?? grammar.rules[0]?.name ?? "module",
-      options.metadata ?? {},
-      analyzed,
-    ));
-  }
-  if (targets.includes("typescript")) {
-    try {
-      diagnostics.push(
-        ...planTypeScriptTarget(
-          analyzed,
-          options.typescript,
-          options.metadata,
-          portability,
-          runtimePlan,
-        ).diagnostics,
-      );
-    } catch (error) {
-      diagnostics.push(
-        toBabaError(error, "TYPESCRIPT_TARGET_INTERNAL_ERROR").toDiagnostic(),
-      );
-    }
-  }
-  if (targets.includes("wasm")) {
-    try {
-      diagnostics.push(
-        ...planWasmTarget(
-          analyzed,
-          options.wasm,
-          options.metadata,
-          portability,
-          runtimePlan,
-        ).diagnostics,
-      );
-    } catch (error) {
-      diagnostics.push(
-        toBabaError(error, "WASM_TARGET_INTERNAL_ERROR").toDiagnostic(),
-      );
-    }
-  }
-  if (targets.includes("kit")) {
-    try {
-      diagnostics.push(
-        ...planKitTarget(
-          analyzed,
-          options.kit,
-          options.metadata,
-          portability,
-          runtimePlan,
-        ).diagnostics,
-      );
-    } catch (error) {
-      diagnostics.push(
-        toBabaError(error, "KIT_TARGET_INTERNAL_ERROR").toDiagnostic(),
-      );
-    }
+  diagnostics.push(...runtimePlan.diagnostics);
+  try {
+    diagnostics.push(
+      ...planWasmTarget(
+        analyzed,
+        options.wasm,
+        metadata,
+        portability,
+        runtimePlan,
+      ).diagnostics,
+    );
+  } catch (error) {
+    diagnostics.push(
+      toBabaError(error, "WASM_TARGET_INTERNAL_ERROR").toDiagnostic(),
+    );
   }
   return diagnostics;
 }
 
-/** Compiles a grammar into a bundle, returning diagnostics without throwing. */
+/** Compiles a grammar into a Wasm lexer/parser bundle, returning diagnostics without throwing. */
 export function compile(
   sourceOrGrammar: string | EbnfGrammar,
   options: CompileOptions = {},
 ): CompileResult {
   let grammar: EbnfGrammar;
   try {
-    grammar = typeof sourceOrGrammar === "string"
-      ? parseEbnf(sourceOrGrammar)
-      : sourceOrGrammar;
+    if (typeof sourceOrGrammar === "string") {
+      grammar = parseEbnf(sourceOrGrammar);
+    } else {
+      grammar = sourceOrGrammar;
+    }
   } catch (error) {
     return {
       diagnostics: [toBabaError(error, "EBNF_PARSE_ERROR").toDiagnostic()],
@@ -189,54 +126,32 @@ export function compile(
       diagnostics: [toBabaError(error, "GENERATION_ERROR").toDiagnostic()],
     };
   }
-  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  const metadata = options.metadata ?? {};
+
+  const rootRuleName = selectedRootRuleName(grammar, options.rootRule);
+  const metadata = metadataOrEmpty(options.metadata);
   const portability = normalizePortability(options.portability, targets);
   const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
   const analyzed = analyzeGrammar(grammar, {
-    name: options.name ?? "grammar",
+    name: grammarName(options.name),
     rootRule: rootRuleName,
     metadata,
     regexLimits: {
-      sourceLengthLimit: runtimeOptions?.regexSourceLengthLimit,
-      nestingLimit: runtimeOptions?.regexNestingLimit ??
-        DEFAULT_REGEX_NESTING_LIMIT,
+      sourceLengthLimit: runtimeOptions.regexSourceLengthLimit,
+      nestingLimit: regexNestingLimit(runtimeOptions),
     },
-    grammarExpressionDepthLimit: runtimeOptions?.grammarExpressionDepthLimit,
+    grammarExpressionDepthLimit: runtimeOptions.grammarExpressionDepthLimit,
   });
   const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
-  let typeScriptPlan:
-    | TypeScriptPlan
-    | { diagnostics: readonly Diagnostic[] }
-    | undefined;
   let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
-  let kitPlan: KitPlan | { diagnostics: readonly Diagnostic[] } | undefined;
-  const runtimePlan = planSharedRuntimeForTargets(
+  const runtimePlan = planPortableRuntime(
     analyzed,
-    targets,
-    options,
+    runtimeOptions,
     metadata,
     portability,
   );
-  if (runtimePlan) diagnostics.push(...runtimePlan.diagnostics);
-  if (targets.includes("typescript") && !hasErrors(diagnostics)) {
-    try {
-      typeScriptPlan = planTypeScriptTarget(
-        analyzed,
-        options.typescript,
-        metadata,
-        portability,
-        runtimePlan,
-      );
-    } catch (error) {
-      diagnostics.push({
-        ...toBabaError(error, "TYPESCRIPT_TARGET_INTERNAL_ERROR")
-          .toDiagnostic(),
-        backend: "typescript",
-      });
-    }
-  }
-  if (targets.includes("wasm") && !hasErrors(diagnostics)) {
+  diagnostics.push(...runtimePlan.diagnostics);
+
+  if (!hasErrors(diagnostics)) {
     try {
       wasmPlan = planWasmTarget(
         analyzed,
@@ -252,69 +167,27 @@ export function compile(
       });
     }
   }
-  if (targets.includes("kit") && !hasErrors(diagnostics)) {
-    try {
-      kitPlan = planKitTarget(
-        analyzed,
-        options.kit,
-        metadata,
-        portability,
-        runtimePlan,
-      );
-    } catch (error) {
-      diagnostics.push({
-        ...toBabaError(error, "KIT_TARGET_INTERNAL_ERROR").toDiagnostic(),
-        backend: "kit",
-      });
-    }
-  }
 
-  if (!hasErrors(diagnostics) && targets.includes("tree-sitter")) {
-    diagnostics.push(
-      ...treeSitterValidationDiagnostics(
-        grammar,
-        rootRuleName,
-        metadata,
-        analyzed,
-      ),
-    );
-  }
-  if (typeScriptPlan) diagnostics.push(...typeScriptPlan.diagnostics);
-  if (wasmPlan) diagnostics.push(...wasmPlan.diagnostics);
-  if (kitPlan) diagnostics.push(...kitPlan.diagnostics);
+  if (wasmPlan !== undefined) diagnostics.push(...wasmPlan.diagnostics);
   if (hasErrors(diagnostics)) return { diagnostics };
 
   try {
     const files: GeneratedFile[] = [];
-    if (targets.includes("tree-sitter")) {
-      files.push(...emitTreeSitterTarget(analyzed, {
-        name: options.name ?? "grammar",
-        metadata,
-      }));
-      diagnostics.push(
-        ...collectAnalyzedTreeSitterHighlightDiagnostics(analyzed, {
-          metadata,
-        }),
-      );
-    }
-    if (isTypeScriptPlan(typeScriptPlan)) {
-      files.push(...emitTypeScriptTarget(typeScriptPlan, options.typescript));
-    }
     if (isWasmPlan(wasmPlan)) {
       files.push(...emitWasmTarget(wasmPlan, options.wasm));
-    }
-    if (isKitPlan(kitPlan)) {
-      files.push(...emitKitTarget(kitPlan));
     }
 
     diagnostics.push(...collectBundlePathDiagnostics(files));
     if (hasErrors(diagnostics)) return { diagnostics };
 
     const bundle = generatedBundle(files);
-    return {
-      diagnostics,
-      bundle: diagnostics.length ? { ...bundle, diagnostics } : bundle,
-    };
+    if (diagnostics.length > 0) {
+      return {
+        diagnostics,
+        bundle: { ...bundle, diagnostics },
+      };
+    }
+    return { diagnostics, bundle };
   } catch (error) {
     return {
       diagnostics: [
@@ -325,65 +198,13 @@ export function compile(
   }
 }
 
-/** Compiles a grammar into a generic parser-kit artifact. */
-export function compileParserKit(
-  sourceOrGrammar: string | EbnfGrammar,
-  options: CompileParserKitOptions = {},
-): CompileParserKitResult {
-  let grammar: EbnfGrammar;
-  try {
-    grammar = typeof sourceOrGrammar === "string"
-      ? parseEbnf(sourceOrGrammar)
-      : sourceOrGrammar;
-  } catch (error) {
-    return {
-      diagnostics: [toBabaError(error, "EBNF_PARSE_ERROR").toDiagnostic()],
-    };
-  }
-
-  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
-  const metadata = options.metadata ?? {};
-  const analyzed = analyzeGrammar(grammar, {
-    name: options.name ?? "grammar",
-    rootRule: rootRuleName,
-    metadata,
-    regexLimits: {
-      sourceLengthLimit: options.kit?.regexSourceLengthLimit,
-      nestingLimit: options.kit?.regexNestingLimit,
-    },
-    grammarExpressionDepthLimit: options.kit?.grammarExpressionDepthLimit,
-  });
-  const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
-  let kitPlan: KitPlan | { diagnostics: readonly Diagnostic[] } | undefined;
-  if (!hasErrors(diagnostics)) {
-    try {
-      kitPlan = planKitTarget(
-        analyzed,
-        options.kit,
-        metadata,
-        options.portability ?? "warn",
-      );
-      diagnostics.push(...kitPlan.diagnostics);
-    } catch (error) {
-      diagnostics.push({
-        ...toBabaError(error, "KIT_TARGET_INTERNAL_ERROR").toDiagnostic(),
-        backend: "kit",
-      });
-    }
-  }
-  if (hasErrors(diagnostics) || !isKitPlan(kitPlan)) return { diagnostics };
-  return { diagnostics, kit: kitPlan.kit };
-}
-
-/** Generates a deterministic bundle from EBNF source or a parsed grammar. */
+/** Generates a deterministic Wasm lexer/parser bundle from EBNF source or a parsed grammar. */
 export function generate(
   sourceOrGrammar: string | EbnfGrammar,
   options: GenerateOptions = {},
 ): GeneratedBundle {
   const result = compile(sourceOrGrammar, options);
-  const error = result.diagnostics.find((diagnostic) =>
-    (diagnostic.severity ?? "error") === "error"
-  );
+  const error = result.diagnostics.find((diagnostic) => isError(diagnostic));
   if (error) throw new BabaError(error);
   if (!result.bundle) {
     throw new BabaError({
@@ -396,109 +217,33 @@ export function generate(
 
 export { BabaError, formatDiagnostic };
 
-function treeSitterValidationDiagnostics(
-  grammar: EbnfGrammar,
-  rootRuleName: string,
-  metadata: BabaMetadata,
-  analyzed?: ReturnType<typeof analyzeGrammar>,
-): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  try {
-    validateTreeSitterGenerationMetadataSemantics(
-      grammar,
-      rootRuleName,
-      metadata,
-    );
-  } catch (error) {
-    const diagnostic = toBabaError(error, "METADATA_SEMANTIC_ERROR")
-      .toDiagnostic();
-    diagnostics.push({
-      ...diagnostic,
-      backend: diagnostic.backend ?? "tree-sitter",
-    });
-  }
-  try {
-    if (analyzed) validateAnalyzedTreeSitterBackendCapabilities(analyzed);
-    else validateTreeSitterBackendCapabilities(grammar);
-  } catch (error) {
-    const diagnostic = toBabaError(error, "BACKEND_CAPABILITY_ERROR")
-      .toDiagnostic();
-    diagnostics.push({
-      ...diagnostic,
-      backend: diagnostic.backend ?? "tree-sitter",
-    });
-  }
-  return diagnostics;
-}
-
-function planSharedRuntimeForTargets(
-  analyzed: ReturnType<typeof analyzeGrammar>,
-  targets: readonly GenerateTarget[],
-  options: CompileOptions | ValidateOptions,
-  metadata: BabaMetadata,
-  portability: PortabilityMode,
-): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } | undefined {
-  const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
-  if (!runtimeOptions) return undefined;
-  return planPortableRuntime(analyzed, runtimeOptions, metadata, portability);
-}
-
 function sharedRuntimePlanningOptions(
   targets: readonly GenerateTarget[],
   options: CompileOptions | ValidateOptions,
-): RuntimeParserPlanningOptions | undefined {
-  const selected = [
-    targets.includes("typescript")
-      ? typeScriptRuntimePlanningOptions(options.typescript ?? {})
-      : undefined,
-    targets.includes("wasm")
-      ? wasmRuntimePlanningOptions(options.wasm ?? {})
-      : undefined,
-    targets.includes("kit")
-      ? kitRuntimePlanningOptions(options.kit ?? {})
-      : undefined,
-  ].filter((value): value is RuntimeParserPlanningOptions => !!value);
-  if (selected.length === 0) return undefined;
-  const minOption = (
-    key: keyof RuntimeParserPlanningOptions,
-  ): number | undefined => {
-    const values = selected
-      .map((entry) => entry[key])
-      .filter((value): value is number => value !== undefined);
-    return values.length === 0 ? undefined : Math.min(...values);
-  };
-  return {
-    lexerStateLimit: minOption("lexerStateLimit"),
-    regexSourceLengthLimit: minOption("regexSourceLengthLimit"),
-    regexNestingLimit: minOption("regexNestingLimit"),
-    regexAstNodeLimit: minOption("regexAstNodeLimit"),
-    regexBoundedRepeatLimit: minOption("regexBoundedRepeatLimit"),
-    regexNfaStateLimit: minOption("regexNfaStateLimit"),
-    regexDfaStateLimit: minOption("regexDfaStateLimit"),
-    regexOverlapStateLimit: minOption("regexOverlapStateLimit"),
-    regexOverlapPairLimit: minOption("regexOverlapPairLimit"),
-    grammarExpressionDepthLimit: minOption("grammarExpressionDepthLimit"),
-    parserStateLimit: minOption("parserStateLimit"),
-    parserItemLimit: minOption("parserItemLimit"),
-    lrClosureWorkLimit: minOption("lrClosureWorkLimit"),
-    parserTableEntryLimit: minOption("parserTableEntryLimit"),
-    diagnosticLimit: minOption("diagnosticLimit"),
-  };
+): RuntimeParserPlanningOptions {
+  if (!targets.includes("wasm")) {
+    throw new BabaError({
+      code: "UNKNOWN_TARGET",
+      message: "Baba now generates Wasm parser/lexer artifacts only.",
+    });
+  }
+  if (options.wasm !== undefined) {
+    return wasmRuntimePlanningOptions(options.wasm);
+  }
+  return wasmRuntimePlanningOptions({});
 }
 
 function normalizeTargets(
   targets: readonly GenerateTarget[] | undefined,
 ): GenerateTarget[] {
-  if (!targets || targets.length === 0) return ["tree-sitter"];
+  if (!targets || targets.length === 0) return ["wasm"];
   const result: GenerateTarget[] = [];
   for (const target of targets) {
-    if (
-      target !== "tree-sitter" && target !== "typescript" &&
-      target !== "wasm" && target !== "kit"
-    ) {
+    if (target !== "wasm") {
       throw new BabaError({
         code: "UNKNOWN_TARGET",
-        message: `Unknown generation target '${String(target)}'.`,
+        message:
+          `Unsupported generation target '${String(target)}'. Baba now generates Wasm parser/lexer artifacts only.`,
       });
     }
     if (!result.includes(target)) result.push(target);
@@ -515,23 +260,46 @@ function normalizePortability(
   ) {
     return portability;
   }
-  return targets.length > 1 ? "strict" : "warn";
+  if (targets.length > 1) return "strict";
+  return "warn";
+}
+
+function metadataOrEmpty(metadata: BabaMetadata | undefined): BabaMetadata {
+  if (metadata !== undefined) return metadata;
+  return {};
+}
+
+function selectedRootRuleName(
+  grammar: EbnfGrammar,
+  rootRule: string | undefined,
+): string {
+  if (rootRule !== undefined) return rootRule;
+  const firstRule = grammar.rules[0];
+  if (firstRule !== undefined) return firstRule.name;
+  return "module";
+}
+
+function grammarName(name: string | undefined): string {
+  if (name !== undefined) return name;
+  return "grammar";
+}
+
+function regexNestingLimit(
+  options: RuntimeParserPlanningOptions,
+): number {
+  if (options.regexNestingLimit !== undefined) {
+    return options.regexNestingLimit;
+  }
+  return DEFAULT_REGEX_NESTING_LIMIT;
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
-  return diagnostics.some((diagnostic) =>
-    (diagnostic.severity ?? "error") === "error"
-  );
+  return diagnostics.some((diagnostic) => isError(diagnostic));
 }
 
-function isTypeScriptPlan(
-  value:
-    | TypeScriptPlan
-    | { diagnostics: readonly Diagnostic[] }
-    | false
-    | undefined,
-): value is TypeScriptPlan {
-  return !!value && "bnf" in value;
+function isError(diagnostic: Diagnostic): boolean {
+  if (diagnostic.severity === undefined) return true;
+  return diagnostic.severity === "error";
 }
 
 function isWasmPlan(
@@ -542,16 +310,6 @@ function isWasmPlan(
     | undefined,
 ): value is WasmPlan {
   return !!value && "wasm" in value;
-}
-
-function isKitPlan(
-  value:
-    | KitPlan
-    | { diagnostics: readonly Diagnostic[] }
-    | false
-    | undefined,
-): value is KitPlan {
-  return !!value && "kit" in value;
 }
 
 function collectBundlePathDiagnostics(

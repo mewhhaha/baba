@@ -1,0 +1,21 @@
+grammar FeatureSyntax
+
+module Core.Syntax
+import Core.Base ;
+export Core.Syntax.module
+
+mode String {
+  token StringText pop = /[^"]+/ ;
+  token Escape = /\\./ ;
+}
+
+token Quote push String = /"/ ;
+token Ident in default = /[A-Za-z_][A-Za-z0-9_]*/ ;
+skip Space channel trivia = /[ \t\r\n]+/ ;
+layout indent = INDENT | DEDENT | NEWLINE ;
+
+extend item = "trace" value:expr ";" -> Trace(value) ;
+
+module = item* EOF -> Module(item) ;
+item = Ident ;
+expr = Ident ;

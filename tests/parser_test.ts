@@ -413,7 +413,7 @@ Deno.test("TypeScript CST nodes expose public token ranges", async () => {
 });
 
 Deno.test("TypeScript target rejects nonportable character class escapes", () => {
-  for (const pattern of ["[\\s]+", "[\\d]+", "[\\p{L}]+"]) {
+  for (const pattern of ["[\\s]+", "[\\d]+"]) {
     const result = compile(
       `
       token VALUE = /${pattern}/ ;
@@ -423,6 +423,30 @@ Deno.test("TypeScript target rejects nonportable character class escapes", () =>
     );
     assertEquals(result.bundle, undefined);
     assertEquals(result.diagnostics[0].code, "INVALID_TOKEN_REGEX");
+  }
+});
+
+Deno.test("TypeScript target accepts Unicode property identifier tokens", async () => {
+  const result = compile(
+    `
+    token IDENT = /[_\\p{L}][_\\p{L}\\p{N}]*/ ;
+    module = value:IDENT ;
+  `,
+    { targets: ["typescript"] },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("λ2");
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.fields.value.text, "λ2");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
   }
 });
 

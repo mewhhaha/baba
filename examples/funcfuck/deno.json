@@ -1,19 +1,11 @@
 {
   "tasks": {
-    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name funcfuck --root module --metadata baba.json --target all --target wasm --wasm-packaging embedded-typescript --typescript-dir ts",
+    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name funcfuck --root module --metadata baba.json --target wasm",
     "check": "deno check interpreter.ts",
     "run": "deno task pipeline",
     "test": "deno task check && deno task pipeline && deno task fanout && deno task window",
     "pipeline": "deno run --allow-read interpreter.ts programs/pipeline.ff",
     "fanout": "deno run --allow-read interpreter.ts programs/fanout.ff",
-    "window": "deno run --allow-read interpreter.ts programs/window.ff",
-    "helix:sync": "cp generated/queries/generated-highlights.scm .helix/runtime/queries/funcfuck/highlights.scm && cp generated/queries/generated-rainbows.scm .helix/runtime/queries/funcfuck/rainbows.scm",
-    "helix:build": "deno task tree-sitter:generate && mkdir -p .helix/runtime/grammars && XDG_CACHE_HOME=$PWD/.cache sh -c 'cd generated && tree-sitter build -o ../.helix/runtime/grammars/funcfuck.so'",
-    "helix:prepare": "deno task generate && deno task helix:sync && deno task helix:build",
-    "helix:health": "HELIX_RUNTIME=$PWD/.helix/runtime hx --health funcfuck",
-    "helix:open": "HELIX_RUNTIME=$PWD/.helix/runtime hx programs/pipeline.ff",
-    "tree-sitter:generate": "cd generated && tree-sitter generate",
-    "tree-sitter:build": "XDG_CACHE_HOME=$PWD/.cache sh -c 'cd generated && tree-sitter build -o parser.so'",
-    "tree-sitter:parse": "XDG_CACHE_HOME=$PWD/.cache tree-sitter parse --lib-path generated/parser.so --lang-name funcfuck programs/pipeline.ff"
+    "window": "deno run --allow-read interpreter.ts programs/window.ff"
   }
 }

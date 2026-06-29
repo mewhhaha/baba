@@ -1,0 +1,19 @@
+let count = 3;
+let scale = 10;
+let offset = 7;
+print count + scale * 2;
+block report {
+  let title = "daily";
+  print title;
+  print (count + scale) * 2;
+  block nested {
+    let subtotal = count * scale + offset;
+    print subtotal;
+    print (subtotal + 1) * (scale - 2);
+  }
+}
+block archive {
+  let title = "weekly";
+  print title;
+  print count + scale + offset;
+}

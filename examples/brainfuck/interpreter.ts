@@ -1,8 +1,17 @@
 import {
   type AnyRuleNode,
+  createParser,
   type InstructionNode,
-  parse,
 } from "./generated/wasm/mod.ts";
+
+const parser = createParser({
+  bytes: Deno.readFileSync(
+    new URL("generated/wasm/parser.wasm", import.meta.url),
+  ),
+  plan: Deno.readFileSync(
+    new URL("generated/wasm/parser.plan", import.meta.url),
+  ),
+});
 
 type Op =
   | { kind: "inc"; amount: number }
@@ -31,7 +40,7 @@ const DEFAULT_MAX_STEPS = 10_000_000;
 const MAX_REPEAT_COUNT = 1_000_000;
 
 export function compileBrainfuck(source: string): Op[] {
-  const parsed = parse(source, { preserveTrivia: false });
+  const parsed = parser.parse(source, { preserveTrivia: false });
   if (!parsed.ok || !parsed.root) {
     const diagnostics = parsed.diagnostics.map((diagnostic) =>
       `${diagnostic.code} at ${diagnostic.span.start}: ${diagnostic.message}`

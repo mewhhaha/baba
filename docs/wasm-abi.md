@@ -5,12 +5,13 @@ Status: versioned core ABI for generated Wasm parser artifacts.
 This document defines the contract between Baba's generated Wasm core module,
 the generated TypeScript adapter, and non-JavaScript hosts that choose to call
 the core module directly. The current target kind is
-`javascript-hosted-core-wasm`: Baba emits a core WebAssembly module plus a
-TypeScript adapter. It does not yet emit a Wasm Component Model package, WIT
-bindings, WASI library, or browser-only package.
+`javascript-hosted-core-wasm`: Baba emits a generic core WebAssembly module, an
+external parser plan, plus a TypeScript adapter. It does not yet emit a Wasm
+Component Model package, WIT bindings, WASI library, or browser-only package.
 
-Generated Wasm bundles also include `wasm/abi.json`. Hosts should treat that
-JSON file as the machine-readable descriptor for the exact generated parser.
+Generated Wasm bundles also include `wasm/abi.json` and `wasm/parser.plan`.
+Hosts should treat the JSON file as the machine-readable descriptor for the
+generic core ABI. Grammar-specific runtime data lives in `parser.plan`.
 
 ## Versioning
 
@@ -23,15 +24,16 @@ The generated descriptor has:
 }
 ```
 
-The core module exports `abi_version() -> i32`, `plan_version() -> i32`, and
-`semantics_version() -> i32`. For ABI version 1, both the descriptor and
-generated adapter must agree with the core exports before the adapter uses the
-module.
+The core module exports `load_plan(planPtr, planLength) -> i32`,
+`abi_version() -> i32`, `plan_version() -> i32`, and
+`semantics_version() -> i32`. For ABI version 1, the generated adapter writes
+`parser.plan` into linear memory, calls `load_plan`, and then checks that the
+descriptor and core exports agree before the adapter uses the module.
 
 The descriptor also records:
 
-- `parserPlan.format`, `parserPlan.version`, `parserPlan.semantics`, and
-  `parserPlan.hash`;
+- `parserPlan.format`, `parserPlan.version`, `parserPlan.semantics`, and the
+  external storage layout;
 - `runtimeImplementation.format`, `runtimeImplementation.version`,
   `runtimeImplementation.semantics`, and `runtimeImplementation.hash`;
 - the numeric parser diagnostic code table and diagnostic detail schemas.
@@ -47,8 +49,9 @@ ABI version 1 core modules export:
 | `lex_all(sourcePtr, sourceLength, resultPtr, tokenPtr) -> i32` | function | Writes token records and returns the token count.                                |
 | `parser_action(state, terminal) -> i32`                        | function | Returns an encoded LR action.                                                    |
 | `parser_goto(state, nonterminal) -> i32`                       | function | Returns a parser state, or `-1` when absent.                                     |
+| `load_plan(planPtr, planLength) -> i32`                        | function | Loads the external parser plan and returns `1` when accepted.                    |
 | `abi_version() -> i32`                                         | function | Returns the core ABI version.                                                    |
-| `plan_version() -> i32`                                        | function | Returns the portable parser-plan version.                                        |
+| `plan_version() -> i32`                                        | function | Returns the loaded portable parser-plan version, or `0` before `load_plan`.      |
 | `semantics_version() -> i32`                                   | function | Returns the runtime implementation semantics version.                            |
 | `reset() -> void`                                              | function | Clears reusable core runtime state.                                              |
 | `input_base() -> i32`                                          | function | Returns the first byte offset available for host input.                          |
@@ -64,6 +67,21 @@ All numeric parameters and results use WebAssembly `i32`. Linear-memory byte
 offsets and lengths are non-negative 32-bit values. Multi-byte fields use
 little-endian WebAssembly memory order and 4-byte alignment for `i32` records.
 
+## External Plan
+
+ABI version 1 keeps grammar-specific DFA and LR table data outside
+`parser.wasm`. The generated `parser.plan` starts with the core table section
+expected by `load_plan`, followed by shared runtime metadata used by the
+TypeScript adapter. The host writes `parser.plan` bytes into linear memory at
+offset `0` and calls `load_plan(0, planLength)`. The adapter treats any result
+other than `1` as an invalid plan. After a successful load, `input_base()`
+returns the first byte offset after the core table section, aligned for
+caller-managed input.
+
+The descriptor exposes plan metadata under `core.plan`, including the plan
+storage mode, the `load_plan` export name, the generated `parser.plan` path, and
+the combined plan layout.
+
 ## Source And Spans
 
 ABI version 1 uses source encoding enum value `1`, meaning UTF-16 code units.
@@ -71,7 +89,7 @@ The host writes the source into linear memory as contiguous unsigned 16-bit code
 units. `sourceLength` is a count of UTF-16 code units, not bytes.
 
 Span unit enum value `1` means public spans are UTF-16 code-unit offsets. This
-matches JavaScript string indexing and the generated TypeScript target. Non-BMP
+matches JavaScript string indexing and the generated Wasm adapter. Non-BMP
 characters therefore occupy two units in public spans.
 
 ## Record Layouts
@@ -98,9 +116,10 @@ The descriptor exposes these widths as `core.layouts.lexResult.i32Count` and
 
 Host ownership model enum value `1` means caller-managed linear memory buffers.
 The host chooses writable input, result, and token-record offsets at or after
-`input_base()`. The generated TypeScript adapter uses the instance memory,
-copies JavaScript source text into UTF-16 memory, and allocates result buffers
-after the source.
+`input_base()`. Since `parser.plan` is loaded at the start of memory,
+`input_base()` is only stable after `load_plan` succeeds. The generated
+TypeScript adapter uses the instance memory, copies JavaScript source text into
+UTF-16 memory, and allocates result buffers after the source.
 
 Result lifetime enum value `1` means low-level core results remain valid in the
 caller-provided buffers until the host overwrites those buffers, calls
@@ -109,12 +128,7 @@ typed-array and `DataView` objects; hosts must recreate views after any
 operation that can call `memory.grow()`.
 
 The generated adapter never intentionally retains a view across a possible
-growth. `WasmSourceBuffer` and `ParseTraceInput` values are adapter-owned
-JavaScript capabilities, not raw ABI handles. The adapter epoch-checks them:
-
-- `WasmSourceBuffer` becomes stale after `reset()` or after `writeSource()` is
-  called with a different source;
-- `ParseTraceInput` becomes stale after `reset()`.
+growth.
 
 ## Reset, Disposal, And Reentrancy
 
@@ -124,19 +138,15 @@ the previous high-water allocation.
 
 ABI version 1 has instance-owned core memory. Generated adapters expose
 `createParser()` and `createParserAsync()` as the public lifecycle API. Each
-parser instance owns its `WebAssembly.Instance`, memory, source buffers, trace
-runtime, reset epoch, configured limits, and disposed state. `reset()` on a
-parser instance clears reusable state and invalidates that instance's
-adapter-owned handles. `dispose()` invalidates the parser instance; subsequent
-`lex()`, `parse()`, or token-stream calls on that instance throw from the
-generated adapter.
+parser instance owns its `WebAssembly.Instance`, memory, loaded plan, shared
+runtime parser, and disposed state. `reset()` on a parser instance clears
+reusable core state. `dispose()` invalidates the parser instance; subsequent
+`lex()`, `parse()`, or token-stream calls on that instance throw from the shared
+adapter.
 
-Module-level `lex()`, `parse()`, `parseTokens()`, and `parseTokensUnchecked()`
-are convenience wrappers over an active/default parser instance. Embedded
-adapters create that default instance lazily. External-binary adapters can
-create isolated instances with `createParser({ bytes })`,
-`createParser({ module })`, `createParser({ wasm })`, or
-`createParserAsync({ url })`.
+Generated adapters create isolated instances with
+`createParser({ bytes, plan })`, `createParser({ module, plan })`, or
+`createParserAsync({ url, planUrl })`.
 
 Calls into one core instance are not specified as thread-safe or reentrant.
 Hosts that need interleaved parsing should use separate parser instances. CI
@@ -174,6 +184,6 @@ arguments before crossing the ABI boundary.
 ## Host Validation
 
 Generated bundles are expected to validate the core module with
-`WebAssembly.validate()` where available. Repository tests also validate with
-independent tools when installed, including `wasm-tools validate` and a Wasmtime
-low-level smoke test.
+`WebAssembly.validate()` where available, then load and validate `parser.plan`
+before use. Repository tests also validate with independent tools when
+installed, including `wasm-tools validate` and a Wasmtime low-level smoke test.

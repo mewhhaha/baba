@@ -1,0 +1,25 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token INTEGER = /[0-9]+/ ;
+skip WS = /[ \t\r\n]+/ ;
+skip COMMENT = /#[^\r\n]*/ ;
+
+module = expr ";" ;
+expr = equality ;
+equality = comparison equality_tail* ;
+equality_tail = equality_op comparison ;
+equality_op = "==" | "!=" ;
+comparison = additive comparison_tail* ;
+comparison_tail = comparison_op additive ;
+comparison_op = "<" | "<=" | ">" | ">=" ;
+additive = multiplicative additive_tail* ;
+additive_tail = additive_op multiplicative ;
+additive_op = "+" | "-" ;
+multiplicative = unary multiplicative_tail* ;
+multiplicative_tail = multiplicative_op unary ;
+multiplicative_op = "*" | "/" ;
+unary = unary_op* primary ;
+unary_op = "!" | "-" ;
+primary = call | INTEGER | IDENT | "(" expr ")" ;
+call = callee:IDENT "(" args? ")" ;
+args = expr args_tail* ;
+args_tail = "," expr ;
