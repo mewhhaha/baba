@@ -68,7 +68,7 @@ Deno.test("runtime language Stage-0 spec documents current drift checks", async 
   assertIncludes(spec, "`deno task bootstrap:check`");
   assertIncludes(spec, "runtime-language compiler");
   assertIncludes(spec, "TypeScript/Wasm helper artifact manifest");
-  assertNotIncludes(spec, "until T10 adds drift detection");
+  assertNotIncludes(spec, "until drift detection is added");
 });
 
 Deno.test("runtime language conformance fixtures parse, check, and verify", async () => {

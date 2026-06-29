@@ -6,7 +6,7 @@ import {
   parseGrammarV2,
   recoverGrammarV2Parse,
 } from "./helpers.ts";
-import type { GrammarV2ParserCorePlan } from "../src/mod.ts";
+import type { GrammarV2ParserCorePlan } from "./helpers.ts";
 
 Deno.test("grammar v2 recovery inserts a missing token", () => {
   const plan = recoveryPlan();

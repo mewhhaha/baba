@@ -5,6 +5,7 @@
  */
 
 export {
+  assertParserKit as assertParserPlan,
   parserDiagnosticCodeAmbiguousParse,
   parserDiagnosticCodeBranchLimit,
   parserDiagnosticCodeInternalError,
@@ -15,6 +16,7 @@ export {
   parserDiagnosticCodeTraceLimit,
   parserDiagnosticDetailKindNone,
   parserDiagnosticDetailKindParserState,
+  validateParserKit as validateParserPlan,
 } from "./parser_plan.ts";
 export type {
   KitEofToken as EofToken,
@@ -31,9 +33,10 @@ export type {
   KitToken as Token,
   KitTriviaToken as TriviaToken,
   ParserKit as RuntimeParserPlan,
+  ParserKitValidationIssue as RuntimeParserPlanValidationIssue,
 } from "./parser_plan.ts";
 import {
-  assertParserKit,
+  assertParserKit as assertRuntimeParserPlan,
   type KitLexOptions,
   type KitLexResult,
   type KitParseEvent,
@@ -44,8 +47,8 @@ import {
   lexWithKit,
   parseEventsWithKit,
   parseLazyWithKit,
-  type ParserKit,
-  type ParserKitValidationIssue,
+  type ParserKit as RuntimeParserPlan,
+  type ParserKitValidationIssue as RuntimeParserPlanValidationIssue,
   parseTokenEventsUncheckedWithKit,
   parseTokenEventsWithKit,
   parseTokensLazyUncheckedWithKit,
@@ -53,7 +56,7 @@ import {
   parseTokensUncheckedWithKit,
   parseTokensWithKit,
   parseWithKit,
-  validateParserKit,
+  validateParserKit as validateRuntimeParserPlan,
   validateTokensUncheckedWithKit,
   validateTokensWithKit,
   validateWithKit,
@@ -95,7 +98,7 @@ export type ValidateParseResult =
   };
 
 export interface RuntimeParser<Root extends KitRuleNode = KitRuleNode> {
-  readonly plan: ParserKit;
+  readonly plan: RuntimeParserPlan;
   lex(source: string, options?: KitLexOptions): KitLexResult;
   parse(
     source: string,
@@ -157,10 +160,16 @@ export interface CreateParserOptions {
 }
 
 export function createParser<Root extends KitRuleNode = KitRuleNode>(
-  plan: ParserKit,
+  plan: RuntimeParserPlan,
   options: CreateParserOptions = {},
 ): RuntimeParser<Root> {
-  if (options.validate ?? true) assertParserKit(plan);
+  let shouldValidate = true;
+  if (options.validate !== undefined) {
+    shouldValidate = options.validate;
+  }
+  if (shouldValidate) {
+    assertRuntimeParserPlan(plan);
+  }
   const parse: RuntimeParser<Root>["parse"] = ((
     source: string,
     parseOptions?: ParseOptions,
@@ -223,13 +232,17 @@ export function createParser<Root extends KitRuleNode = KitRuleNode>(
   };
 }
 
-export function validatePlan(plan: unknown): ParserKitValidationIssue[] {
-  return validateParserKit(plan);
+export function validatePlan(
+  plan: unknown,
+): RuntimeParserPlanValidationIssue[] {
+  return validateRuntimeParserPlan(plan);
 }
 
 export const createLexer = createParser;
 
-export function inflateCompactRuntimePlan(encoded: unknown): ParserKit {
+export function inflateCompactRuntimePlan(
+  encoded: unknown,
+): RuntimeParserPlan {
   const value = encoded as {
     m: [string, number, string, string, string];
     g: [string, string, number, string, unknown[]];

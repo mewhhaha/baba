@@ -15,7 +15,7 @@ import {
   parseGrammarV2,
   recoverGrammarV2Parse,
   validateGrammarV2Parse,
-} from "../src/mod.ts";
+} from "./helpers.ts";
 import { assert, assertEquals, assertIncludes } from "./helpers.ts";
 
 const BASIC_GRAMMAR = `

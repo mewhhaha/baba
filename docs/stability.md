@@ -11,9 +11,9 @@ same promise as published user APIs.
 The exported modules in `deno.json` are the stable public library surface:
 
 - `@mewhhaha/baba`;
-- `@mewhhaha/baba/advanced`;
-- `@mewhhaha/baba/kit`;
-- `@mewhhaha/baba/cli`.
+- `@mewhhaha/baba/cli`;
+- `@mewhhaha/baba/runtime`;
+- `@mewhhaha/baba/runtime/wasm`.
 
 Patch and minor releases may add options, result fields, diagnostics, helper
 exports, and target capabilities. Removing exports, changing accepted option
@@ -77,13 +77,3 @@ compiler helpers, artifact manifests, and generated helper layout may change
 between releases. Public compatibility is expressed through generated parser
 APIs, parser-plan versions, runtime diagnostic contracts, and Wasm ABI versions,
 not through BRL source compatibility.
-
-## Tree-Sitter Compatibility
-
-The Tree-sitter target aims to keep generated grammars and query fragments
-compatible with the current Tree-sitter CLI/tooling used in repository tests.
-Tree-sitter acceptance can differ from standalone runtime acceptance when
-Tree-sitter recovery or target-specific capabilities are involved; portable
-subset parity is tested separately. Generated Tree-sitter artifact filenames are
-stable, but Tree-sitter-internal node shaping can change when metadata or
-grammar semantics require it.

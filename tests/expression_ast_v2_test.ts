@@ -8,7 +8,7 @@ import {
   parseGrammarV2,
   parseGrammarV2PrattExpression,
 } from "./helpers.ts";
-import type { GrammarV2PrattNode } from "../src/mod.ts";
+import type { GrammarV2PrattNode } from "./helpers.ts";
 
 Deno.test("grammar v2 Pratt nodes expose expression constructor shape", () => {
   const parsed = parseGrammarV2(`

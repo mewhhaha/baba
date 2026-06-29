@@ -4,7 +4,7 @@ import {
   assertIncludes,
   parseGrammarV2,
 } from "./helpers.ts";
-import type { Diagnostic, GrammarV2Document } from "../src/mod.ts";
+import type { Diagnostic, GrammarV2Document } from "./helpers.ts";
 
 Deno.test("grammar v2 parser accepts the task syntax example", async () => {
   const source = await Deno.readTextFile(

@@ -25,9 +25,8 @@ for expected exhaustion.
 
 ## Target Limits
 
-Portable runtime planning limits apply to TypeScript, Wasm, and kit targets.
-Generated-size limits remain target-specific because each target emits different
-artifact kinds.
+Portable runtime planning limits apply to the generated Wasm parser plan.
+Generated-size limits cover the emitted Wasm bundle artifacts.
 
 ## Runtime Limits
 

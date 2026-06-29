@@ -4,15 +4,14 @@ Status: accepted for Stage-0 compiler infrastructure.
 
 ## Context
 
-Baba's TypeScript and Wasm runtimes need exact semantic parity for lexer,
-parser, branch-search, reducer, CST, and diagnostic behavior. Some runtime
-helpers were initially generated from the private runtime language before the
-full standalone runtime cutline was complete. The generated TypeScript and
-JavaScript-hosted Wasm parser runtimes now satisfy the source-of-truth cutline
-documented in `docs/runtime-language.md`: parser semantics are
-runtime-language-owned, while generated host code owns source/string
-capabilities, public object allocation, diagnostic text rendering, adapter
-capabilities, and packaging.
+Baba's shared runtime and Wasm adapter need exact semantic parity for lexer,
+parser, branch-search, reducer, CST, and diagnostic behavior. Runtime helpers
+were initially generated from the private runtime language before the full
+standalone runtime cutline was complete. The current Wasm parser path satisfies
+the source-of-truth cutline documented in `docs/runtime-language.md`: parser
+semantics are runtime-language-owned, while generated host code owns
+source/string capabilities, public object allocation, diagnostic text rendering,
+adapter capabilities, and packaging.
 
 ## Decision
 
@@ -25,10 +24,8 @@ tracked independently from package version.
 ## Consequences
 
 Runtime-language source and generated helper artifacts are checked for drift.
-Generated TypeScript and Wasm parsers package runtime-language-derived parser
-semantics and expose runtime implementation identity separately from parser-plan
-identity. Parser-kit helpers remain tooling/convenience interpreters for
-`parser-kit.json`, not part of the TypeScript/Wasm source-of-truth proof.
+Generated Wasm parsers package runtime-language-derived parser semantics and
+expose runtime implementation identity separately from parser-plan identity.
 
 ## Rejected Alternatives
 

@@ -10,7 +10,7 @@ import {
   missingGrammarV2CstNode,
   parseGrammarV2,
 } from "./helpers.ts";
-import type { AnalyzedGrammarV2 } from "../src/mod.ts";
+import type { AnalyzedGrammarV2 } from "./helpers.ts";
 
 Deno.test("grammar v2 token CST preserves trivia and round-trips source", () => {
   const analyzed = analyzedGrammar(`

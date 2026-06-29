@@ -4,7 +4,7 @@ import {
   assertEquals,
   parseGrammarV2,
 } from "./helpers.ts";
-import type { AnalyzedGrammarV2 } from "../src/mod.ts";
+import type { AnalyzedGrammarV2 } from "./helpers.ts";
 
 Deno.test("grammar v2 analysis lowers syntax into stable target-neutral facts", async () => {
   const parsed = parseGrammarV2(

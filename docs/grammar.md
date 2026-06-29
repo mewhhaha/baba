@@ -19,7 +19,7 @@ skip whitespace = /[ \t\r\n]+/ ;
 ```
 
 Token regexes use Baba's portable regex syntax. The analyzed regex AST is the
-source of truth for portable runtime targets and Tree-sitter emission.
+source of truth for portable runtime planning and generated Wasm tokenization.
 
 Skips are trivia. Generated runtimes can preserve trivia when requested, but
 parser rules should describe significant syntax.
@@ -40,14 +40,12 @@ are lowered into the portable parser plan before target-specific packaging.
 
 ## Portability
 
-Portable runtime targets do not support reachable external scanner tokens. Use
-metadata `externals` only for Tree-sitter-specific scanners, and expect the
-TypeScript, Wasm, and kit targets to report a structured diagnostic if those
-symbols are reachable from the selected root.
+The Wasm runtime target does not support reachable external scanner tokens.
+Historical metadata that declares external scanner symbols produces a structured
+diagnostic when those symbols are reachable from the selected root.
 
-When more than one semantic target is selected, portability defaults to strict.
-Single semantic target generation defaults to warning mode unless the user sets
-the portability option explicitly.
+Wasm generation defaults to warning-mode portability unless the user sets the
+portability option explicitly.
 
 ## Diagnostics
 

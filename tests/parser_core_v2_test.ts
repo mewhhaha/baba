@@ -6,7 +6,7 @@ import {
   parseGrammarV2,
   validateGrammarV2Parse,
 } from "./helpers.ts";
-import type { AnalyzedGrammarV2, GrammarV2ParserCorePlan } from "../src/mod.ts";
+import type { AnalyzedGrammarV2, GrammarV2ParserCorePlan } from "./helpers.ts";
 
 Deno.test("grammar v2 parser core validates left-recursive LR syntax", () => {
   const plan = parserCorePlan(`

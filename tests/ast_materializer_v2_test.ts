@@ -11,7 +11,7 @@ import type {
   AnalyzedGrammarV2,
   GrammarV2AstNode,
   GrammarV2AstValue,
-} from "../src/mod.ts";
+} from "./helpers.ts";
 
 Deno.test("grammar v2 AST materializer builds clean nodes from annotations", () => {
   const analyzed = astGrammar();

@@ -4,9 +4,9 @@ Status: accepted.
 
 ## Context
 
-The TypeScript, Wasm, parser-kit, and Tree-sitter planning paths need consistent
-grammar analysis. Earlier target-specific lowering made it easy for token,
-regex, conflict, and diagnostic behavior to diverge.
+The Wasm parser path needs grammar analysis that is independent from emitted
+artifact layout. Earlier target-specific lowering made it easy for token, regex,
+conflict, and diagnostic behavior to diverge.
 
 ## Decision
 
@@ -17,16 +17,16 @@ CST schema, diagnostic schema, statistics, and a stable plan hash.
 
 ## Consequences
 
-Generated TypeScript, generated Wasm adapters, and parser-kit outputs expose the
-same parser-plan identity fields. Untrusted serialized plans are validated for
-version, references, dense IDs, canonical ordering, and supported integer ranges
-before use.
+Generated Wasm adapters expose parser-plan identity fields. Untrusted serialized
+plans are validated for version, references, dense IDs, canonical ordering, and
+supported integer ranges before use.
 
 ## Rejected Alternatives
 
 - Letting each target rebuild its own parser tables from the source grammar.
 - Using package version alone as the runtime data contract.
-- Treating parser-kit JSON as a separate schema unrelated to runtime plans.
+- Treating generated wrapper data as a separate schema unrelated to runtime
+  plans.
 
 ## Compatibility Impact
 

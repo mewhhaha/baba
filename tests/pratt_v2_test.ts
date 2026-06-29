@@ -12,7 +12,7 @@ import type {
   AnalyzedGrammarV2,
   GrammarV2PrattNode,
   GrammarV2PrattPlan,
-} from "../src/mod.ts";
+} from "./helpers.ts";
 
 Deno.test("grammar v2 Pratt parser applies declared precedence", () => {
   const { analyzed, plan, tokens, candidateSites } = prattFixture("a + b * c");

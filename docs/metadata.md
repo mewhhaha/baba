@@ -3,9 +3,8 @@
 Status: current metadata guide for schema version 2.
 
 Baba metadata is optional JSON loaded next to a grammar or passed through the
-CLI. Metadata controls target-specific syntax shaping, query generation, root
-selection, and external scanner declarations without changing the grammar
-language itself.
+CLI. Metadata controls parser conflict policy, root selection, and runtime
+options without changing the grammar language itself.
 
 ## Versioning
 
@@ -22,21 +21,12 @@ longer accepted. Schema version `2` is the current stable metadata schema.
 Additive fields may be accepted in compatible releases; incompatible selector or
 default changes need a new schema version or a documented breaking release.
 
-## Tree-Sitter Metadata
-
-Tree-sitter metadata can describe externals, hidden or inline shaping, aliases,
-highlight captures, rainbow captures, and query fragments. Generated query files
-are derived from metadata and validated by repository tests.
-
-External scanner symbols are Tree-sitter-only capabilities. They must be
-declared explicitly and implemented outside Baba.
-
 ## Portable Runtime Metadata
 
-TypeScript, Wasm, and kit targets consume the portable parser plan. Metadata
-that affects syntax must lower into that plan deterministically. Metadata that
-requires Tree-sitter-only behavior should produce a target-specific or portable
-diagnostic rather than silently changing runtime semantics.
+The Wasm target consumes the portable parser plan. Metadata that affects parser
+semantics must lower into that plan deterministically. Metadata that requires
+external scanner behavior should produce a structured diagnostic rather than
+silently changing runtime semantics.
 
 ### Parser Conflict Policy
 

@@ -5,7 +5,7 @@ import {
   parseGrammarV2PortablePlanJson,
   serializeGrammarV2PortablePlanJson,
   validateGrammarV2PortablePlan,
-} from "../src/mod.ts";
+} from "./helpers.ts";
 import {
   assert,
   assertEquals,

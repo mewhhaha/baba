@@ -3,7 +3,7 @@ import {
   buildGrammarV2PortablePlan,
   createGrammarV2Runtime,
   type GrammarV2PortablePlan,
-} from "../src/mod.ts";
+} from "./helpers.ts";
 import { assert, assertEquals, parseGrammarV2 } from "./helpers.ts";
 
 Deno.test("grammar v2 TypeScript runtime records explicit Wasm parity status", () => {

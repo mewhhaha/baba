@@ -1,6 +1,3 @@
-import type { GeneratedBundle, GeneratedFile } from "../src/mod.ts";
-import { applyBundle, generate } from "../src/mod.ts";
-
 export {
   applyBundle,
   BabaError,
@@ -11,11 +8,23 @@ export {
   parseMetadata,
   validateGrammar,
 } from "../src/mod.ts";
+export type { Diagnostic, GrammarV2Document } from "../src/ast.ts";
 export { analyzeGrammarV2 } from "../src/compiler/grammar_v2_analysis.ts";
 export {
   buildGrammarV2AstSchema,
   emitGrammarV2AstTypes,
   materializeGrammarV2Ast,
+} from "../src/compiler/grammar_v2_ast.ts";
+export type {
+  GrammarV2AstConstructorSchema,
+  GrammarV2AstFieldCardinality,
+  GrammarV2AstFieldSchema,
+  GrammarV2AstMaterializeResult,
+  GrammarV2AstNode,
+  GrammarV2AstSchema,
+  GrammarV2AstToken,
+  GrammarV2AstValue,
+  GrammarV2InvalidAstNode,
 } from "../src/compiler/grammar_v2_ast.ts";
 export {
   buildGrammarV2CstSchema,
@@ -25,36 +34,102 @@ export {
   grammarV2CstText,
   missingGrammarV2CstNode,
 } from "../src/compiler/grammar_v2_cst.ts";
+export type {
+  GrammarV2ByteSpan,
+  GrammarV2CstBuildResult,
+  GrammarV2CstKind,
+  GrammarV2CstSchema,
+  GrammarV2CstStats,
+  GrammarV2GreenElement,
+  GrammarV2GreenNode,
+  GrammarV2GreenToken,
+} from "../src/compiler/grammar_v2_cst.ts";
 export {
   applyGrammarV2TextEdits,
   createGrammarV2IncrementalParser,
+} from "../src/compiler/grammar_v2_incremental.ts";
+export type {
+  GrammarV2ChangedRange,
+  GrammarV2IncrementalParseOptions,
+  GrammarV2IncrementalParser,
+  GrammarV2IncrementalResult,
+  GrammarV2IncrementalState,
+  GrammarV2TextEdit,
 } from "../src/compiler/grammar_v2_incremental.ts";
 export {
   buildGrammarV2LexerPlan,
   lexGrammarV2,
   validateGrammarV2TokenStream,
 } from "../src/compiler/grammar_v2_lexer.ts";
+export type {
+  GrammarV2LayoutOptions,
+  GrammarV2LexCandidate,
+  GrammarV2LexCandidateSite,
+  GrammarV2LexerCheckpoint,
+  GrammarV2LexerModePlan,
+  GrammarV2LexerPlan,
+  GrammarV2LexerSpec,
+  GrammarV2LexerTransition,
+  GrammarV2LexOptions,
+  GrammarV2LexResult,
+  GrammarV2LexToken,
+  GrammarV2TokenStreamValidationOptions,
+} from "../src/compiler/grammar_v2_lexer.ts";
 export { composeGrammarV2Modules } from "../src/compiler/grammar_v2_modules.ts";
+export type {
+  GrammarV2ModuleCompositionResult,
+  GrammarV2ModuleDiagnostic,
+} from "../src/compiler/grammar_v2_modules.ts";
 export {
   buildGrammarV2ParserCorePlan,
   lowerGrammarV2ToBnf,
   recoverGrammarV2Parse,
   validateGrammarV2Parse,
 } from "../src/compiler/grammar_v2_parser_core.ts";
+export type {
+  GrammarV2ParserCoreOptions,
+  GrammarV2ParserCorePlan,
+  GrammarV2ParseRecoveryDiagnostic,
+  GrammarV2ParseRecoveryResult,
+  GrammarV2ParseValidationResult,
+} from "../src/compiler/grammar_v2_parser_core.ts";
+export {
+  buildGrammarV2PortablePlan,
+  parseGrammarV2PortablePlanJson,
+  serializeGrammarV2PortablePlanJson,
+  validateGrammarV2PortablePlan,
+} from "../src/compiler/grammar_v2_portable_plan.ts";
+export type {
+  GrammarV2PortablePlan,
+  GrammarV2PortablePlanBuildOptions,
+  GrammarV2PortablePlanBuildResult,
+} from "../src/compiler/grammar_v2_portable_plan.ts";
 export {
   buildGrammarV2PrattPlan,
   parseGrammarV2PrattExpression,
 } from "../src/compiler/grammar_v2_pratt.ts";
+export type {
+  GrammarV2PrattIslandPlan,
+  GrammarV2PrattNode,
+  GrammarV2PrattOperatorPlan,
+  GrammarV2PrattParseOptions,
+  GrammarV2PrattParseResult,
+  GrammarV2PrattPlan,
+} from "../src/compiler/grammar_v2_pratt.ts";
+export type {
+  AnalyzedGrammarV2,
+  AnalyzedGrammarV2Constructor,
+  AnalyzedGrammarV2Expression,
+  AnalyzedGrammarV2ExpressionIsland,
+  AnalyzedGrammarV2Field,
+  AnalyzedGrammarV2Literal,
+  AnalyzedGrammarV2Mode,
+  AnalyzedGrammarV2Rule,
+  AnalyzedGrammarV2Token,
+  GrammarV2ResolvedReference,
+} from "../src/compiler/grammar_v2_ir.ts";
 export { parseGrammarV2 } from "../src/grammar_v2.ts";
-export {
-  collectReachabilityDiagnostics,
-  collectTreeSitterHighlightDiagnostics,
-  generateTreeSitterGrammar,
-  generateTreeSitterHighlightsQuery,
-  generateTreeSitterQueries,
-  parseEbnf,
-} from "../src/advanced.ts";
-export { main } from "../src/cli.ts";
+export { createGrammarV2Runtime } from "../src/runtime/grammar_v2.ts";
 
 export function assert(
   condition: unknown,
@@ -92,30 +167,6 @@ export function assertNotIncludes(actual: string, expected: string): void {
   );
 }
 
-export function generatedTextContent(
-  bundle: GeneratedBundle,
-  path: string,
-): string {
-  const file = bundle.files.find((entry) => entry.path === path);
-  assert(file, `Expected generated file ${path}.`);
-  assert(file.encoding === "utf-8", `Expected ${path} to be UTF-8 text.`);
-  return file.content;
-}
-
-export function generatedTextContentOrEmpty(
-  bundle: GeneratedBundle,
-  path: string,
-): string {
-  const file = bundle.files.find((entry) => entry.path === path);
-  if (!file) return "";
-  assert(file.encoding === "utf-8", `Expected ${path} to be UTF-8 text.`);
-  return file.content;
-}
-
-export function generatedContentForComparison(file: GeneratedFile): string {
-  return file.encoding === "utf-8" ? file.content : [...file.content].join(",");
-}
-
 export function assertThrowsIncludes(
   action: () => unknown,
   expected: string,
@@ -127,47 +178,6 @@ export function assertThrowsIncludes(
     message = error instanceof Error ? error.message : String(error);
   }
   assertIncludes(message, expected);
-}
-
-export async function assertRejectsIncludes(
-  action: () => Promise<unknown>,
-  expected: string,
-): Promise<void> {
-  let message = "";
-  try {
-    await action();
-  } catch (error) {
-    message = error instanceof Error ? error.message : String(error);
-  }
-  assertIncludes(message, expected);
-}
-
-export async function captureConsoleLog(
-  action: () => Promise<void>,
-): Promise<string[]> {
-  const original = console.log;
-  const logs: string[] = [];
-  console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
-  try {
-    await action();
-  } finally {
-    console.log = original;
-  }
-  return logs;
-}
-
-export async function captureConsoleError(
-  action: () => Promise<void>,
-): Promise<string[]> {
-  const original = console.error;
-  const logs: string[] = [];
-  console.error = (...args: unknown[]) => logs.push(args.map(String).join(" "));
-  try {
-    await action();
-  } finally {
-    console.error = original;
-  }
-  return logs;
 }
 
 export async function assertMissing(path: string): Promise<void> {
@@ -192,125 +202,3 @@ export async function denoCheck(path: string): Promise<void> {
     );
   }
 }
-
-export async function runCommand(
-  commandName: string,
-  args: string[],
-  cwd?: string,
-  env?: Record<string, string>,
-): Promise<{ stdout: string; stderr: string }> {
-  const command = new Deno.Command(commandName, { args, cwd, env });
-  const output = await command.output();
-  const decoder = new TextDecoder();
-  const stdout = decoder.decode(output.stdout);
-  const stderr = decoder.decode(output.stderr);
-  if (!output.success) {
-    throw new Error(`${stdout}${stderr}`);
-  }
-  return { stdout, stderr };
-}
-
-export async function treeSitterAccepts(
-  source: string,
-  sample: string,
-  name = "tiny",
-): Promise<boolean> {
-  const dir = await Deno.makeTempDir();
-  try {
-    const bundle = generate(source, { name });
-    await applyBundle(bundle, { root: dir });
-    const samplePath = `${dir}/sample.${name}`;
-    await Deno.writeTextFile(samplePath, sample);
-    const env = {
-      HOME: `${dir}/home`,
-      XDG_CACHE_HOME: `${dir}/cache`,
-    };
-    await runCommand("tree-sitter", ["generate"], dir, env);
-    await runCommand(
-      "tree-sitter",
-      ["build", "-o", `${dir}/parser.so`],
-      dir,
-      env,
-    );
-    const parseCommand = new Deno.Command("tree-sitter", {
-      args: [
-        "parse",
-        "--lib-path",
-        `${dir}/parser.so`,
-        "--lang-name",
-        name,
-        samplePath,
-      ],
-      cwd: dir,
-      env,
-    });
-    const output = await parseCommand.output();
-    const decoder = new TextDecoder();
-    const stdout = decoder.decode(output.stdout);
-    const stderr = decoder.decode(output.stderr);
-    if (!output.success) return false;
-    return !stdout.includes("ERROR") &&
-      !stdout.includes("MISSING") &&
-      !stderr.includes("ERROR") &&
-      !stderr.includes("MISSING");
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-}
-
-export async function fixtureSamples(
-  fixture: string,
-  kind: "valid" | "invalid",
-): Promise<string[]> {
-  return (await fixtureSampleEntries(fixture, kind)).map((entry) =>
-    entry.source
-  );
-}
-
-export async function fixtureSampleEntries(
-  fixture: string,
-  kind: "valid" | "invalid",
-): Promise<Array<{ path: string; source: string }>> {
-  const dir = `fixtures/${fixture}/${kind}`;
-  const samples: Array<{ path: string; source: string }> = [];
-  for await (const entry of Deno.readDir(dir)) {
-    if (!entry.isFile) continue;
-    const path = `${dir}/${entry.name}`;
-    samples.push({ path, source: await Deno.readTextFile(path) });
-  }
-  return samples.sort((left, right) => left.path.localeCompare(right.path));
-}
-
-export async function fixtureNames(): Promise<string[]> {
-  const names: string[] = [];
-  for await (const entry of Deno.readDir("fixtures")) {
-    if (!entry.isDirectory) continue;
-    try {
-      await Deno.stat(`fixtures/${entry.name}/grammar.ebnf`);
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) continue;
-      throw error;
-    }
-    names.push(entry.name);
-  }
-  return names.sort();
-}
-
-export async function fixtureMetadata(fixture: string): Promise<unknown> {
-  try {
-    const source = await Deno.readTextFile(`fixtures/${fixture}/baba.json`);
-    return JSON.parse(source);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return undefined;
-    throw error;
-  }
-}
-
-export const explicitGrammar = `
-  token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
-  token integer = /[0-9]+/ ;
-  skip whitespace = /[ \\t\\r\\n]+/ ;
-
-  module = "fn" name:ident "(" ")" body:block ;
-  block = "{" value:integer "}" ;
-`;

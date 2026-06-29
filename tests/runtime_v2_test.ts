@@ -4,7 +4,7 @@ import {
   createGrammarV2Runtime,
   debugGrammarV2Cst,
   type GrammarV2PortablePlan,
-} from "../src/mod.ts";
+} from "./helpers.ts";
 import {
   assert,
   assertEquals,

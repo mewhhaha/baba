@@ -4,17 +4,17 @@ Status: accepted.
 
 ## Context
 
-Baba supports grammar-driven syntax tooling across Tree-sitter, TypeScript,
-Wasm, and parser-kit targets. The task program explicitly keeps semantic
-analysis, language-specific code generation, formatting, LSP behavior, and
-editor extension packaging outside the core generator.
+Baba supports grammar-driven syntax tooling through compact runtime plans and a
+shared Wasm parser runtime. Semantic analysis, language-specific code
+generation, formatting, LSP behavior, and editor extension packaging stay
+outside the core generator.
 
 ## Decision
 
-Baba is a syntax-runtime generator. It accepts EBNF plus Baba metadata and emits
-syntax artifacts: Tree-sitter grammars and queries, standalone parser runtimes,
-Wasm adapter artifacts, and parser-kit data. User-language semantics remain in
-consumer code.
+Baba is a syntax-runtime generator. It accepts grammar source plus Baba metadata
+and emits inspectable syntax artifacts: a compact parser plan, the generic Wasm
+runtime, a small adapter, and optional type declarations. User-language
+semantics remain in consumer code.
 
 ## Consequences
 

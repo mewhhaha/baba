@@ -79,8 +79,7 @@
       "examples/feature-tour/generated",
       "examples/funcfuck/generated",
       "examples/thunkwasm/generated",
-      "src/runtime_language/SPEC.md",
-      "tasks"
+      "src/runtime_language/SPEC.md"
     ]
   },
   "lint": {
