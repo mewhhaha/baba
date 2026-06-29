@@ -162,6 +162,10 @@ export interface TypeScriptTargetOptions
   extends PortableRuntimePlanningOptions {
   /** Relative directory inside the generated bundle. Defaults to `typescript`. */
   directory?: string;
+  /** Runtime packaging mode. Defaults to shared runtime plus parser data. */
+  runtimePackaging?: "shared" | "legacy-generated";
+  /** Shared-runtime parser plan data packaging. Defaults to an inline TypeScript literal. */
+  planData?: "inline" | "json";
   /** Maximum generated TypeScript source bytes. Defaults to unlimited. */
   generatedByteLimit?: number;
   /** Emit an informational parser planning statistics diagnostic. */
@@ -176,8 +180,8 @@ export interface WasmTargetOptions extends PortableRuntimePlanningOptions {
   generatedByteLimit?: number;
   /** Emit an informational parser planning statistics diagnostic. */
   reportParserStats?: boolean;
-  /** Wasm packaging mode. Currently defaults to the JavaScript-embedded module. */
-  packaging?: "external-binary" | "embedded-typescript";
+  /** Wasm packaging mode. Defaults to a shared-runtime data adapter. */
+  packaging?: "shared-generic" | "external-binary" | "embedded-typescript";
 }
 
 /** Options for the generic parser-kit target. */

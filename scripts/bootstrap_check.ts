@@ -201,6 +201,7 @@ async function compileExample(example: ExampleConfig) {
     metadata,
     targets: ["tree-sitter", "typescript", "wasm"],
     typescript: { directory: example.typescriptDir },
+    wasm: { packaging: "embedded-typescript" },
   });
   const allowedDiagnosticCodes = new Set(example.allowedDiagnosticCodes ?? []);
   const unexpectedDiagnostics = result.diagnostics.filter((diagnostic) =>

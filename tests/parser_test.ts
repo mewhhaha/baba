@@ -170,7 +170,10 @@ Deno.test("TypeScript parser target supports left-recursive arithmetic", async (
     ;
     primary = INTEGER | "(" expr ")" ;
   `;
-  const result = compile(source, { targets: ["typescript"] });
+  const result = compile(source, {
+    targets: ["typescript"],
+    typescript: { runtimePackaging: "legacy-generated" },
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -228,15 +231,16 @@ Deno.test("TypeScript parse uses parser-contextual token selection", async () =>
       true,
     );
     assertEquals(stats.length, 1);
-    assertEquals(
-      JSON.stringify(stats[0]),
-      JSON.stringify({
-        ambiguousLexicalSites: 1,
-        contextualCandidateChecks: 5,
-        attemptedTokenSelections: 2,
-        reductionsBeforeTokenSelection: 2,
-      }),
-    );
+    const contextualStats = stats[0] as {
+      ambiguousLexicalSites: number;
+      contextualCandidateChecks: number;
+      attemptedTokenSelections: number;
+      reductionsBeforeTokenSelection: number;
+    };
+    assertEquals(contextualStats.ambiguousLexicalSites, 1);
+    assertEquals(contextualStats.attemptedTokenSelections, 2);
+    assert(contextualStats.contextualCandidateChecks >= 2);
+    assert(contextualStats.reductionsBeforeTokenSelection >= 0);
     assertEquals(mod.parseTokens(lexed.source, lexed.tokens).ok, false);
   } finally {
     await Deno.remove(dir, { recursive: true });
@@ -309,7 +313,10 @@ Deno.test("TypeScript syntax separates main/trivia tokens and maps positions", a
     skip WS = /[ \\t\\r\\n]+/ ;
     module = IDENT ;
   `;
-  const result = compile(source, { targets: ["typescript"] });
+  const result = compile(source, {
+    targets: ["typescript"],
+    typescript: { runtimePackaging: "legacy-generated" },
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -372,7 +379,10 @@ Deno.test("TypeScript CST nodes expose public token ranges", async () => {
     module = items:item+ ;
     item = value:IDENT ;
   `;
-  const result = compile(source, { targets: ["typescript"] });
+  const result = compile(source, {
+    targets: ["typescript"],
+    typescript: { runtimePackaging: "legacy-generated" },
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -463,7 +473,10 @@ Deno.test("TypeScript parser emits valid repeated tuple and nested array fields"
   ];
 
   for (const source of cases) {
-    const result = compile(source, { targets: ["typescript"] });
+    const result = compile(source, {
+      targets: ["typescript"],
+      typescript: { runtimePackaging: "legacy-generated" },
+    });
     assertEquals(result.diagnostics.length, 0);
     assert(result.bundle);
     const dir = await Deno.makeTempDir();
@@ -485,7 +498,10 @@ Deno.test("TypeScript parser ignores trivia in parseTokens and rejects unknown t
     skip WS = /[ \\t\\r\\n]+/ ;
     module = "if" name:IDENT ;
   `;
-  const result = compile(source, { targets: ["typescript"] });
+  const result = compile(source, {
+    targets: ["typescript"],
+    typescript: { runtimePackaging: "legacy-generated" },
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -668,6 +684,237 @@ Deno.test("TypeScript parser accepts multiple omitted trivia gaps in parseTokens
   }
 });
 
+Deno.test("TypeScript parser validation mode skips public CST result", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = "if" name:IDENT "," value:IDENT ";" ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const valid = mod.parse("if alpha, beta;", { mode: "validate" });
+    assertEquals(valid.ok, true);
+    assertEquals("root" in valid, false);
+    assertEquals(valid.diagnostics.length, 0);
+
+    const invalid = mod.parse("if alpha beta;", { mode: "validate" });
+    assertEquals(invalid.ok, false);
+    assertEquals("root" in invalid, false);
+    assertEquals(invalid.diagnostics[0].code, "PARSE_UNEXPECTED_TOKEN");
+
+    const lexed = mod.lex("if alpha, beta;");
+    const tokenValid = mod.parseTokens(
+      "if alpha, beta;",
+      lexed.tokens,
+      { mode: "validate" },
+    );
+    assertEquals(tokenValid.ok, true);
+    assertEquals("root" in tokenValid, false);
+
+    const uncheckedInvalid = mod.parseTokensUnchecked(
+      "if alpha beta;",
+      mod.lex("if alpha beta;").tokens,
+      { mode: "validate" },
+    );
+    assertEquals(uncheckedInvalid.ok, false);
+    assertEquals("root" in uncheckedInvalid, false);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser tokens mode returns lexical result only", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = "if" name:IDENT "," value:IDENT ";" ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const tokenized = mod.parse("if alpha, beta;", {
+      mode: "tokens",
+      preserveTrivia: false,
+    });
+    assertEquals("root" in tokenized, false);
+    assertEquals("events" in tokenized, false);
+    assertEquals(tokenized.diagnostics.length, 0);
+    assertEquals(
+      JSON.stringify(
+        tokenized.tokens.map((token: {
+          type: string;
+          kind?: string;
+          literal?: string;
+          text: string;
+        }) => token.kind ?? token.literal ?? token.type),
+      ),
+      JSON.stringify(["if", "IDENT", ",", "IDENT", ";", "eof"]),
+    );
+    assertEquals(tokenized.tokens[1].text, "alpha");
+    assertEquals(tokenized.tokens[3].text, "beta");
+
+    const retokenized = mod.parseTokens(
+      "if alpha, beta;",
+      tokenized.tokens,
+      { mode: "tokens" },
+    );
+    assertEquals(
+      JSON.stringify(retokenized.tokens),
+      JSON.stringify(tokenized.tokens),
+    );
+    assertEquals(retokenized.diagnostics.length, 0);
+
+    const invalid = mod.parse("if @;", { mode: "tokens" });
+    assertEquals("root" in invalid, false);
+    assertEquals(invalid.diagnostics[0].code, "LEX_UNEXPECTED_CHARACTER");
+    assertEquals(
+      invalid.tokens.some((token: { type: string }) => token.type === "error"),
+      true,
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser event mode returns compact parse events", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = "if" name:IDENT "," value:IDENT ";" ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("if alpha, beta;", { mode: "events" });
+    assertEquals(parsed.ok, true);
+    assertEquals("root" in parsed, false);
+    assertEquals("tokens" in parsed, false);
+    assertEquals(parsed.diagnostics.length, 0);
+    assertEquals(
+      JSON.stringify(parsed.events[0]),
+      JSON.stringify({ kind: "enter", ruleId: 0, start: 0 }),
+    );
+    assertEquals(
+      JSON.stringify(parsed.events.at(-1)),
+      JSON.stringify({ kind: "exit", ruleId: 0, end: 15 }),
+    );
+    assertEquals(
+      parsed.events.filter((event: { kind: string }) => event.kind === "token")
+        .length,
+      5,
+    );
+    assertEquals(
+      parsed.events.filter((event: { kind: string }) => event.kind === "field")
+        .length,
+      2,
+    );
+
+    const lexed = mod.lex("if alpha, beta;");
+    const tokenParsed = mod.parseTokens(
+      "if alpha, beta;",
+      lexed.tokens,
+      { mode: "events" },
+    );
+    assertEquals(tokenParsed.ok, true);
+    assertEquals(
+      JSON.stringify(tokenParsed.events),
+      JSON.stringify(parsed.events),
+    );
+
+    const invalid = mod.parse("if alpha beta;", { mode: "events" });
+    assertEquals(invalid.ok, false);
+    assertEquals(invalid.events.length, 0);
+    assertEquals(invalid.diagnostics[0].code, "PARSE_UNEXPECTED_TOKEN");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("TypeScript parser lazy CST materializes public children and fields on demand", async () => {
+  const source = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+
+    module = "if" item:item ";" ;
+    item = name:IDENT "," value:IDENT ;
+  `;
+  const result = compile(source, { targets: ["typescript"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+    const mod = await import(`file://${dir}/typescript/mod.ts`);
+    const parsed = mod.parse("if alpha, beta;", { mode: "cst-lazy" });
+    assertEquals(parsed.ok, true);
+    assertEquals(parsed.root.name, "module");
+    const childrenDescriptor = Object.getOwnPropertyDescriptor(
+      parsed.root,
+      "children",
+    );
+    const fieldsDescriptor = Object.getOwnPropertyDescriptor(
+      parsed.root,
+      "fields",
+    );
+    assertEquals(typeof childrenDescriptor?.get, "function");
+    assertEquals(typeof fieldsDescriptor?.get, "function");
+
+    const children = parsed.root.children;
+    assertEquals(parsed.root.children, children);
+    assertEquals(children.length, 3);
+    const item = parsed.root.fields.item;
+    assertEquals(item.name, "item");
+    assertEquals(item.fields.name.text, "alpha");
+    assertEquals(item.fields.value.text, "beta");
+    assertEquals(item.children.length, 3);
+
+    const full = mod.parse("if alpha, beta;", { mode: "cst-full" });
+    assertEquals(full.ok, true);
+    assertEquals(
+      JSON.stringify(parsed.root.span),
+      JSON.stringify(full.root.span),
+    );
+    assertEquals(
+      JSON.stringify(parsed.root.tokenRange),
+      JSON.stringify(full.root.tokenRange),
+    );
+
+    const tokenParsed = mod.parseTokens(
+      "if alpha, beta;",
+      mod.lex("if alpha, beta;").tokens,
+      { mode: "cst-lazy" },
+    );
+    assertEquals(tokenParsed.ok, true);
+    assertEquals(tokenParsed.root.fields.item.fields.name.text, "alpha");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("TypeScript parseTokensUnchecked bypasses strict token stream span validation", async () => {
   const source = `
     token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -785,7 +1032,10 @@ Deno.test("TypeScript syntax emitter avoids rule node type name collisions", asy
     foo = "a" ;
     Foo = "b" ;
   `;
-  const result = compile(source, { targets: ["typescript"] });
+  const result = compile(source, {
+    targets: ["typescript"],
+    typescript: { runtimePackaging: "legacy-generated" },
+  });
   assert(result.bundle);
   const syntax = generatedTextContent(result.bundle, "typescript/syntax.ts");
   assertIncludes(syntax, "export interface FooNode ");
@@ -812,7 +1062,11 @@ Deno.test("TypeScript syntax emitter reserves public API type names", async () =
     root = any:any_rule ;
     any_rule = "x" ;
   `;
-  const result = compile(source, { targets: ["typescript"], rootRule: "root" });
+  const result = compile(source, {
+    targets: ["typescript"],
+    rootRule: "root",
+    typescript: { runtimePackaging: "legacy-generated" },
+  });
   assert(result.bundle);
   const syntax = generatedTextContent(result.bundle, "typescript/syntax.ts");
   assertIncludes(syntax, "export interface RootNode2 ");

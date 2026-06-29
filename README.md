@@ -8,11 +8,17 @@ in.
 The same grammar can produce:
 
 - a Tree-sitter `grammar.js` and generated query fragments;
-- a standalone TypeScript DFA lexer, LR(1) parser, and typed concrete syntax
-  tree;
+- a TypeScript parser adapter backed by shared runtime code and parser-plan
+  data;
 - a JavaScript-hosted core WebAssembly lexer/parser adapter with the same
   TypeScript API;
 - a generic parser-kit JSON artifact for compiler and tooling consumers.
+
+The parser-runtime architecture is being slimmed from generated parser programs
+toward shared runtime executors plus compact parser-plan data. See
+[docs/slim-runtime.md](docs/slim-runtime.md) and
+[docs/performance.md](docs/performance.md). Use `deno task bench:runtime` to
+measure the current generated-size and cold-start baseline.
 
 This is useful when a grammar needs to support editor highlighting, tests,
 command-line tools, or browser tooling without maintaining separate parser
@@ -74,8 +80,9 @@ generated/
   .baba-manifest.json
 ```
 
-Use `--target all`, `--target typescript`, or `--target wasm` to include parser
-runtimes:
+Use `--target all` to include Tree-sitter plus the shared-runtime TypeScript
+parser adapter. Request Wasm explicitly with `--target wasm` when you need the
+Wasm-backed runtime:
 
 ```sh
 deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
@@ -83,15 +90,18 @@ deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --target all
 ```
 
-The TypeScript runtime is written under `typescript/`:
+The TypeScript target is written under `typescript/` as parser data plus a small
+adapter around `@mewhhaha/baba/runtime`:
 
 ```text
 generated/
   typescript/
-    syntax.ts
-    lexer.ts
-    parser.ts
+    plan.ts
+    types.ts
     mod.ts
+    syntax.ts  # compatibility reexport
+    lexer.ts   # compatibility reexport
+    parser.ts  # compatibility reexport
 ```
 
 The Wasm runtime is written under `wasm/` as a JavaScript-hosted TypeScript
@@ -114,8 +124,7 @@ Both generated parser runtimes export the same main TypeScript API:
   data used by the generated tables;
 - `runtimeImplementationFormat`, `runtimeImplementationVersion`,
   `runtimeImplementationSemantics`, and `runtimeImplementationHash`, identifying
-  the packaged standalone runtime source family used to emit the generated
-  runtime;
+  the shared runtime source family used by the generated adapter;
 - `lex(source)` for deterministic standalone DFA tokenization. It emits the
   global longest-match winner using priority, literal/regex tie policy, and
   declaration order;
@@ -167,21 +176,44 @@ integers when provided. Exceeding the explored or queued branch budget produces
 after the first successful parse and report `PARSER_AMBIGUOUS_PARSE` if another
 branch also succeeds.
 
-The Wasm target also writes `wasm/abi.json`, a host-readable descriptor for the
-core Wasm ABI, parser-plan identity, runtime implementation identity, memory
-layout, UTF-16 source/span conventions, trace statuses, adapter handle model,
-numeric parser diagnostic IDs, and diagnostic payload schemas. Non-JS hosts
-should read that JSON rather than scraping the generated TypeScript adapter. The
-normative ABI contract is documented in [docs/wasm-abi.md](docs/wasm-abi.md).
+The Wasm target defaults to shared-generic packaging: `wasm/mod.ts` imports the
+shared TypeScript runtime and consumes generated parser-plan data without
+emitting `wasmBytes`, `wasm/wasm.ts`, or `parser.wasm`. Use
+`--wasm-packaging embedded-typescript` or `--wasm-packaging external-binary`
+only when you need the legacy grammar-specialized Wasm runtime.
 
-The Wasm target also exports `wasmTargetKind`, `wasmBytes`, `wasmAbiVersion`,
-core ABI metadata constants, `memory`, and `reset()` from `wasm/mod.ts`.
-`wasmTargetKind` is currently `"javascript-hosted-core-wasm"`; Baba does not yet
-emit a WASI library, Wasm Component/WIT package, browser-only package, or
-host-neutral parser ABI. The embedded core module exports
-`abi_version() -> i32`, `plan_version() -> i32`, `semantics_version() -> i32`,
-`reset() -> void`, `input_base() -> i32`, `max_pages() -> i32`,
-`source_encoding() -> i32`, `span_unit() -> i32`,
+Parser-plan consumers can also use `@mewhhaha/baba/runtime/wasm` for the async
+Wasm/auto engine lifecycle:
+
+```ts
+import {
+  createAutoParser,
+  createWasmParser,
+} from "@mewhhaha/baba/runtime/wasm";
+```
+
+The current generic Wasm facade is cacheable and async, exposes timing events,
+and prepares one shared Wasm module with reusable DFA/LR table lookup
+primitives. Public result materialization still uses the shared TypeScript
+runtime, so timing events distinguish `"generic-wasm"` preparation from
+`"wasm+typescript"` parser facade creation.
+
+Legacy-specialized Wasm packaging writes `wasm/abi.json`, a host-readable
+descriptor for the core Wasm ABI, parser-plan identity, runtime implementation
+identity, memory layout, UTF-16 source/span conventions, trace statuses, adapter
+handle model, numeric parser diagnostic IDs, and diagnostic payload schemas.
+Non-JS hosts should read that JSON rather than scraping the generated TypeScript
+adapter. The normative ABI contract is documented in
+[docs/wasm-abi.md](docs/wasm-abi.md).
+
+Legacy-specialized Wasm adapters export `wasmTargetKind`, `wasmBytes` for
+embedded packaging, `wasmAbiVersion`, core ABI metadata constants, `memory`, and
+`reset()` from `wasm/mod.ts`. `wasmTargetKind` is currently
+`"javascript-hosted-core-wasm"`; Baba does not yet emit a WASI library, Wasm
+Component/WIT package, browser-only package, or host-neutral parser ABI. The
+embedded core module exports `abi_version() -> i32`, `plan_version() -> i32`,
+`semantics_version() -> i32`, `reset() -> void`, `input_base() -> i32`,
+`max_pages() -> i32`, `source_encoding() -> i32`, `span_unit() -> i32`,
 `lex_result_i32_count() -> i32`, and `token_record_i32_count() -> i32`,
 `host_ownership_model() -> i32`, and `result_lifetime_model() -> i32`; the
 JavaScript adapter exposes their current values as constants and validates that
@@ -230,6 +262,9 @@ not available.
 - [Grammar](docs/grammar.md)
 - [Metadata](docs/metadata.md)
 - [Portable runtime](docs/portable-runtime.md)
+- [Slim runtime architecture](docs/slim-runtime.md)
+- [Performance guide](docs/performance.md)
+- [Slim runtime migration](docs/migration-slim-runtime.md)
 - [TypeScript target](docs/typescript.md)
 - [Wasm target](docs/wasm.md)
 - [Diagnostics](docs/diagnostics.md)
@@ -386,6 +421,7 @@ Select and configure parser-runtime targets:
 ```sh
 deno x --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
   --target all \
+  --target wasm \
   --typescript-dir ts \
   --wasm-dir wasm \
   --discard-trivia \
@@ -423,9 +459,9 @@ diagnostics for known cross-target acceptance differences. When Tree-sitter is
 selected with another target, portability defaults to `strict`; otherwise it
 defaults to `warn`.
 
-`--target all` intentionally does not include `kit`; request it explicitly with
-`--target kit` to avoid unplanned JSON artifact churn in existing generated
-directories.
+`--target all` intentionally does not include `wasm` or `kit`; request them
+explicitly with `--target wasm` or `--target kit` to avoid unplanned binary and
+JSON artifact churn in existing generated directories.
 
 Inspect generated TypeScript target size and parser table statistics:
 

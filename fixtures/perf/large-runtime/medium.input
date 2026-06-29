@@ -1,0 +1,29 @@
+const release: string = "2026.06";
+let retries: number = 3;
+let threshold: number = 95%;
+config service {
+  owner: "tools";
+  replicas: 4;
+  enabled: true;
+  pattern: /api-.+/;
+}
+pipeline checks {
+  stage prepare {
+    step deps: install(name = "deps");
+    step lint: run_lint(strict = true);
+  }
+  stage verify requires [prepare] {
+    step unit: test(kind = "unit", retries = retries);
+    step integration: test(kind = "integration", timeout = 120s);
+  }
+  stage package requires [verify] {
+    step bundle: build(target = "cli", mode = "release");
+    step upload: deploy(target = "staging", version = release);
+  }
+}
+policy protected when retries >= 3 && threshold in [90%, 95%, 99%] {
+  action: "require-review";
+  expires: 2026-12-31;
+}
+route api/v1/users to users method GET auth session cache 10s;
+route api/v1/builds to builds method POST auth token cache 1m;

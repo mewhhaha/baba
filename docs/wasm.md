@@ -1,34 +1,41 @@
 # Wasm Target
 
-Status: current generated Wasm target guide.
+Status: current Wasm target guide.
 
-The Wasm target emits a JavaScript-hosted core WebAssembly parser plus a
-TypeScript adapter under the configured output directory, usually `wasm/`.
+The Wasm target now defaults to shared-generic packaging. It emits parser-plan
+data plus a TypeScript adapter under the configured output directory, usually
+`wasm/`, and does not emit a grammar-specialized WebAssembly module.
 
 ```text
 wasm/
+  plan.ts
   syntax.ts
   lexer.ts
   parser.ts
-  wasm.ts
   mod.ts
   abi.json
 ```
 
-Current generated bundles use the `javascript-hosted-core-wasm` target kind.
-Baba does not yet emit a Wasm Component Model package, WIT bindings, WASI
-library, or browser-only package.
+Use `--wasm-packaging embedded-typescript` or `--wasm-packaging external-binary`
+for the legacy grammar-specialized Wasm runtime. Legacy embedded packaging adds
+`wasm.ts`; legacy external-binary packaging adds `wasm.ts`, `parser.wasm`, and
+`manifest.json`.
 
 ## Public API
 
-The adapter mirrors the generated TypeScript target API: `lex`, `parse`,
+The default adapter mirrors the generated TypeScript target API: `lex`, `parse`,
 `parseTokens`, source-map helpers, generated syntax types, parser-plan identity,
-and runtime implementation identity. It also exports Wasm-specific metadata such
-as `wasmTargetKind`, `wasmBytes`, `wasmAbiVersion`, `wasmSemanticsVersion`,
+and runtime implementation identity. It also exports `wasmTargetKind` with value
+`"shared-generic-runtime-data"` so callers can identify that no per-grammar Wasm
+bytes were emitted.
+
+Legacy-specialized adapters additionally export Wasm-specific metadata such as
+`wasmBytes` for embedded packaging, `wasmAbiVersion`, `wasmSemanticsVersion`,
 `memory`, and `reset()`.
 
-For embedded Wasm bundles, `createParser()` creates an independent parser
-instance:
+For default shared-generic bundles, `createParser()` creates a shared-runtime
+parser facade. For legacy embedded Wasm bundles, `createParser()` creates an
+independent Wasm parser instance:
 
 ```ts
 const parser = createParser();
@@ -45,6 +52,38 @@ Importing an embedded adapter exposes static metadata such as ABI constants and
 parser-plan identity without synchronously compiling Wasm. The embedded core
 module and trace runtime are compiled lazily when a parser instance is created
 or a module-level parse/lex helper first needs the default instance.
+
+The package-level `@mewhhaha/baba/runtime/wasm` module exposes the async runtime
+boundary for parser-plan consumers:
+
+```ts
+import {
+  createAutoParser,
+  createWasmParser,
+} from "@mewhhaha/baba/runtime/wasm";
+
+const wasmParser = await createWasmParser(parserPlan);
+const autoParser = await createAutoParser(parserPlan, {
+  smallInputThreshold: 16_384,
+  timing(event) {
+    console.log(event.phase, event.engine, event.backend);
+  },
+});
+```
+
+`createWasmParser()` prepares one process-local generic Wasm executor module and
+returns an isolated parser facade. `createAutoParser()` selects the shared
+TypeScript runtime for small inputs and the Wasm engine policy for larger
+inputs. The generic Wasm executor currently provides reusable DFA/LR table
+lookup primitives and reports backend `"generic-wasm"` for preparation; public
+parse-result materialization still runs through the shared TypeScript runtime
+and reports backend `"wasm+typescript"` for parser instance creation. Simple
+deterministic source validation parses (`mode: "validate"`) use the shared Wasm
+DFA range and LR table executor for lex/parse tracing; contextual lexing,
+branching grammars, and diagnostic-rich failures fall back to the TypeScript
+runtime. Checked `parseTokens` calls retain the TypeScript token-stream
+validation path. This keeps startup cacheable without emitting per-grammar Wasm
+bytes.
 
 Parser factories also accept `limits` for adapter-owned hard resource bounds:
 

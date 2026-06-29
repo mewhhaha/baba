@@ -21,8 +21,13 @@ jobs:
       - name: Benchmark JSON report
         run: deno task bench -- --samples 3 --json bench-results.json
 
+      - name: Runtime benchmark JSON report
+        run: deno task bench:runtime -- --json runtime-bench-results.json
+
       - name: Upload benchmark report
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: bench-results.json
+          path: |
+            bench-results.json
+            runtime-bench-results.json

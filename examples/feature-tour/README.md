@@ -24,7 +24,8 @@ It demonstrates:
 All commands in this section assume your current directory is
 `examples/feature-tour`.
 
-Generate the checked artifacts:
+Generate the checked artifacts. The task explicitly requests legacy-specialized
+Wasm packaging so the tour can exercise the Wasm parser APIs:
 
 ```sh
 deno task generate

@@ -354,6 +354,41 @@ function parseArgs(args: string[]): Options {
           arg,
         );
         break;
+      case "--typescript-runtime-packaging": {
+        const packaging = args[++i];
+        if (!packaging) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: `Expected packaging mode after ${arg}`,
+          });
+        }
+        if (packaging !== "shared" && packaging !== "legacy-generated") {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message:
+              "Expected TypeScript runtime packaging shared or legacy-generated",
+          });
+        }
+        options.typescript.runtimePackaging = packaging;
+        break;
+      }
+      case "--typescript-plan-data": {
+        const planData = args[++i];
+        if (!planData) {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: `Expected plan data mode after ${arg}`,
+          });
+        }
+        if (planData !== "inline" && planData !== "json") {
+          throw new BabaError({
+            code: "CLI_BAD_ARGS",
+            message: "Expected TypeScript plan data inline or json",
+          });
+        }
+        options.typescript.planData = planData;
+        break;
+      }
       case "--wasm-generated-byte-limit":
         options.wasm.generatedByteLimit = parsePositiveIntegerArg(
           args[++i],
@@ -369,13 +404,14 @@ function parseArgs(args: string[]): Options {
           });
         }
         if (
+          packaging !== "shared-generic" &&
           packaging !== "external-binary" &&
           packaging !== "embedded-typescript"
         ) {
           throw new BabaError({
             code: "CLI_BAD_ARGS",
             message:
-              "Expected Wasm packaging external-binary or embedded-typescript",
+              "Expected Wasm packaging shared-generic, external-binary, or embedded-typescript",
           });
         }
         options.wasm.packaging = packaging;
@@ -468,7 +504,8 @@ Usage:
 Options:
   --name        Grammar/target name. Defaults to grammar
   --root        Root grammar rule. Defaults to the first grammar rule
-  --target      Output target: tree-sitter, typescript, wasm, kit, or all. May repeat
+  --target      Output target: tree-sitter, typescript, wasm, kit, or all. May repeat.
+                all expands to tree-sitter and typescript; request wasm or kit explicitly
   --typescript-dir  TypeScript target output directory. Defaults to typescript
   --ts-out      Alias for --typescript-dir
   --wasm-dir    Wasm target output directory. Defaults to wasm
@@ -488,8 +525,10 @@ Options:
   --lr-closure-work-limit  Maximum portable runtime LR closure work units
   --parser-table-entry-limit  Maximum portable runtime ACTION/GOTO entry count
   --typescript-generated-byte-limit  Maximum generated TypeScript bytes
+  --typescript-runtime-packaging  TypeScript packaging: shared or legacy-generated
+  --typescript-plan-data  TypeScript shared-runtime parser plan data: inline or json
   --wasm-generated-byte-limit  Maximum generated Wasm bytes
-  --wasm-packaging  Wasm packaging: embedded-typescript or external-binary
+  --wasm-packaging  Wasm packaging: shared-generic, embedded-typescript, or external-binary
   --parser-stats  Emit runtime parser planning statistics for TypeScript and Wasm
   --wasm-stats   Emit Wasm runtime parser planning statistics
   --portability  Cross-target portability mode: strict, warn, or off
@@ -665,7 +704,7 @@ function diagnosticFormatFromArgs(
 
 function addTarget(options: Options, target: string): void {
   const targets: GenerateTarget[] = target === "all"
-    ? ["tree-sitter", "typescript", "wasm"]
+    ? ["tree-sitter", "typescript"]
     : target === "tree-sitter" || target === "typescript" ||
         target === "wasm" || target === "kit"
     ? [target]

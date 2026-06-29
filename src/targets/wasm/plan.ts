@@ -16,6 +16,8 @@ import {
   PARSER_DIAGNOSTIC_SCHEMAS,
 } from "../runtime/diagnostic_codes.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
+import { createParserKit } from "../kit/plan.ts";
+import type { ParserKit } from "../kit/schema.ts";
 import {
   createParserConflictTraceRuntimeProgram,
   createParserTraceRuntimeProgram,
@@ -55,6 +57,7 @@ import {
   WASM_UTF16_UNIT_BYTES,
 } from "../runtime/wasm_abi.ts";
 import { emitSyntaxFromPortablePlan } from "../typescript/syntax_emit.ts";
+import { compactRuntimePlan } from "../typescript/plan.ts";
 import {
   planPortableRuntime,
   type RuntimeParserPlan,
@@ -73,6 +76,7 @@ export interface WasmPlan {
   dfa: Dfa;
   portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
+  parserKit: ParserKit;
   wasm: WasmModuleImage;
   parserTraceWasm: Uint8Array;
   directory: string;
@@ -103,15 +107,21 @@ export function planWasmTarget(
   const portableBnf = portablePlanToBnf(runtimePlan.portable);
   const portableLr = portablePlanToLrTable(runtimePlan.portable);
   const portableDfa = portablePlanToDfa(runtimePlan.portable);
-  const wasm = emitWasmModule(
-    portableDfa,
-    portableLr,
-    runtimePlan.portable.version,
-  );
-  const parserTraceWasm = emitParserTraceWasm(
-    portableBnf,
-    portableLr,
-  );
+  const packaging = options.packaging ?? "shared-generic";
+  const usesSpecializedWasm = packaging !== "shared-generic";
+  const wasm = usesSpecializedWasm
+    ? emitWasmModule(
+      portableDfa,
+      portableLr,
+      runtimePlan.portable.version,
+    )
+    : { bytes: new Uint8Array(), inputBase: 0 };
+  const parserTraceWasm = usesSpecializedWasm
+    ? emitParserTraceWasm(
+      portableBnf,
+      portableLr,
+    )
+    : new Uint8Array();
   const generatedBytes = wasmGeneratedByteLengths(
     analyzed,
     runtimePlan,
@@ -146,6 +156,12 @@ export function planWasmTarget(
     dfa: portableDfa,
     portable: runtimePlan.portable,
     portableMetadata: runtimePlan.portableMetadata,
+    parserKit: createParserKit(
+      analyzed,
+      runtimePlan,
+      options.preserveTrivia ?? true,
+      "runtime",
+    ),
     wasm,
     parserTraceWasm,
     directory: options.directory ?? "wasm",
@@ -160,6 +176,14 @@ export function emitWasmTarget(
   options: WasmTargetOptions = {},
 ): GeneratedFile[] {
   const dir = plan.directory;
+  if ((options.packaging ?? "shared-generic") === "shared-generic") {
+    return sharedGenericWasmSources(plan).map((file) => ({
+      path: `${dir}/${file.path}`,
+      content: file.content,
+      kind: file.path.endsWith(".json") ? "config" as const : "source" as const,
+      encoding: "utf-8" as const,
+    }));
+  }
   const files: GeneratedFile[] = [
     {
       path: `${dir}/syntax.ts`,
@@ -173,7 +197,7 @@ export function emitWasmTarget(
         plan.wasm,
         plan.parserTraceWasm,
         plan.portableMetadata,
-        { packaging: options.packaging },
+        { packaging: legacyWasmPackaging(options.packaging) },
       ),
       kind: "source",
       encoding: "utf-8",
@@ -201,12 +225,15 @@ export function emitWasmTarget(
     },
     {
       path: `${dir}/mod.ts`,
-      content: wasmModSource(plan.portableMetadata, options.packaging),
+      content: wasmModSource(
+        plan.portableMetadata,
+        legacyWasmPackaging(options.packaging),
+      ),
       kind: "source",
       encoding: "utf-8",
     },
   ];
-  if ((options.packaging ?? "embedded-typescript") === "external-binary") {
+  if (options.packaging === "external-binary") {
     files.push(
       {
         path: `${dir}/parser.wasm`,
@@ -541,9 +568,269 @@ function hasMultiActionEntries(
   return false;
 }
 
+type LegacyWasmPackaging = "embedded-typescript" | "external-binary";
+
+function legacyWasmPackaging(
+  packaging: WasmTargetOptions["packaging"],
+): LegacyWasmPackaging {
+  return packaging === "external-binary"
+    ? "external-binary"
+    : "embedded-typescript";
+}
+
+function sharedGenericWasmSources(
+  plan: WasmPlan,
+): Array<{ path: string; content: string }> {
+  return [
+    {
+      path: "plan.ts",
+      content: sharedGenericPlanSource(plan.portableMetadata, plan.parserKit),
+    },
+    {
+      path: "syntax.ts",
+      content: emitSharedGenericTypes(plan.portable, plan.portableMetadata),
+    },
+    {
+      path: "lexer.ts",
+      content: compatibilitySource(
+        plan.portableMetadata,
+        'export { lex } from "./mod.ts";\nexport type { LexDiagnostic, LexOptions, LexResult, Token } from "./syntax.ts";',
+      ),
+    },
+    {
+      path: "parser.ts",
+      content: compatibilitySource(
+        plan.portableMetadata,
+        'export { parse, parseTokens, parseTokensUnchecked, parserDiagnosticCodeAmbiguousParse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticCodeTraceLimit, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState } from "./mod.ts";\nexport type { ParseDiagnostic, ParseOptions, ParseResult, RootNode } from "./syntax.ts";',
+      ),
+    },
+    {
+      path: "mod.ts",
+      content: sharedGenericModSource(plan.portableMetadata),
+    },
+    {
+      path: "abi.json",
+      content: `${JSON.stringify(sharedGenericAbiDescriptor(plan), null, 2)}\n`,
+    },
+  ];
+}
+
+function sharedGenericPlanSource(
+  portableMetadata: PortableParserPlanMetadata,
+  parserKit: ParserKit,
+): string {
+  return `${
+    generatedSourceBanner({
+      parserPlanVersion: portableMetadata.version,
+      parserPlanSemantics: portableMetadata.semantics,
+    })
+  }
+export const compactParserPlan = ${
+    JSON.stringify(compactRuntimePlan(parserKit))
+  } as const;
+`;
+}
+
+function emitSharedGenericTypes(
+  portable: PortableParserPlan,
+  portableMetadata: PortableParserPlanMetadata,
+): string {
+  const mainTokenKinds = portable.symbols.tokens
+    .filter((token) => token.kind === "token" && token.reachable)
+    .map((token) => token.name);
+  const triviaTokenKinds = portable.symbols.tokens
+    .filter((token) => token.kind === "skip" && token.reachable)
+    .map((token) => token.name);
+  const literalKinds = portable.symbols.literals
+    .filter((literal) => literal.reachable)
+    .map((literal) => literal.value);
+  const ruleNames = portable.cst.rules.map((rule) => rule.ruleName);
+  const rootName = portable.cst.rootNodeType;
+  return `${
+    generatedSourceBanner({
+      parserPlanVersion: portableMetadata.version,
+      parserPlanSemantics: portableMetadata.semantics,
+    })
+  }
+import type {
+  EofToken,
+  ErrorToken,
+  LexDiagnostic,
+  LexOptions,
+  LexResult,
+  LiteralToken,
+  MainNamedToken,
+  ParseDiagnostic,
+  ParseOptions,
+  ParseResult,
+  Position,
+  RuleNode,
+  SourceMap,
+  Span,
+  SyntaxElement,
+  Token,
+  TriviaToken,
+} from "@mewhhaha/baba/runtime";
+
+export type NamedTokenKind = ${stringUnion(mainTokenKinds)};
+export type TriviaTokenKind = ${stringUnion(triviaTokenKinds)};
+export type LiteralKind = ${stringUnion(literalKinds)};
+export type RuleName = ${stringUnion(ruleNames)};
+
+export type {
+  EofToken,
+  ErrorToken,
+  LexDiagnostic,
+  LexOptions,
+  LexResult,
+  LiteralToken,
+  MainNamedToken,
+  ParseDiagnostic,
+  ParseOptions,
+  ParseResult,
+  Position,
+  RuleNode,
+  SourceMap,
+  Span,
+  SyntaxElement,
+  Token,
+  TriviaToken,
+};
+
+export type RootNode = RuleNode<${JSON.stringify(rootName)}>;
+`;
+}
+
+function sharedGenericModSource(
+  portableMetadata: PortableParserPlanMetadata,
+): string {
+  return `${
+    generatedSourceBanner({
+      parserPlanVersion: portableMetadata.version,
+      parserPlanSemantics: portableMetadata.semantics,
+    })
+  }
+import type { LexOptions, LexResult, ParseOptions, ParseResult, RootNode, Token } from "./syntax.ts";
+import { createParser as createRuntimeParser, inflateCompactRuntimePlan } from "@mewhhaha/baba/runtime";
+import { compactParserPlan } from "./plan.ts";
+
+export const parserPlan = inflateCompactRuntimePlan(compactParserPlan);
+const defaultParser = createRuntimeParser(parserPlan);
+
+export const parserPlanFormat = ${
+    JSON.stringify(portableMetadata.format)
+  } as const;
+export const parserPlanVersion = ${portableMetadata.version};
+export const parserPlanSemantics = ${
+    JSON.stringify(portableMetadata.semantics)
+  } as const;
+export const parserPlanHash = ${JSON.stringify(portableMetadata.hash)} as const;
+export const runtimeImplementationFormat = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.format)
+  } as const;
+export const runtimeImplementationVersion = ${RUNTIME_IMPLEMENTATION_METADATA.version};
+export const runtimeImplementationSemantics = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.semantics)
+  } as const;
+export const runtimeImplementationHash = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.hash)
+  } as const;
+export const wasmTargetKind = "shared-generic-runtime-data" as const;
+
+export interface ParserInstanceOptions {}
+export interface AsyncParserInstanceOptions extends ParserInstanceOptions {}
+export interface ParserInstance {
+  lex(source: string, options?: LexOptions): LexResult;
+  parse(source: string, options?: ParseOptions): ParseResult<RootNode>;
+  parseTokens(source: string, tokens: readonly Token[]): ParseResult<RootNode>;
+  parseTokensUnchecked(source: string, tokens: readonly Token[]): ParseResult<RootNode>;
+  reset(): void;
+  dispose(): void;
+}
+
+export const lex = defaultParser.lex;
+export const parse = defaultParser.parse;
+export const parseTokens = defaultParser.parseTokens;
+export const parseTokensUnchecked = defaultParser.parseTokensUnchecked;
+export const parser = defaultParser;
+
+export function createParser(_options: ParserInstanceOptions = {}): ParserInstance {
+  return createParserFacade(createRuntimeParser(parserPlan));
+}
+
+export async function createParserAsync(
+  options: AsyncParserInstanceOptions = {},
+): Promise<ParserInstance> {
+  return createParser(options);
+}
+
+function createParserFacade(runtimeParser: typeof defaultParser): ParserInstance {
+  return {
+    lex: runtimeParser.lex,
+    parse: runtimeParser.parse,
+    parseTokens: runtimeParser.parseTokens,
+    parseTokensUnchecked: runtimeParser.parseTokensUnchecked,
+    reset() {},
+    dispose() {},
+  };
+}
+
+export { createSourceMap, positionAt } from "@mewhhaha/baba/runtime";
+export * from "./syntax.ts";
+export {
+  parserDiagnosticCodeAmbiguousParse,
+  parserDiagnosticCodeBranchLimit,
+  parserDiagnosticCodeInternalError,
+  parserDiagnosticCodeParseInvalidTokenStream,
+  parserDiagnosticCodeParseLexicalError,
+  parserDiagnosticCodeParseTrailingInput,
+  parserDiagnosticCodeParseUnexpectedToken,
+  parserDiagnosticCodeTraceLimit,
+  parserDiagnosticDetailKindNone,
+  parserDiagnosticDetailKindParserState,
+} from "@mewhhaha/baba/runtime";
+`;
+}
+
+function compatibilitySource(
+  portableMetadata: PortableParserPlanMetadata,
+  body: string,
+): string {
+  return `${
+    generatedSourceBanner({
+      parserPlanVersion: portableMetadata.version,
+      parserPlanSemantics: portableMetadata.semantics,
+    })
+  }
+${body}
+`;
+}
+
+function stringUnion(values: readonly string[]): string {
+  return values.length === 0
+    ? "never"
+    : values.map((value) => JSON.stringify(value)).join(" | ");
+}
+
+function sharedGenericAbiDescriptor(plan: WasmPlan): unknown {
+  return {
+    format: "baba-wasm-abi",
+    version: 1,
+    targetKind: "shared-generic-runtime-data",
+    parserPlan: {
+      format: plan.portableMetadata.format,
+      version: plan.portableMetadata.version,
+      semantics: plan.portableMetadata.semantics,
+      hash: plan.portableMetadata.hash,
+    },
+    runtimeImplementation: RUNTIME_IMPLEMENTATION_METADATA,
+    wasmBytes: 0,
+  };
+}
+
 function wasmModSource(
   portableMetadata: PortableParserPlanMetadata,
-  packaging: WasmTargetOptions["packaging"] = "embedded-typescript",
+  packaging: LegacyWasmPackaging = "embedded-typescript",
 ): string {
   const wasmExports = packaging === "external-binary"
     ? "createWasmParserInstance, memory, parserPlanFormat, parserPlanHash, parserPlanSemantics, parserPlanVersion, reset, runtimeImplementationFormat, runtimeImplementationHash, runtimeImplementationSemantics, runtimeImplementationVersion, wasmAbiVersion, wasmAdapterHandleCapabilityModel, wasmHostOwnershipModel, wasmInputBase, wasmLexResultI32Count, wasmMaxPages, wasmResultLifetimeModel, wasmSemanticsVersion, wasmSourceEncoding, wasmSpanUnit, wasmTargetKind, wasmTokenRecordI32Count, wasmTraceStatusAmbiguous, wasmTraceStatusBranchLimit, wasmTraceStatusInternal, wasmTraceStatusOk, wasmTraceStatusTraceLimit, wasmTraceStatusUnexpected"
@@ -753,6 +1040,7 @@ function wasmOptionsDiagnostics(options: WasmTargetOptions): Diagnostic[] {
   }
   if (
     options.packaging !== undefined &&
+    options.packaging !== "shared-generic" &&
     options.packaging !== "embedded-typescript" &&
     options.packaging !== "external-binary"
   ) {
@@ -760,7 +1048,8 @@ function wasmOptionsDiagnostics(options: WasmTargetOptions): Diagnostic[] {
       code: "WASM_PACKAGING_MODE",
       severity: "error",
       backend: "wasm",
-      message: "packaging must be external-binary or embedded-typescript.",
+      message:
+        "packaging must be shared-generic, external-binary, or embedded-typescript.",
     });
   }
   return diagnostics;
@@ -782,20 +1071,54 @@ function wasmGeneratedByteLengths(
   parserTraceWasm: Uint8Array,
   options: WasmTargetOptions,
 ): WasmGeneratedByteLengths {
+  if ((options.packaging ?? "shared-generic") === "shared-generic") {
+    const source = sharedGenericWasmSources({
+      analyzed: _analyzed,
+      bnf: _bnf,
+      lr: _lr,
+      dfa: portablePlanToDfa(runtimePlan.portable),
+      portable: runtimePlan.portable,
+      portableMetadata: runtimePlan.portableMetadata,
+      parserKit: createParserKit(
+        _analyzed,
+        runtimePlan,
+        options.preserveTrivia ?? true,
+        "runtime",
+      ),
+      wasm,
+      parserTraceWasm,
+      directory: options.directory ?? "wasm",
+      preserveTrivia: options.preserveTrivia ?? true,
+      generatedBytes: 0,
+      diagnostics: [],
+    }).reduce(
+      (sum, file) => sum + generatedSourceBytes(file.content),
+      0,
+    );
+    return {
+      total: source,
+      source,
+      coreBinary: 0,
+      traceBinary: 0,
+    };
+  }
   const source = byteLength([
     emitSyntaxFromPortablePlan(runtimePlan.portable),
     emitWasmRuntime(
       wasm,
       parserTraceWasm,
       runtimePlan.portableMetadata,
-      { packaging: options.packaging },
+      { packaging: legacyWasmPackaging(options.packaging) },
     ),
     emitWasmLexerFromPortablePlan(
       runtimePlan.portable,
       options.preserveTrivia ?? true,
     ),
     emitWasmParser(runtimePlan.portable),
-    wasmModSource(runtimePlan.portableMetadata, options.packaging),
+    wasmModSource(
+      runtimePlan.portableMetadata,
+      legacyWasmPackaging(options.packaging),
+    ),
   ].join(""));
   return {
     total: source + wasm.bytes.length + parserTraceWasm.length,
@@ -857,6 +1180,10 @@ function parserStatsDiagnostic(
 
 function byteLength(source: string): number {
   return new TextEncoder().encode(source).length;
+}
+
+function generatedSourceBytes(source: string | Uint8Array): number {
+  return source instanceof Uint8Array ? source.length : byteLength(source);
 }
 
 function isSafeRelativeDirectory(directory: string): boolean {

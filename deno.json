@@ -6,6 +6,8 @@
     ".": "./src/mod.ts",
     "./advanced": "./src/advanced.ts",
     "./kit": "./src/kit.ts",
+    "./runtime": "./src/runtime/mod.ts",
+    "./runtime/wasm": "./src/runtime/wasm.ts",
     "./cli": "./src/cli.ts"
   },
   "publish": {
@@ -58,7 +60,9 @@
     "test:tree-sitter": "deno test --allow-read --allow-write --allow-run tests/tree_sitter_test.ts",
     "check": "deno check src/mod.ts src/advanced.ts src/cli.ts scripts/*.ts bench/*.ts tests/*.ts",
     "bench": "deno run --allow-read --allow-write bench/ts_vs_wasm.ts",
+    "bench:runtime": "deno run --allow-read --allow-write scripts/runtime_bench.ts --budget size-budgets.json",
     "bench:wasm": "deno run --allow-read --allow-write bench/ts_vs_wasm.ts",
+    "inspect-plan": "deno run --allow-read scripts/inspect_plan.ts",
     "size:report": "deno run --allow-read --allow-write scripts/size_report.ts",
     "size:check": "deno run --allow-read scripts/size_report.ts --budget size-budgets.json",
     "publish:dry-run": "deno publish --dry-run --allow-dirty"

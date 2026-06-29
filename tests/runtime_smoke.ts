@@ -14,6 +14,20 @@ try {
   await applyBundle(generate(grammar, { targets: ["typescript", "wasm"] }), {
     root,
   });
+  await Deno.writeTextFile(
+    `${root}/deno.json`,
+    JSON.stringify(
+      {
+        imports: {
+          "@mewhhaha/baba/runtime":
+            new URL("../src/runtime/mod.ts", import.meta.url)
+              .href,
+        },
+      },
+      null,
+      2,
+    ),
+  );
   for (const runtime of runtimes) {
     if (runtime === "deno") {
       await writeRunner(

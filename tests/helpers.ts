@@ -250,6 +250,12 @@ export async function fixtureNames(): Promise<string[]> {
   const names: string[] = [];
   for await (const entry of Deno.readDir("fixtures")) {
     if (!entry.isDirectory) continue;
+    try {
+      await Deno.stat(`fixtures/${entry.name}/grammar.ebnf`);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) continue;
+      throw error;
+    }
     names.push(entry.name);
   }
   return names.sort();

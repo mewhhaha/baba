@@ -30,7 +30,9 @@ export function emitWasmRuntime(
   image: WasmModuleImage,
   parserTraceBytes: Uint8Array,
   portableMetadata: PortableParserPlanMetadata,
-  options: { packaging?: "embedded-typescript" | "external-binary" } = {},
+  options: {
+    packaging?: "embedded-typescript" | "external-binary";
+  } = {},
 ): string {
   const packaging = options.packaging ?? "embedded-typescript";
   return `${

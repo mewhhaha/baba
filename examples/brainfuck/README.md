@@ -37,7 +37,7 @@ deno task generate
 deno task helix:sync
 ```
 
-That command creates:
+That command explicitly requests legacy-specialized Wasm packaging and creates:
 
 - `generated/.baba-manifest.json`: generated-file ownership manifest.
 - `generated/grammar.js`: Tree-sitter grammar.
@@ -46,9 +46,10 @@ That command creates:
 - `generated/wasm/*.ts`: generated Wasm-backed lexer/parser runtime.
 - `.helix/runtime/queries/brainfuck/*.scm`: local Helix query copies.
 
-The parser-kit target is not part of `--target all`. This example keeps kit
-usage artifact-free by compiling the grammar in memory and parsing a sample
-program with the public kit helpers:
+The Wasm and parser-kit targets are not part of `--target all`. This example
+opts into legacy-specialized Wasm for the interpreter and keeps kit usage
+artifact-free by compiling the grammar in memory and parsing a sample program
+with the public kit helpers:
 
 ```sh
 deno task kit

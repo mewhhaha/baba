@@ -14,6 +14,7 @@ import {
   type RuntimeParserPlanningOptions,
 } from "../runtime/plan.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
+import { encodeCompactPlanBinary } from "../../runtime/compact_plan_binary.ts";
 import type {
   ParserKit,
   ParserKitActionEntry,
@@ -71,15 +72,23 @@ export function emitKitTarget(plan: KitPlan): GeneratedFile[] {
   const content = plan.kit.profile === "runtime"
     ? `${JSON.stringify(plan.kit)}\n`
     : `${JSON.stringify(plan.kit, null, 2)}\n`;
-  return [{
-    path: `${plan.directory}/parser-kit.json`,
-    content,
-    kind: "config",
-    encoding: "utf-8",
-  }];
+  return [
+    {
+      path: `${plan.directory}/parser-kit.json`,
+      content,
+      kind: "config",
+      encoding: "utf-8",
+    },
+    {
+      path: `${plan.directory}/parser-plan.bin`,
+      content: encodeCompactPlanBinary(plan.kit),
+      kind: "binary",
+      encoding: "binary",
+    },
+  ];
 }
 
-function createParserKit(
+export function createParserKit(
   analyzed: AnalyzedGrammar,
   runtime: RuntimeParserPlan,
   preserveTrivia: boolean,
@@ -149,6 +158,12 @@ function createParserKit(
           }))
         ),
         accepts: runtime.dfa.states.map((state) => state.selectedAccept ?? -1),
+        acceptCandidates: runtime.portable.lexer.states.map((state) =>
+          orderAcceptCandidates(
+            runtime.portable.lexer.specifications,
+            state.accepts,
+          )
+        ),
       },
     },
     bnf: {
@@ -173,6 +188,9 @@ function createParserKit(
       })),
     },
     lr: {
+      conflictProfile: hasBranchingActions(runtime.lr.actions)
+        ? "branching"
+        : "deterministic",
       states: runtime.lr.states.map((state) => ({
         id: state.id,
         items: includeDebugDetails
@@ -211,6 +229,25 @@ function createParserKit(
       })),
     },
   };
+}
+
+function orderAcceptCandidates(
+  specs: RuntimeParserPlan["portable"]["lexer"]["specifications"],
+  accepts: readonly number[],
+): readonly number[] {
+  return [...accepts].sort((left, right) => {
+    const leftSpec = specs[left];
+    const rightSpec = specs[right];
+    if (!leftSpec || !rightSpec) return left - right;
+    return rightSpec.priority - leftSpec.priority ||
+      (leftSpec.literal === rightSpec.literal
+        ? 0
+        : leftSpec.literal
+        ? -1
+        : 1) ||
+      leftSpec.order - rightSpec.order ||
+      left - right;
+  });
 }
 
 function lexerSpecs(analyzed: AnalyzedGrammar): ParserKitLexerSpec[] {
@@ -256,6 +293,17 @@ function actionEntries(
     }
   }
   return entries;
+}
+
+function hasBranchingActions(
+  table: RuntimeParserPlan["lr"]["actions"],
+): boolean {
+  for (const row of table.values()) {
+    for (const actions of row.values()) {
+      if (actions.length > 1) return true;
+    }
+  }
+  return false;
 }
 
 function actionEntry(action: LrAction): ParserKitLrAction {

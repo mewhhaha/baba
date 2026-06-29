@@ -17,6 +17,7 @@ import {
   fixtureSamples,
   formatDiagnostic,
   generate,
+  generatedTextContent,
   generateTreeSitterGrammar,
   generateTreeSitterHighlightsQuery,
   generateTreeSitterQueries,
@@ -28,6 +29,7 @@ import {
   treeSitterAccepts,
   validateGrammar,
 } from "./helpers.ts";
+import { inspectCompactPlanBinary } from "../src/runtime/compact_plan_binary.ts";
 
 Deno.test("safe bundle apply writes nested files and refuses user edits", async () => {
   const dir = await Deno.makeTempDir();
@@ -314,6 +316,127 @@ Deno.test("benchmark command writes machine-readable metrics", async () => {
       ),
       "Expected each benchmark case to include parse metrics.",
     );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runtime benchmark reports lexer row-kind counters", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const jsonPath = `${dir}/runtime-bench-results.json`;
+    const result = await runCommand(Deno.execPath(), [
+      "task",
+      "bench:runtime",
+      "--fixture",
+      "large-runtime",
+      "--json",
+      jsonPath,
+    ]);
+    assertIncludes(result.stdout, "lexer rows:");
+
+    const report = JSON.parse(await Deno.readTextFile(jsonPath));
+    const rowKinds = report.fixtures[0].planStats.lexerRowKinds;
+    assert(typeof rowKinds.ascii === "number");
+    assert(typeof rowKinds.single === "number");
+    assert(typeof rowKinds.small === "number");
+    assert(typeof rowKinds.binary === "number");
+    assert(typeof rowKinds.empty === "number");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("default TypeScript output is shared-runtime data and wrappers", () => {
+  const result = compile(
+    `
+      token ID = /[A-Za-z_][A-Za-z0-9_]*/ ;
+      skip WS = /[ \\t\\r\\n]+/ ;
+      module = "let" name:ID ;
+    `,
+    { targets: ["typescript"] },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+  const paths = result.bundle.files.map((file) => file.path).join(",");
+  assertIncludes(paths, "typescript/plan.ts");
+  assertIncludes(paths, "typescript/types.ts");
+  const mod = generatedTextContent(result.bundle, "typescript/mod.ts");
+  const lexer = generatedTextContent(result.bundle, "typescript/lexer.ts");
+  const parser = generatedTextContent(result.bundle, "typescript/parser.ts");
+  assertIncludes(mod, 'from "@mewhhaha/baba/runtime"');
+  for (const source of [mod, lexer, parser]) {
+    assertNotIncludes(source, "function parseTokenList(");
+    assertNotIncludes(source, "function reduceProduction(");
+    assertNotIncludes(source, "function parserTrace(");
+    assertNotIncludes(source, "new Uint8Array([");
+    assertNotIncludes(source, "wasmBytes =");
+  }
+});
+
+Deno.test("shared TypeScript output can externalize parser plan JSON", async () => {
+  const result = compile(
+    `
+      token ID = /[A-Za-z_][A-Za-z0-9_]*/ ;
+      skip WS = /[ \\t\\r\\n]+/ ;
+      module = "let" name:ID ;
+    `,
+    { targets: ["typescript"], typescript: { planData: "json" } },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+  const paths = result.bundle.files.map((file) => file.path).join(",");
+  assertIncludes(paths, "typescript/plan.ts");
+  assertIncludes(paths, "typescript/plan.json");
+  const planTs = generatedTextContent(result.bundle, "typescript/plan.ts");
+  const planJson = generatedTextContent(result.bundle, "typescript/plan.json");
+  assertIncludes(
+    planTs,
+    'import compactParserPlan from "./plan.json" with { type: "json" };',
+  );
+  assertNotIncludes(planTs, '"module"');
+  assertEquals(JSON.parse(planJson).g[1], "module");
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/typescript/mod.ts`);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("parser-kit target emits inspectable compact binary plan", async () => {
+  const result = compile(
+    `
+      token ID = /[A-Za-z_][A-Za-z0-9_]*/ ;
+      skip WS = /[ \\t\\r\\n]+/ ;
+      module = "let" name:ID ;
+    `,
+    { targets: ["kit"], kit: { profile: "runtime" } },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+  const planBinary = result.bundle.files.find((file) =>
+    file.path === "kit/parser-plan.bin"
+  );
+  const planJson = generatedTextContent(result.bundle, "kit/parser-kit.json");
+  assert(planBinary?.encoding === "binary");
+  const planInfo = inspectCompactPlanBinary(planBinary.content);
+  assertEquals(planInfo.format, "baba-compact-plan");
+  assert(planInfo.bytes < new TextEncoder().encode(planJson).length);
+  const dir = await Deno.makeTempDir();
+  try {
+    const path = `${dir}/parser-plan.bin`;
+    await Deno.writeFile(path, planBinary.content);
+    const inspected = await runCommand(Deno.execPath(), [
+      "run",
+      "--allow-read",
+      "scripts/inspect_plan.ts",
+      path,
+    ]);
+    assertIncludes(inspected.stdout, '"format": "baba-compact-plan"');
+    assertIncludes(inspected.stdout, '"parserPlanVersion": 1');
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -636,6 +759,8 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
           "1000",
           "--typescript-generated-byte-limit",
           "1000000",
+          "--typescript-plan-data",
+          "json",
           "--parser-stats",
         ])
       );
@@ -646,8 +771,12 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
       "parseTokens",
     );
     assertIncludes(
-      await Deno.readTextFile(`${tsOutDir}/ts/lexer.ts`),
-      "const DEFAULT_PRESERVE_TRIVIA = false",
+      await Deno.readTextFile(`${tsOutDir}/ts/plan.ts`),
+      'import compactParserPlan from "./plan.json" with { type: "json" };',
+    );
+    assertIncludes(
+      await Deno.readTextFile(`${tsOutDir}/ts/plan.json`),
+      '"l":[false',
     );
 
     const allOutDir = `${dir}/all`;
@@ -669,6 +798,7 @@ Deno.test("CLI lists, diagnoses, and writes Tree-sitter outputs", async () => {
       await Deno.readTextFile(`${allOutDir}/typescript/mod.ts`),
       "parseTokens",
     );
+    await assertMissing(`${allOutDir}/wasm/mod.ts`);
     await assertMissing(`${allOutDir}/kit/parser-kit.json`);
 
     const kitOutDir = `${dir}/kit-out`;

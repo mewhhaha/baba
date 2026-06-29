@@ -317,17 +317,17 @@ Deno.test("generated deterministic parser omits branch-only helpers", () => {
     result.bundle,
     "typescript/parser.ts",
   );
-  assertIncludes(parserSource, "function parserTrace(");
-  assertIncludes(parserSource, "function parserTraceSetTerminal(");
-  assertIncludes(parserSource, "function replayTrace(");
-  assertIncludes(parserSource, "function parserAction(");
-  assertIncludes(parserSource, "function parserGoto(");
-  assertIncludes(parserSource, "function parserExpectedStart(");
-  assertIncludes(parserSource, "function parserExpectedEnd(");
-  assertIncludes(parserSource, "function parserProductionLhs(");
-  assertIncludes(parserSource, "function parserProductionRhsLength(");
-  assertIncludes(parserSource, "function parserActionKind(");
-  assertIncludes(parserSource, "function parserActionPayload(");
+  assertNotIncludes(parserSource, "function parserTrace(");
+  assertNotIncludes(parserSource, "function parserTraceSetTerminal(");
+  assertNotIncludes(parserSource, "function replayTrace(");
+  assertNotIncludes(parserSource, "function parserAction(");
+  assertNotIncludes(parserSource, "function parserGoto(");
+  assertNotIncludes(parserSource, "function parserExpectedStart(");
+  assertNotIncludes(parserSource, "function parserExpectedEnd(");
+  assertNotIncludes(parserSource, "function parserProductionLhs(");
+  assertNotIncludes(parserSource, "function parserProductionRhsLength(");
+  assertNotIncludes(parserSource, "function parserActionKind(");
+  assertNotIncludes(parserSource, "function parserActionPayload(");
   assertNotIncludes(parserSource, "function parserActionCount(");
   assertNotIncludes(parserSource, "const ACTIONS");
   assertNotIncludes(parserSource, "const GOTOS");
@@ -343,8 +343,7 @@ Deno.test("generated deterministic parser omits branch-only helpers", () => {
     result.bundle,
     "typescript/syntax.ts",
   );
-  assertIncludes(syntaxSource, "export type EmptyFields");
-  assertIncludes(syntaxSource, "fields: EmptyFields;");
+  assertIncludes(syntaxSource, 'export * from "./types.ts";');
   assertNotIncludes(syntaxSource, "fields: {\n  };");
 });
 
@@ -376,11 +375,11 @@ Deno.test("TypeScript parser branches through declared local grammar conflicts",
   try {
     await applyBundle(resolved.bundle, { root: dir });
     const parserSource = await Deno.readTextFile(`${dir}/typescript/parser.ts`);
-    assertIncludes(parserSource, "function parserTrace(");
-    assertIncludes(parserSource, "function parserTraceSetTerminal(");
-    assertIncludes(parserSource, "function parserActionAt(");
-    assertIncludes(parserSource, "function parserActionCount(");
-    assertIncludes(parserSource, "function parserGoto(");
+    assertNotIncludes(parserSource, "function parserTrace(");
+    assertNotIncludes(parserSource, "function parserTraceSetTerminal(");
+    assertNotIncludes(parserSource, "function parserActionAt(");
+    assertNotIncludes(parserSource, "function parserActionCount(");
+    assertNotIncludes(parserSource, "function parserGoto(");
     assertNotIncludes(parserSource, "MAX_PARSE_BRANCHES");
     assertNotIncludes(parserSource, "interface ParseBranch");
     assertNotIncludes(parserSource, "function findActions(");
@@ -537,6 +536,7 @@ Deno.test("Wasm parser target traces declared conflict branches", async () => {
   const result = compile(parenthesizedTypeGrammar, {
     targets: ["wasm"],
     metadata,
+    wasm: { packaging: "embedded-typescript" },
   });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);

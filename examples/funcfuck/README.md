@@ -57,7 +57,7 @@ deno task generate
 deno task helix:sync
 ```
 
-That command creates:
+That command explicitly requests legacy-specialized Wasm packaging and creates:
 
 - `generated/.baba-manifest.json`: generated-file ownership manifest.
 - `generated/grammar.js`: Tree-sitter grammar.

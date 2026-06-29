@@ -1,4 +1,11 @@
 import { analyzeGrammar } from "../src/compiler/analyze.ts";
+import { compileParserKit } from "../src/mod.ts";
+import {
+  createAutoParser,
+  createWasmParser,
+  getSharedWasmRuntimeStats,
+  prepareSharedWasmRuntime,
+} from "../src/runtime/wasm.ts";
 import {
   hashRuntimeImplementationManifest,
   hashRuntimeImplementationSource,
@@ -12,6 +19,90 @@ import {
   assertNotIncludes,
   parseGrammar,
 } from "./helpers.ts";
+
+Deno.test("runtime/wasm facade prepares once and supports auto policy", async () => {
+  const first = compileParserKit(`
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    token HASH = /#[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = tag:HASH name:IDENT ;
+  `);
+  const second = compileParserKit(`
+    token INT = /[0-9]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = value:INT ;
+  `);
+  assertEquals(first.diagnostics.length, 0);
+  assertEquals(second.diagnostics.length, 0);
+  assert(first.kit);
+  assert(second.kit);
+
+  const before = getSharedWasmRuntimeStats();
+  const timing: string[] = [];
+  const parser = await createWasmParser(first.kit, {
+    timing(event) {
+      timing.push(`${event.phase}:${event.engine}:${event.backend}`);
+    },
+  });
+  const sibling = await createWasmParser(second.kit, {
+    timing(event) {
+      timing.push(`${event.phase}:${event.engine}:${event.backend}`);
+    },
+  });
+  const after = getSharedWasmRuntimeStats();
+  assertEquals(after.prepared, true);
+  assert(after.wasmBytes > 0);
+  assertEquals(
+    after.prepareCount,
+    before.prepared ? before.prepareCount : before.prepareCount + 1,
+  );
+  assertEquals(parser.parse("#let alpha").ok, true);
+  const validated = parser.parse("#let alpha", { mode: "validate" });
+  assertEquals(validated.ok, true);
+  assertEquals("root" in validated, false);
+  const invalid = parser.parse("#let", { mode: "validate" });
+  assertEquals(invalid.ok, false);
+  assertEquals(
+    (invalid.diagnostics[0] as { code?: unknown }).code,
+    "PARSE_UNEXPECTED_TOKEN",
+  );
+  assertEquals(sibling.parse("42").ok, true);
+  assert(timing.includes("create instance:wasm:wasm+typescript"));
+  assert(timing.includes("lex:wasm:wasm+typescript"));
+  assert(timing.includes("parse trace:wasm:wasm+typescript"));
+  assert(timing.includes("build result:wasm:wasm+typescript"));
+
+  const executor = await prepareSharedWasmRuntime();
+  const instance = executor.createInstance();
+  assertEquals(instance.exports.baba_generic_runtime_version(), 1);
+  const actionRows = instance.writeI32Table([0, 2, 2]);
+  const actionPairs = instance.writeI32Table([1, 10, 3, 30]);
+  assertEquals(
+    instance.exports.find_pair(actionRows, 2, actionPairs, 0, 3),
+    30,
+  );
+  assertEquals(
+    instance.exports.find_pair(actionRows, 2, actionPairs, 1, 3),
+    -1,
+  );
+  const dfaRows = instance.writeI32Table([0, 2]);
+  const dfaRanges = instance.writeI32Table([65, 90, 1, 97, 122, 2]);
+  assertEquals(instance.exports.find_range(dfaRows, 1, dfaRanges, 0, 66), 1);
+  assertEquals(instance.exports.find_range(dfaRows, 1, dfaRanges, 0, 122), 2);
+  assertEquals(instance.exports.find_range(dfaRows, 1, dfaRanges, 0, 48), -1);
+
+  const autoEvents: string[] = [];
+  const auto = await createAutoParser(first.kit, {
+    smallInputThreshold: 5,
+    timing(event) {
+      autoEvents.push(`${event.phase}:${event.engine}`);
+    },
+  });
+  assertEquals(auto.parse("#let alpha").ok, true);
+  assert(autoEvents.includes("select engine:wasm"));
+  assertEquals(auto.parse("#let").ok, false);
+  assert(autoEvents.includes("select engine:typescript"));
+});
 
 Deno.test("runtime planner exposes a versioned portable parser plan", () => {
   const grammar = parseGrammar(`
@@ -792,7 +883,7 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
     RUNTIME_IMPLEMENTATION_METADATA.semantics,
     "baba-runtime-portable-v1",
   );
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 25);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 29);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
@@ -805,7 +896,11 @@ Deno.test("runtime implementation manifest identifies source artifacts", async (
   assert(roles.includes("shared-brl-diagnostics"));
   assert(roles.includes("shared-brl-source-map"));
   assert(roles.includes("public-source-text-boundary"));
+  assert(roles.includes("shared-wasm-runtime-api"));
+  assert(roles.includes("shared-generic-wasm-executor"));
   assert(roles.includes("parser-diagnostic-codes"));
+  assert(roles.includes("shared-typescript-runtime-api"));
+  assert(roles.includes("parser-kit-shared-runtime"));
   assert(roles.includes("wasm-abi-constants"));
   assert(roles.includes("generated-source-provenance"));
 

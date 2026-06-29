@@ -62,6 +62,7 @@ Deno.test("compileParserKit returns stable parser-kit data", () => {
   assertEquals(kit.portablePlan.semantics, "baba-portable-v1");
   assert(kit.portablePlan.hash.startsWith("fnv1a64:"));
   assertEquals(kit.portablePlan.hash.length, "fnv1a64:".length + 16);
+  assertEquals(kit.lr.conflictProfile, "deterministic");
   assert(kit.runtimeImplementation);
   assertEquals(
     kit.runtimeImplementation.format,
@@ -89,6 +90,15 @@ Deno.test("compileParserKit returns stable parser-kit data", () => {
   assert(
     validateParserKit(invalidKit).some((issue) =>
       issue.path === "$.lexer.dfa.accepts"
+    ),
+  );
+  const invalidProfileKit = structuredClone(kit) as unknown as {
+    lr: { conflictProfile: unknown };
+  };
+  invalidProfileKit.lr.conflictProfile = "maybe";
+  assert(
+    validateParserKit(invalidProfileKit).some((issue) =>
+      issue.path === "$.lr.conflictProfile"
     ),
   );
   const invalidDfaAcceptKit = structuredClone(kit) as unknown as ParserKit & {
@@ -566,6 +576,7 @@ Deno.test("parser-kit helpers preserve declared parser conflict branches", async
     metadata,
   });
   try {
+    assertEquals(kit.lr.conflictProfile, "branching");
     const multiActionEntries = kit.lr.actions.filter((entry) =>
       entry.actions.length > 1
     );

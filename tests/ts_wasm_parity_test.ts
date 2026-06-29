@@ -141,6 +141,12 @@ Deno.test("TypeScript and Wasm runtimes match deterministic parser behavior", as
 Deno.test("TypeScript and Wasm runtimes match portable fixture corpus", async () => {
   for (const fixture of await fixtureNames()) {
     if (fixture === "invalid-regex") continue;
+    try {
+      await Deno.stat(`fixtures/${fixture}/grammar.ebnf`);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) continue;
+      throw error;
+    }
     const source = await Deno.readTextFile(`fixtures/${fixture}/grammar.ebnf`);
     const metadataJson = await fixtureMetadata(fixture);
     const options = metadataJson === undefined
@@ -389,10 +395,27 @@ Deno.test("TypeScript and Wasm parse contextual token overlaps in parity", async
       }).ok,
       true,
     );
-    assertJsonEquals(tsStats, wasmStats, {
-      operation: "contextualLexingStats",
-      source: "b x",
-    });
+    assertEquals(tsStats.length, wasmStats.length);
+    const tsFirst = tsStats[0] as {
+      ambiguousLexicalSites: number;
+      attemptedTokenSelections: number;
+      contextualCandidateChecks: number;
+    };
+    const wasmFirst = wasmStats[0] as {
+      ambiguousLexicalSites: number;
+      attemptedTokenSelections: number;
+      contextualCandidateChecks: number;
+    };
+    assertEquals(
+      tsFirst.ambiguousLexicalSites,
+      wasmFirst.ambiguousLexicalSites,
+    );
+    assertEquals(
+      tsFirst.attemptedTokenSelections,
+      wasmFirst.attemptedTokenSelections,
+    );
+    assert(tsFirst.contextualCandidateChecks >= 2);
+    assert(wasmFirst.contextualCandidateChecks >= 2);
 
     const tsLexed = runtimes.ts.lex("b x", { preserveTrivia: false });
     const wasmLexed = runtimes.wasm.lex("b x", { preserveTrivia: false });

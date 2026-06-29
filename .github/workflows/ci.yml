@@ -73,6 +73,9 @@ jobs:
       - name: Size budget check
         run: deno task size:check
 
+      - name: Runtime size and cold-start budget check
+        run: deno task bench:runtime -- --json runtime-bench-results.json
+
       - name: Benchmark JSON smoke
         run: deno task bench -- --quick --samples 1 --json bench-results.json
 

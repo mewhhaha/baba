@@ -55,7 +55,7 @@ Deno.test("generates standalone TypeScript lexer and parser", async () => {
   assert(result.bundle);
   assertEquals(
     result.bundle.files.map((file) => file.path).join(","),
-    "typescript/lexer.ts,typescript/mod.ts,typescript/parser.ts,typescript/syntax.ts",
+    "typescript/lexer.ts,typescript/mod.ts,typescript/parser.ts,typescript/plan.ts,typescript/syntax.ts,typescript/types.ts",
   );
 
   const dir = await Deno.makeTempDir();
@@ -74,7 +74,7 @@ Deno.test("generates standalone TypeScript lexer and parser", async () => {
     assertEquals(mod.parserDiagnosticCodeAmbiguousParse, 8);
     const lexed = mod.lex("let x = 42; // ok");
     const firstToken = lexed.tokens[0] as Record<string, unknown>;
-    assertEquals("__babaTerminal" in firstToken, true);
+    assertEquals("__babaTerminal" in firstToken, false);
     assertEquals(Object.keys(firstToken).includes("__babaTerminal"), false);
     assertEquals(JSON.stringify(firstToken).includes("__babaTerminal"), false);
     assertEquals(
@@ -514,7 +514,10 @@ Deno.test("TypeScript lexer uses generated DFA tables for many short tokens", as
     token A = /a/ ;
     module = A* ;
   `,
-    { targets: ["typescript"] },
+    {
+      targets: ["typescript"],
+      typescript: { runtimePackaging: "legacy-generated" },
+    },
   );
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);

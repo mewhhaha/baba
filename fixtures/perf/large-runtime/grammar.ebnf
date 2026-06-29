@@ -1,0 +1,56 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+token INTEGER = /[0-9]+/ ;
+token FLOAT = /[0-9]+\.[0-9]+/ ;
+token STRING = /"([^"\\]|\\.)*"/ ;
+token PATH = /[A-Za-z_][A-Za-z0-9_]*(\/[A-Za-z_][A-Za-z0-9_]*)+/ ;
+token HEX = /0x[0-9A-Fa-f]+/ ;
+token DATE = /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ ;
+token DURATION = /[0-9]+(ms|s|m|h)/ ;
+token PERCENT = /[0-9]+%/ ;
+token REGEX = /\/([^\/\\]|\\.)+\// ;
+skip WS = /[ \t\r\n]+/ ;
+skip COMMENT = /#[^\r\n]*/ ;
+
+module = item* ;
+item = declaration | command | pipeline | block | policy | route ;
+
+declaration = decl_kind name:IDENT annotation? initializer? ";" ;
+decl_kind = "let" | "const" | "type" | "fn" | "task" | "view" ;
+annotation = ":" type_expr ;
+type_expr = type_atom type_suffix* ;
+type_atom = IDENT | "string" | "number" | "bool" | "date" | "duration" ;
+type_suffix = "[]" | "?" | type_args ;
+type_args = "<" type_expr ("," type_expr)* ">" ;
+initializer = "=" expr ;
+
+command = command_kind target:IDENT arg_list? command_body? ";" ;
+command_kind = "run" | "build" | "test" | "deploy" | "watch" | "clean" ;
+arg_list = "(" argument ("," argument)* ")" ;
+argument = name:IDENT "=" value:expr ;
+command_body = "using" "{" property* "}" ;
+
+pipeline = "pipeline" name:IDENT "{" stage+ "}" ;
+stage = "stage" name:IDENT requires? "{" step+ "}" ;
+requires = "requires" "[" IDENT ("," IDENT)* "]" ;
+step = "step" name:IDENT ":" expr ";" ;
+
+block = "config" name:IDENT "{" property* "}" ;
+policy = "policy" name:IDENT "when" expr "{" property* "}" ;
+route = "route" path:PATH "to" target:IDENT route_option* ";" ;
+route_option = "method" method | "auth" IDENT | "cache" DURATION ;
+method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" ;
+
+property = key:IDENT ":" expr ";" ;
+expr = unary binary_tail* ;
+binary_tail = binary_op unary ;
+binary_op = "==" | "!=" | "<=" | ">=" | "<" | ">" | "+" | "-" | "*" | "/" | "&&" | "||" | "in" | "matches" ;
+unary = unary_op* primary ;
+unary_op = "!" | "-" | "not" ;
+primary = literal | reference | call | list | object | group ;
+literal = STRING | FLOAT | INTEGER | HEX | DATE | DURATION | PERCENT | REGEX | "true" | "false" | "null" ;
+reference = IDENT ("." IDENT)* ;
+call = callee:IDENT "(" (expr ("," expr)*)? ")" ;
+list = "[" (expr ("," expr)*)? "]" ;
+object = "{" (pair ("," pair)*)? "}" ;
+pair = key:IDENT ":" value:expr ;
+group = "(" expr ")" ;

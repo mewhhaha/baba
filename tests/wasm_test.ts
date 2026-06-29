@@ -14,6 +14,7 @@ import {
 
 const hasWasmTools = await commandAvailable("wasm-tools");
 const hasWasmtime = await commandAvailable("wasmtime");
+const legacySpecializedWasm = { packaging: "embedded-typescript" } as const;
 
 Deno.test("Wasm target validates generated size and parser stats options", () => {
   const invalidByteLimit = compile(`module = "ok" ;`, {
@@ -79,6 +80,34 @@ Deno.test("Wasm target validates generated size and parser stats options", () =>
   );
 });
 
+Deno.test("Wasm target defaults to shared generic adapter without emitted bytes", async () => {
+  const result = compile(`module = "ok" ;`, { targets: ["wasm"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+  assertEquals(
+    result.bundle.files.map((file) => file.path).join(","),
+    "wasm/abi.json,wasm/lexer.ts,wasm/mod.ts,wasm/parser.ts,wasm/plan.ts,wasm/syntax.ts",
+  );
+  assert(
+    !result.bundle.files.some((file) =>
+      file.path === "wasm/wasm.ts" || file.path === "wasm/parser.wasm"
+    ),
+  );
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: dir });
+    await denoCheck(`${dir}/wasm/mod.ts`);
+    const source = await Deno.readTextFile(`${dir}/wasm/mod.ts`);
+    assertIncludes(source, "shared-generic-runtime-data");
+    assertNotIncludes(source, "wasmBytes");
+    const mod = await import(`file://${dir}/wasm/mod.ts`);
+    assertEquals("wasmBytes" in mod, false);
+    assertEquals((mod.parse("ok") as { ok: boolean }).ok, true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("generates standalone Wasm lexer and parser", async () => {
   const source = `
     token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -89,7 +118,10 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
     module = statement* ;
     statement = "let" name:IDENT "=" value:INTEGER ";" ;
   `;
-  const result = compile(source, { targets: ["wasm"] });
+  const result = compile(source, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
   assertEquals(
@@ -359,7 +391,10 @@ Deno.test("generates standalone Wasm lexer and parser", async () => {
 });
 
 Deno.test("embedded Wasm adapter import does not synchronously compile", async () => {
-  const result = compile(`module = "a" ;`, { targets: ["wasm"] });
+  const result = compile(`module = "a" ;`, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -557,7 +592,7 @@ Deno.test("Wasm runtime reset keeps repeated parses within high-water memory", a
     skip WS = /[ \\t\\r\\n]+/ ;
     module = A* ;
   `,
-    { targets: ["wasm"] },
+    { targets: ["wasm"], wasm: legacySpecializedWasm },
   );
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
@@ -588,7 +623,7 @@ Deno.test("Wasm parser instances own memory, reset, and disposal state", async (
     module = items:item* ;
     item = A ;
   `,
-    { targets: ["wasm"] },
+    { targets: ["wasm"], wasm: legacySpecializedWasm },
   );
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
@@ -636,7 +671,7 @@ Deno.test("Wasm parser instances run concurrently in workers", async () => {
     module = items:item* ;
     item = A ;
   `,
-    { targets: ["wasm"] },
+    { targets: ["wasm"], wasm: legacySpecializedWasm },
   );
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
@@ -712,7 +747,7 @@ Deno.test("Wasm parser instances enforce structured resource limits", async () =
     module = items:item* ;
     item = A ;
   `,
-    { targets: ["wasm"] },
+    { targets: ["wasm"], wasm: legacySpecializedWasm },
   );
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
@@ -818,7 +853,10 @@ Deno.test("Wasm parser instances enforce structured resource limits", async () =
 });
 
 Deno.test("Wasm parser reports trailing input through trace replay", async () => {
-  const result = compile(`module = "a" ;`, { targets: ["wasm"] });
+  const result = compile(`module = "a" ;`, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -850,7 +888,10 @@ Deno.test("Wasm parser reports trailing input through trace replay", async () =>
 });
 
 Deno.test("Wasm runtime validates parse trace input bounds", async () => {
-  const result = compile(`module = "a" ;`, { targets: ["wasm"] });
+  const result = compile(`module = "a" ;`, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -921,7 +962,10 @@ Deno.test("Wasm runtime validates parse trace input bounds", async () => {
 });
 
 Deno.test("Wasm source buffers are adapter-owned capabilities", async () => {
-  const result = compile(`module = "a" ;`, { targets: ["wasm"] });
+  const result = compile(`module = "a" ;`, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -973,8 +1017,14 @@ Deno.test("Wasm target generates deterministic runtime bytes", () => {
     skip WS = /[ \\t\\r\\n]+/ ;
     module = "let" name:ID ";" ;
   `;
-  const first = compile(source, { targets: ["wasm"] });
-  const second = compile(source, { targets: ["wasm"] });
+  const first = compile(source, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
+  const second = compile(source, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(first.diagnostics.length, 0);
   assertEquals(second.diagnostics.length, 0);
   assert(first.bundle);
@@ -1027,7 +1077,10 @@ Deno.test("Wasm ABI documentation covers generated descriptor contract", async (
 });
 
 Deno.test("Wasm lexer preserves UTF-16 offsets for non-BMP literals", async () => {
-  const result = compile(`module = face:"😀" ;`, { targets: ["wasm"] });
+  const result = compile(`module = face:"😀" ;`, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -1099,7 +1152,10 @@ Deno.test("Wasm spans use UTF-16 units for edge-case source text", async () => {
 
   for (const entry of cases) {
     const grammar = entry.grammar ?? `module = value:"${entry.source}" ;`;
-    const result = compile(grammar, { targets: ["wasm"] });
+    const result = compile(grammar, {
+      targets: ["wasm"],
+      wasm: legacySpecializedWasm,
+    });
     assertEquals(
       result.diagnostics.filter((diagnostic) => diagnostic.severity === "error")
         .length,
@@ -1152,7 +1208,10 @@ Deno.test("Wasm parse fast path handles large parser buffers", async () => {
     multiplicative = first:primary rest:(("*" | "/") primary)* ;
     primary = INT | "(" expr ")" ;
   `;
-  const result = compile(source, { targets: ["wasm"] });
+  const result = compile(source, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 
@@ -1195,8 +1254,9 @@ Deno.test("CLI generates Wasm target with custom directory", async () => {
       );
     });
     assertIncludes(logs.join("\n"), "runtime/mod.ts");
-    assertIncludes(logs.join("\n"), "runtime/wasm.ts");
+    assertIncludes(logs.join("\n"), "runtime/plan.ts");
     assertIncludes(logs.join("\n"), "runtime/abi.json");
+    assertNotIncludes(logs.join("\n"), "runtime/wasm.ts");
     assertNotIncludes(logs.join("\n"), "runtime/parser.wasm");
 
     let externalLogs: string[] = [];
@@ -1227,6 +1287,8 @@ Deno.test("CLI generates Wasm target with custom directory", async () => {
         "wasm",
         "--wasm-dir",
         "runtime",
+        "--wasm-packaging",
+        "embedded-typescript",
         "--discard-trivia",
         "--out",
         outDir,
@@ -1337,7 +1399,10 @@ async function runCommandResult(
 async function writeGeneratedCoreWasm(
   source: string,
 ): Promise<{ readonly dir: string; readonly wasmPath: string }> {
-  const result = compile(source, { targets: ["wasm"] });
+  const result = compile(source, {
+    targets: ["wasm"],
+    wasm: legacySpecializedWasm,
+  });
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
 

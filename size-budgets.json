@@ -1,5 +1,33 @@
 {
-  "publishPayloadBytes": 1600000,
+  "publishPayloadBytes": 1700000,
   "publishGeneratedExampleBytes": 0,
-  "largestPublishFileBytes": 260000
+  "largestPublishFileBytes": 260000,
+  "runtimeBudgets": {
+    "large-runtime": {
+      "wasmBytesMax": {
+        "currentBudget": 250000,
+        "targetBudget": 50000
+      },
+      "wasmColdInstantiateMsMax": {
+        "currentBudget": 1000,
+        "targetBudget": 100
+      },
+      "smallParseMsMax": {
+        "currentBudget": 100,
+        "targetBudget": 2
+      },
+      "typescriptGeneratedBytesMax": {
+        "currentBudget": 200000,
+        "targetBudget": 50000
+      },
+      "portablePlanJsonBytesMax": {
+        "currentBudget": 700000,
+        "targetBudget": 100000
+      },
+      "parserPlanBinaryBytesMax": {
+        "currentBudget": 250000,
+        "targetBudget": 50000
+      }
+    }
+  }
 }

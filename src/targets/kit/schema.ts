@@ -104,6 +104,7 @@ export interface ParserKitLexerDfa {
   start: number;
   transitions: readonly (readonly ParserKitLexerTransition[])[];
   accepts: readonly number[];
+  acceptCandidates?: readonly (readonly number[])[];
 }
 
 export interface ParserKitLexerTransition {
@@ -176,6 +177,7 @@ export interface ParserKitProductionOrigin {
 }
 
 export interface ParserKitLr {
+  conflictProfile: "deterministic" | "branching";
   states: readonly ParserKitLrState[];
   actions: readonly ParserKitActionEntry[];
   gotos: readonly ParserKitGotoEntry[];
@@ -350,7 +352,19 @@ export interface KitLexResult {
   diagnostics: readonly KitLexDiagnostic[];
 }
 
-export interface KitParseOptions extends KitLexOptions {}
+export interface KitContextualLexingStats {
+  ambiguousLexicalSites: number;
+  contextualCandidateChecks: number;
+  attemptedTokenSelections: number;
+  reductionsBeforeTokenSelection: number;
+}
+
+export interface KitParseOptions extends KitLexOptions {
+  contextualLexingStats?: (stats: KitContextualLexingStats) => void;
+  maxExploredBranches?: number;
+  maxTraceActions?: number;
+  ambiguityMode?: "first-success" | "reject-ambiguous-success";
+}
 
 export type KitParseResult<Root extends KitRuleNode = KitRuleNode> =
   | {
@@ -368,10 +382,54 @@ export type KitParseResult<Root extends KitRuleNode = KitRuleNode> =
     diagnostics: readonly KitParseDiagnostic[];
   };
 
+export type KitParseEvent =
+  | {
+    kind: "token";
+    tokenId: number;
+    terminalId: number;
+    start: number;
+    end: number;
+  }
+  | { kind: "enter"; ruleId: number; start: number }
+  | { kind: "exit"; ruleId: number; end: number }
+  | { kind: "field"; fieldId: number };
+
+export type KitParseEventResult =
+  | {
+    ok: true;
+    source: string;
+    events: readonly KitParseEvent[];
+    diagnostics: readonly [];
+  }
+  | {
+    ok: false;
+    source: string;
+    events: readonly [];
+    diagnostics: readonly KitParseDiagnostic[];
+  };
+
+export type KitValidateParseResult =
+  | {
+    ok: true;
+    source: string;
+    diagnostics: readonly [];
+  }
+  | {
+    ok: false;
+    source: string;
+    diagnostics: readonly KitParseDiagnostic[];
+  };
+
 interface Fragment {
   value: unknown;
   children: KitSyntaxElement[];
   fields: FieldCapture[];
+  span: KitSpan | null;
+  tokenRange: TokenRange | null;
+}
+
+interface EventFragment {
+  events: KitParseEvent[];
   span: KitSpan | null;
   tokenRange: TokenRange | null;
 }
@@ -391,6 +449,16 @@ interface ShiftedToken {
   tokenIndex: number;
 }
 
+interface ParseLexCandidate {
+  token: KitToken;
+  terminal: number;
+}
+
+interface ParseLexCandidateSite {
+  tokenIndex: number;
+  candidates: readonly ParseLexCandidate[];
+}
+
 interface FieldConfig {
   array: boolean;
   nullable: boolean;
@@ -405,20 +473,36 @@ interface ParseBranch {
   states: number[];
   values: unknown[];
   index: number;
+  tokenOverrides: Map<number, KitToken>;
 }
 
 type BranchAdvanceResult =
   | { kind: "continue" }
   | { kind: "forked" }
-  | { kind: "success"; result: KitParseResult }
+  | { kind: "success"; result: InternalParseResult }
   | { kind: "failure"; failure: ParseFailure };
+
+type KitParseExecutionMode = "cst" | "validate" | "events";
+
+type InternalParseResult =
+  | KitParseResult
+  | KitValidateParseResult
+  | KitParseEventResult;
 
 interface ParseFailure {
   diagnostic: KitParseDiagnostic;
   offset: number;
 }
 
+interface ContextualStatsState extends KitContextualLexingStats {}
+
 const MAX_PARSE_BRANCHES = 100000;
+
+function optionsLimit(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : fallback;
+}
 
 export function validateParserKit(
   value: unknown,
@@ -582,6 +666,12 @@ export function validateParserKit(
     }
   }
   if (kit.lr && typeof kit.lr === "object") {
+    requireEnum(
+      kit.lr.conflictProfile,
+      ["deterministic", "branching"],
+      "$.lr.conflictProfile",
+      issues,
+    );
     requireArray(kit.lr.states, "$.lr.states", issues);
     requireArray(kit.lr.actions, "$.lr.actions", issues);
     requireArray(kit.lr.gotos, "$.lr.gotos", issues);
@@ -717,22 +807,19 @@ export function lexWithKit(
   assertParserKit(kit);
   const preserveTrivia = options.preserveTrivia ??
     kit.lexer.defaultPreserveTrivia;
-  const namedById = new Map(kit.tokens.named.map((token) => [token.id, token]));
-  const literalById = new Map(
-    kit.tokens.literals.map((literal) => [literal.id, literal]),
-  );
+  const runtime = runtimeTables(kit);
   const tokens: KitToken[] = [];
   const diagnostics: KitLexDiagnostic[] = [];
   let offset = 0;
 
   while (offset < source.length) {
-    const candidate = bestCandidate(kit, source, offset);
+    const candidate = bestCandidate(runtime, source, offset);
     if (candidate) {
       const start = offset;
       const end = candidate.end;
       const specRef = kit.lexer.specs[candidate.specIndex];
       if (specRef?.type === "literal") {
-        const spec = literalById.get(specRef.literalId);
+        const spec = runtime.literalById.get(specRef.literalId);
         if (spec) {
           tokens.push({
             type: "literal",
@@ -743,25 +830,13 @@ export function lexWithKit(
           });
         }
       } else if (specRef?.type === "named") {
-        const spec = namedById.get(specRef.tokenId);
+        const spec = runtime.namedById.get(specRef.tokenId);
         if (spec?.channel === "trivia") {
           if (preserveTrivia) {
-            tokens.push({
-              type: "named",
-              kind: spec.name,
-              text: source.slice(start, end),
-              span: { start, end },
-              channel: "trivia",
-            });
+            tokens.push(namedToken(spec.name, source, start, end, "trivia"));
           }
         } else if (spec?.channel === "main") {
-          tokens.push({
-            type: "named",
-            kind: spec.name,
-            text: source.slice(start, end),
-            span: { start, end },
-            channel: "main",
-          });
+          tokens.push(namedToken(spec.name, source, start, end, "main"));
         }
       }
       offset = end;
@@ -789,17 +864,167 @@ export function lexWithKit(
   return { source, tokens, diagnostics };
 }
 
+function lexForParseWithKit(
+  kit: ParserKit,
+  source: string,
+  options: KitLexOptions = {},
+): KitLexResult & { sites: readonly ParseLexCandidateSite[] } {
+  assertParserKit(kit);
+  const preserveTrivia = options.preserveTrivia ??
+    kit.lexer.defaultPreserveTrivia;
+  const tokens: KitToken[] = [];
+  const diagnostics: KitLexDiagnostic[] = [];
+  const sites: ParseLexCandidateSite[] = [];
+  const runtime = runtimeTables(kit);
+  let offset = 0;
+
+  while (offset < source.length) {
+    const scanned = scanAcceptCandidates(runtime, source, offset);
+    if (!scanned) {
+      const start = offset;
+      const codePoint = source.codePointAt(offset);
+      offset += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+      const text = source.slice(start, offset);
+      tokens.push({
+        type: "error",
+        text,
+        span: { start, end: offset },
+        channel: "error",
+      });
+      diagnostics.push({
+        code: "LEX_UNEXPECTED_CHARACTER",
+        message: `Unexpected character ${JSON.stringify(text)}.`,
+        span: { start, end: offset },
+      });
+      continue;
+    }
+
+    const candidates = scanned.candidates.map((specIndex) =>
+      materializeSpecCandidate(
+        runtime,
+        source,
+        specIndex,
+        offset,
+        scanned.end,
+      )
+    );
+    const trivia = candidates.find((candidate) =>
+      candidate.token.channel === "trivia"
+    );
+    const mainCandidates = candidates.filter((candidate) =>
+      candidate.token.channel !== "trivia" && candidate.terminal >= 0
+    );
+    if (trivia && mainCandidates.length === 0) {
+      if (preserveTrivia) tokens.push(trivia.token);
+      offset = scanned.end;
+      continue;
+    }
+    if (mainCandidates.length === 0) {
+      const text = source.slice(offset, scanned.end);
+      tokens.push({
+        type: "error",
+        text,
+        span: { start: offset, end: scanned.end },
+        channel: "error",
+      });
+      diagnostics.push({
+        code: "LEX_UNEXPECTED_CHARACTER",
+        message: `Unexpected character ${JSON.stringify(text)}.`,
+        span: { start: offset, end: scanned.end },
+      });
+      offset = scanned.end;
+      continue;
+    }
+    const tokenIndex = tokens.length;
+    tokens.push(mainCandidates[0].token);
+    sites.push({ tokenIndex, candidates: mainCandidates });
+    offset = scanned.end;
+  }
+
+  const eof = eofToken(source.length);
+  const eofIndex = tokens.length;
+  tokens.push(eof);
+  sites.push({
+    tokenIndex: eofIndex,
+    candidates: [{ token: eof, terminal: kit.bnf.eofTerminal }],
+  });
+  return { source, tokens, diagnostics, sites };
+}
+
 export function parseWithKit(
   kit: ParserKit,
   source: string,
   options: KitParseOptions = {},
 ): KitParseResult {
-  const lexed = lexWithKit(kit, source, options);
+  const lexed = lexForParseWithKit(kit, source, options);
   return parseTokenList(
     kit,
     source,
     lexed.tokens,
     lexicalDiagnostics(lexed.diagnostics),
+    lexed.sites,
+    options.contextualLexingStats,
+    options,
+  ) as KitParseResult;
+}
+
+export function validateWithKit(
+  kit: ParserKit,
+  source: string,
+  options: KitParseOptions = {},
+): KitValidateParseResult {
+  const lexed = lexForParseWithKit(kit, source, options);
+  return validateResult(
+    parseTokenList(
+      kit,
+      source,
+      lexed.tokens,
+      lexicalDiagnostics(lexed.diagnostics),
+      lexed.sites,
+      options.contextualLexingStats,
+      { ...options, mode: "validate" },
+    ),
+  );
+}
+
+export function parseEventsWithKit(
+  kit: ParserKit,
+  source: string,
+  options: KitParseOptions = {},
+): KitParseEventResult {
+  const lexed = lexForParseWithKit(kit, source, options);
+  return eventResult(
+    parseTokenList(
+      kit,
+      source,
+      lexed.tokens,
+      lexicalDiagnostics(lexed.diagnostics),
+      lexed.sites,
+      options.contextualLexingStats,
+      { ...options, mode: "events" },
+    ),
+  );
+}
+
+export function parseLazyWithKit(
+  kit: ParserKit,
+  source: string,
+  options: KitParseOptions = {},
+): KitParseResult {
+  const lexed = lexForParseWithKit(kit, source, options);
+  return lazyResultFromEvents(
+    kit,
+    source,
+    lexed.tokens,
+    parseTokenList(
+      kit,
+      source,
+      lexed.tokens,
+      lexicalDiagnostics(lexed.diagnostics),
+      lexed.sites,
+      options.contextualLexingStats,
+      { ...options, mode: "events" },
+    ),
   );
 }
 
@@ -816,6 +1041,72 @@ export function parseTokensWithKit(
     source,
     tokens,
     combineDiagnostics(streamDiagnostics, tokenDiagnostics),
+  ) as KitParseResult;
+}
+
+export function validateTokensWithKit(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+): KitValidateParseResult {
+  assertParserKit(kit);
+  const streamDiagnostics = validateTokenStream(kit, source, tokens);
+  const tokenDiagnostics = lexicalTokenDiagnostics(kit, tokens);
+  return validateResult(
+    parseTokenList(
+      kit,
+      source,
+      tokens,
+      combineDiagnostics(streamDiagnostics, tokenDiagnostics),
+      [],
+      undefined,
+      { mode: "validate" },
+    ),
+  );
+}
+
+export function parseTokenEventsWithKit(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+): KitParseEventResult {
+  assertParserKit(kit);
+  const streamDiagnostics = validateTokenStream(kit, source, tokens);
+  const tokenDiagnostics = lexicalTokenDiagnostics(kit, tokens);
+  return eventResult(
+    parseTokenList(
+      kit,
+      source,
+      tokens,
+      combineDiagnostics(streamDiagnostics, tokenDiagnostics),
+      [],
+      undefined,
+      { mode: "events" },
+    ),
+  );
+}
+
+export function parseTokensLazyWithKit(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+): KitParseResult {
+  assertParserKit(kit);
+  const streamDiagnostics = validateTokenStream(kit, source, tokens);
+  const tokenDiagnostics = lexicalTokenDiagnostics(kit, tokens);
+  return lazyResultFromEvents(
+    kit,
+    source,
+    tokens,
+    parseTokenList(
+      kit,
+      source,
+      tokens,
+      combineDiagnostics(streamDiagnostics, tokenDiagnostics),
+      [],
+      undefined,
+      { mode: "events" },
+    ),
   );
 }
 
@@ -830,7 +1121,97 @@ export function parseTokensUncheckedWithKit(
     source,
     tokens,
     lexicalTokenDiagnostics(kit, tokens),
+  ) as KitParseResult;
+}
+
+export function validateTokensUncheckedWithKit(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+): KitValidateParseResult {
+  assertParserKit(kit);
+  return validateResult(
+    parseTokenList(
+      kit,
+      source,
+      tokens,
+      lexicalTokenDiagnostics(kit, tokens),
+      [],
+      undefined,
+      { mode: "validate" },
+    ),
   );
+}
+
+export function parseTokenEventsUncheckedWithKit(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+): KitParseEventResult {
+  assertParserKit(kit);
+  return eventResult(
+    parseTokenList(
+      kit,
+      source,
+      tokens,
+      lexicalTokenDiagnostics(kit, tokens),
+      [],
+      undefined,
+      { mode: "events" },
+    ),
+  );
+}
+
+export function parseTokensLazyUncheckedWithKit(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+): KitParseResult {
+  assertParserKit(kit);
+  return lazyResultFromEvents(
+    kit,
+    source,
+    tokens,
+    parseTokenList(
+      kit,
+      source,
+      tokens,
+      lexicalTokenDiagnostics(kit, tokens),
+      [],
+      undefined,
+      { mode: "events" },
+    ),
+  );
+}
+
+function validateResult(result: InternalParseResult): KitValidateParseResult {
+  return result.ok
+    ? {
+      ok: true,
+      source: result.source,
+      diagnostics: [],
+    }
+    : {
+      ok: false,
+      source: result.source,
+      diagnostics: result.diagnostics,
+    };
+}
+
+function eventResult(result: InternalParseResult): KitParseEventResult {
+  return result.ok
+    ? {
+      ok: true,
+      source: result.source,
+      events: "events" in result ? result.events : [],
+      diagnostics: [],
+    }
+    : {
+      ok: false,
+      source: result.source,
+      events: [],
+      diagnostics: result.diagnostics,
+    };
 }
 
 function parseTokenList(
@@ -838,8 +1219,18 @@ function parseTokenList(
   source: string,
   tokens: readonly KitToken[],
   lexicalDiagnostics: readonly KitParseDiagnostic[],
-): KitParseResult {
+  candidateSites: readonly ParseLexCandidateSite[] = [],
+  contextualLexingStats?: (stats: KitContextualLexingStats) => void,
+  options: KitParseOptions & { mode?: KitParseExecutionMode } = {},
+): InternalParseResult {
+  const mode = options.mode ?? "cst";
   if (lexicalDiagnostics.length > 0) {
+    if (mode === "validate") {
+      return { ok: false, source, diagnostics: lexicalDiagnostics };
+    }
+    if (mode === "events") {
+      return { ok: false, source, events: [], diagnostics: lexicalDiagnostics };
+    }
     return {
       ok: false,
       root: null,
@@ -851,30 +1242,68 @@ function parseTokenList(
 
   const pending: ParseBranch[] = [{
     states: [0],
-    values: [null],
+    values: mode === "validate" ? [] : [null],
     index: 0,
+    tokenOverrides: new Map(),
   }];
   let bestFailure: ParseFailure | null = null;
+  let firstSuccess: InternalParseResult | null = null;
   let exploredBranches = 0;
+  let traceActions = 0;
+  const maxExploredBranches = optionsLimit(
+    options.maxExploredBranches,
+    MAX_PARSE_BRANCHES,
+  );
+  const maxTraceActions = optionsLimit(
+    options.maxTraceActions,
+    1_000_000,
+  );
+  const ambiguityMode = options.ambiguityMode ?? "first-success";
   const runtime = runtimeTables(kit);
+  const sitesByToken = new Map(
+    candidateSites.map((site) => [site.tokenIndex, site.candidates]),
+  );
+  const stats: ContextualStatsState = {
+    ambiguousLexicalSites:
+      candidateSites.filter((site) => site.candidates.length > 1).length,
+    contextualCandidateChecks: 0,
+    attemptedTokenSelections: 0,
+    reductionsBeforeTokenSelection: 0,
+  };
+  if (
+    !runtime.hasBranchingActions && stats.ambiguousLexicalSites === 0 &&
+    ambiguityMode === "first-success"
+  ) {
+    const result = parseDeterministicTokenList(
+      kit,
+      runtime,
+      source,
+      tokens,
+      sitesByToken,
+      stats,
+      maxTraceActions,
+      mode,
+    );
+    emitContextualStats(contextualLexingStats, stats);
+    return result;
+  }
 
   while (pending.length > 0) {
     const branch = pending.pop()!;
     exploredBranches++;
-    if (exploredBranches > MAX_PARSE_BRANCHES) {
-      return {
-        ok: false,
-        root: null,
+    if (exploredBranches > maxExploredBranches + 1) {
+      return failedParseResult(
+        mode,
         source,
         tokens,
-        diagnostics: [
+        [
           kitParseDiagnostic(
             "PARSER_BRANCH_LIMIT",
             "Parser exceeded the branch exploration limit.",
             { start: source.length, end: source.length },
           ),
         ],
-      };
+      );
     }
 
     while (true) {
@@ -885,21 +1314,58 @@ function parseTokenList(
         tokens,
         branch,
         pending,
+        sitesByToken,
+        stats,
+        maxExploredBranches,
+        () => ++traceActions,
+        mode,
       );
+      if (traceActions > maxTraceActions) {
+        const diagnostic = kitParseDiagnostic(
+          "PARSER_TRACE_LIMIT",
+          "Parser exceeded the trace action limit.",
+          { start: source.length, end: source.length },
+        );
+        emitContextualStats(contextualLexingStats, stats);
+        return failedParseResult(mode, source, tokens, [diagnostic]);
+      }
       if (advanced.kind === "continue") continue;
       if (advanced.kind === "forked") break;
-      if (advanced.kind === "success") return advanced.result;
+      if (advanced.kind === "success") {
+        if (ambiguityMode === "reject-ambiguous-success") {
+          if (firstSuccess) {
+            emitContextualStats(contextualLexingStats, stats);
+            return failedParseResult(
+              mode,
+              source,
+              tokens,
+              [
+                kitParseDiagnostic(
+                  "PARSER_AMBIGUOUS_PARSE",
+                  "Parser found multiple successful conflict branches.",
+                  { start: source.length, end: source.length },
+                ),
+              ],
+            );
+          }
+          firstSuccess = advanced.result;
+          break;
+        }
+        emitContextualStats(contextualLexingStats, stats);
+        return advanced.result;
+      }
       bestFailure = betterFailure(bestFailure, advanced.failure);
       break;
     }
   }
 
-  return {
-    ok: false,
-    root: null,
+  emitContextualStats(contextualLexingStats, stats);
+  if (firstSuccess) return firstSuccess;
+  return failedParseResult(
+    mode,
     source,
     tokens,
-    diagnostics: [
+    [
       bestFailure?.diagnostic ??
         kitParseDiagnostic(
           "PARSER_INTERNAL_ERROR",
@@ -907,7 +1373,87 @@ function parseTokenList(
           { start: source.length, end: source.length },
         ),
     ],
+  );
+}
+
+function parseDeterministicTokenList(
+  kit: ParserKit,
+  runtime: RuntimeTables,
+  source: string,
+  tokens: readonly KitToken[],
+  candidateSites: ReadonlyMap<number, readonly ParseLexCandidate[]>,
+  stats: ContextualStatsState,
+  maxTraceActions: number,
+  mode: KitParseExecutionMode,
+): InternalParseResult {
+  const branch: ParseBranch = {
+    states: [0],
+    values: mode === "validate" ? [] : [null],
+    index: 0,
+    tokenOverrides: new Map(),
   };
+  let traceActions = 0;
+  while (true) {
+    const advanced = advanceBranch(
+      kit,
+      runtime,
+      source,
+      tokens,
+      branch,
+      [],
+      candidateSites,
+      stats,
+      0,
+      () => ++traceActions,
+      mode,
+    );
+    if (traceActions > maxTraceActions) {
+      return failedParseResult(
+        mode,
+        source,
+        tokens,
+        [
+          kitParseDiagnostic(
+            "PARSER_TRACE_LIMIT",
+            "Parser exceeded the trace action limit.",
+            { start: source.length, end: source.length },
+          ),
+        ],
+      );
+    }
+    if (advanced.kind === "continue") continue;
+    if (advanced.kind === "success") return advanced.result;
+    if (advanced.kind === "failure") {
+      return failedParseResult(mode, source, tokens, [
+        advanced.failure.diagnostic,
+      ]);
+    }
+    return failedParseResult(
+      mode,
+      source,
+      tokens,
+      [
+        kitParseDiagnostic(
+          "PARSER_INTERNAL_ERROR",
+          "Deterministic parser unexpectedly forked.",
+          { start: source.length, end: source.length },
+        ),
+      ],
+    );
+  }
+}
+
+function failedParseResult(
+  mode: KitParseExecutionMode,
+  source: string,
+  tokens: readonly KitToken[],
+  diagnostics: readonly KitParseDiagnostic[],
+): InternalParseResult {
+  if (mode === "validate") return { ok: false, source, diagnostics };
+  if (mode === "events") {
+    return { ok: false, source, events: [], diagnostics };
+  }
+  return { ok: false, root: null, source, tokens, diagnostics };
 }
 
 function advanceBranch(
@@ -917,14 +1463,32 @@ function advanceBranch(
   tokens: readonly KitToken[],
   branch: ParseBranch,
   pending: ParseBranch[],
+  candidateSites: ReadonlyMap<number, readonly ParseLexCandidate[]>,
+  stats: ContextualStatsState,
+  maxExploredBranches: number,
+  nextTraceAction: () => number,
+  mode: KitParseExecutionMode,
 ): BranchAdvanceResult {
   branch.index = skipTrivia(tokens, branch.index);
   const token = tokens[branch.index] ?? eofToken(source.length);
-  const terminal = tokenToTerminalFromMaps(runtime, token);
   const state = branch.states[branch.states.length - 1];
-  const actions = findActions(runtime, state, terminal);
+  const choices: { token: KitToken; action: ParserKitLrAction }[] = [];
+  const candidates = candidateSites.get(branch.index) ?? [{
+    token,
+    terminal: tokenToTerminalFromMaps(runtime, token),
+  }];
+  if (candidates.length > 1) {
+    stats.attemptedTokenSelections += candidates.length;
+  }
+  for (const candidate of candidates) {
+    stats.contextualCandidateChecks++;
+    if (candidate.terminal < 0) continue;
+    for (const action of findActions(runtime, state, candidate.terminal)) {
+      choices.push({ token: candidate.token, action });
+    }
+  }
 
-  if (actions.length === 0) {
+  if (choices.length === 0) {
     return {
       kind: "failure",
       failure: {
@@ -934,17 +1498,35 @@ function advanceBranch(
     };
   }
 
-  if (actions.length > 1) {
-    for (let index = actions.length - 1; index >= 0; index--) {
+  if (choices.length > 1) {
+    if (choices.length > maxExploredBranches) {
+      return {
+        kind: "failure",
+        failure: {
+          offset: token.span.start,
+          diagnostic: kitParseDiagnostic(
+            "PARSER_BRANCH_LIMIT",
+            "Parser exceeded the branch exploration limit.",
+            token.span,
+          ),
+        },
+      };
+    }
+    for (let index = choices.length - 1; index >= 0; index--) {
       const fork = cloneBranch(branch);
+      const choice = choices[index];
       const advanced = applyAction(
         kit,
         runtime,
         source,
         tokens,
         fork,
-        token,
-        actions[index],
+        choice.token,
+        choice.action,
+        candidateSites,
+        stats,
+        nextTraceAction,
+        mode,
       );
       if (advanced.kind === "success" || advanced.kind === "failure") {
         return advanced;
@@ -960,8 +1542,12 @@ function advanceBranch(
     source,
     tokens,
     branch,
-    token,
-    actions[0],
+    choices[0].token,
+    choices[0].action,
+    candidateSites,
+    stats,
+    nextTraceAction,
+    mode,
   );
 }
 
@@ -973,10 +1559,24 @@ function applyAction(
   branch: ParseBranch,
   token: KitToken,
   action: ParserKitLrAction,
+  candidateSites: ReadonlyMap<number, readonly ParseLexCandidate[]>,
+  stats: ContextualStatsState,
+  nextTraceAction: () => number,
+  mode: KitParseExecutionMode,
 ): BranchAdvanceResult {
+  nextTraceAction();
   if (action.kind === "shift") {
     branch.states.push(action.state);
-    branch.values.push(shiftedToken(token, branch.index));
+    if (mode !== "validate") {
+      branch.values.push(
+        mode === "events"
+          ? eventTokenFragment(runtime, token, branch.index)
+          : shiftedToken(token, branch.index),
+      );
+    }
+    if (token !== tokens[branch.index]) {
+      branch.tokenOverrides.set(branch.index, token);
+    }
     branch.index++;
     return { kind: "continue" };
   }
@@ -984,29 +1584,55 @@ function applyAction(
   if (action.kind === "accept") {
     return {
       kind: "success",
-      result: acceptedParseResult(source, tokens, branch.values.at(-1)),
+      result: mode === "validate"
+        ? { ok: true, source, diagnostics: [] }
+        : mode === "events"
+        ? acceptedEventResult(source, branch.values.at(-1))
+        : acceptedParseResult(
+          source,
+          tokens,
+          branch.values.at(-1),
+          branch.tokenOverrides,
+        ),
     };
+  }
+  if ((candidateSites.get(branch.index)?.length ?? 0) > 1) {
+    stats.reductionsBeforeTokenSelection++;
   }
 
   const production = kit.bnf.productions[action.production];
-  const rhsValues = production.rhs.length === 0 ? [] : branch.values.splice(
-    branch.values.length - production.rhs.length,
-    production.rhs.length,
-  );
+  const rhsValues = mode === "validate"
+    ? []
+    : production.rhs.length === 0
+    ? []
+    : branch.values.splice(
+      branch.values.length - production.rhs.length,
+      production.rhs.length,
+    );
   branch.states.splice(
     branch.states.length - production.rhs.length,
     production.rhs.length,
   );
   let reduced: unknown;
   try {
-    reduced = reduceProduction(
-      kit,
-      runtime,
-      production.reducer,
-      rhsValues,
-      token.span.start,
-      branch.index,
-    );
+    reduced = mode === "validate"
+      ? null
+      : mode === "events"
+      ? reduceEventProduction(
+        runtime,
+        production.reducer,
+        rhsValues,
+        token.span.start,
+        branch.index,
+      )
+      : reduceProduction(
+        kit,
+        runtime,
+        production.reducer,
+        rhsValues,
+        token.span.start,
+        branch.index,
+      );
   } catch (error) {
     return {
       kind: "failure",
@@ -1035,8 +1661,16 @@ function applyAction(
     };
   }
   branch.states.push(gotoState);
-  branch.values.push(reduced);
+  if (mode !== "validate") branch.values.push(reduced);
   return { kind: "continue" };
+}
+
+function emitContextualStats(
+  callback: ((stats: KitContextualLexingStats) => void) | undefined,
+  stats: KitContextualLexingStats,
+): void {
+  if (!callback || stats.ambiguousLexicalSites === 0) return;
+  callback({ ...stats });
 }
 
 function reduceProduction(
@@ -1104,6 +1738,146 @@ function reduceProduction(
     }
   }
   void kit;
+}
+
+function reduceEventProduction(
+  runtime: RuntimeTables,
+  reducer: ParserKitReducerSpec,
+  rhs: readonly unknown[],
+  offset: number,
+  tokenIndex: number,
+): EventFragment {
+  switch (reducer.kind) {
+    case "start":
+      return toEventFragment(rhs[0]);
+    case "rule": {
+      const fragment = toEventFragment(rhs[0]);
+      const span = fragment.span ?? { start: offset, end: offset };
+      const tokenRange = fragment.tokenRange ?? {
+        start: tokenIndex,
+        end: tokenIndex,
+      };
+      return {
+        events: [
+          { kind: "enter", ruleId: reducer.ruleId, start: span.start },
+          ...fragment.events,
+          { kind: "exit", ruleId: reducer.ruleId, end: span.end },
+        ],
+        span,
+        tokenRange,
+      };
+    }
+    case "terminal":
+      return toEventFragment(rhs[0]);
+    case "ruleRef":
+    case "identity":
+    case "optionalSome":
+      return toEventFragment(rhs[0]);
+    case "sequence":
+      return sequenceEventFragment(rhs, offset, tokenIndex);
+    case "optionalEmpty":
+    case "repeatEmpty":
+      return emptyEventFragment(offset, tokenIndex);
+    case "repeatAppend":
+    case "repeat1Append":
+      return appendEventFragment(
+        toEventFragment(rhs[0]),
+        toEventFragment(rhs[1]),
+      );
+    case "repeat1First":
+    case "separatedFirst":
+      return toEventFragment(rhs[0]);
+    case "separatedAppend":
+      return appendEventFragment(
+        appendEventFragment(toEventFragment(rhs[0]), toEventFragment(rhs[1])),
+        toEventFragment(rhs[2]),
+      );
+    case "field": {
+      const fragment = toEventFragment(rhs[0]);
+      return {
+        events: [
+          { kind: "field", fieldId: runtime.fieldIds.get(reducer.name) ?? -1 },
+          ...fragment.events,
+        ],
+        span: fragment.span,
+        tokenRange: fragment.tokenRange,
+      };
+    }
+  }
+}
+
+function eventTokenFragment(
+  runtime: RuntimeTables,
+  token: KitToken,
+  tokenIndex: number,
+): EventFragment {
+  const terminalId = tokenToTerminalFromMaps(runtime, token);
+  return {
+    events: isMainSyntaxToken(token)
+      ? [{
+        kind: "token",
+        tokenId: syntaxTokenId(runtime, token),
+        terminalId,
+        start: token.span.start,
+        end: token.span.end,
+      }]
+      : [],
+    span: token.span,
+    tokenRange: { start: tokenIndex, end: tokenIndex + 1 },
+  };
+}
+
+function sequenceEventFragment(
+  values: readonly unknown[],
+  offset: number,
+  tokenIndex: number,
+): EventFragment {
+  let combined = emptyEventFragment(offset, tokenIndex);
+  for (const value of values) {
+    combined = appendEventFragment(combined, toEventFragment(value));
+  }
+  return combined;
+}
+
+function emptyEventFragment(offset: number, tokenIndex: number): EventFragment {
+  return {
+    events: [],
+    span: { start: offset, end: offset },
+    tokenRange: { start: tokenIndex, end: tokenIndex },
+  };
+}
+
+function appendEventFragment(
+  left: EventFragment,
+  right: EventFragment,
+): EventFragment {
+  return {
+    events: [...left.events, ...right.events],
+    span: combineSpans(left.span, right.span),
+    tokenRange: combineTokenRanges(left.tokenRange, right.tokenRange),
+  };
+}
+
+function toEventFragment(value: unknown): EventFragment {
+  if (isEventFragment(value)) return value;
+  throw new Error("Expected parser reduction event fragment.");
+}
+
+function isEventFragment(value: unknown): value is EventFragment {
+  return Boolean(
+    value && typeof value === "object" && "events" in value &&
+      Array.isArray((value as { events?: unknown }).events),
+  );
+}
+
+function syntaxTokenId(runtime: RuntimeTables, token: KitToken): number {
+  if (token.type === "named") {
+    return runtime.namedTokenIds.get(token.kind) ?? -1;
+  }
+  if (token.type === "literal") {
+    return runtime.literalIds.get(token.literal) ?? -1;
+  }
+  return -1;
 }
 
 function tokenFragment(shifted: ShiftedToken): Fragment {
@@ -1278,7 +2052,11 @@ function acceptedParseResult(
   source: string,
   tokens: readonly KitToken[],
   accepted: unknown,
+  tokenOverrides: ReadonlyMap<number, KitToken> = new Map(),
 ): KitParseResult {
+  const resultTokens = tokenOverrides.size === 0
+    ? tokens
+    : tokens.map((token, index) => tokenOverrides.get(index) ?? token);
   const root = isRuleNode(accepted)
     ? accepted
     : isFragment(accepted) && isRuleNode(accepted.value)
@@ -1289,7 +2067,7 @@ function acceptedParseResult(
       ok: true,
       root,
       source,
-      tokens,
+      tokens: resultTokens,
       diagnostics: [],
     };
   }
@@ -1297,7 +2075,7 @@ function acceptedParseResult(
     ok: false,
     root: null,
     source,
-    tokens,
+    tokens: resultTokens,
     diagnostics: [
       kitParseDiagnostic(
         "PARSER_INTERNAL_ERROR",
@@ -1308,24 +2086,279 @@ function acceptedParseResult(
   };
 }
 
+function acceptedEventResult(
+  source: string,
+  accepted: unknown,
+): KitParseEventResult {
+  if (isEventFragment(accepted)) {
+    return {
+      ok: true,
+      source,
+      events: accepted.events,
+      diagnostics: [],
+    };
+  }
+  return {
+    ok: false,
+    source,
+    events: [],
+    diagnostics: [
+      kitParseDiagnostic(
+        "PARSER_INTERNAL_ERROR",
+        "Parser accepted without producing an event stream.",
+        { start: source.length, end: source.length },
+      ),
+    ],
+  };
+}
+
+interface LazyRuleDraft {
+  ruleId: number;
+  start: number;
+  end: number;
+  tokenRange: TokenRange | null;
+  children: KitSyntaxElement[];
+  fields: FieldCapture[];
+  captureNames: string[];
+}
+
+function lazyResultFromEvents(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+  result: InternalParseResult,
+): KitParseResult {
+  if (!result.ok) {
+    return {
+      ok: false,
+      root: null,
+      source,
+      tokens,
+      diagnostics: result.diagnostics,
+    };
+  }
+  if (!("events" in result)) {
+    return acceptedParseResult(source, tokens, null);
+  }
+  try {
+    const root = lazyRootFromEvents(runtimeTables(kit), tokens, result.events);
+    return root
+      ? { ok: true, root, source, tokens, diagnostics: [] }
+      : acceptedParseResult(source, tokens, null);
+  } catch (error) {
+    return {
+      ok: false,
+      root: null,
+      source,
+      tokens,
+      diagnostics: [
+        internalParserDiagnostic(error, {
+          start: source.length,
+          end: source.length,
+        }),
+      ],
+    };
+  }
+}
+
+function lazyRootFromEvents(
+  runtime: RuntimeTables,
+  tokens: readonly KitToken[],
+  events: readonly KitParseEvent[],
+): KitRuleNode | null {
+  const stack: LazyRuleDraft[] = [];
+  const pendingFields: string[] = [];
+  let root: KitRuleNode | null = null;
+  let tokenCursor = 0;
+  for (const event of events) {
+    switch (event.kind) {
+      case "field":
+        pendingFields.push(
+          runtime.fieldNames[event.fieldId] ?? `#${event.fieldId}`,
+        );
+        break;
+      case "enter":
+        stack.push({
+          ruleId: event.ruleId,
+          start: event.start,
+          end: event.start,
+          tokenRange: null,
+          children: [],
+          fields: [],
+          captureNames: pendingFields.splice(0),
+        });
+        break;
+      case "token": {
+        const tokenMatch = findEventToken(tokens, tokenCursor, event);
+        tokenCursor = tokenMatch.index + 1;
+        attachLazyElement(
+          stack,
+          tokenMatch.token,
+          { start: tokenMatch.index, end: tokenMatch.index + 1 },
+          pendingFields.splice(0),
+        );
+        break;
+      }
+      case "exit": {
+        const draft = stack.pop();
+        if (!draft || draft.ruleId !== event.ruleId) {
+          throw new Error("Parse event stream has unbalanced rule events.");
+        }
+        draft.end = event.end;
+        const node = createLazyRuleNode(runtime, draft);
+        if (stack.length === 0) {
+          root = node;
+        } else {
+          attachLazyElement(
+            stack,
+            node,
+            node.tokenRange,
+            draft.captureNames,
+          );
+        }
+        break;
+      }
+    }
+  }
+  if (stack.length > 0) {
+    throw new Error("Parse event stream ended before all rules exited.");
+  }
+  return root;
+}
+
+function attachLazyElement(
+  stack: LazyRuleDraft[],
+  element: KitSyntaxElement,
+  tokenRange: TokenRange,
+  captureNames: readonly string[],
+): void {
+  const parent = stack[stack.length - 1];
+  if (!parent) {
+    throw new Error("Parse event stream emitted syntax outside a rule.");
+  }
+  parent.children.push(element);
+  parent.tokenRange = combineTokenRanges(parent.tokenRange, tokenRange);
+  for (const name of captureNames) {
+    parent.fields.push({ name, value: element });
+  }
+}
+
+function createLazyRuleNode(
+  runtime: RuntimeTables,
+  draft: LazyRuleDraft,
+): KitRuleNode {
+  let childrenCache: readonly KitSyntaxElement[] | undefined;
+  let fieldsCache: Record<string, unknown> | undefined;
+  const node = {
+    type: "rule",
+    name: runtime.ruleNames[draft.ruleId],
+    span: { start: draft.start, end: draft.end },
+    tokenRange: draft.tokenRange ?? { start: 0, end: 0 },
+  } as KitRuleNode;
+  Object.defineProperties(node, {
+    children: {
+      enumerable: true,
+      get() {
+        childrenCache ??= draft.children;
+        return childrenCache;
+      },
+    },
+    fields: {
+      enumerable: true,
+      get() {
+        fieldsCache ??= buildFields(runtime, draft.ruleId, draft.fields);
+        return fieldsCache;
+      },
+    },
+  });
+  return node;
+}
+
+function findEventToken(
+  tokens: readonly KitToken[],
+  startIndex: number,
+  event: Extract<KitParseEvent, { kind: "token" }>,
+): { token: KitMainNamedToken | KitLiteralToken; index: number } {
+  for (let index = startIndex; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (!isMainSyntaxToken(token)) continue;
+    if (token.span.start === event.start && token.span.end === event.end) {
+      return { token, index };
+    }
+  }
+  throw new Error("Parse event stream referenced an unknown token.");
+}
+
 interface RuntimeTables {
+  kit: ParserKit;
   eofTerminal: number;
+  dfaRows: readonly RuntimeDfaRow[];
+  dfaRowKindCounts: RuntimeDfaRowKindCounts;
   actions: ReadonlyMap<string, readonly ParserKitLrAction[]>;
   gotos: ReadonlyMap<string, number>;
   expected: readonly (readonly string[])[];
+  hasBranchingActions: boolean;
   namedTerminals: ReadonlyMap<string, number>;
   literalTerminals: ReadonlyMap<string, number>;
+  namedById: ReadonlyMap<number, ParserKitNamedTokenSpec>;
+  literalById: ReadonlyMap<number, ParserKitLiteralSpec>;
+  terminalByNamedTokenId: ReadonlyMap<number, number>;
+  terminalByLiteralId: ReadonlyMap<number, number>;
+  namedTokenIds: ReadonlyMap<string, number>;
+  literalIds: ReadonlyMap<string, number>;
   mainTokenKinds: ReadonlySet<string>;
   triviaTokenKinds: ReadonlySet<string>;
   ruleNames: readonly string[];
+  fieldIds: ReadonlyMap<string, number>;
+  fieldNames: readonly string[];
   fieldSchemas: readonly (RuntimeRuleFieldSchema | undefined)[];
 }
 
+type RuntimeDfaRow =
+  | { kind: "empty" }
+  | { kind: "single"; start: number; end: number; target: number }
+  | {
+    kind: "small" | "binary";
+    transitions: readonly ParserKitLexerTransition[];
+  }
+  | {
+    kind: "ascii";
+    ascii: Int32Array;
+    fallback: readonly ParserKitLexerTransition[];
+  };
+
+interface RuntimeDfaRowKindCounts {
+  empty: number;
+  single: number;
+  small: number;
+  binary: number;
+  ascii: number;
+}
+
+const runtimeTableCache = new WeakMap<ParserKit, RuntimeTables>();
+
 function runtimeTables(kit: ParserKit): RuntimeTables {
+  const cached = runtimeTableCache.get(kit);
+  if (cached) return cached;
   const mappings = terminalMappings(kit);
+  const dfaRows = kit.lexer.dfa.transitions.map(compileDfaRow);
+  const dfaRowKindCounts = countDfaRowKinds(dfaRows);
+  const terminalByNamedTokenId = new Map<number, number>();
+  const terminalByLiteralId = new Map<number, number>();
+  for (const terminal of kit.bnf.terminals) {
+    if (terminal.kind === "named" && terminal.tokenId !== undefined) {
+      terminalByNamedTokenId.set(terminal.tokenId, terminal.id);
+    } else if (
+      terminal.kind === "literal" && terminal.literalId !== undefined
+    ) {
+      terminalByLiteralId.set(terminal.literalId, terminal.id);
+    }
+  }
   const actions = new Map<string, readonly ParserKitLrAction[]>();
+  let hasBranchingActions = kit.lr.conflictProfile === "branching";
   for (const entry of kit.lr.actions) {
     actions.set(actionKey(entry.state, entry.terminal), entry.actions);
+    if (entry.actions.length > 1) hasBranchingActions = true;
   }
   const gotos = new Map<string, number>();
   for (const entry of kit.lr.gotos) {
@@ -1340,6 +2373,8 @@ function runtimeTables(kit: ParserKit): RuntimeTables {
     return [...new Set(row)].sort();
   });
   const fieldSchemas: (RuntimeRuleFieldSchema | undefined)[] = [];
+  const fieldIds = new Map<string, number>();
+  const fieldNames: string[] = [];
   for (const schema of kit.fields.rules) {
     const entries = schema.fields.map((field) =>
       [
@@ -1348,21 +2383,105 @@ function runtimeTables(kit: ParserKit): RuntimeTables {
       ] as const
     );
     const byName = Object.create(null) as Record<string, FieldConfig>;
-    for (const [name, config] of entries) byName[name] = config;
+    for (const [name, config] of entries) {
+      byName[name] = config;
+      if (!fieldIds.has(name)) {
+        fieldIds.set(name, fieldIds.size);
+        fieldNames.push(name);
+      }
+    }
     fieldSchemas[schema.ruleId] = { entries, byName };
   }
-  return {
+  const runtime = {
+    kit,
     eofTerminal: mappings.eof,
+    dfaRows,
+    dfaRowKindCounts,
     actions,
     gotos,
     expected,
+    hasBranchingActions,
     namedTerminals: new Map(Object.entries(mappings.named)),
     literalTerminals: new Map(Object.entries(mappings.literals)),
+    namedById: new Map(kit.tokens.named.map((token) => [token.id, token])),
+    literalById: new Map(
+      kit.tokens.literals.map((literal) => [literal.id, literal]),
+    ),
+    terminalByNamedTokenId,
+    terminalByLiteralId,
+    namedTokenIds: new Map(
+      kit.tokens.named.map((token) => [token.name, token.id]),
+    ),
+    literalIds: new Map(
+      kit.tokens.literals.map((literal) => [literal.value, literal.id]),
+    ),
     mainTokenKinds: new Set(mainTokenKinds(kit)),
     triviaTokenKinds: new Set(triviaTokenKinds(kit)),
     ruleNames: kit.grammar.rules.map((rule) => rule.name),
+    fieldIds,
+    fieldNames,
     fieldSchemas,
   };
+  runtimeTableCache.set(kit, runtime);
+  return runtime;
+}
+
+function compileDfaRow(
+  transitions: readonly ParserKitLexerTransition[] = [],
+): RuntimeDfaRow {
+  if (transitions.length === 0) return { kind: "empty" };
+  if (transitions.length === 1) {
+    const [transition] = transitions;
+    return {
+      kind: "single",
+      start: transition.start,
+      end: transition.end,
+      target: transition.target,
+    };
+  }
+
+  const asciiCoverage = transitions.reduce((count, transition) => {
+    const start = Math.max(0, transition.start);
+    const end = Math.min(127, transition.end);
+    return end >= start ? count + end - start + 1 : count;
+  }, 0);
+  if (asciiCoverage >= 8 || (asciiCoverage > 0 && transitions.length >= 4)) {
+    const ascii = new Int32Array(128);
+    ascii.fill(-1);
+    const fallback: ParserKitLexerTransition[] = [];
+    for (const transition of transitions) {
+      const asciiStart = Math.max(0, transition.start);
+      const asciiEnd = Math.min(127, transition.end);
+      if (asciiEnd >= asciiStart) {
+        for (let code = asciiStart; code <= asciiEnd; code++) {
+          ascii[code] = transition.target;
+        }
+      }
+      if (transition.start < 0 || transition.end > 127) {
+        fallback.push(transition);
+      }
+    }
+    return { kind: "ascii", ascii, fallback };
+  }
+
+  return {
+    kind: transitions.length <= 4 ? "small" : "binary",
+    transitions,
+  };
+}
+
+function countDfaRowKinds(
+  rows: readonly RuntimeDfaRow[],
+): RuntimeDfaRowKindCounts {
+  const counts: RuntimeDfaRowKindCounts = {
+    empty: 0,
+    single: 0,
+    small: 0,
+    binary: 0,
+    ascii: 0,
+  };
+  for (const row of rows) counts[row.kind]++;
+  return counts;
 }
 
 function findActions(
@@ -1692,35 +2811,168 @@ function sameToken(left: KitToken, right: KitToken): boolean {
 }
 
 function bestCandidate(
-  kit: ParserKit,
+  runtime: RuntimeTables,
   source: string,
   offset: number,
 ): { specIndex: number; end: number } | null {
-  let state = kit.lexer.dfa.start;
+  let state = runtime.kit.lexer.dfa.start;
   let index = offset;
   let best: { specIndex: number; end: number } | null = null;
 
   while (index < source.length) {
     const codePoint = source.codePointAt(index);
     if (codePoint === undefined) break;
-    const target = transition(kit, state, codePoint);
+    const target = transition(runtime, state, codePoint);
     if (target < 0) break;
     index += codePoint > 0xffff ? 2 : 1;
     state = target;
-    const specIndex = kit.lexer.dfa.accepts[state] ?? -1;
+    const specIndex = runtime.kit.lexer.dfa.accepts[state] ?? -1;
     if (specIndex >= 0) best = { specIndex, end: index };
   }
 
   return best;
 }
 
+function scanAcceptCandidates(
+  runtime: RuntimeTables,
+  source: string,
+  offset: number,
+): { end: number; candidates: readonly number[] } | null {
+  const kit = runtime.kit;
+  let state = kit.lexer.dfa.start;
+  let index = offset;
+  let best: { state: number; end: number } | null = null;
+
+  while (index < source.length) {
+    const codePoint = source.codePointAt(index);
+    if (codePoint === undefined) break;
+    const target = transition(runtime, state, codePoint);
+    if (target < 0) break;
+    index += codePoint > 0xffff ? 2 : 1;
+    state = target;
+    const selected = kit.lexer.dfa.accepts[state] ?? -1;
+    const candidates = kit.lexer.dfa.acceptCandidates?.[state] ?? [];
+    if (selected >= 0 || candidates.length > 0) best = { state, end: index };
+  }
+
+  if (!best) return null;
+  const candidates = kit.lexer.dfa.acceptCandidates?.[best.state] ??
+    [kit.lexer.dfa.accepts[best.state] ?? -1];
+  const filtered = candidates.filter((candidate) => candidate >= 0);
+  return filtered.length === 0 ? null : { end: best.end, candidates: filtered };
+}
+
+function materializeSpecCandidate(
+  runtime: RuntimeTables,
+  source: string,
+  specIndex: number,
+  start: number,
+  end: number,
+): ParseLexCandidate {
+  const specRef = runtime.kit.lexer.specs[specIndex];
+  if (specRef?.type === "literal") {
+    const literal = runtime.literalById.get(specRef.literalId);
+    const value = literal?.value ?? source.slice(start, end);
+    return {
+      token: {
+        type: "literal",
+        literal: value,
+        text: value,
+        span: { start, end },
+        channel: "main",
+      },
+      terminal: runtime.terminalByLiteralId.get(specRef.literalId) ?? -1,
+    };
+  }
+  if (specRef?.type === "named") {
+    const named = runtime.namedById.get(specRef.tokenId);
+    if (named?.channel === "main") {
+      return {
+        token: namedToken(named.name, source, start, end, "main"),
+        terminal: runtime.terminalByNamedTokenId.get(specRef.tokenId) ?? -1,
+      };
+    }
+    return {
+      token: namedToken(
+        named?.name ?? `token_${specRef?.tokenId ?? specIndex}`,
+        source,
+        start,
+        end,
+        "trivia",
+      ),
+      terminal: -1,
+    };
+  }
+  return {
+    token: {
+      type: "error",
+      text: source.slice(start, end),
+      span: { start, end },
+      channel: "error",
+    },
+    terminal: -1,
+  };
+}
+
+function terminalForNamedToken(kit: ParserKit, tokenId: number): number {
+  return kit.bnf.terminals.find((terminal) =>
+    terminal.kind === "named" && terminal.tokenId === tokenId
+  )?.id ?? -1;
+}
+
+function terminalForLiteral(kit: ParserKit, literalId: number): number {
+  return kit.bnf.terminals.find((terminal) =>
+    terminal.kind === "literal" && terminal.literalId === literalId
+  )?.id ?? -1;
+}
+
 function transition(
-  kit: ParserKit,
+  runtime: RuntimeTables,
   state: number,
   codePoint: number,
 ): number {
-  for (const entry of kit.lexer.dfa.transitions[state] ?? []) {
+  const row = runtime.dfaRows[state] ?? { kind: "empty" };
+  switch (row.kind) {
+    case "empty":
+      return -1;
+    case "single":
+      return row.start <= codePoint && codePoint <= row.end ? row.target : -1;
+    case "ascii":
+      if (codePoint < 128) return row.ascii[codePoint] ?? -1;
+      return transitionLinear(row.fallback, codePoint);
+    case "binary":
+      return transitionBinary(row.transitions, codePoint);
+    case "small":
+      return transitionLinear(row.transitions, codePoint);
+  }
+}
+
+function transitionLinear(
+  transitions: readonly ParserKitLexerTransition[],
+  codePoint: number,
+): number {
+  for (const entry of transitions) {
     if (entry.start <= codePoint && codePoint <= entry.end) return entry.target;
+  }
+  return -1;
+}
+
+function transitionBinary(
+  transitions: readonly ParserKitLexerTransition[],
+  codePoint: number,
+): number {
+  let low = 0;
+  let high = transitions.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    const entry = transitions[mid];
+    if (codePoint < entry.start) {
+      high = mid - 1;
+    } else if (codePoint > entry.end) {
+      low = mid + 1;
+    } else {
+      return entry.target;
+    }
   }
   return -1;
 }
@@ -1837,6 +3089,40 @@ function isTriviaToken(token: KitToken): boolean {
   return token.type === "named" && token.channel === "trivia";
 }
 
+function namedToken(
+  kind: string,
+  source: string,
+  start: number,
+  end: number,
+  channel: "main",
+): KitMainNamedToken;
+function namedToken(
+  kind: string,
+  source: string,
+  start: number,
+  end: number,
+  channel: "trivia",
+): KitTriviaToken;
+function namedToken(
+  kind: string,
+  source: string,
+  start: number,
+  end: number,
+  channel: "main" | "trivia",
+): KitMainNamedToken | KitTriviaToken {
+  let text: string | undefined;
+  return {
+    type: "named",
+    kind,
+    get text() {
+      text ??= source.slice(start, end);
+      return text;
+    },
+    span: { start, end },
+    channel,
+  } as KitMainNamedToken | KitTriviaToken;
+}
+
 function eofToken(offset: number): KitEofToken {
   return {
     type: "eof",
@@ -1851,6 +3137,7 @@ function cloneBranch(branch: ParseBranch): ParseBranch {
     states: [...branch.states],
     values: [...branch.values],
     index: branch.index,
+    tokenOverrides: new Map(branch.tokenOverrides),
   };
 }
 
@@ -2062,6 +3349,9 @@ function validateLexerDfa(
   requireNumber(value.start, `${path}.start`, issues);
   requireArray(value.transitions, `${path}.transitions`, issues);
   requireArray(value.accepts, `${path}.accepts`, issues);
+  if (value.acceptCandidates !== undefined) {
+    requireArray(value.acceptCandidates, `${path}.acceptCandidates`, issues);
+  }
   const stateCount = Array.isArray(value.transitions)
     ? value.transitions.length
     : undefined;
@@ -2110,6 +3400,36 @@ function validateLexerDfa(
           message: `Expected lexer spec index between 0 and ${specCount - 1}.`,
         });
       }
+    });
+  }
+  if (Array.isArray(value.acceptCandidates)) {
+    if (
+      stateCount !== undefined && value.acceptCandidates.length !== stateCount
+    ) {
+      issues.push({
+        path: `${path}.acceptCandidates`,
+        message: "Expected one accept-candidate row for each DFA state.",
+      });
+    }
+    value.acceptCandidates.forEach((row, rowIndex) => {
+      requireArray(row, `${path}.acceptCandidates[${rowIndex}]`, issues);
+      if (!Array.isArray(row)) return;
+      row.forEach((accept, index) => {
+        const acceptPath = `${path}.acceptCandidates[${rowIndex}][${index}]`;
+        requireNumber(accept, acceptPath, issues);
+        if (
+          isInteger(accept) &&
+          specCount !== undefined &&
+          !isIndex(accept, specCount)
+        ) {
+          issues.push({
+            path: acceptPath,
+            message: `Expected lexer spec index between 0 and ${
+              specCount - 1
+            }.`,
+          });
+        }
+      });
     });
   }
 }

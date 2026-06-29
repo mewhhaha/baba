@@ -17,6 +17,8 @@ import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
 import { emitLexerFromPortablePlan } from "./lexer_emit.ts";
 import { emitParserFromPortablePlan } from "./parser_emit.ts";
 import { emitSyntaxFromPortablePlan } from "./syntax_emit.ts";
+import { createParserKit } from "../kit/plan.ts";
+import type { ParserKit } from "../kit/schema.ts";
 import {
   portablePlanToBnf,
   portablePlanToDfa,
@@ -36,6 +38,7 @@ export interface TypeScriptPlan {
   dfa: Dfa;
   portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
+  parserKit: ParserKit;
   directory: string;
   generatedBytes: number;
   diagnostics: readonly Diagnostic[];
@@ -64,10 +67,17 @@ export function planTypeScriptTarget(
     portableLr,
     runtimePlan.portable,
     runtimePlan.portableMetadata,
+    createParserKit(
+      analyzed,
+      runtimePlan,
+      options.preserveTrivia ?? true,
+      "runtime",
+    ),
     options,
   );
-  const generatedBytes = byteLength(
-    generatedSources.map((source) => source.content).join(""),
+  const generatedBytes = generatedSources.reduce(
+    (sum, source) => sum + generatedSourceBytes(source.content),
+    0,
   );
   if (
     options.generatedByteLimit !== undefined &&
@@ -99,6 +109,12 @@ export function planTypeScriptTarget(
     dfa: portableDfa,
     portable: runtimePlan.portable,
     portableMetadata: runtimePlan.portableMetadata,
+    parserKit: createParserKit(
+      analyzed,
+      runtimePlan,
+      options.preserveTrivia ?? true,
+      "runtime",
+    ),
     directory: options.directory ?? "typescript",
     generatedBytes,
     diagnostics,
@@ -116,12 +132,13 @@ export function emitTypeScriptTarget(
     plan.lr,
     plan.portable,
     plan.portableMetadata,
+    plan.parserKit,
     options,
   ).map((file) => ({
     path: `${dir}/${file.path}`,
     content: file.content,
-    kind: "source",
-    encoding: "utf-8",
+    kind: "source" as const,
+    encoding: "utf-8" as const,
   }));
 }
 
@@ -131,8 +148,12 @@ function typeScriptSources(
   _lr: LrTable,
   portable: PortableParserPlan,
   portableMetadata: PortableParserPlanMetadata,
+  parserKit: ParserKit,
   options: TypeScriptTargetOptions,
 ): Array<{ path: string; content: string }> {
+  if ((options.runtimePackaging ?? "shared") === "shared") {
+    return sharedRuntimeSources(portable, portableMetadata, parserKit, options);
+  }
   return [
     {
       path: "syntax.ts",
@@ -151,6 +172,441 @@ function typeScriptSources(
       content: typeScriptModSource(portableMetadata),
     },
   ];
+}
+
+function sharedRuntimeSources(
+  portable: PortableParserPlan,
+  portableMetadata: PortableParserPlanMetadata,
+  parserKit: ParserKit,
+  options: TypeScriptTargetOptions,
+): Array<{ path: string; content: string }> {
+  const planSources = typeScriptPlanSources(
+    portableMetadata,
+    parserKit,
+    options.planData ?? "inline",
+  );
+  return [
+    ...planSources,
+    {
+      path: "types.ts",
+      content: emitMinimalTypesFromPortablePlan(portable, portableMetadata),
+    },
+    {
+      path: "mod.ts",
+      content: sharedRuntimeModSource(portableMetadata),
+    },
+    {
+      path: "syntax.ts",
+      content: syntaxCompatibilitySource(portableMetadata),
+    },
+    {
+      path: "lexer.ts",
+      content: lexerCompatibilitySource(portableMetadata),
+    },
+    {
+      path: "parser.ts",
+      content: parserCompatibilitySource(portableMetadata),
+    },
+  ];
+}
+
+function typeScriptPlanSources(
+  portableMetadata: PortableParserPlanMetadata,
+  parserKit: ParserKit,
+  planData: NonNullable<TypeScriptTargetOptions["planData"]>,
+): Array<{ path: string; content: string }> {
+  const compactPlan = compactRuntimePlan(parserKit);
+  if (planData === "json") {
+    return [
+      {
+        path: "plan.ts",
+        content: `${
+          generatedSourceBanner({
+            parserPlanVersion: portableMetadata.version,
+            parserPlanSemantics: portableMetadata.semantics,
+          })
+        }
+import compactParserPlan from "./plan.json" with { type: "json" };
+
+export { compactParserPlan };
+`,
+      },
+      {
+        path: "plan.json",
+        content: `${JSON.stringify(compactPlan)}\n`,
+      },
+    ];
+  }
+  return [
+    {
+      path: "plan.ts",
+      content: typeScriptPlanSourceFromCompactPlan(
+        portableMetadata,
+        compactPlan,
+      ),
+    },
+  ];
+}
+
+function typeScriptPlanSourceFromCompactPlan(
+  portableMetadata: PortableParserPlanMetadata,
+  compactPlan: unknown,
+): string {
+  return `${
+    generatedSourceBanner({
+      parserPlanVersion: portableMetadata.version,
+      parserPlanSemantics: portableMetadata.semantics,
+    })
+  }
+export const compactParserPlan = ${JSON.stringify(compactPlan)} as const;
+`;
+}
+
+export function compactRuntimePlan(kit: ParserKit): unknown {
+  return {
+    m: [
+      kit.portablePlan.format,
+      kit.portablePlan.version,
+      kit.portablePlan.semantics,
+      kit.portablePlan.hash,
+      kit.runtimeImplementation?.hash ?? RUNTIME_IMPLEMENTATION_METADATA.hash,
+    ],
+    g: [
+      kit.grammar.name,
+      kit.grammar.rootRule,
+      kit.grammar.rootRuleId,
+      kit.grammar.rootNodeType,
+      kit.grammar.rules.map((rule) => [
+        rule.id,
+        rule.name,
+        rule.reachable,
+        rule.nodeType,
+      ]),
+    ],
+    t: [
+      kit.tokens.named.map((token) => [
+        token.id,
+        token.name,
+        token.kind === "token" ? 0 : 1,
+        token.priority,
+        token.declarationOrder,
+        token.reachable,
+      ]),
+      kit.tokens.literals.map((literal) => [
+        literal.id,
+        literal.value,
+        literal.sourceOrder,
+        literal.reachable,
+      ]),
+    ],
+    l: [
+      kit.lexer.defaultPreserveTrivia,
+      kit.lexer.specs.map((spec) =>
+        spec.type === "named" ? [0, spec.tokenId] : [1, spec.literalId]
+      ),
+      kit.lexer.dfa.start,
+      kit.lexer.dfa.transitions.map((row) =>
+        row.map((transition) => [
+          transition.start,
+          transition.end,
+          transition.target,
+        ])
+      ),
+      kit.lexer.dfa.accepts,
+      kit.lexer.dfa.acceptCandidates ?? [],
+    ],
+    b: [
+      kit.bnf.startNonterminal,
+      kit.bnf.rootRuleNonterminal,
+      kit.bnf.eofTerminal,
+      kit.bnf.terminals.map((terminal) => [
+        terminal.id,
+        terminal.kind === "eof" ? 0 : terminal.kind === "named" ? 1 : 2,
+        terminal.key,
+        terminal.display,
+        terminal.kind === "named"
+          ? terminal.tokenId
+          : terminal.kind === "literal"
+          ? terminal.literalId
+          : undefined,
+      ]),
+      kit.bnf.nonterminals.map((nonterminal) => [
+        nonterminal.id,
+        nonterminal.name,
+        nonterminal.ruleId,
+        nonterminal.expressionId,
+      ]),
+      kit.bnf.productions.map((production) => [
+        production.id,
+        production.lhs,
+        production.rhs.map((symbol) => [
+          symbol.kind === "terminal" ? 0 : 1,
+          symbol.id,
+        ]),
+        compactReducer(production.reducer),
+      ]),
+    ],
+    r: [
+      kit.lr.conflictProfile === "branching" ? 1 : 0,
+      kit.lr.states.length,
+      kit.lr.actions.map((entry) => [
+        entry.state,
+        entry.terminal,
+        entry.actions.map(compactAction),
+      ]),
+      kit.lr.gotos.map((entry) => [
+        entry.state,
+        entry.nonterminal,
+        entry.target,
+      ]),
+      [
+        kit.lr.stats.bnfProductions,
+        kit.lr.stats.states,
+        kit.lr.stats.coreItems,
+        kit.lr.stats.items,
+        kit.lr.stats.closureWork,
+        kit.lr.stats.actionEntries,
+        kit.lr.stats.gotoEntries,
+        kit.lr.stats.tableEntries,
+      ],
+    ],
+    f: [
+      kit.fields.rootNodeType,
+      kit.fields.rules.map((rule) => [
+        rule.ruleId,
+        rule.ruleName,
+        rule.nodeType,
+        rule.fields.map((field) => [
+          field.name,
+          field.type,
+          field.array,
+          field.nullable,
+        ]),
+      ]),
+    ],
+    d: [
+      kit.displayNames.terminals.map((entry) => [entry.id, entry.display]),
+      kit.displayNames.rules.map((entry) => [entry.id, entry.display]),
+    ],
+  };
+}
+
+function compactReducer(
+  reducer: ParserKit["bnf"]["productions"][number]["reducer"],
+) {
+  switch (reducer.kind) {
+    case "start":
+      return [0];
+    case "rule":
+      return [1, reducer.ruleId];
+    case "terminal":
+      return [2];
+    case "ruleRef":
+      return [3];
+    case "identity":
+      return [4];
+    case "sequence":
+      return [5];
+    case "optionalEmpty":
+      return [6];
+    case "optionalSome":
+      return [7];
+    case "repeatEmpty":
+      return [8];
+    case "repeatAppend":
+      return [9];
+    case "repeat1First":
+      return [10];
+    case "repeat1Append":
+      return [11];
+    case "separatedFirst":
+      return [12];
+    case "separatedAppend":
+      return [13];
+    case "field":
+      return [14, reducer.name];
+  }
+}
+
+function compactAction(
+  action: ParserKit["lr"]["actions"][number]["actions"][number],
+) {
+  if (action.kind === "shift") return [0, action.state];
+  if (action.kind === "reduce") return [1, action.production];
+  return [2];
+}
+
+function emitMinimalTypesFromPortablePlan(
+  portable: PortableParserPlan,
+  portableMetadata: PortableParserPlanMetadata,
+): string {
+  const mainTokenKinds = portable.symbols.tokens
+    .filter((token) => token.kind === "token" && token.reachable)
+    .map((token) => token.name);
+  const triviaTokenKinds = portable.symbols.tokens
+    .filter((token) => token.kind === "skip" && token.reachable)
+    .map((token) => token.name);
+  const literalKinds = portable.symbols.literals
+    .filter((literal) => literal.reachable)
+    .map((literal) => literal.value);
+  const ruleNames = portable.cst.rules.map((rule) => rule.ruleName);
+  const rootName = portable.cst.rootNodeType;
+  return `${
+    generatedSourceBanner({
+      parserPlanVersion: portableMetadata.version,
+      parserPlanSemantics: portableMetadata.semantics,
+    })
+  }
+import type {
+  EofToken,
+  ErrorToken,
+  LexDiagnostic,
+  LexOptions,
+  LexResult,
+  LiteralToken,
+  MainNamedToken,
+  ParseDiagnostic,
+  ParseOptions,
+  ParseResult,
+  Position,
+  RuleNode,
+  SourceMap,
+  Span,
+  SyntaxElement,
+  Token,
+  TriviaToken,
+} from "@mewhhaha/baba/runtime";
+
+export type NamedTokenKind = ${stringUnion(mainTokenKinds)};
+export type TriviaTokenKind = ${stringUnion(triviaTokenKinds)};
+export type LiteralKind = ${stringUnion(literalKinds)};
+export type RuleName = ${stringUnion(ruleNames)};
+
+export type {
+  EofToken,
+  ErrorToken,
+  LexDiagnostic,
+  LexOptions,
+  LexResult,
+  LiteralToken,
+  MainNamedToken,
+  ParseDiagnostic,
+  ParseOptions,
+  ParseResult,
+  Position,
+  RuleNode,
+  SourceMap,
+  Span,
+  SyntaxElement,
+  Token,
+  TriviaToken,
+};
+
+export type RootNode = RuleNode<${JSON.stringify(rootName)}>;
+`;
+}
+
+function sharedRuntimeModSource(
+  portableMetadata: PortableParserPlanMetadata,
+): string {
+  return `${
+    generatedSourceBanner({
+      parserPlanVersion: portableMetadata.version,
+      parserPlanSemantics: portableMetadata.semantics,
+    })
+  }
+import { createParser, inflateCompactRuntimePlan } from "@mewhhaha/baba/runtime";
+import { compactParserPlan } from "./plan.ts";
+
+export const parserPlan = inflateCompactRuntimePlan(compactParserPlan);
+const parser = createParser(parserPlan);
+
+export const parserPlanFormat = ${
+    JSON.stringify(portableMetadata.format)
+  } as const;
+export const parserPlanVersion = ${portableMetadata.version};
+export const parserPlanSemantics = ${
+    JSON.stringify(portableMetadata.semantics)
+  } as const;
+export const parserPlanHash = ${JSON.stringify(portableMetadata.hash)} as const;
+export const runtimeImplementationFormat = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.format)
+  } as const;
+export const runtimeImplementationVersion = ${RUNTIME_IMPLEMENTATION_METADATA.version};
+export const runtimeImplementationSemantics = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.semantics)
+  } as const;
+export const runtimeImplementationHash = ${
+    JSON.stringify(RUNTIME_IMPLEMENTATION_METADATA.hash)
+  } as const;
+
+export const lex = parser.lex;
+export const parse = parser.parse;
+export const parseTokens = parser.parseTokens;
+export const parseTokensUnchecked = parser.parseTokensUnchecked;
+export { parser };
+export { createSourceMap, positionAt } from "@mewhhaha/baba/runtime";
+export * from "./types.ts";
+export {
+  parserDiagnosticCodeAmbiguousParse,
+  parserDiagnosticCodeBranchLimit,
+  parserDiagnosticCodeInternalError,
+  parserDiagnosticCodeParseInvalidTokenStream,
+  parserDiagnosticCodeParseLexicalError,
+  parserDiagnosticCodeParseTrailingInput,
+  parserDiagnosticCodeParseUnexpectedToken,
+  parserDiagnosticCodeTraceLimit,
+  parserDiagnosticDetailKindNone,
+  parserDiagnosticDetailKindParserState,
+} from "@mewhhaha/baba/runtime";
+`;
+}
+
+function syntaxCompatibilitySource(
+  portableMetadata: PortableParserPlanMetadata,
+): string {
+  return compatibilitySource(
+    portableMetadata,
+    'export * from "./types.ts";',
+  );
+}
+
+function lexerCompatibilitySource(
+  portableMetadata: PortableParserPlanMetadata,
+): string {
+  return compatibilitySource(
+    portableMetadata,
+    'export { lex } from "./mod.ts";\nexport type { LexDiagnostic, LexOptions, LexResult, Token } from "./types.ts";',
+  );
+}
+
+function parserCompatibilitySource(
+  portableMetadata: PortableParserPlanMetadata,
+): string {
+  return compatibilitySource(
+    portableMetadata,
+    'export { parse, parseTokens, parseTokensUnchecked, parserDiagnosticCodeAmbiguousParse, parserDiagnosticCodeBranchLimit, parserDiagnosticCodeInternalError, parserDiagnosticCodeParseInvalidTokenStream, parserDiagnosticCodeParseLexicalError, parserDiagnosticCodeParseTrailingInput, parserDiagnosticCodeParseUnexpectedToken, parserDiagnosticCodeTraceLimit, parserDiagnosticDetailKindNone, parserDiagnosticDetailKindParserState } from "./mod.ts";\nexport type { ParseDiagnostic, ParseOptions, ParseResult, RootNode } from "./types.ts";',
+  );
+}
+
+function compatibilitySource(
+  portableMetadata: PortableParserPlanMetadata,
+  body: string,
+): string {
+  return `${
+    generatedSourceBanner({
+      parserPlanVersion: portableMetadata.version,
+      parserPlanSemantics: portableMetadata.semantics,
+    })
+  }
+${body}
+`;
+}
+
+function stringUnion(values: readonly string[]): string {
+  return values.length === 0
+    ? "never"
+    : values.map((value) => JSON.stringify(value)).join(" | ");
 }
 
 function typeScriptModSource(
@@ -198,6 +654,30 @@ function typescriptOptionsDiagnostics(
       backend: "typescript",
       message:
         `Invalid TypeScript output directory '${directory}'. Use a relative directory without '.', '..', empty components, absolute paths, drive prefixes, or backslashes.`,
+    });
+  }
+  if (
+    options.runtimePackaging !== undefined &&
+    options.runtimePackaging !== "shared" &&
+    options.runtimePackaging !== "legacy-generated"
+  ) {
+    diagnostics.push({
+      code: "TS_INVALID_RUNTIME_PACKAGING",
+      severity: "error",
+      backend: "typescript",
+      message: "runtimePackaging must be shared or legacy-generated.",
+    });
+  }
+  if (
+    options.planData !== undefined &&
+    options.planData !== "inline" &&
+    options.planData !== "json"
+  ) {
+    diagnostics.push({
+      code: "TS_INVALID_PLAN_DATA",
+      severity: "error",
+      backend: "typescript",
+      message: "planData must be inline or json.",
     });
   }
   if (
@@ -264,6 +744,10 @@ function parserStatsDiagnostic(
 
 function byteLength(source: string): number {
   return new TextEncoder().encode(source).length;
+}
+
+function generatedSourceBytes(source: string | Uint8Array): number {
+  return source instanceof Uint8Array ? source.length : byteLength(source);
 }
 
 function isSafeRelativeDirectory(directory: string): boolean {

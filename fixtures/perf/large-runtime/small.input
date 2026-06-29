@@ -1,0 +1,6 @@
+let retries: number = 3;
+run build(target = "cli", mode = "debug") using {
+  timeout: 30s;
+  cache: true;
+};
+route api/v1/users to users method GET cache 10s;

@@ -28,8 +28,8 @@ refcounts, function table ids, environments, and cached thunk results.
 
 All commands assume your current directory is `examples/thunkwasm`.
 
-Generate the parser artifacts, including the Wasm-backed parser used by the AOT
-compiler:
+Generate the parser artifacts, including the explicitly requested
+legacy-specialized Wasm-backed parser used by the AOT compiler:
 
 ```sh
 deno task generate
