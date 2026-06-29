@@ -1300,6 +1300,12 @@ function parseTokenList(
     const branch = pending.pop()!;
     exploredBranches++;
     if (exploredBranches > maxExploredBranches + 1) {
+      if (bestFailure !== null) {
+        emitContextualStats(contextualLexingStats, stats);
+        return failedParseResult(mode, source, tokens, [
+          bestFailure.diagnostic,
+        ]);
+      }
       return failedParseResult(
         mode,
         source,
@@ -1741,8 +1747,13 @@ function reduceProduction(
       );
     case "field": {
       const fragment = toFragment(rhs[0]);
-      fragment.fields.push({ name: reducer.name, value: fragment.value });
-      return fragment;
+      return {
+        value: fragment.value,
+        children: fragment.children,
+        fields: [{ name: reducer.name, value: fragment.value }],
+        span: fragment.span,
+        tokenRange: fragment.tokenRange,
+      };
     }
   }
   void kit;
@@ -3131,10 +3142,57 @@ function eofToken(offset: number): KitEofToken {
 function cloneBranch(branch: ParseBranch): ParseBranch {
   return {
     states: [...branch.states],
-    values: [...branch.values],
+    values: branch.values.map(cloneBranchValue),
     index: branch.index,
     tokenOverrides: new Map(branch.tokenOverrides),
   };
+}
+
+function cloneBranchValue(value: unknown): unknown {
+  if (isFragment(value)) {
+    let fragmentValue = value.value;
+    if (Array.isArray(value.value)) {
+      fragmentValue = [...value.value];
+    }
+    const fields = value.fields.map((field) => {
+      let fieldValue = field.value;
+      if (Array.isArray(field.value)) {
+        fieldValue = [...field.value];
+      }
+      return { name: field.name, value: fieldValue };
+    });
+    let span = value.span;
+    if (value.span !== null) {
+      span = { ...value.span };
+    }
+    let tokenRange = value.tokenRange;
+    if (value.tokenRange !== null) {
+      tokenRange = { ...value.tokenRange };
+    }
+    return {
+      value: fragmentValue,
+      children: [...value.children],
+      fields,
+      span,
+      tokenRange,
+    };
+  }
+  if (isEventFragment(value)) {
+    let span = value.span;
+    if (value.span !== null) {
+      span = { ...value.span };
+    }
+    let tokenRange = value.tokenRange;
+    if (value.tokenRange !== null) {
+      tokenRange = { ...value.tokenRange };
+    }
+    return {
+      events: [...value.events],
+      span,
+      tokenRange,
+    };
+  }
+  return value;
 }
 
 function betterFailure(
