@@ -21,7 +21,10 @@ import {
   type Token,
   type ValidateParseResult,
 } from "./mod.ts";
-import { decodeCombinedWasmParserPlan } from "./wasm_plan.ts";
+import {
+  decodeCombinedWasmParserPlan,
+  validateCombinedWasmParserPlan,
+} from "./wasm_plan.ts";
 import {
   createSharedGenericWasmExecutor,
   type SharedGenericWasmExecutor,
@@ -161,19 +164,20 @@ export function createParser<Root extends RuleNode = RuleNode>(
   if (options.plan === undefined) {
     throw new Error("Wasm parser creation requires parser plan bytes.");
   }
-  const decoded = decodeCombinedWasmParserPlan(options.plan);
-  const runtimePlan = inflateCompactRuntimePlan(decoded.compactRuntimePlan);
-  if (runtimePlan.portablePlan.version !== decoded.parserPlanVersion) {
-    throw new Error("Wasm parser plan version does not match runtime plan.");
-  }
+  const planBytes = new Uint8Array(options.plan);
+  const validated = validateCombinedWasmParserPlan(planBytes);
   const module = externalWasmModule(options);
   const instance = new WebAssembly.Instance(module, {});
   const wasm = instance.exports as unknown as ExternalParserWasmExports;
   validateStaticExternalWasmAbi(wasm);
-  loadExternalWasmPlan(wasm, options.plan);
-  validateLoadedExternalWasmAbi(wasm, decoded.parserPlanVersion);
-  const parser = createPlanParser<Root>(runtimePlan, options);
-  return new ExternalWasmParserInstance(runtimePlan, parser, wasm);
+  loadExternalWasmPlan(wasm, planBytes);
+  validateLoadedExternalWasmAbi(wasm, validated.parserPlanVersion);
+  return new ExternalWasmParserInstance(
+    planBytes,
+    validated.parserPlanVersion,
+    parserOptionsFromInstanceOptions(options),
+    wasm,
+  );
 }
 
 export async function createParserAsync<Root extends RuleNode = RuleNode>(
@@ -212,22 +216,23 @@ export async function createParserAsync<Root extends RuleNode = RuleNode>(
 
 class ExternalWasmParserInstance<Root extends RuleNode = RuleNode>
   implements ParserInstance<Root> {
-  readonly plan: RuntimeParserPlan;
   #disposed = false;
+  #runtimePlan: RuntimeParserPlan | undefined;
+  #parser: RuntimeParser<Root> | undefined;
 
   readonly parse: ParserInstance<Root>["parse"];
   readonly parseTokens: ParserInstance<Root>["parseTokens"];
   readonly parseTokensUnchecked: ParserInstance<Root>["parseTokensUnchecked"];
 
   constructor(
-    plan: RuntimeParserPlan,
-    private readonly parser: RuntimeParser<Root>,
+    private readonly planBytes: Uint8Array,
+    private readonly parserPlanVersionToMatch: number,
+    private readonly parserOptions: CreateParserOptions,
     private readonly wasm: ExternalParserWasmExports,
   ) {
-    this.plan = plan;
     this.parse = ((source: string, options?: ParseOptions) => {
       this.#assertLive();
-      return this.parser.parse(source, options);
+      return this.#runtimeParser().parse(source, options);
     }) as ParserInstance<Root>["parse"];
     this.parseTokens = ((
       source: string,
@@ -235,7 +240,7 @@ class ExternalWasmParserInstance<Root extends RuleNode = RuleNode>
       options?: ParseOptions,
     ) => {
       this.#assertLive();
-      return this.parser.parseTokens(source, tokens, options);
+      return this.#runtimeParser().parseTokens(source, tokens, options);
     }) as ParserInstance<Root>["parseTokens"];
     this.parseTokensUnchecked = ((
       source: string,
@@ -243,13 +248,21 @@ class ExternalWasmParserInstance<Root extends RuleNode = RuleNode>
       options?: ParseOptions,
     ) => {
       this.#assertLive();
-      return this.parser.parseTokensUnchecked(source, tokens, options);
+      return this.#runtimeParser().parseTokensUnchecked(
+        source,
+        tokens,
+        options,
+      );
     }) as ParserInstance<Root>["parseTokensUnchecked"];
+  }
+
+  get plan(): RuntimeParserPlan {
+    return this.#loadRuntimePlan();
   }
 
   lex(source: string, options?: Parameters<RuntimeParser["lex"]>[1]) {
     this.#assertLive();
-    return this.parser.lex(source, options);
+    return this.#runtimeParser().lex(source, options);
   }
 
   reset(): void {
@@ -266,6 +279,43 @@ class ExternalWasmParserInstance<Root extends RuleNode = RuleNode>
       throw new Error("Wasm parser instance is disposed.");
     }
   }
+
+  #runtimeParser(): RuntimeParser<Root> {
+    if (this.#parser !== undefined) {
+      return this.#parser;
+    }
+    const parser = createPlanParser<Root>(
+      this.#loadRuntimePlan(),
+      this.parserOptions,
+    );
+    this.#parser = parser;
+    return parser;
+  }
+
+  #loadRuntimePlan(): RuntimeParserPlan {
+    if (this.#runtimePlan !== undefined) {
+      return this.#runtimePlan;
+    }
+    const decoded = decodeCombinedWasmParserPlan(this.planBytes);
+    if (decoded.parserPlanVersion !== this.parserPlanVersionToMatch) {
+      throw new Error("Wasm parser plan version changed after load.");
+    }
+    const runtimePlan = inflateCompactRuntimePlan(decoded.compactRuntimePlan);
+    if (runtimePlan.portablePlan.version !== decoded.parserPlanVersion) {
+      throw new Error("Wasm parser plan version does not match runtime plan.");
+    }
+    this.#runtimePlan = runtimePlan;
+    return runtimePlan;
+  }
+}
+
+function parserOptionsFromInstanceOptions(
+  options: ParserInstanceOptions,
+): CreateParserOptions {
+  if (options.validate !== undefined) {
+    return { validate: options.validate };
+  }
+  return {};
 }
 
 function externalWasmModule(

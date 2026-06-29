@@ -13,6 +13,7 @@ import {
   hashRuntimeImplementationSource,
   RUNTIME_IMPLEMENTATION_METADATA,
 } from "../src/targets/runtime/implementation.ts";
+import { validateCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
 
 const STATEMENT_GRAMMAR = `
   token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -362,6 +363,16 @@ Deno.test("shared Wasm adapter validates external plan bytes", async () => {
       () => mod.createParser({ bytes, plan: corruptOffset }),
       "accepts offset is not aligned",
     );
+
+    const corruptRuntimeMetadata = new Uint8Array(plan);
+    const validated = validateCombinedWasmParserPlan(corruptRuntimeMetadata);
+    corruptRuntimeMetadata[validated.runtimeMetadataOffset] = 0;
+    const parser = mod.createParser({ bytes, plan: corruptRuntimeMetadata });
+    assertThrowsIncludes(
+      () => parser.lex("ok"),
+      "Invalid compact plan magic",
+    );
+    parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

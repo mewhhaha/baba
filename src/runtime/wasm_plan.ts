@@ -46,6 +46,14 @@ export interface DecodedWasmParserPlan {
   readonly compactRuntimePlan: unknown;
 }
 
+export interface ValidatedWasmParserPlan {
+  readonly coreByteLength: number;
+  readonly parserPlanVersion: number;
+  readonly runtimeMetadataHeaderOffset: number;
+  readonly runtimeMetadataOffset: number;
+  readonly runtimeMetadataLength: number;
+}
+
 export function encodeCombinedWasmParserPlan(
   corePlanBytes: Uint8Array,
   compactRuntimePlan: unknown,
@@ -75,6 +83,23 @@ export function encodeCombinedWasmParserPlan(
 export function decodeCombinedWasmParserPlan(
   planBytes: Uint8Array,
 ): DecodedWasmParserPlan {
+  const validated = validateCombinedWasmParserPlan(planBytes);
+  const compactRuntimePlan = decodeCompactPlanBinary(
+    planBytes.subarray(
+      validated.runtimeMetadataOffset,
+      validated.runtimeMetadataOffset + validated.runtimeMetadataLength,
+    ),
+  );
+  return {
+    coreByteLength: validated.coreByteLength,
+    parserPlanVersion: validated.parserPlanVersion,
+    compactRuntimePlan,
+  };
+}
+
+export function validateCombinedWasmParserPlan(
+  planBytes: Uint8Array,
+): ValidatedWasmParserPlan {
   const core = validateCorePlan(planBytes);
   let offset = core.coreByteLength;
   if (
@@ -83,6 +108,7 @@ export function decodeCombinedWasmParserPlan(
   ) {
     throw new Error("Wasm parser plan is missing runtime metadata.");
   }
+  const runtimeMetadataHeaderOffset = offset;
   for (let index = 0; index < WASM_PLAN_RUNTIME_SECTION_MAGIC.length; index++) {
     if (planBytes[offset + index] !== WASM_PLAN_RUNTIME_SECTION_MAGIC[index]) {
       throw new Error("Wasm parser plan runtime metadata magic is invalid.");
@@ -101,13 +127,12 @@ export function decodeCombinedWasmParserPlan(
   if (offset + compactLength !== planBytes.byteLength) {
     throw new Error("Wasm parser plan runtime metadata length is invalid.");
   }
-  const compactRuntimePlan = decodeCompactPlanBinary(
-    planBytes.subarray(offset, offset + compactLength),
-  );
   return {
     coreByteLength: core.coreByteLength,
     parserPlanVersion: core.parserPlanVersion,
-    compactRuntimePlan,
+    runtimeMetadataHeaderOffset,
+    runtimeMetadataOffset: offset,
+    runtimeMetadataLength: compactLength,
   };
 }
 
