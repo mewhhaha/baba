@@ -2374,23 +2374,30 @@ function runtimeTables(kit: ParserKit): RuntimeTables {
     }
   }
   const actions = new Map<string, readonly ParserKitLrAction[]>();
+  const expectedRows: string[][] = [];
+  const expectedSeen: Set<string>[] = [];
+  for (const _state of kit.lr.states) {
+    expectedRows.push([]);
+    expectedSeen.push(new Set());
+  }
   let hasBranchingActions = kit.lr.conflictProfile === "branching";
   for (const entry of kit.lr.actions) {
     actions.set(actionKey(entry.state, entry.terminal), entry.actions);
     if (entry.actions.length > 1) hasBranchingActions = true;
+    const terminalDisplay = kit.bnf.terminals[entry.terminal]?.display ??
+      `#${entry.terminal}`;
+    const seen = expectedSeen[entry.state];
+    const row = expectedRows[entry.state];
+    if (seen !== undefined && row !== undefined && !seen.has(terminalDisplay)) {
+      seen.add(terminalDisplay);
+      row.push(terminalDisplay);
+    }
   }
   const gotos = new Map<string, number>();
   for (const entry of kit.lr.gotos) {
     gotos.set(gotoKey(entry.state, entry.nonterminal), entry.target);
   }
-  const expected = kit.lr.states.map((state) => {
-    const row = kit.lr.actions
-      .filter((entry) => entry.state === state.id)
-      .map((entry) =>
-        kit.bnf.terminals[entry.terminal]?.display ?? `#${entry.terminal}`
-      );
-    return [...new Set(row)].sort();
-  });
+  const expected = expectedRows.map((row) => row.sort());
   const fieldSchemas: (RuntimeRuleFieldSchema | undefined)[] = [];
   const fieldIds = new Map<string, number>();
   const fieldNames: string[] = [];
