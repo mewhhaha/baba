@@ -186,7 +186,7 @@ async function checkExample(example: ExampleConfig): Promise<void> {
 }
 
 async function compileExample(example: ExampleConfig) {
-  const source = await Deno.readTextFile(`${example.dir}/grammar.ebnf`);
+  const source = await Deno.readTextFile(`${example.dir}/grammar.baba`);
   const metadata = parseMetadata(
     await Deno.readTextFile(`${example.dir}/${example.metadataPath}`),
   );

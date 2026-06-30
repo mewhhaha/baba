@@ -174,7 +174,7 @@ async function benchFixture(
   name: string,
 ): Promise<FixtureReport> {
   const fixturePath = `${fixturesRoot}/${name}`;
-  const grammarSource = await Deno.readTextFile(`${fixturePath}/grammar.ebnf`);
+  const grammarSource = await Deno.readTextFile(`${fixturePath}/grammar.baba`);
   const metadata = await readOptionalMetadata(`${fixturePath}/baba.json`);
   const smallInput = await Deno.readTextFile(`${fixturePath}/small.input`);
   const mediumInput = await Deno.readTextFile(`${fixturePath}/medium.input`);
@@ -621,7 +621,7 @@ async function discoverFixtures(fixturesRoot: string): Promise<string[]> {
     if (!entry.isDirectory) {
       continue;
     }
-    const grammarPath = `${fixturesRoot}/${entry.name}/grammar.ebnf`;
+    const grammarPath = `${fixturesRoot}/${entry.name}/grammar.baba`;
     try {
       const info = await Deno.stat(grammarPath);
       if (info.isFile) {

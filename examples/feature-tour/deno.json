@@ -3,7 +3,7 @@
     "@mewhhaha/baba/runtime/wasm": "../../src/runtime/wasm.ts"
   },
   "tasks": {
-    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name feature_tour --root module --metadata baba.json --target wasm --portability warn",
+    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.baba --out generated --name feature_tour --root module --metadata baba.json --target wasm --portability warn",
     "check": "deno check interpreter.ts",
     "run": "deno run --allow-read --allow-write interpreter.ts programs/tour.ft",
     "test": "deno task check && deno task run && deno task external",

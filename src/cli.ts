@@ -1,5 +1,5 @@
 /**
- * Command-line entrypoint for compiling explicit EBNF to Wasm lexer/parser outputs.
+ * Command-line entrypoint for compiling explicit grammar source to Wasm lexer/parser outputs.
  *
  * @module
  */
@@ -347,12 +347,12 @@ function parseArgs(args: string[]): Options {
 }
 
 function helpText(): string {
-  return `baba - compile explicit EBNF to a Wasm lexer/parser
+  return `baba - compile explicit grammar source to a Wasm lexer/parser
 
 Usage:
-  baba <grammar.ebnf> --out generated
-  baba check <grammar.ebnf>
-  baba generate <grammar.ebnf> --out generated
+  baba <grammar.baba> --out generated
+  baba check <grammar.baba>
+  baba generate <grammar.baba> --out generated
 
 Options:
   --name        Grammar/target name. Defaults to grammar
@@ -367,7 +367,7 @@ Options:
   --regex-nfa-state-limit       Maximum regex NFA state count
   --regex-dfa-state-limit       Maximum regex DFA state count
   --regex-overlap-state-limit   Maximum overlap-analysis product states
-  --grammar-expression-depth-limit  Maximum nested EBNF expression depth
+  --grammar-expression-depth-limit  Maximum nested grammar expression depth
   --parser-state-limit  Maximum portable runtime LR state count
   --parser-item-limit   Maximum total portable runtime LR item count
   --lr-closure-work-limit  Maximum portable runtime LR closure work units

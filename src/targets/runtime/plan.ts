@@ -338,7 +338,7 @@ function runtimeCapabilityDiagnostics(
       severity: "error",
       backend: config.backend,
       message:
-        `The ${config.label} target cannot generate scanner behavior for external token '${external}'. Generate only Tree-sitter output or replace the external token with an explicit portable token.`,
+        `The ${config.label} target cannot generate scanner behavior for external token '${external}'. External scanner metadata is accepted only for compatibility with older Tree-sitter grammar generation; replace the external token with an explicit portable token for Wasm output.`,
     });
   }
 
@@ -361,7 +361,7 @@ function runtimeCapabilityDiagnostics(
         severity: "warning",
         backend: config.backend,
         message:
-          `Tree-sitter shaping metadata on rule '${ruleName}' is ignored by the ${config.label} CST target.`,
+          `Legacy Tree-sitter grammar-shaping metadata on rule '${ruleName}' is ignored by the ${config.label} CST target. Baba now emits query fragments, not grammar.js.`,
       });
     }
   }
@@ -379,7 +379,7 @@ function runtimeCapabilityDiagnostics(
         severity: portability === "strict" ? "error" : "warning",
         backend: config.backend,
         message:
-          `Tree-sitter extras that are not EBNF skip declarations are ignored by the ${config.label} target.`,
+          `Legacy Tree-sitter extras that are not grammar skip declarations are ignored by the ${config.label} target. Baba now emits query fragments, not grammar.js.`,
       });
     }
   }

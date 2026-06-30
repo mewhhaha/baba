@@ -6,7 +6,7 @@ maintain a Baba parser without reading historical design material first.
 
 ## Start Here
 
-- [Grammar](grammar.md): the EBNF grammar syntax accepted by the public CLI.
+- [Grammar](grammar.md): the grammar syntax accepted by the public CLI.
 - [Metadata](metadata.md): optional `baba.json` fields for root selection,
   parser conflicts, and target behavior.
 - [Wasm Target](wasm.md): generated files and the TypeScript runtime API.
@@ -27,7 +27,7 @@ maintain a Baba parser without reading historical design material first.
 Baba currently generates a Wasm-first parser bundle:
 
 ```text
-grammar.ebnf + baba.json -> generated/wasm/
+grammar.baba + baba.json -> generated/wasm/
                          -> generated/queries/
 ```
 
@@ -58,8 +58,8 @@ The methods above are the complete generated parser instance API.
 ## Common Commands
 
 ```sh
-baba grammar.ebnf --out generated
-baba check grammar.ebnf
+baba grammar.baba --out generated
+baba check grammar.baba
 deno task check
 deno task test
 deno task bench:runtime --json runtime-bench.json

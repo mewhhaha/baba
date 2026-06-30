@@ -14,7 +14,7 @@ export function generatedSourceBanner(options: {
       : `// Parser plan semantics: ${options.parserPlanSemantics}.`,
     `// Runtime semantics version: ${RUNTIME_IMPLEMENTATION_METADATA.version}.`,
     `// Runtime semantics: ${RUNTIME_IMPLEMENTATION_METADATA.semantics}.`,
-    "// Do not edit; regenerate from grammar.ebnf.",
+    "// Do not edit; regenerate from grammar.baba.",
   ];
   return lines.join("\n");
 }

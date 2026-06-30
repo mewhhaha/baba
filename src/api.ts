@@ -8,15 +8,21 @@ import type {
   GeneratedFile,
   GenerateOptions,
   GenerateTarget,
+  GrammarDocument,
   PortabilityMode,
   ValidateOptions,
 } from "./ast.ts";
 import { parseMetadata as parseBabaMetadata } from "./metadata.ts";
 import { BabaError, formatDiagnostic, toBabaError } from "./errors.ts";
-import { parseEbnf } from "./parser.ts";
+import { parseGrammarSource } from "./grammar.ts";
 import { generatedBundle } from "./bundle.ts";
 import { analyzeGrammar } from "./compiler/analyze.ts";
-import { DEFAULT_REGEX_NESTING_LIMIT } from "./compiler/regex/limits.ts";
+import { analyzeGrammarDocumentForWasm } from "./compiler/grammar_wasm_analysis.ts";
+import type { AnalyzedGrammar } from "./compiler/ir.ts";
+import {
+  DEFAULT_REGEX_NESTING_LIMIT,
+  type RegexCompilerLimits,
+} from "./compiler/regex/limits.ts";
 import {
   emitWasmTarget,
   planWasmTarget,
@@ -27,16 +33,29 @@ import {
   planPortableRuntime,
   type RuntimeParserPlanningOptions,
 } from "./targets/runtime/plan.ts";
-import { emitTreeSitterQueryFiles } from "./targets/tree_sitter/queries.ts";
+import { emitTreeSitterQueryFiles } from "./targets/tree_sitter_queries.ts";
 export { applyBundle } from "./output.ts";
 
-/** Parses EBNF source into a grammar AST. */
-export function parseGrammar(source: string): EbnfGrammar {
-  try {
-    return parseEbnf(source);
-  } catch (error) {
-    throw toBabaError(error, "EBNF_PARSE_ERROR");
+type GrammarObject = EbnfGrammar | GrammarDocument;
+
+interface PreparedGrammar {
+  readonly grammar?: GrammarObject;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly name?: string;
+}
+
+/** Parses grammar source into a syntax document. */
+export function parseGrammar(source: string): GrammarDocument {
+  const result = parseGrammarSource(source);
+  const diagnostics = publicGrammarDiagnostics(result.diagnostics);
+  const error = diagnostics.find((diagnostic) => isError(diagnostic));
+  if (error) {
+    throw new BabaError(error);
   }
+  if (result.grammar === undefined) {
+    throw new BabaError(missingGrammarDocumentDiagnostic());
+  }
+  return result.grammar;
 }
 
 /** Parses baba metadata JSON. */
@@ -50,9 +69,17 @@ export function parseMetadata(source: string): BabaMetadata {
 
 /** Validates a grammar for the Wasm lexer/parser target. */
 export function validateGrammar(
-  grammar: EbnfGrammar,
+  grammar: GrammarObject,
   options: ValidateOptions = {},
 ): Diagnostic[] {
+  const prepared = prepareGrammarObject(grammar);
+  const diagnostics: Diagnostic[] = [...prepared.diagnostics];
+  if (hasErrors(diagnostics)) return diagnostics;
+  if (prepared.grammar === undefined) {
+    diagnostics.push(missingGrammarDocumentDiagnostic());
+    return diagnostics;
+  }
+
   let targets: GenerateTarget[];
   try {
     targets = normalizeTargets(options.targets);
@@ -62,8 +89,8 @@ export function validateGrammar(
 
   const portability = normalizePortability(options.portability, targets);
   const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
-  const analyzed = analyzeGrammar(grammar, {
-    name: "grammar",
+  const analyzed = analyzePreparedGrammar(prepared.grammar, {
+    name: selectedGrammarName(undefined, prepared.name),
     rootRule: options.rootRule,
     metadata: options.metadata,
     regexLimits: {
@@ -72,7 +99,7 @@ export function validateGrammar(
     },
     grammarExpressionDepthLimit: runtimeOptions.grammarExpressionDepthLimit,
   });
-  const diagnostics = [...analyzed.diagnostics];
+  diagnostics.push(...analyzed.diagnostics);
   if (hasErrors(diagnostics)) return diagnostics;
 
   const metadata = metadataOrEmpty(options.metadata);
@@ -103,20 +130,17 @@ export function validateGrammar(
 
 /** Compiles a grammar into a Wasm lexer/parser bundle, returning diagnostics without throwing. */
 export function compile(
-  sourceOrGrammar: string | EbnfGrammar,
+  sourceOrGrammar: string | GrammarObject,
   options: CompileOptions = {},
 ): CompileResult {
-  let grammar: EbnfGrammar;
-  try {
-    if (typeof sourceOrGrammar === "string") {
-      grammar = parseEbnf(sourceOrGrammar);
-    } else {
-      grammar = sourceOrGrammar;
-    }
-  } catch (error) {
-    return {
-      diagnostics: [toBabaError(error, "EBNF_PARSE_ERROR").toDiagnostic()],
-    };
+  const prepared = prepareGrammarInput(sourceOrGrammar);
+  const diagnostics: Diagnostic[] = [...prepared.diagnostics];
+  if (hasErrors(diagnostics)) {
+    return { diagnostics };
+  }
+  if (prepared.grammar === undefined) {
+    diagnostics.push(missingGrammarDocumentDiagnostic());
+    return { diagnostics };
   }
 
   let targets: GenerateTarget[];
@@ -128,13 +152,13 @@ export function compile(
     };
   }
 
-  const rootRuleName = selectedRootRuleName(grammar, options.rootRule);
+  const grammar = prepared.grammar;
   const metadata = metadataOrEmpty(options.metadata);
   const portability = normalizePortability(options.portability, targets);
   const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
-  const analyzed = analyzeGrammar(grammar, {
-    name: grammarName(options.name),
-    rootRule: rootRuleName,
+  const analyzed = analyzePreparedGrammar(grammar, {
+    name: selectedGrammarName(options.name, prepared.name),
+    rootRule: options.rootRule,
     metadata,
     regexLimits: {
       sourceLengthLimit: runtimeOptions.regexSourceLengthLimit,
@@ -142,7 +166,7 @@ export function compile(
     },
     grammarExpressionDepthLimit: runtimeOptions.grammarExpressionDepthLimit,
   });
-  const diagnostics: Diagnostic[] = [...analyzed.diagnostics];
+  diagnostics.push(...analyzed.diagnostics);
   let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
   const runtimePlan = planPortableRuntime(
     analyzed,
@@ -200,9 +224,9 @@ export function compile(
   }
 }
 
-/** Generates a deterministic Wasm lexer/parser bundle from EBNF source or a parsed grammar. */
+/** Generates a deterministic Wasm lexer/parser bundle from grammar source or a parsed grammar. */
 export function generate(
-  sourceOrGrammar: string | EbnfGrammar,
+  sourceOrGrammar: string | GrammarObject,
   options: GenerateOptions = {},
 ): GeneratedBundle {
   const result = compile(sourceOrGrammar, options);
@@ -233,6 +257,46 @@ function sharedRuntimePlanningOptions(
     return wasmRuntimePlanningOptions(options.wasm);
   }
   return wasmRuntimePlanningOptions({});
+}
+
+function prepareGrammarInput(
+  sourceOrGrammar: string | GrammarObject,
+): PreparedGrammar {
+  if (typeof sourceOrGrammar === "string") {
+    const parsed = parseGrammarSource(sourceOrGrammar);
+    const diagnostics: Diagnostic[] = [
+      ...publicGrammarDiagnostics(parsed.diagnostics),
+    ];
+    if (hasErrors(diagnostics)) {
+      return { diagnostics };
+    }
+    if (parsed.grammar === undefined) {
+      diagnostics.push(missingGrammarDocumentDiagnostic());
+      return { diagnostics };
+    }
+    return {
+      grammar: parsed.grammar,
+      diagnostics,
+      name: parsed.grammar.name,
+    };
+  }
+
+  return prepareGrammarObject(sourceOrGrammar);
+}
+
+function prepareGrammarObject(grammar: GrammarObject): PreparedGrammar {
+  if (isGrammarDocument(grammar)) {
+    return {
+      grammar,
+      diagnostics: [],
+      name: grammar.name,
+    };
+  }
+
+  return {
+    grammar,
+    diagnostics: [],
+  };
 }
 
 function normalizeTargets(
@@ -272,19 +336,29 @@ function metadataOrEmpty(metadata: BabaMetadata | undefined): BabaMetadata {
   return {};
 }
 
-function selectedRootRuleName(
-  grammar: EbnfGrammar,
-  rootRule: string | undefined,
+function selectedGrammarName(
+  name: string | undefined,
+  parsedName: string | undefined,
 ): string {
-  if (rootRule !== undefined) return rootRule;
-  const firstRule = grammar.rules[0];
-  if (firstRule !== undefined) return firstRule.name;
-  return "module";
+  if (name !== undefined) return name;
+  if (parsedName !== undefined) return parsedName;
+  return "grammar";
 }
 
-function grammarName(name: string | undefined): string {
-  if (name !== undefined) return name;
-  return "grammar";
+function analyzePreparedGrammar(
+  grammar: GrammarObject,
+  options: {
+    readonly name?: string;
+    readonly rootRule?: string;
+    readonly metadata?: BabaMetadata;
+    readonly regexLimits?: RegexCompilerLimits;
+    readonly grammarExpressionDepthLimit?: number;
+  },
+): AnalyzedGrammar {
+  if (isGrammarDocument(grammar)) {
+    return analyzeGrammarDocumentForWasm(grammar, options);
+  }
+  return analyzeGrammar(grammar, options);
 }
 
 function regexNestingLimit(
@@ -313,6 +387,26 @@ function isWasmPlan(
     | undefined,
 ): value is WasmPlan {
   return !!value && "wasm" in value;
+}
+
+function isGrammarDocument(
+  value: GrammarObject,
+): value is GrammarDocument {
+  return "declarations" in value;
+}
+
+function publicGrammarDiagnostics(
+  diagnostics: readonly Diagnostic[],
+): Diagnostic[] {
+  return [...diagnostics];
+}
+
+function missingGrammarDocumentDiagnostic(): Diagnostic {
+  return {
+    code: "GRAMMAR_PARSE_ERROR",
+    severity: "error",
+    message: "Grammar parser did not produce a document.",
+  };
 }
 
 function collectBundlePathDiagnostics(

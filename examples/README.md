@@ -2,8 +2,8 @@
 
 Examples are complete, reproducible projects built with Baba.
 
-These projects use the public EBNF CLI and generated Wasm parser artifacts. They
-are the runnable examples for the current package.
+These projects use the public grammar CLI and generated Wasm parser artifacts.
+They are the runnable examples for the current package.
 
 - `brainfuck/`: generates Wasm parser artifacts for a counted, parallel
   Brainfuck dialect and implements an interpreter using the generated

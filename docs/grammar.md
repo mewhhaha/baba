@@ -1,17 +1,27 @@
 # Grammar
 
-Status: current public EBNF grammar guide.
+Status: current public grammar guide.
 
-Baba grammars are explicit EBNF files. They describe concrete syntax only:
-tokens, skips, literals, rules, groups, alternatives, optionals, repetitions,
-and lists. Semantic analysis, type checking, formatting, editor projects, and
-language-specific scanner behavior stay outside the grammar.
+Baba grammars use the current source syntax. The generated Wasm target accepts
+the deterministic grammar subset that lowers to tokens, skips, literals, rules,
+groups, alternatives, optionals, repetitions, fields, and separated lists.
+Semantic analysis, type checking, formatting, editor projects, and
+language-specific scanner behavior stay outside the generated parser plan.
+
+The grammar syntax also includes contextual tokens, lexer modes, layout rules,
+module imports/extensions, sync recovery annotations, AST constructors, and
+Pratt expression islands. The parser accepts that syntax, but Wasm generation
+reports structured diagnostics for features that are not yet encoded by the
+shared runtime plan. AST constructors are accepted with a warning because
+generated Wasm bundles still expose cursor-shaped parse results.
 
 ## Tokens And Skips
 
 Declare named tokens with `token` and trivia with `skip`:
 
-```ebnf
+```baba
+grammar Tiny
+
 token ident = /[A-Za-z_][A-Za-z0-9_]*/ ;
 token integer = /[0-9]+/ ;
 skip whitespace = /[ \t\r\n]+/ ;
@@ -19,6 +29,14 @@ skip whitespace = /[ \t\r\n]+/ ;
 
 Token regexes use Baba's portable regex syntax. The analyzed regex AST is the
 source of truth for generated Wasm tokenization.
+
+Use `priority` when overlapping named tokens need a deterministic standalone
+lexer winner:
+
+```baba
+token keyword priority 10 = /let/ ;
+token ident priority 0 = /[A-Za-z_][A-Za-z0-9_]*/ ;
+```
 
 Skips are trivia. Generated runtimes can preserve trivia when requested, but
 parser rules should describe significant syntax.
@@ -29,9 +47,9 @@ the grammar and metadata make the choice deterministic.
 
 ## Rules
 
-Rules are named EBNF expressions:
+Rules are named grammar expressions:
 
-```ebnf
+```baba
 module = statement* ;
 statement = "let" name:ident "=" value:expression ";" ;
 expression = integer | ident ;
@@ -47,7 +65,7 @@ without materializing an object tree.
 
 Common expression forms:
 
-```ebnf
+```baba
 item = ident | integer ;
 block = "{" statement* "}" ;
 maybe_type = (":" ident)? ;

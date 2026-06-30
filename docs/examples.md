@@ -7,7 +7,7 @@ metadata, interpreter or runner, sample programs, and example documentation.
 Generated parser artifacts and editor query fragments are reproducible build
 outputs.
 
-The checked-in example projects use the public EBNF CLI and generated Wasm
+The checked-in example projects use the public grammar CLI and generated Wasm
 parser output. They are the runnable examples for the current package.
 
 ## Repository Policy
@@ -34,7 +34,7 @@ Generated example outputs are not published. The package includes example inputs
 and user-owned runners:
 
 - `examples/README.md`;
-- each example `README.md`, `deno.json`, `grammar.ebnf`, and `baba.json`;
+- each example `README.md`, `deno.json`, `grammar.baba`, and `baba.json`;
 - sample programs under `examples/*/programs`;
 - example runners such as `interpreter.ts`, `aot.ts`, and `bench.ts`.
 

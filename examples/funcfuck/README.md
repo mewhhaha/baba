@@ -43,7 +43,7 @@ cd examples/funcfuck
 
 Step 2: write the starting files:
 
-- `grammar.ebnf`: the Baba grammar.
+- `grammar.baba`: the Baba grammar.
 - `baba.json`: optional parser metadata.
 - `programs/*.ff`: sample source files.
 

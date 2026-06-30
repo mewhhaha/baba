@@ -3,8 +3,8 @@
 Status: current metadata guide.
 
 Baba metadata is optional JSON loaded next to a grammar or passed through the
-CLI. Metadata controls parser conflict policy, root selection, and runtime
-options without changing the grammar language itself.
+CLI. Current metadata controls parser conflict policy and editor query fragments
+without changing the grammar language itself.
 
 ## Versioning
 
@@ -27,6 +27,11 @@ The Wasm target consumes the portable parser plan. Metadata that affects parser
 semantics must lower into that plan deterministically. Metadata that requires
 external scanner behavior should produce a structured diagnostic rather than
 silently changing runtime semantics.
+
+Legacy Tree-sitter grammar-generation fields such as `word`, `extras`,
+`externals`, and rule-shaping metadata may still parse for compatibility with
+older metadata files, but Baba no longer generates `grammar.js`. The current
+Tree-sitter-related output is query fragments under `queries/generated-*.scm`.
 
 ### Parser Conflict Policy
 

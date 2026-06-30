@@ -279,7 +279,7 @@ export function analyzeGrammar(
   };
 }
 
-function collectGrammarHardeningDiagnostics(
+export function collectGrammarHardeningDiagnostics(
   rules: readonly AnalyzedRule[],
   reachableRules: ReadonlySet<RuleId>,
   rootRule: RuleId,
@@ -542,7 +542,7 @@ function stronglyConnectedComponents(
   return components;
 }
 
-function parseTokenRegex(
+export function parseTokenRegex(
   patternSource: string,
   tokenName: string,
   span: Diagnostic["span"],

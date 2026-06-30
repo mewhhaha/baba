@@ -12,15 +12,11 @@ import {
 import { portablePlanStatistics } from "../src/compiler/portable_plan/statistics.ts";
 import { validatePortableParserPlan } from "../src/compiler/portable_plan/validate.ts";
 import type { PortableParserPlan } from "../src/compiler/portable_plan/plan.ts";
-import {
-  assert,
-  assertEquals,
-  assertIncludes,
-  parseGrammar,
-} from "./helpers.ts";
+import { assert, assertEquals, assertIncludes } from "./helpers.ts";
+import { parseEbnf } from "../src/parser.ts";
 
 function portablePlanFor(source: string): PortableParserPlan {
-  const grammar = parseGrammar(source);
+  const grammar = parseEbnf(source);
   const analyzed = analyzeGrammar(grammar, { name: "portable_fixture" });
   assertEquals(analyzed.diagnostics.length, 0);
   const result = buildPortableParserPlan(analyzed);

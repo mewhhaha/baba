@@ -1,11 +1,11 @@
+import { parseGrammarSource } from "../src/grammar.ts";
+import { analyzeGrammar } from "../src/compiler/grammar_analysis.ts";
+import { buildGrammarCstSchema } from "../src/compiler/grammar_cst.ts";
+import { buildGrammarLexerPlan } from "../src/compiler/grammar_lexer.ts";
 import {
-  analyzeGrammarV2,
-  buildGrammarV2CstSchema,
-  buildGrammarV2LexerPlan,
-  createGrammarV2IncrementalParser,
-  type GrammarV2TextEdit,
-  parseGrammarV2,
-} from "../src/mod.ts";
+  createGrammarIncrementalParser,
+  type GrammarTextEdit,
+} from "../src/compiler/grammar_incremental.ts";
 
 interface IncrementalBenchReport {
   readonly format: "baba-incremental-parser-benchmark";
@@ -41,7 +41,7 @@ if (options.jsonStdout) {
 }
 
 function runBench(): IncrementalBenchReport {
-  const parsed = parseGrammarV2(`
+  const parsed = parseGrammarSource(`
     grammar IncrementalBench
 
     token Let = "let" ;
@@ -62,10 +62,10 @@ function runBench(): IncrementalBenchReport {
   if (parsed.grammar === undefined) {
     throw new Error("Incremental benchmark grammar did not parse.");
   }
-  const analyzed = analyzeGrammarV2(parsed.grammar);
-  const schema = buildGrammarV2CstSchema(analyzed);
-  const lexer = buildGrammarV2LexerPlan(analyzed);
-  const parser = createGrammarV2IncrementalParser(schema, lexer);
+  const analyzed = analyzeGrammar(parsed.grammar);
+  const schema = buildGrammarCstSchema(analyzed);
+  const lexer = buildGrammarLexerPlan(analyzed);
+  const parser = createGrammarIncrementalParser(schema, lexer);
   const source = [
     "let alpha = 1 + 2;",
     "let beta = alpha + 3;",
@@ -98,12 +98,12 @@ function runBench(): IncrementalBenchReport {
 }
 
 function runCase(
-  parser: ReturnType<typeof createGrammarV2IncrementalParser>,
+  parser: ReturnType<typeof createGrammarIncrementalParser>,
   initial: ReturnType<
-    ReturnType<typeof createGrammarV2IncrementalParser>["parseInitial"]
+    ReturnType<typeof createGrammarIncrementalParser>["parseInitial"]
   >,
   name: string,
-  edits: readonly GrammarV2TextEdit[],
+  edits: readonly GrammarTextEdit[],
 ): IncrementalBenchCase {
   const start = performance.now();
   const result = parser.applyEdits(initial, edits);

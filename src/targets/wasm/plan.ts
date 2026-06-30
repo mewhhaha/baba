@@ -30,11 +30,6 @@ import type {
   PortableParserPlanMetadata,
 } from "../runtime/portable_plan.ts";
 import {
-  portablePlanToBnf,
-  portablePlanToDfa,
-  portablePlanToLrTable,
-} from "../../compiler/portable_plan/adapters.ts";
-import {
   WASM_ABI_VERSION,
   WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
   WASM_CURSOR_FIELD_RECORD_I32_COUNT,
@@ -106,9 +101,9 @@ export function planWasmTarget(
   if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
     return { diagnostics };
   }
-  const portableBnf = portablePlanToBnf(runtimePlan.portable);
-  const portableLr = portablePlanToLrTable(runtimePlan.portable);
-  const portableDfa = portablePlanToDfa(runtimePlan.portable);
+  const portableBnf = runtimePlan.bnf;
+  const portableLr = runtimePlan.lr;
+  const portableDfa = runtimePlan.dfa;
   let preserveTrivia = true;
   if (options.preserveTrivia !== undefined) {
     preserveTrivia = options.preserveTrivia;
@@ -576,10 +571,10 @@ import type { CursorParseResult, LexOptions, LexTapeResult, ParseOptions, RootCu
 import {
   createParser as createSharedParser,
   createParserAsync as createSharedParserAsync,
-} from "@mewhhaha/baba/runtime/wasm";
+} from "@mewhhaha/baba/runtime/generated-wasm";
 import type {
   ParserInstanceOptions as SharedParserInstanceOptions,
-} from "@mewhhaha/baba/runtime/wasm";
+} from "@mewhhaha/baba/runtime/generated-wasm";
 
 export * from "./syntax.ts";
 export {
@@ -610,7 +605,7 @@ export {
   wasmSpanUnit,
   wasmTargetKind,
   wasmTokenRecordI32Count,
-} from "@mewhhaha/baba/runtime/wasm";
+} from "@mewhhaha/baba/runtime/generated-wasm";
 
 export interface ParserInstanceOptions extends SharedParserInstanceOptions {
   plan: Uint8Array;

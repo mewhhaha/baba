@@ -27,7 +27,7 @@ export function parseMetadata(source: string): BabaMetadata {
     throw new BabaError(
       {
         code: "METADATA_JSON_ERROR",
-        message: `Invalid tree-sitter metadata JSON: ${message}`,
+        message: `Invalid Baba metadata JSON: ${message}`,
         path: "metadata",
       },
       { cause: error },

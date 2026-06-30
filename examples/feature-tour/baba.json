@@ -3,7 +3,7 @@
   "word": "IDENT",
   "parser": {
     "resolutions": [
-      { "conflict": "c_c0b22aed305af8bf", "prefer": "shift" }
+      { "conflict": "c_e376f2f933bca747", "prefer": "shift" }
     ]
   },
   "queries": {

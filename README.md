@@ -1,12 +1,12 @@
 # baba
 
-Baba compiles an explicit EBNF grammar plus optional metadata into a usable Wasm
+Baba compiles explicit grammar source plus optional metadata into a usable Wasm
 lexer/parser bundle.
 
 The public flow is intentionally small:
 
 ```text
-grammar.ebnf + baba.json -> generated/wasm parser and lexer
+grammar.baba + baba.json -> generated/wasm parser and lexer
                          -> generated/queries editor query fragments
 ```
 
@@ -19,7 +19,9 @@ prebuilt engine.
 
 Create a grammar:
 
-```ebnf
+```baba
+grammar Tiny
+
 token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
 token INT = /[0-9]+/ ;
 skip WS = /[ \t\r\n]+/ ;
@@ -31,7 +33,7 @@ statement = "let" name:IDENT "=" value:INT ";" ;
 Generate the parser:
 
 ```sh
-deno run --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.ebnf \
+deno run --allow-read --allow-write jsr:@mewhhaha/baba/cli grammar.baba \
   --out generated
 ```
 
@@ -89,14 +91,15 @@ import {
   parseMetadata,
 } from "jsr:@mewhhaha/baba";
 
-const grammar = parseGrammar(await Deno.readTextFile("grammar.ebnf"));
+const grammar = parseGrammar(await Deno.readTextFile("grammar.baba"));
 const metadata = parseMetadata(await Deno.readTextFile("baba.json"));
 const bundle = generate(grammar, { name: "tiny", metadata });
 await applyBundle(bundle, { root: "generated" });
 ```
 
-`compile()` returns diagnostics instead of throwing. `generate()` throws a
-`BabaError` when diagnostics contain an error.
+`parseGrammar()` returns a grammar document. `compile()` accepts source text or
+that parsed document and returns diagnostics instead of throwing. `generate()`
+throws a `BabaError` when diagnostics contain an error.
 
 ## Editor Queries
 
@@ -148,9 +151,9 @@ metadata entries.
 ## CLI
 
 ```text
-baba <grammar.ebnf> --out generated
-baba check <grammar.ebnf>
-baba generate <grammar.ebnf> --out generated
+baba <grammar.baba> --out generated
+baba check <grammar.baba>
+baba generate <grammar.baba> --out generated
 ```
 
 Useful options:

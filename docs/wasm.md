@@ -28,14 +28,19 @@ authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded
 in the Baba package; grammar generation does not invoke Cargo or require Rust on
 the user's machine. `parser.plan` contains the generated DFA/LR core data plus
 the shared TypeScript runtime metadata used for token, diagnostic, and cursor
-access. `mod.ts` is a thin wrapper around `@mewhhaha/baba/runtime/wasm`;
-`syntax.ts` is the typed token/cursor surface and does not contain runtime
-tables.
+access. `mod.ts` is a thin wrapper around
+`@mewhhaha/baba/runtime/generated-wasm`; `syntax.ts` is the typed token/cursor
+surface and does not contain runtime tables.
+
+The Rust grammar frontend lives under `src/compiler/grammar_rs` and is embedded
+as `src/grammar_parser_wasm_bytes.ts`. It is checked with
+`deno task check:grammar-rs`; grammar generation uses the embedded bytes and
+does not invoke Cargo.
 
 ## Generation
 
 ```sh
-baba grammar.ebnf --out generated
+baba grammar.baba --out generated
 ```
 
 This writes `parser.wasm` and `parser.plan` separately. Callers pass module

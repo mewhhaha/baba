@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 4.0.0
+
+### Added
+
+- Added a Rust/Wasm grammar parser frontend with embedded parser bytes and a
+  drift-checkable build task.
+
+### Changed
+
+- Made `.baba` grammar sources canonical and changed `parseGrammar()` to return
+  the current grammar document shape directly.
+- Routed Wasm generation through the current grammar analysis instead of an EBNF
+  compatibility lowering step.
+- Removed versioned grammar-stack names from source files, tests, helper APIs,
+  and grammar diagnostics.
+- Split the generated Wasm runtime bytes from the hand-authored runtime facade.
+
+### Removed
+
+- Removed the old TypeScript grammar parser source and syntax-level EBNF
+  lowering adapter.
+- Replaced tracked example and fixture `grammar.ebnf` files with `grammar.baba`
+  sources.
+
 ## 3.1.0
 
 ### Added

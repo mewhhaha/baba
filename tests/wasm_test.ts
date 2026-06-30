@@ -7,6 +7,7 @@ import {
   assertThrowsIncludes,
   compile,
   denoCheck,
+  parsePublicGrammar,
 } from "./helpers.ts";
 import {
   hashRuntimeImplementationManifest,
@@ -190,6 +191,36 @@ Deno.test("Wasm target validates generated size and parser stats options", () =>
   );
 });
 
+Deno.test("public grammar parser returns documents accepted by Wasm generation", () => {
+  const grammar = parsePublicGrammar(`
+    grammar Tiny
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = name:IDENT ;
+  `);
+  assertEquals(grammar.name, "Tiny");
+
+  const result = compile(grammar, { targets: ["wasm"] });
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+});
+
+Deno.test("grammar features outside the Wasm subset report explicit diagnostics", () => {
+  const result = compile(`
+    grammar Expressions
+    token INT = /[0-9]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    expr = INT {
+      infix left 10 "+"
+    } ;
+  `);
+  assertEquals(result.bundle, undefined);
+  assertEquals(
+    result.diagnostics[0].code,
+    "GRAMMAR_UNSUPPORTED_EXPRESSION_ISLAND",
+  );
+});
+
 Deno.test("Wasm target emits minimal external artifacts", async () => {
   const bundle = wasmBundle(`module = "ok" ;`);
   assertEquals(
@@ -197,7 +228,7 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
     "wasm/abi.json,wasm/manifest.json,wasm/mod.ts,wasm/parser.plan,wasm/parser.wasm,wasm/syntax.ts",
   );
   const modSource = textFile(bundle, "wasm/mod.ts");
-  assertIncludes(modSource, "@mewhhaha/baba/runtime/wasm");
+  assertIncludes(modSource, "@mewhhaha/baba/runtime/generated-wasm");
   assertNotIncludes(modSource, "parserTraceRuntimeBytes");
   assertNotIncludes(modSource, "wasmBytes");
   const abi = JSON.parse(textFile(bundle, "wasm/abi.json")) as {
@@ -253,7 +284,7 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
   }
 });
 
-Deno.test("Wasm target emits Tree-sitter query fragments", () => {
+Deno.test("Wasm target emits Tree-sitter query fragments from metadata", () => {
   const metadata: BabaMetadata = {
     version: 2,
     queries: {
@@ -266,27 +297,49 @@ Deno.test("Wasm target emits Tree-sitter query fragments", () => {
       locals: [
         { node: "IDENT", capture: "local.definition" },
       ],
+      folds: [
+        { node: "group", capture: "fold" },
+      ],
+      indents: [
+        { node: "group", capture: "indent.begin" },
+      ],
+      tags: [
+        { node: "variable_binding", capture: "tag.definition" },
+      ],
+      textobjects: [
+        { node: "variable_binding", capture: "statement.outer" },
+      ],
       rainbows: {
         brackets: ["(", ")"],
       },
+      injections: [
+        { node: "STRING", language: "markdown" },
+      ],
     },
   };
   const bundle = wasmBundle(
     `
       token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
       token INT = /[0-9]+/ ;
+      token STRING = /"[^"]*"/ ;
       skip WS = /[ \\t\\r\\n]+/ ;
 
-      module = variable_binding | group ;
+      module = variable_binding | group | doc ;
       variable_binding = "let" name:IDENT "=" value:INT ";" ;
       group = "(" item:IDENT ")" ;
+      doc = text:STRING ;
     `,
     metadata,
   );
   const paths = bundle.files.map((file) => file.path).join(",");
   assertIncludes(paths, "queries/generated-highlights.scm");
   assertIncludes(paths, "queries/generated-locals.scm");
+  assertIncludes(paths, "queries/generated-folds.scm");
+  assertIncludes(paths, "queries/generated-indents.scm");
+  assertIncludes(paths, "queries/generated-tags.scm");
+  assertIncludes(paths, "queries/generated-textobjects.scm");
   assertIncludes(paths, "queries/generated-rainbows.scm");
+  assertIncludes(paths, "queries/generated-injections.scm");
   assertIncludes(paths, "wasm/parser.wasm");
 
   const highlights = textFile(bundle, "queries/generated-highlights.scm");
@@ -298,14 +351,30 @@ Deno.test("Wasm target emits Tree-sitter query fragments", () => {
   const locals = textFile(bundle, "queries/generated-locals.scm");
   assertIncludes(locals, "(IDENT) @local.definition");
 
+  const folds = textFile(bundle, "queries/generated-folds.scm");
+  assertIncludes(folds, "(group) @fold");
+
+  const indents = textFile(bundle, "queries/generated-indents.scm");
+  assertIncludes(indents, "(group) @indent.begin");
+
+  const tags = textFile(bundle, "queries/generated-tags.scm");
+  assertIncludes(tags, "(variable_binding) @tag.definition");
+
+  const textobjects = textFile(bundle, "queries/generated-textobjects.scm");
+  assertIncludes(textobjects, "(variable_binding) @statement.outer");
+
   const rainbows = textFile(bundle, "queries/generated-rainbows.scm");
   assertIncludes(rainbows, '"("');
   assertIncludes(rainbows, '")"');
   assertIncludes(rainbows, "@rainbow.bracket");
+
+  const injections = textFile(bundle, "queries/generated-injections.scm");
+  assertIncludes(injections, "((STRING) @injection.content");
+  assertIncludes(injections, '#set! injection.language "markdown"');
 });
 
 Deno.test("runtime manifest contains only active shared sources", async () => {
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 33);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 34);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
@@ -341,6 +410,7 @@ Deno.test("runtime manifest contains only active shared sources", async () => {
       "wasm-core-runtime-rust-source",
       "wasm-core-runtime-embedded-bytes",
       "shared-parser-plan-adapter-api",
+      "generated-wasm-parser-loader",
       "shared-wasm-runtime-api",
       "shared-generic-wasm-executor",
       "shared-runtime-parser-plan",
@@ -469,6 +539,10 @@ Deno.test("package exports expose only current runtime entrypoint", async () => 
   assert(config.exports, "Expected deno.json exports.");
   assertEquals(config.exports["./runtime"], undefined);
   assertEquals(config.exports["./runtime/wasm"], "./src/runtime/wasm.ts");
+  assertEquals(
+    config.exports["./runtime/generated-wasm"],
+    "./src/runtime/generated_wasm.ts",
+  );
 });
 
 Deno.test("shared Wasm adapter preserves lexer and parser behavior", async () => {

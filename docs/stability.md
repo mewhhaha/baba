@@ -12,6 +12,7 @@ The exported modules in `deno.json` are the stable public library surface:
 
 - `@mewhhaha/baba`;
 - `@mewhhaha/baba/cli`;
+- `@mewhhaha/baba/runtime/generated-wasm`;
 - `@mewhhaha/baba/runtime/wasm`.
 
 Patch and minor releases may add options, result fields, diagnostics, helper
@@ -19,9 +20,9 @@ exports, and target capabilities. Removing exports, changing accepted option
 meaning, or changing successful result shapes requires a documented breaking
 release.
 
-## EBNF Syntax
+## Grammar Syntax
 
-The EBNF grammar language is stable for accepted constructs. New syntax may be
+The grammar source language is stable for accepted constructs. New syntax may be
 added when it does not change the meaning of existing grammars. Tightening an
 ambiguous or unsafe construct is allowed only when it produces a structured
 diagnostic and is documented as a semantic correction.
@@ -66,8 +67,10 @@ layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.
 
 The TypeScript Wasm adapter API is stable at the generated module entrypoint.
-Low-level helper names and embedded byte-array layout are implementation
-details.
+Generated modules import their loader from
+`@mewhhaha/baba/runtime/generated-wasm`. The older `@mewhhaha/baba/runtime/wasm`
+export remains a compatibility facade for shared/auto runtime helpers. Low-level
+helper names and embedded byte-array layout are implementation details.
 
 ## Internal BRL
 

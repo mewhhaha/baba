@@ -1,4 +1,4 @@
-/** A parsed EBNF grammar with terminal declarations and grammar rules. */
+/** Legacy compatibility grammar used by the current runtime planner. */
 export interface EbnfGrammar {
   /** Explicit token and skip declarations from the grammar header. */
   tokens: EbnfTokenDeclaration[];
@@ -44,7 +44,7 @@ export interface EbnfRule {
   span: SourceSpan;
 }
 
-/** An EBNF expression node. */
+/** Legacy compatibility expression node used by the current runtime planner. */
 export type EbnfExpression =
   | {
     kind: "field";
@@ -100,7 +100,7 @@ export interface Diagnostic {
   severity?: "error" | "warning" | "information";
   /** Backend that produced the diagnostic, when backend-specific. */
   backend?: "tree-sitter" | string;
-  /** Optional EBNF source span. */
+  /** Optional grammar source span. */
   span?: SourceSpan;
   /** Optional metadata object path. */
   path?: string;
@@ -113,159 +113,160 @@ export interface Diagnostic {
   }[];
 }
 
-/** Result returned by the grammar v2 bootstrap parser. */
-export interface GrammarV2ParseResult {
+/** Result returned by the grammar parser. */
+export interface GrammarParseResult {
   /** Parsed grammar when enough structure was present to build one. */
-  grammar?: GrammarV2Document;
+  grammar?: GrammarDocument;
   /** Structured syntax diagnostics collected without semantic analysis. */
   diagnostics: Diagnostic[];
 }
 
-/** A parsed grammar v2 source document. */
-export interface GrammarV2Document {
+/** A parsed grammar source document. */
+export interface GrammarDocument {
   /** Optional `grammar Name` header. */
   name?: string;
   /** Top-level declarations in source order. */
-  declarations: GrammarV2Declaration[];
+  declarations: GrammarDeclaration[];
   /** Source span covering the complete grammar source. */
   span: SourceSpan;
 }
 
-/** Top-level grammar v2 declaration. */
-export type GrammarV2Declaration =
-  | GrammarV2TokenDeclaration
-  | GrammarV2ModeDeclaration
-  | GrammarV2LayoutDeclaration
-  | GrammarV2ExportDeclaration
-  | GrammarV2ImportDeclaration
-  | GrammarV2ModuleDeclaration
-  | GrammarV2ExtensionDeclaration
-  | GrammarV2Rule;
+/** Top-level grammar declaration. */
+export type GrammarDeclaration =
+  | GrammarTokenDeclaration
+  | GrammarModeDeclaration
+  | GrammarLayoutDeclaration
+  | GrammarExportDeclaration
+  | GrammarImportDeclaration
+  | GrammarModuleDeclaration
+  | GrammarExtensionDeclaration
+  | GrammarRule;
 
-/** Token, skip, or contextual keyword declaration in grammar v2. */
-export interface GrammarV2TokenDeclaration {
+/** Token, skip, or contextual keyword declaration. */
+export interface GrammarTokenDeclaration {
   kind: "token" | "skip" | "contextual";
   name: string;
-  pattern: GrammarV2TerminalPattern;
+  pattern: GrammarTerminalPattern;
+  priority?: number;
   channel?: string;
   mode?: string;
-  transition?: GrammarV2ModeTransition;
+  transition?: GrammarModeTransition;
   span: SourceSpan;
 }
 
 /** Lexer-mode transition attached to a terminal declaration. */
-export type GrammarV2ModeTransition =
+export type GrammarModeTransition =
   | { kind: "push"; mode: string; span: SourceSpan }
   | { kind: "mode"; mode: string; span: SourceSpan }
   | { kind: "pop"; span: SourceSpan };
 
-/** Lexer mode declaration in grammar v2. */
-export interface GrammarV2ModeDeclaration {
+/** Lexer mode declaration. */
+export interface GrammarModeDeclaration {
   kind: "mode";
   name: string;
-  declarations: GrammarV2TokenDeclaration[];
+  declarations: GrammarTokenDeclaration[];
   span: SourceSpan;
 }
 
-/** Optional layout rule declaration in grammar v2. */
-export interface GrammarV2LayoutDeclaration {
+/** Optional layout rule declaration. */
+export interface GrammarLayoutDeclaration {
   kind: "layout";
   name: string;
-  expression: GrammarV2Expression;
+  expression: GrammarExpression;
   span: SourceSpan;
 }
 
 /** A literal or regex terminal pattern. */
-export type GrammarV2TerminalPattern =
+export type GrammarTerminalPattern =
   | { kind: "regex"; pattern: string; span: SourceSpan }
   | { kind: "literal"; value: string; span: SourceSpan };
 
 /** Exported grammar symbol declaration. */
-export interface GrammarV2ExportDeclaration {
+export interface GrammarExportDeclaration {
   kind: "export";
   name: string;
   span: SourceSpan;
 }
 
 /** Imported grammar module declaration. */
-export interface GrammarV2ImportDeclaration {
+export interface GrammarImportDeclaration {
   kind: "import";
   source: string;
   span: SourceSpan;
 }
 
 /** Named grammar module declaration. */
-export interface GrammarV2ModuleDeclaration {
+export interface GrammarModuleDeclaration {
   kind: "module";
   name: string;
   span: SourceSpan;
 }
 
-/** Extension declaration for grammar v2 extension points. */
-export interface GrammarV2ExtensionDeclaration {
+/** Extension declaration for grammar extension points. */
+export interface GrammarExtensionDeclaration {
   kind: "extend";
   target: string;
-  expression: GrammarV2Expression;
+  expression: GrammarExpression;
   span: SourceSpan;
 }
 
-/** Grammar v2 parser rule. */
-export interface GrammarV2Rule {
+/** Parser rule declaration. */
+export interface GrammarRule {
   kind: "rule";
   name: string;
-  annotations: GrammarV2RuleAnnotation[];
-  expression: GrammarV2Expression;
+  annotations: GrammarRuleAnnotation[];
+  expression: GrammarExpression;
   span: SourceSpan;
 }
 
 /** Rule-level syntax annotation. */
-export interface GrammarV2RuleAnnotation {
+export interface GrammarRuleAnnotation {
   kind: "sync";
-  expression: GrammarV2Expression;
+  expression: GrammarExpression;
   span: SourceSpan;
 }
 
-/** Grammar v2 expression node. */
-export type GrammarV2Expression =
+/** Grammar expression node. */
+export type GrammarExpression =
   | {
     kind: "field";
     name: string;
-    expression: GrammarV2Expression;
+    expression: GrammarExpression;
     span: SourceSpan;
   }
   | { kind: "ref"; name: string; span: SourceSpan }
   | { kind: "literal"; value: string; span: SourceSpan }
-  | { kind: "sequence"; items: GrammarV2Expression[]; span: SourceSpan }
-  | { kind: "choice"; options: GrammarV2Expression[]; span: SourceSpan }
-  | { kind: "optional"; expression: GrammarV2Expression; span: SourceSpan }
-  | { kind: "repeat"; expression: GrammarV2Expression; span: SourceSpan }
-  | { kind: "repeat1"; expression: GrammarV2Expression; span: SourceSpan }
+  | { kind: "sequence"; items: GrammarExpression[]; span: SourceSpan }
+  | { kind: "choice"; options: GrammarExpression[]; span: SourceSpan }
+  | { kind: "optional"; expression: GrammarExpression; span: SourceSpan }
+  | { kind: "repeat"; expression: GrammarExpression; span: SourceSpan }
+  | { kind: "repeat1"; expression: GrammarExpression; span: SourceSpan }
   | {
     kind: "separated";
-    item: GrammarV2Expression;
-    separator: GrammarV2Expression;
+    item: GrammarExpression;
+    separator: GrammarExpression;
     span: SourceSpan;
   }
   | {
     kind: "constructor";
-    expression: GrammarV2Expression;
+    expression: GrammarExpression;
     name: string;
     arguments: string[];
     span: SourceSpan;
   }
   | {
     kind: "expressionIsland";
-    atom: GrammarV2Expression;
-    operators: GrammarV2ExpressionOperator[];
+    atom: GrammarExpression;
+    operators: GrammarExpressionOperator[];
     span: SourceSpan;
   };
 
 /** Expression-island operator declaration. */
-export interface GrammarV2ExpressionOperator {
+export interface GrammarExpressionOperator {
   kind: "infix" | "prefix" | "postfix";
   associativity?: "left" | "right" | "none";
   precedence: number;
-  token: GrammarV2TerminalPattern;
+  token: GrammarTerminalPattern;
   span: SourceSpan;
 }
 
@@ -297,7 +298,7 @@ export interface PortableRuntimePlanningOptions {
   regexOverlapStateLimit?: number;
   /** Maximum token/literal pairs compared during overlap analysis. Defaults to unlimited. */
   regexOverlapPairLimit?: number;
-  /** Maximum nested EBNF expression depth during grammar analysis. Defaults to 1,024. */
+  /** Maximum nested grammar expression depth during grammar analysis. Defaults to 1,024. */
   grammarExpressionDepthLimit?: number;
   /** Maximum canonical LR(1) state count. Defaults to 20,000. */
   parserStateLimit?: number;

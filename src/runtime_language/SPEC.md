@@ -108,7 +108,7 @@ operation name may appear in generic BRL semantics or IR.
 ## Stage-0 Bootstrap
 
 The v1 source parser is handwritten and checked in under `src/runtime_language`.
-`grammar.ebnf` is the normative grammar for later generated bootstrap work; the
+`grammar.baba` is the normative grammar for later generated bootstrap work; the
 handwritten parser is the Stage-0 implementation. Drift is checked by
 `deno task bootstrap:check`, which verifies the runtime-language compiler
 source manifest and the checked TypeScript/Wasm helper artifact manifest before

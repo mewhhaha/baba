@@ -4,6 +4,7 @@ Run these checks before publishing:
 
 ```sh
 deno task build:wasm-engine:check
+deno task build:grammar-parser:check
 deno task check
 deno task test
 deno task test:fuzz -- --seed 12345 --max-time-ms 30000 --artifacts tmp/fuzz-artifacts

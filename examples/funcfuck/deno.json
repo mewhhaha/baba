@@ -3,7 +3,7 @@
     "@mewhhaha/baba/runtime/wasm": "../../src/runtime/wasm.ts"
   },
   "tasks": {
-    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.ebnf --out generated --name funcfuck --root module --metadata baba.json --target wasm",
+    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.baba --out generated --name funcfuck --root module --metadata baba.json --target wasm",
     "check": "deno check interpreter.ts",
     "run": "deno task pipeline",
     "test": "deno task check && deno task pipeline && deno task fanout && deno task window",

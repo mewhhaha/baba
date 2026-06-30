@@ -11,7 +11,7 @@ const here = new URL(".", import.meta.url);
 const sourcePath = Deno.args.find((arg) => !arg.startsWith("--")) ??
   "programs/tour.ft";
 const source = await Deno.readTextFile(new URL(sourcePath, here));
-const grammar = await Deno.readTextFile(new URL("grammar.ebnf", here));
+const grammar = await Deno.readTextFile(new URL("grammar.baba", here));
 const metadataSource = await Deno.readTextFile(new URL("baba.json", here));
 const metadata = parseMetadata(metadataSource);
 const wasmBytes = await Deno.readFile(
@@ -198,7 +198,7 @@ function contextualValueKind(
     throw new Error("Expected contextual item.");
   }
   const contextual = childRule(item);
-  if (contextual.name !== "contextual") {
+  if (contextual.name !== "contextual_item") {
     throw new Error(`Expected contextual item, got ${contextual.name}.`);
   }
   const value = contextual.field("value");
