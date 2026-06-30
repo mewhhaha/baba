@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 3.1.0
+
+### Added
+
+- Restored generated Tree-sitter query fragments alongside the Wasm parser
+  bundle. Non-empty `queries/generated-*.scm` files are emitted for highlights,
+  locals, folds, indents, tags, textobjects, rainbows, and injections.
+
+### Changed
+
+- Documented generated editor query output in the README and Wasm docs.
+
+### Removed
+
+- Removed stale bundle helpers for the old generated `grammar.js` Tree-sitter
+  target.
+
 ## 3.0.0
 
 ### Added
