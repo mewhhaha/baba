@@ -300,7 +300,7 @@ function wasmAbiDescriptor(): unknown {
         tokenRecord: {
           i32Count: WASM_TOKEN_RECORD_I32_COUNT,
           bytes: WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES,
-          fields: ["specIndex", "start", "end"],
+          fields: ["specIndex", "start", "end", "acceptingState"],
         },
       },
       exports: [
@@ -317,6 +317,11 @@ function wasmAbiDescriptor(): unknown {
           name: "parser_action",
           params: ["state", "terminal"],
           result: "encodedAction",
+        },
+        {
+          name: "parser_actions",
+          params: ["state", "terminal", "actionPtr", "actionCapacity"],
+          result: "actionCountOrMinusOne",
         },
         {
           name: "parser_goto",

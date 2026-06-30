@@ -14,6 +14,7 @@ import {
   RUNTIME_IMPLEMENTATION_METADATA,
 } from "../src/targets/runtime/implementation.ts";
 import { validateCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
+import type { BabaMetadata } from "../src/ast.ts";
 
 const STATEMENT_GRAMMAR = `
   token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -306,6 +307,68 @@ Deno.test("shared Wasm adapter preserves lexer and parser behavior", async () =>
   }
 });
 
+Deno.test("shared Wasm adapter resolves contextual token candidates from Wasm lex records", async () => {
+  const grammar = `
+    token IDENT = /[a-z]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = statement* ;
+    statement = "if" value:IDENT ";" | value:IDENT ";" ;
+  `;
+  const { dir, mod, bytes, plan } = await materialize(grammar);
+  try {
+    const parser = mod.createParser({ bytes, plan });
+    let stats: unknown;
+    const parsedIdent = parser.parse("if;", {
+      contextualLexingStats(value: unknown) {
+        stats = value;
+      },
+    }) as ParseResultLike;
+    assertEquals(parsedIdent.ok, true);
+    assert(parsedIdent.root);
+    assertEquals(parsedIdent.root.children[0].fields.value.text, "if");
+    assert(stats && typeof stats === "object");
+    assertEquals(
+      (stats as { ambiguousLexicalSites?: unknown }).ambiguousLexicalSites,
+      1,
+    );
+
+    const parsedKeyword = parser.parse("if name;") as ParseResultLike;
+    assertEquals(parsedKeyword.ok, true);
+    assert(parsedKeyword.root);
+    assertEquals(parsedKeyword.root.children[0].fields.value.text, "name");
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("shared Wasm adapter explores declared branching LR action sets", async () => {
+  const grammar = `
+    module = left | right ;
+    left = "a" ;
+    right = "a" ;
+  `;
+  const { dir, mod, bytes, plan } = await materialize(
+    grammar,
+    declaredConflictMetadata(grammar),
+  );
+  try {
+    const parser = mod.createParser({ bytes, plan });
+    const parsed = parser.parse("a") as ParseResultLike;
+    assertEquals(parsed.ok, true);
+
+    const ambiguous = parser.parse("a", {
+      ambiguityMode: "reject-ambiguous-success",
+    }) as ParseResultLike;
+    assertEquals(ambiguous.ok, false);
+    assertEquals(ambiguous.diagnostics[0].code, "PARSER_AMBIGUOUS_PARSE");
+
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("shared Wasm adapter loads concurrent parser instances with different plans", async () => {
   const alpha = await materialize(`module = "alpha" ;`);
   const beta = await materialize(`module = "beta" "!" ;`);
@@ -393,8 +456,13 @@ Deno.test("shared Wasm adapter supports async URL loading", async () => {
   }
 });
 
-function wasmBundle(source: string) {
-  const result = compile(source, { targets: ["wasm"] });
+function wasmBundle(source: string, metadata?: BabaMetadata) {
+  let result: ReturnType<typeof compile>;
+  if (metadata === undefined) {
+    result = compile(source, { targets: ["wasm"] });
+  } else {
+    result = compile(source, { targets: ["wasm"], metadata });
+  }
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
   return result.bundle;
@@ -405,8 +473,26 @@ async function materialize(source: string): Promise<{
   mod: GeneratedWasmModule;
   bytes: Uint8Array;
   plan: Uint8Array;
+}>;
+async function materialize(
+  source: string,
+  metadata: BabaMetadata,
+): Promise<{
+  dir: string;
+  mod: GeneratedWasmModule;
+  bytes: Uint8Array;
+  plan: Uint8Array;
+}>;
+async function materialize(
+  source: string,
+  metadata?: BabaMetadata,
+): Promise<{
+  dir: string;
+  mod: GeneratedWasmModule;
+  bytes: Uint8Array;
+  plan: Uint8Array;
 }> {
-  const bundle = wasmBundle(source);
+  const bundle = wasmBundle(source, metadata);
   const dir = await Deno.makeTempDir();
   await applyBundle(bundle, { root: dir });
   await denoCheck(`${dir}/wasm/mod.ts`);
@@ -415,6 +501,22 @@ async function materialize(source: string): Promise<{
     mod: await import(`file://${dir}/wasm/mod.ts`) as GeneratedWasmModule,
     bytes: await Deno.readFile(`${dir}/wasm/parser.wasm`),
     plan: await Deno.readFile(`${dir}/wasm/parser.plan`),
+  };
+}
+
+function declaredConflictMetadata(source: string): BabaMetadata {
+  const result = compile(source, { targets: ["wasm"] });
+  const conflict = result.diagnostics.find((diagnostic) =>
+    diagnostic.code === "RUNTIME_PARSER_REDUCE_REDUCE_CONFLICT" ||
+    diagnostic.code === "RUNTIME_PARSER_SHIFT_REDUCE_CONFLICT"
+  );
+  assert(conflict, "Expected the grammar to report an LR conflict.");
+  const match = conflict.message.match(/Conflict ID: (c_[0-9a-f]+)/);
+  assert(match, "Expected the conflict diagnostic to include a stable ID.");
+  return {
+    parser: {
+      conflicts: [{ conflict: match[1] }],
+    },
   };
 }
 

@@ -301,6 +301,7 @@ function functionSection(): number[] {
     u32(2),
     u32(2),
     u32(2),
+    u32(1),
   ]);
 }
 
@@ -328,6 +329,7 @@ function exportSection(): number[] {
     exportEntry("token_record_i32_count", 0x00, 15),
     exportEntry("host_ownership_model", 0x00, 16),
     exportEntry("result_lifetime_model", 0x00, 17),
+    exportEntry("parser_actions", 0x00, 18),
   ]);
 }
 
@@ -353,7 +355,7 @@ function codeSection(): number[] {
         missing: -1,
       }),
     ),
-    functionBody(15, lexAllFunction()),
+    functionBody(16, lexAllFunction()),
     functionBody(0, loadPlanFunction()),
     functionBody(0, versionFunction(WASM_ABI_VERSION)),
     functionBody(0, planVersionFunction()),
@@ -367,6 +369,7 @@ function codeSection(): number[] {
     functionBody(0, versionFunction(TOKEN_RECORD_I32_COUNT)),
     functionBody(0, versionFunction(WASM_HOST_OWNERSHIP_CALLER_MANAGED)),
     functionBody(0, versionFunction(WASM_RESULT_LIFETIME_CALLER_BUFFER)),
+    functionBody(5, parserActionsFunction()),
   ]);
 }
 
@@ -698,6 +701,7 @@ function lexAllFunction(): number[] {
   const codePoint = 16;
   const target = 17;
   const accept = 18;
+  const bestState = 19;
   return [
     ...i32(0),
     ...set(offset),
@@ -722,6 +726,8 @@ function lexAllFunction(): number[] {
     ...set(bestSpec),
     ...get(offset),
     ...set(bestEnd),
+    ...i32(-1),
+    ...set(bestState),
 
     0x02,
     EMPTY_BLOCK,
@@ -768,6 +774,8 @@ function lexAllFunction(): number[] {
     ...set(bestSpec),
     ...get(index),
     ...set(bestEnd),
+    ...get(state),
+    ...set(bestState),
     0x0b,
 
     0x0c,
@@ -796,7 +804,7 @@ function lexAllFunction(): number[] {
 
     ...get(tokens),
     ...get(count),
-    ...i32(12),
+    ...i32(TOKEN_RECORD_I32_COUNT * 4),
     0x6c,
     0x6a,
     ...set(record),
@@ -812,6 +820,11 @@ function lexAllFunction(): number[] {
     ...i32(8),
     0x6a,
     ...get(end),
+    ...store32(),
+    ...get(record),
+    ...i32(12),
+    0x6a,
+    ...get(bestState),
     ...store32(),
 
     ...get(end),
@@ -1036,6 +1049,94 @@ function tableLookupFunction(options: {
     0x0b,
 
     ...i32(options.missing),
+  ];
+}
+
+function parserActionsFunction(): number[] {
+  const state = 0;
+  const key = 1;
+  const output = 2;
+  const capacity = 3;
+  const index = 4;
+  const end = 5;
+  const base = 6;
+  const count = 7;
+  const pairKey = 8;
+  return [
+    ...get(state),
+    ...loadHeaderValue(PLAN_HEADER_PARSER_STATE_COUNT),
+    0x4f,
+    0x04,
+    EMPTY_BLOCK,
+    ...i32(-1),
+    0x0f,
+    0x0b,
+
+    ...loadHeaderValue(PLAN_HEADER_ACTION_ROWS),
+    ...set(base),
+    ...loadTableValueFromLocal(base, state),
+    ...set(index),
+    ...loadTableValuePlusOneFromLocal(base, state),
+    ...set(end),
+    ...i32(0),
+    ...set(count),
+
+    0x02,
+    EMPTY_BLOCK,
+    0x03,
+    EMPTY_BLOCK,
+    ...get(index),
+    ...get(end),
+    0x4f,
+    0x0d,
+    ...u32(1),
+
+    ...loadHeaderValue(PLAN_HEADER_ACTION_PAIRS),
+    ...get(index),
+    ...i32(8),
+    0x6c,
+    0x6a,
+    ...set(base),
+    ...get(base),
+    ...load32(),
+    ...set(pairKey),
+    ...get(pairKey),
+    ...get(key),
+    0x46,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(count),
+    ...get(capacity),
+    0x48,
+    0x04,
+    EMPTY_BLOCK,
+    ...get(output),
+    ...get(count),
+    ...i32(4),
+    0x6c,
+    0x6a,
+    ...get(base),
+    ...i32(4),
+    0x6a,
+    ...load32(),
+    ...store32(),
+    0x0b,
+    ...get(count),
+    ...i32(1),
+    0x6a,
+    ...set(count),
+    0x0b,
+
+    ...get(index),
+    ...i32(1),
+    0x6a,
+    ...set(index),
+    0x0c,
+    ...u32(0),
+    0x0b,
+    0x0b,
+
+    ...get(count),
   ];
 }
 

@@ -61,7 +61,7 @@ runtime helper internals.
 ## Wasm ABI
 
 The generated Wasm core ABI is versioned separately from package and parser-plan
-versions. ABI version `1` is documented in `docs/wasm-abi.md` and described by
+versions. ABI version `3` is documented in `docs/wasm-abi.md` and described by
 each generated `wasm/abi.json`. Changes to exported core functions, record
 layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.

@@ -18,12 +18,12 @@ Any replacement frontend must compile a minimal fixture and then a real Baba
 parser core that satisfy these checks:
 
 - `parser.wasm` passes `WebAssembly.validate()`.
-- `wasm/abi.json` has `format: "baba-wasm-abi"` and ABI version `1`.
+- `wasm/abi.json` has `format: "baba-wasm-abi"` and ABI version `3`.
 - The module exports `memory`, `lex_one`, `lex_all`, `parser_action`,
-  `parser_goto`, `abi_version`, `plan_version`, `semantics_version`, `reset`,
-  `input_base`, `max_pages`, `source_encoding`, `span_unit`,
-  `lex_result_i32_count`, `token_record_i32_count`, `host_ownership_model`, and
-  `result_lifetime_model`.
+  `parser_actions`, `parser_goto`, `abi_version`, `plan_version`,
+  `semantics_version`, `reset`, `input_base`, `max_pages`, `source_encoding`,
+  `span_unit`, `lex_result_i32_count`, `token_record_i32_count`,
+  `host_ownership_model`, and `result_lifetime_model`.
 - All public core parameters and results remain `i32`.
 - The core does not require WASI, browser APIs, component-model lowering, or
   hidden host-owned parser state by default.

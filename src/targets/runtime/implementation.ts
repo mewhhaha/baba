@@ -123,12 +123,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_abi.ts",
       role: "wasm-abi-constants",
-      hash: "fnv1a64:e38a60d5bef05b49",
+      hash: "fnv1a64:ea9780c182ca1dce",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime.ts",
       role: "wasm-core-runtime",
-      hash: "fnv1a64:4fcd54de0794e1c8",
+      hash: "fnv1a64:dc6325f807203619",
     },
     {
       path: "src/runtime/mod.ts",
@@ -138,7 +138,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/runtime/wasm.ts",
       role: "shared-wasm-runtime-api",
-      hash: "fnv1a64:7cba300d6e501731",
+      hash: "fnv1a64:4601bde5c9a8ffb4",
     },
     {
       path: "src/runtime/wasm_executor.ts",
@@ -157,7 +157,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:c0a71e098f17c49e" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:5dbe5e01ff110233" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

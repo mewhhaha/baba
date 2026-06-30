@@ -101,6 +101,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "memory",
     "lex_one",
     "parser_action",
+    "parser_actions",
     "parser_goto",
     "lex_all",
     "load_plan",

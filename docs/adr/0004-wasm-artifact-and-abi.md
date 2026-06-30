@@ -1,6 +1,6 @@
 # ADR 0004: Wasm Artifact And ABI
 
-Status: accepted for ABI version 1.
+Status: accepted; current ABI version 3.
 
 ## Context
 
@@ -12,8 +12,9 @@ validation without scraping adapter implementation details.
 
 The current target kind is `javascript-hosted-core-wasm`. Generated Wasm bundles
 emit `wasm/abi.json`, export ABI metadata from `wasm/mod.ts`, and define the
-normative core contract in `docs/wasm-abi.md`. ABI version 1 uses UTF-16 source
-units and UTF-16 public spans.
+normative core contract in `docs/wasm-abi.md`. ABI version 3 uses UTF-16 source
+units, UTF-16 public spans, external binary plans, four-field token records, and
+a multi-action parser table export for declared LR branch search.
 
 ## Consequences
 
