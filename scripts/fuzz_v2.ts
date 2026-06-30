@@ -1,17 +1,21 @@
+import { analyzeGrammarV2 } from "../src/compiler/grammar_v2_analysis.ts";
 import {
-  analyzeGrammarV2,
   buildGrammarV2LexerPlan,
-  buildGrammarV2ParserCorePlan,
-  buildGrammarV2PortablePlan,
   lexGrammarV2,
-  parseGrammarV2,
+} from "../src/compiler/grammar_v2_lexer.ts";
+import {
+  buildGrammarV2ParserCorePlan,
   recoverGrammarV2Parse,
   validateGrammarV2Parse,
+} from "../src/compiler/grammar_v2_parser_core.ts";
+import {
+  buildGrammarV2PortablePlan,
   validateGrammarV2PortablePlan,
-} from "../src/mod.ts";
+} from "../src/compiler/grammar_v2_portable_plan.ts";
 import { buildDfa } from "../src/compiler/regex/dfa.ts";
 import { buildRegexNfa } from "../src/compiler/regex/nfa.ts";
 import { parsePortableRegex } from "../src/compiler/regex/parser.ts";
+import { parseGrammarV2 } from "../src/grammar_v2.ts";
 
 interface FuzzOptions {
   readonly seed: number;

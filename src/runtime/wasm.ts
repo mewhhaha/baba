@@ -1389,7 +1389,7 @@ const externalCursorTokenEof = 3;
 const externalCursorTokenError = 4;
 const externalParseTraceStatusOk = 0;
 const externalParseTraceStatusUnexpected = 1;
-const externalParseTraceStatusInternal = 2;
+const _externalParseTraceStatusInternal = 2;
 const externalParseCursorStatusCapacity = 3;
 const externalParseTraceStatusTraceLimit = 4;
 const externalParseTraceStatusAmbiguous = 5;
@@ -1639,7 +1639,7 @@ function lexExternalRecords(
   return records;
 }
 
-function lexExternalForParse(
+function _lexExternalForParse(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
@@ -1705,7 +1705,7 @@ function lexExternalForParse(
   return { source, tokens, diagnostics, sites };
 }
 
-function lexExternalCursorForParse(
+function _lexExternalCursorForParse(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
@@ -1888,7 +1888,7 @@ function lexExternalCursorForParse(
   };
 }
 
-function parseExternalCursorTraceWithWasm(
+function _parseExternalCursorTraceWithWasm(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
@@ -2677,7 +2677,6 @@ function replayExternalCursorTrace(
         );
       }
       const reduced = reduceExternalCursorProduction(
-        metadata,
         cursorTape,
         production.reducer,
         rhsValues,
@@ -2956,7 +2955,7 @@ function materializeExternalSpecCandidate(
   };
 }
 
-function parseExternalTokenList<Root extends RuleNode>(
+function _parseExternalTokenList<Root extends RuleNode>(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
@@ -3110,7 +3109,7 @@ function parseExternalTokenList<Root extends RuleNode>(
   ]);
 }
 
-function parseExternalCursorTokenList<Root extends RuleNode>(
+function _parseExternalCursorTokenList<Root extends RuleNode>(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
@@ -3446,7 +3445,6 @@ function advanceExternalCursorBranch<Root extends RuleNode>(
       wasm,
       selectionBuffer,
       lexed,
-      source,
       branch.index,
       currentToken,
       state,
@@ -3708,7 +3706,6 @@ function externalSelectCursorActionWithWasm(
   wasm: ExternalParserWasmExports,
   buffer: ExternalSelectionBuffer,
   lexed: ExternalCursorLexForParseResult,
-  source: string,
   tokenIndex: number,
   currentToken: ExternalCursorTokenData,
   state: number,
@@ -3907,7 +3904,6 @@ function applyExternalAction<Root extends RuleNode>(
         throw new Error("Cursor parse mode is missing cursor tape state.");
       }
       reduced = reduceExternalCursorProduction(
-        metadata,
         cursorTape,
         production.reducer,
         rhsValues,
@@ -4019,7 +4015,6 @@ function applyExternalCursorEncodedAction<Root extends RuleNode>(
   let reduced: unknown = null;
   try {
     reduced = reduceExternalCursorProduction(
-      metadata,
       cursorTape,
       production.reducer,
       rhsValues,
@@ -4114,7 +4109,6 @@ function applyExternalCursorAction<Root extends RuleNode>(
   let reduced: unknown = null;
   try {
     reduced = reduceExternalCursorProduction(
-      metadata,
       cursorTape,
       production.reducer,
       rhsValues,
@@ -4316,7 +4310,6 @@ function reduceExternalEventProduction(
 }
 
 function reduceExternalCursorProduction(
-  metadata: ExternalRuntimeMetadata,
   tape: ExternalCursorTapeBuilder,
   reducer: ExternalReducer,
   rhs: readonly unknown[],
@@ -5190,7 +5183,6 @@ class ExternalCursorTapeBuilder {
       ),
     };
     let childrenCache: readonly SyntaxCursor[] | undefined;
-    const tape = this;
     const cursor: RuleCursor = {
       type: "rule",
       name,
@@ -5201,21 +5193,21 @@ class ExternalCursorTapeBuilder {
         ruleIndex,
         "rule child count",
       ),
-      child(index: number): SyntaxCursor | undefined {
+      child: (index: number): SyntaxCursor | undefined => {
         if (!Number.isInteger(index) || index < 0) return undefined;
         if (index >= cursor.childCount) return undefined;
-        const start = tape.requiredNumber(
-          tape.ruleChildStarts,
+        const start = this.requiredNumber(
+          this.ruleChildStarts,
           ruleIndex,
           "rule child start",
         );
-        const ref = tape.childRefs[start + index];
+        const ref = this.childRefs[start + index];
         if (ref === undefined) {
           throw new Error("Cursor child edge is missing.");
         }
-        return tape.elementForRef(ref);
+        return this.elementForRef(ref);
       },
-      children(): readonly SyntaxCursor[] {
+      children: (): readonly SyntaxCursor[] => {
         if (childrenCache !== undefined) return childrenCache;
         const children: SyntaxCursor[] = [];
         for (let index = 0; index < cursor.childCount; index++) {
@@ -5228,63 +5220,63 @@ class ExternalCursorTapeBuilder {
         childrenCache = children;
         return childrenCache;
       },
-      field(name: string): CursorFieldValue | undefined {
-        const schema = tape.metadata.fieldSchemas[ruleId];
+      field: (name: string): CursorFieldValue | undefined => {
+        const schema = this.metadata.fieldSchemas[ruleId];
         if (schema === undefined) return undefined;
         const config = schema.byName[name];
         if (config === undefined) return undefined;
-        const expectedFieldId = tape.metadata.fieldIds.get(name);
+        const expectedFieldId = this.metadata.fieldIds.get(name);
         if (expectedFieldId === undefined) {
           throw new Error(`Unknown field id '${name}'.`);
         }
-        const fieldStart = tape.requiredNumber(
-          tape.ruleFieldStarts,
+        const fieldStart = this.requiredNumber(
+          this.ruleFieldStarts,
           ruleIndex,
           "rule field start",
         );
-        const fieldCount = tape.requiredNumber(
-          tape.ruleFieldCounts,
+        const fieldCount = this.requiredNumber(
+          this.ruleFieldCounts,
           ruleIndex,
           "rule field count",
         );
         if (config.array || config.valueArray) {
           const values: CursorFieldValue[] = [];
           for (let index = 0; index < fieldCount; index++) {
-            const fieldId = tape.fieldNameIds[fieldStart + index];
+            const fieldId = this.fieldNameIds[fieldStart + index];
             if (fieldId === undefined) {
               throw new Error("Cursor field edge is missing a name.");
             }
             if (fieldId !== expectedFieldId) continue;
-            const value = tape.fieldValues[fieldStart + index];
+            const value = this.fieldValues[fieldStart + index];
             if (value === undefined) {
               throw new Error("Cursor field edge is missing a value.");
             }
             if (config.valueArray && value.kind === "array") {
               for (const item of value.items) {
-                values.push(tape.valueFromDraft(item));
+                values.push(this.valueFromDraft(item));
               }
             } else {
-              values.push(tape.valueFromDraft(value));
+              values.push(this.valueFromDraft(value));
             }
           }
           return values;
         }
         for (let index = 0; index < fieldCount; index++) {
-          const fieldId = tape.fieldNameIds[fieldStart + index];
+          const fieldId = this.fieldNameIds[fieldStart + index];
           if (fieldId === undefined) {
             throw new Error("Cursor field edge is missing a name.");
           }
           if (fieldId !== expectedFieldId) continue;
-          const value = tape.fieldValues[fieldStart + index];
+          const value = this.fieldValues[fieldStart + index];
           if (value === undefined) {
             throw new Error("Cursor field edge is missing a value.");
           }
-          return tape.valueFromDraft(value);
+          return this.valueFromDraft(value);
         }
         if (config.nullable) return null;
         return undefined;
       },
-      fieldArray(name: string): readonly CursorFieldValue[] {
+      fieldArray: (name: string): readonly CursorFieldValue[] => {
         const value = cursor.field(name);
         if (Array.isArray(value)) return value;
         if (value === undefined || value === null) return [];
@@ -5339,14 +5331,14 @@ class ExternalCursorTapeBuilder {
       throw new Error("Cursor references a non-syntax token.");
     }
     const span = { start, end };
-    const tape = this;
+    const source = this.source;
     const cursor: TokenCursor = {
       type: "token",
       tokenType,
       kind,
       get text() {
         if (tokenType === "literal") return kind;
-        return tape.source.slice(start, end);
+        return source.slice(start, end);
       },
       span,
       tokenIndex,
@@ -5475,23 +5467,22 @@ class ExternalCursorTapeView {
       throw new Error("Cursor rule record is incomplete.");
     }
     let childrenCache: readonly SyntaxCursor[] | undefined;
-    const tape = this;
     const cursor: RuleCursor = {
       type: "rule",
       name,
       span,
       tokenRange,
       childCount,
-      child(index: number): SyntaxCursor | undefined {
+      child: (index: number): SyntaxCursor | undefined => {
         if (!Number.isInteger(index) || index < 0) return undefined;
         if (index >= childCount) return undefined;
-        const ref = tape.childRefs[childStart + index];
+        const ref = this.childRefs[childStart + index];
         if (ref === undefined) {
           throw new Error("Cursor child edge is missing.");
         }
-        return tape.elementForRef(ref);
+        return this.elementForRef(ref);
       },
-      children(): readonly SyntaxCursor[] {
+      children: (): readonly SyntaxCursor[] => {
         if (childrenCache !== undefined) return childrenCache;
         const children: SyntaxCursor[] = [];
         for (let index = 0; index < childCount; index++) {
@@ -5504,12 +5495,12 @@ class ExternalCursorTapeView {
         childrenCache = children;
         return childrenCache;
       },
-      field(name: string): CursorFieldValue | undefined {
-        const schema = tape.metadata.fieldSchemas[ruleId];
+      field: (name: string): CursorFieldValue | undefined => {
+        const schema = this.metadata.fieldSchemas[ruleId];
         if (schema === undefined) return undefined;
         const config = schema.byName[name];
         if (config === undefined) return undefined;
-        const expectedFieldId = tape.metadata.fieldIds.get(name);
+        const expectedFieldId = this.metadata.fieldIds.get(name);
         if (expectedFieldId === undefined) {
           throw new Error(`Unknown field id '${name}'.`);
         }
@@ -5518,37 +5509,37 @@ class ExternalCursorTapeView {
           for (let index = 0; index < fieldCount; index++) {
             const fieldRecord = (fieldStart + index) *
               WASM_CURSOR_FIELD_RECORD_I32_COUNT;
-            const fieldId = tape.fieldRecords[fieldRecord];
+            const fieldId = this.fieldRecords[fieldRecord];
             if (fieldId === undefined) {
               throw new Error("Cursor field edge is missing a name.");
             }
             if (fieldId !== expectedFieldId) continue;
-            const valueId = tape.fieldRecords[fieldRecord + 1];
+            const valueId = this.fieldRecords[fieldRecord + 1];
             if (valueId === undefined) {
               throw new Error("Cursor field edge is missing a value.");
             }
             if (
               config.valueArray &&
-              tape.valueKind(valueId) === externalCursorValueArray
+              this.valueKind(valueId) === externalCursorValueArray
             ) {
-              const start = tape.valueRecords[
+              const start = this.valueRecords[
                 valueId * WASM_CURSOR_VALUE_RECORD_I32_COUNT + 2
               ];
-              const count = tape.valueRecords[
+              const count = this.valueRecords[
                 valueId * WASM_CURSOR_VALUE_RECORD_I32_COUNT + 3
               ];
               if (start === undefined || count === undefined) {
                 throw new Error("Cursor field array value is incomplete.");
               }
               for (let item = 0; item < count; item++) {
-                const itemId = tape.valueItems[start + item];
+                const itemId = this.valueItems[start + item];
                 if (itemId === undefined) {
                   throw new Error("Cursor field array item is missing.");
                 }
-                values.push(tape.valueForId(itemId));
+                values.push(this.valueForId(itemId));
               }
             } else {
-              values.push(tape.valueForId(valueId));
+              values.push(this.valueForId(valueId));
             }
           }
           return values;
@@ -5556,21 +5547,21 @@ class ExternalCursorTapeView {
         for (let index = 0; index < fieldCount; index++) {
           const fieldRecord = (fieldStart + index) *
             WASM_CURSOR_FIELD_RECORD_I32_COUNT;
-          const fieldId = tape.fieldRecords[fieldRecord];
+          const fieldId = this.fieldRecords[fieldRecord];
           if (fieldId === undefined) {
             throw new Error("Cursor field edge is missing a name.");
           }
           if (fieldId !== expectedFieldId) continue;
-          const valueId = tape.fieldRecords[fieldRecord + 1];
+          const valueId = this.fieldRecords[fieldRecord + 1];
           if (valueId === undefined) {
             throw new Error("Cursor field edge is missing a value.");
           }
-          return tape.valueForId(valueId);
+          return this.valueForId(valueId);
         }
         if (config.nullable) return null;
         return undefined;
       },
-      fieldArray(name: string): readonly CursorFieldValue[] {
+      fieldArray: (name: string): readonly CursorFieldValue[] => {
         const value = cursor.field(name);
         if (Array.isArray(value)) return value;
         if (value === undefined || value === null) return [];
@@ -5618,14 +5609,14 @@ class ExternalCursorTapeView {
       kind = literal.value;
     }
     const span = { start, end };
-    const tape = this;
+    const source = this.source;
     const cursor: TokenCursor = {
       type: "token",
       tokenType,
       kind,
       get text() {
         if (tokenType === "literal") return kind;
-        return tape.source.slice(start, end);
+        return source.slice(start, end);
       },
       span,
       tokenIndex,
@@ -5697,7 +5688,7 @@ function externalCursorRefIndex(ref: number): number {
   return Math.floor(ref / 2);
 }
 
-function externalLazyResultFromEvents<Root extends RuleNode>(
+function _externalLazyResultFromEvents<Root extends RuleNode>(
   metadata: ExternalRuntimeMetadata,
   source: string,
   tokens: readonly Token[],
@@ -5895,7 +5886,7 @@ function findExternalEventToken(
   throw new Error("Parse event stream referenced an unknown token.");
 }
 
-function validateExternalTokenStream(
+function _validateExternalTokenStream(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
@@ -6151,7 +6142,7 @@ function sameExternalToken(left: Token, right: Token): boolean {
   return true;
 }
 
-function externalLexicalDiagnostics(
+function _externalLexicalDiagnostics(
   diagnostics: readonly ExternalLexDiagnostic[],
 ): readonly ExternalParseDiagnostic[] {
   if (diagnostics.length === 0) return [];
@@ -6164,7 +6155,7 @@ function externalLexicalDiagnostics(
   );
 }
 
-function externalLexicalTokenDiagnostics(
+function _externalLexicalTokenDiagnostics(
   metadata: ExternalRuntimeMetadata,
   tokens: readonly Token[],
 ): readonly ExternalParseDiagnostic[] {
@@ -6206,7 +6197,7 @@ function externalLexicalTokenDiagnostic(
   };
 }
 
-function externalCombineDiagnostics(
+function _externalCombineDiagnostics(
   left: readonly ExternalParseDiagnostic[],
   right: readonly ExternalParseDiagnostic[],
 ): readonly ExternalParseDiagnostic[] {

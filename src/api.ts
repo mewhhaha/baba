@@ -242,8 +242,9 @@ function normalizeTargets(
     if (target !== "wasm") {
       throw new BabaError({
         code: "UNKNOWN_TARGET",
-        message:
-          `Unsupported generation target '${String(target)}'. Baba now generates Wasm parser/lexer artifacts only.`,
+        message: `Unsupported generation target '${
+          String(target)
+        }'. Baba now generates Wasm parser/lexer artifacts only.`,
       });
     }
     if (!result.includes(target)) result.push(target);

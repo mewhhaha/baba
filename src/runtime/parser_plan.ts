@@ -1829,7 +1829,6 @@ function applyAction(
         throw new Error("Cursor parse mode is missing cursor tape state.");
       }
       reduced = reduceCursorProduction(
-        runtime,
         cursorTape,
         production.reducer,
         rhsValues,
@@ -2025,7 +2024,6 @@ function reduceEventProduction(
 }
 
 function reduceCursorProduction(
-  runtime: RuntimeTables,
   tape: CursorTapeBuilder,
   reducer: ParserKitReducerSpec,
   rhs: readonly unknown[],
@@ -2819,7 +2817,6 @@ class CursorTapeBuilder {
       ),
     };
     let childrenCache: readonly KitSyntaxCursor[] | undefined;
-    const tape = this;
     const cursor: KitRuleCursor = {
       type: "rule",
       name,
@@ -2830,21 +2827,21 @@ class CursorTapeBuilder {
         ruleIndex,
         "rule child count",
       ),
-      child(index: number): KitSyntaxCursor | undefined {
+      child: (index: number): KitSyntaxCursor | undefined => {
         if (!Number.isInteger(index) || index < 0) return undefined;
         if (index >= cursor.childCount) return undefined;
-        const start = tape.requiredNumber(
-          tape.ruleChildStarts,
+        const start = this.requiredNumber(
+          this.ruleChildStarts,
           ruleIndex,
           "rule child start",
         );
-        const ref = tape.childRefs[start + index];
+        const ref = this.childRefs[start + index];
         if (ref === undefined) {
           throw new Error("Cursor child edge is missing.");
         }
-        return tape.elementForRef(ref);
+        return this.elementForRef(ref);
       },
-      children(): readonly KitSyntaxCursor[] {
+      children: (): readonly KitSyntaxCursor[] => {
         if (childrenCache !== undefined) return childrenCache;
         const children: KitSyntaxCursor[] = [];
         for (let index = 0; index < cursor.childCount; index++) {
@@ -2857,63 +2854,63 @@ class CursorTapeBuilder {
         childrenCache = children;
         return childrenCache;
       },
-      field(name: string): KitCursorFieldValue | undefined {
-        const schema = tape.runtime.fieldSchemas[ruleId];
+      field: (name: string): KitCursorFieldValue | undefined => {
+        const schema = this.runtime.fieldSchemas[ruleId];
         if (schema === undefined) return undefined;
         const config = schema.byName[name];
         if (config === undefined) return undefined;
-        const expectedFieldId = tape.runtime.fieldIds.get(name);
+        const expectedFieldId = this.runtime.fieldIds.get(name);
         if (expectedFieldId === undefined) {
           throw new Error(`Unknown field id '${name}'.`);
         }
-        const fieldStart = tape.requiredNumber(
-          tape.ruleFieldStarts,
+        const fieldStart = this.requiredNumber(
+          this.ruleFieldStarts,
           ruleIndex,
           "rule field start",
         );
-        const fieldCount = tape.requiredNumber(
-          tape.ruleFieldCounts,
+        const fieldCount = this.requiredNumber(
+          this.ruleFieldCounts,
           ruleIndex,
           "rule field count",
         );
         if (config.array || config.valueArray) {
           const values: KitCursorFieldValue[] = [];
           for (let index = 0; index < fieldCount; index++) {
-            const fieldId = tape.fieldNameIds[fieldStart + index];
+            const fieldId = this.fieldNameIds[fieldStart + index];
             if (fieldId === undefined) {
               throw new Error("Cursor field edge is missing a name.");
             }
             if (fieldId !== expectedFieldId) continue;
-            const value = tape.fieldValues[fieldStart + index];
+            const value = this.fieldValues[fieldStart + index];
             if (value === undefined) {
               throw new Error("Cursor field edge is missing a value.");
             }
             if (config.valueArray && value.kind === "array") {
               for (const item of value.items) {
-                values.push(tape.valueFromDraft(item));
+                values.push(this.valueFromDraft(item));
               }
             } else {
-              values.push(tape.valueFromDraft(value));
+              values.push(this.valueFromDraft(value));
             }
           }
           return values;
         }
         for (let index = 0; index < fieldCount; index++) {
-          const fieldId = tape.fieldNameIds[fieldStart + index];
+          const fieldId = this.fieldNameIds[fieldStart + index];
           if (fieldId === undefined) {
             throw new Error("Cursor field edge is missing a name.");
           }
           if (fieldId !== expectedFieldId) continue;
-          const value = tape.fieldValues[fieldStart + index];
+          const value = this.fieldValues[fieldStart + index];
           if (value === undefined) {
             throw new Error("Cursor field edge is missing a value.");
           }
-          return tape.valueFromDraft(value);
+          return this.valueFromDraft(value);
         }
         if (config.nullable) return null;
         return undefined;
       },
-      fieldArray(name: string): readonly KitCursorFieldValue[] {
+      fieldArray: (name: string): readonly KitCursorFieldValue[] => {
         const value = cursor.field(name);
         if (Array.isArray(value)) return value;
         if (value === undefined || value === null) return [];
