@@ -253,6 +253,57 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
   }
 });
 
+Deno.test("Wasm target emits Tree-sitter query fragments", () => {
+  const metadata: BabaMetadata = {
+    version: 2,
+    queries: {
+      highlights: {
+        entries: [
+          { node: "INT", capture: "number" },
+          { literal: "let", capture: "keyword" },
+        ],
+      },
+      locals: [
+        { node: "IDENT", capture: "local.definition" },
+      ],
+      rainbows: {
+        brackets: ["(", ")"],
+      },
+    },
+  };
+  const bundle = wasmBundle(
+    `
+      token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+      token INT = /[0-9]+/ ;
+      skip WS = /[ \\t\\r\\n]+/ ;
+
+      module = variable_binding | group ;
+      variable_binding = "let" name:IDENT "=" value:INT ";" ;
+      group = "(" item:IDENT ")" ;
+    `,
+    metadata,
+  );
+  const paths = bundle.files.map((file) => file.path).join(",");
+  assertIncludes(paths, "queries/generated-highlights.scm");
+  assertIncludes(paths, "queries/generated-locals.scm");
+  assertIncludes(paths, "queries/generated-rainbows.scm");
+  assertIncludes(paths, "wasm/parser.wasm");
+
+  const highlights = textFile(bundle, "queries/generated-highlights.scm");
+  assertIncludes(highlights, "(INT) @number");
+  assertIncludes(highlights, '"let" @keyword');
+  assertIncludes(highlights, "(variable_binding name: (IDENT) @variable)");
+  assertIncludes(highlights, '"=" @operator');
+
+  const locals = textFile(bundle, "queries/generated-locals.scm");
+  assertIncludes(locals, "(IDENT) @local.definition");
+
+  const rainbows = textFile(bundle, "queries/generated-rainbows.scm");
+  assertIncludes(rainbows, '"("');
+  assertIncludes(rainbows, '")"');
+  assertIncludes(rainbows, "@rainbow.bracket");
+});
+
 Deno.test("runtime manifest contains only active shared sources", async () => {
   assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 33);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>

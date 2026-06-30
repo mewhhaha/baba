@@ -4,7 +4,8 @@ Status: current repository policy.
 
 Baba examples are source examples first. The user-owned files are the grammar,
 metadata, interpreter or runner, sample programs, and example documentation.
-Generated parser artifacts are reproducible build outputs.
+Generated parser artifacts and editor query fragments are reproducible build
+outputs.
 
 The checked-in example projects use the public EBNF CLI and generated Wasm
 parser output. They are the runnable examples for the current package.
@@ -19,9 +20,9 @@ deno task bootstrap:check
 deno task bootstrap
 ```
 
-`bootstrap:check` validates generated manifests and generated Wasm entrypoints.
-`bootstrap` rewrites local ignored outputs through Baba's manifest-aware
-generated-file ownership path.
+`bootstrap:check` validates generated manifests, generated Wasm entrypoints, and
+generated query fragments. `bootstrap` rewrites local ignored outputs through
+Baba's manifest-aware generated-file ownership path.
 
 Each example also has its own `generate`, `check`, and `test` tasks. Example
 interpreters and compilers consume the current generated parser API: `parse()`,

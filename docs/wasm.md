@@ -6,6 +6,9 @@ Wasm module, an external grammar plan, and a small TypeScript adapter.
 Default output:
 
 ```text
+queries/
+  generated-highlights.scm
+  generated-rainbows.scm
 wasm/
   abi.json
   manifest.json
@@ -14,6 +17,11 @@ wasm/
   parser.wasm
   syntax.ts
 ```
+
+Only non-empty query fragments are emitted. Grammars with metadata-driven
+locals, folds, tags, textobjects, or injections also get corresponding
+`queries/generated-*.scm` files. These files restore the editor-highlighting
+contract without reintroducing `grammar.js` generation.
 
 `parser.wasm` contains the generic lexer/parser lookup runtime. The engine is
 authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded

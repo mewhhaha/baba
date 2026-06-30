@@ -72,25 +72,3 @@ export function generatedFileMap(
     bundle.files.map((file) => [file.path, file.content]),
   );
 }
-
-/** Returns the generated tree-sitter grammar file, if present. */
-export function treeSitterGrammarFile(
-  bundle: GeneratedBundle,
-): GeneratedFile | undefined {
-  return bundle.files.find((file) => file.path === "grammar.js");
-}
-
-/** Returns generated tree-sitter query files in bundle order. */
-export function treeSitterQueryFiles(bundle: GeneratedBundle): GeneratedFile[] {
-  return bundle.files.filter((file) =>
-    file.kind === "query" &&
-    (file.path.endsWith(".scm") || file.path.startsWith("queries/"))
-  );
-}
-
-/** Maps a bundle query path to a tree-sitter grammar `queries/` filename. */
-export function treeSitterQueryOutputName(file: GeneratedFile): string {
-  return file.path.startsWith("queries/")
-    ? file.path.slice("queries/".length)
-    : file.path;
-}

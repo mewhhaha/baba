@@ -27,6 +27,7 @@ import {
   planPortableRuntime,
   type RuntimeParserPlanningOptions,
 } from "./targets/runtime/plan.ts";
+import { emitTreeSitterQueryFiles } from "./targets/tree_sitter/queries.ts";
 export { applyBundle } from "./output.ts";
 
 /** Parses EBNF source into a grammar AST. */
@@ -176,6 +177,7 @@ export function compile(
     if (isWasmPlan(wasmPlan)) {
       files.push(...emitWasmTarget(wasmPlan, options.wasm));
     }
+    files.push(...emitTreeSitterQueryFiles(analyzed, metadata));
 
     diagnostics.push(...collectBundlePathDiagnostics(files));
     if (hasErrors(diagnostics)) return { diagnostics };

@@ -7,6 +7,7 @@ The public flow is intentionally small:
 
 ```text
 grammar.ebnf + baba.json -> generated/wasm parser and lexer
+                         -> generated/queries editor query fragments
 ```
 
 Only the Wasm parser/lexer bundle is part of the public generation path. The
@@ -38,6 +39,9 @@ The default output is:
 
 ```text
 generated/
+  queries/
+    generated-highlights.scm
+    generated-rainbows.scm
   wasm/
     abi.json
     manifest.json
@@ -47,6 +51,10 @@ generated/
     syntax.ts
   .baba-manifest.json
 ```
+
+Query files are emitted only when they have content. Metadata-driven query
+blocks such as locals, folds, tags, textobjects, and injections use the same
+`queries/generated-*.scm` naming convention.
 
 Use it from TypeScript:
 
@@ -89,6 +97,28 @@ await applyBundle(bundle, { root: "generated" });
 
 `compile()` returns diagnostics instead of throwing. `generate()` throws a
 `BabaError` when diagnostics contain an error.
+
+## Editor Queries
+
+Baba emits Tree-sitter query fragments next to the Wasm parser bundle so editor
+integrations can get consistent highlighting and navigation metadata:
+
+```text
+queries/
+  generated-highlights.scm
+  generated-locals.scm
+  generated-folds.scm
+  generated-indents.scm
+  generated-tags.scm
+  generated-textobjects.scm
+  generated-rainbows.scm
+  generated-injections.scm
+```
+
+Only non-empty files are written. The generated paths deliberately use
+`generated-*.scm` names so user-owned `queries/*.scm` files can coexist with
+Baba output. The current public target does not generate `grammar.js`; it emits
+query fragments and the Wasm parser artifacts.
 
 ## Metadata
 

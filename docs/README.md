@@ -28,6 +28,7 @@ Baba currently generates a Wasm-first parser bundle:
 
 ```text
 grammar.ebnf + baba.json -> generated/wasm/
+                         -> generated/queries/
 ```
 
 The generated `wasm/` directory contains:
@@ -38,6 +39,11 @@ The generated `wasm/` directory contains:
 - `syntax.ts`: generated cursor, token tape, diagnostic, and result types;
 - `abi.json`: the machine-readable low-level Wasm ABI descriptor;
 - `manifest.json`: generated output metadata.
+
+The generated `queries/` directory contains non-empty Tree-sitter query
+fragments named `generated-*.scm`, such as generated highlights, locals, folds,
+tags, textobjects, rainbows, and injections. They are emitted as editor assets
+alongside the Wasm parser bundle.
 
 The public parser instance surface is:
 
