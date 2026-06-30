@@ -1,0 +1,2212 @@
+#![no_std]
+
+use core::panic::PanicInfo;
+
+const WASM_ABI_VERSION: i32 = 7;
+const RUNTIME_IMPLEMENTATION_VERSION: i32 = 1;
+const MAX_WASM_PAGES: i32 = 65_535;
+const SOURCE_ENCODING_UTF16: i32 = 1;
+const SPAN_UNIT_UTF16: i32 = 1;
+const HOST_OWNERSHIP_CALLER_MANAGED: i32 = 1;
+const RESULT_LIFETIME_CALLER_BUFFER: i32 = 1;
+
+const PLAN_MAGIC: i32 = 0x3150_5742;
+const PLAN_FORMAT_VERSION: i32 = 2;
+const PLAN_HEADER_MAGIC: i32 = 0;
+const PLAN_HEADER_FORMAT_VERSION: i32 = 1;
+const PLAN_HEADER_PARSER_PLAN_VERSION: i32 = 2;
+const PLAN_HEADER_DFA_STATE_COUNT: i32 = 3;
+const PLAN_HEADER_PARSER_STATE_COUNT: i32 = 4;
+const PLAN_HEADER_ACCEPTS: i32 = 5;
+const PLAN_HEADER_ASCII_TRANSITIONS: i32 = 6;
+const PLAN_HEADER_TRANSITION_ROWS: i32 = 7;
+const PLAN_HEADER_TRANSITIONS: i32 = 8;
+const PLAN_HEADER_ACTION_ROWS: i32 = 9;
+const PLAN_HEADER_ACTION_PAIRS: i32 = 10;
+const PLAN_HEADER_GOTO_ROWS: i32 = 11;
+const PLAN_HEADER_GOTO_PAIRS: i32 = 12;
+const PLAN_HEADER_BYTE_LENGTH: i32 = 13;
+const PLAN_HEADER_SPEC_COUNT: i32 = 14;
+const PLAN_HEADER_EOF_TERMINAL: i32 = 15;
+const PLAN_HEADER_SPEC_TERMINALS: i32 = 16;
+const PLAN_HEADER_ACCEPT_CANDIDATE_ROWS: i32 = 17;
+const PLAN_HEADER_ACCEPT_CANDIDATES: i32 = 18;
+const PLAN_HEADER_PRODUCTION_COUNT: i32 = 19;
+const PLAN_HEADER_PRODUCTIONS: i32 = 20;
+const PLAN_HEADER_BYTES: i32 = 21 * 4;
+const COMPACT_I16_OFFSET_TAG: i32 = 2;
+const COMPACT_U16_OFFSET_BASE: i32 = 0x4000_0000;
+
+const LEX_RESULT_I32_COUNT: i32 = 2;
+const TOKEN_RECORD_I32_COUNT: i32 = 4;
+const PARSE_CURSOR_RESULT_I32_COUNT: i32 = 10;
+const CURSOR_RULE_RECORD_I32_COUNT: i32 = 9;
+const CURSOR_FIELD_RECORD_I32_COUNT: i32 = 2;
+const CURSOR_VALUE_RECORD_I32_COUNT: i32 = 4;
+
+const ACTION_SHIFT: i32 = 0x0100_0000;
+const ACTION_REDUCE: i32 = 0x0200_0000;
+const ACTION_ACCEPT: i32 = 0x0300_0000;
+const ACTION_KIND_MASK: i32 = ACTION_SHIFT | ACTION_REDUCE | ACTION_ACCEPT;
+const ACTION_PAYLOAD_MASK: i32 = 0x00ff_ffff;
+
+const PARSE_STATUS_OK: i32 = 0;
+const PARSE_STATUS_UNEXPECTED: i32 = 1;
+const PARSE_STATUS_INTERNAL: i32 = 2;
+const PARSE_CURSOR_STATUS_CAPACITY: i32 = 3;
+const PARSE_STATUS_TRACE_LIMIT: i32 = 4;
+const PARSE_STATUS_AMBIGUOUS: i32 = 5;
+
+const CURSOR_RESULT_TOKEN_COUNT: i32 = 0;
+const CURSOR_RESULT_RULE_COUNT: i32 = 1;
+const CURSOR_RESULT_CHILD_COUNT: i32 = 2;
+const CURSOR_RESULT_FIELD_COUNT: i32 = 3;
+const CURSOR_RESULT_VALUE_COUNT: i32 = 4;
+const CURSOR_RESULT_VALUE_ITEM_COUNT: i32 = 5;
+const CURSOR_RESULT_ROOT_REF: i32 = 6;
+const CURSOR_RESULT_ERROR_OFFSET: i32 = 7;
+const CURSOR_RESULT_ERROR_STATE: i32 = 8;
+const CURSOR_RESULT_TOKEN_READ: i32 = 9;
+
+const CURSOR_VALUE_NULL: i32 = 0;
+const CURSOR_VALUE_REF: i32 = 1;
+const CURSOR_VALUE_ARRAY: i32 = 2;
+
+const CURSOR_REDUCER_START: i32 = 0;
+const CURSOR_REDUCER_RULE: i32 = 1;
+const CURSOR_REDUCER_TERMINAL: i32 = 2;
+const CURSOR_REDUCER_RULE_REF: i32 = 3;
+const CURSOR_REDUCER_IDENTITY: i32 = 4;
+const CURSOR_REDUCER_SEQUENCE: i32 = 5;
+const CURSOR_REDUCER_OPTIONAL_EMPTY: i32 = 6;
+const CURSOR_REDUCER_OPTIONAL_SOME: i32 = 7;
+const CURSOR_REDUCER_REPEAT_EMPTY: i32 = 8;
+const CURSOR_REDUCER_REPEAT_APPEND: i32 = 9;
+const CURSOR_REDUCER_REPEAT1_FIRST: i32 = 10;
+const CURSOR_REDUCER_REPEAT1_APPEND: i32 = 11;
+const CURSOR_REDUCER_SEPARATED_FIRST: i32 = 12;
+const CURSOR_REDUCER_SEPARATED_APPEND: i32 = 13;
+const CURSOR_REDUCER_FIELD: i32 = 14;
+
+const FRAGMENT_VALUE: i32 = 0;
+const FRAGMENT_CHILD_START: i32 = 1;
+const FRAGMENT_CHILD_COUNT: i32 = 2;
+const FRAGMENT_FIELD_START: i32 = 3;
+const FRAGMENT_FIELD_COUNT: i32 = 4;
+const FRAGMENT_SPAN_START: i32 = 5;
+const FRAGMENT_SPAN_END: i32 = 6;
+const FRAGMENT_TOKEN_START: i32 = 7;
+const FRAGMENT_TOKEN_END: i32 = 8;
+const FRAGMENT_I32_COUNT: i32 = 9;
+
+extern "C" {
+    static __heap_base: u8;
+}
+
+static mut PLAN_BASE: i32 = -1;
+static mut PLAN_LENGTH: i32 = 0;
+
+#[inline]
+unsafe fn load_i32(addr: i32) -> i32 {
+    core::ptr::read_unaligned(addr as usize as *const i32)
+}
+
+#[inline]
+unsafe fn store_i32(addr: i32, value: i32) {
+    core::ptr::write_unaligned(addr as usize as *mut i32, value);
+}
+
+#[inline]
+unsafe fn load_u16(addr: i32) -> u32 {
+    core::ptr::read_unaligned(addr as usize as *const u16) as u32
+}
+
+#[inline]
+unsafe fn load_i16(addr: i32) -> i32 {
+    core::ptr::read_unaligned(addr as usize as *const i16) as i32
+}
+
+#[inline]
+unsafe fn load_u16_i32(addr: i32) -> i32 {
+    core::ptr::read_unaligned(addr as usize as *const u16) as i32
+}
+
+#[inline]
+fn loaded_plan_base() -> i32 {
+    unsafe { PLAN_BASE }
+}
+
+#[inline]
+fn header_at(base: i32, field: i32) -> i32 {
+    unsafe { load_i32(base + field * 4) }
+}
+
+#[inline]
+fn header(field: i32) -> i32 {
+    let base = loaded_plan_base();
+    if base < 0 {
+        return 0;
+    }
+    header_at(base, field)
+}
+
+#[inline]
+fn plan_addr(offset: i32) -> i32 {
+    loaded_plan_base() + offset
+}
+
+#[inline]
+fn compact_u16_offset(encoded: i32) -> i32 {
+    -encoded - COMPACT_U16_OFFSET_BASE
+}
+
+#[inline]
+fn compact_i16_offset(encoded: i32) -> i32 {
+    -encoded - COMPACT_I16_OFFSET_TAG
+}
+
+#[inline]
+fn is_compact_u16_offset(encoded: i32) -> bool {
+    encoded <= -COMPACT_U16_OFFSET_BASE
+}
+
+#[inline]
+fn is_compact_i16_offset(encoded: i32) -> bool {
+    encoded < -1 && !is_compact_u16_offset(encoded)
+}
+
+#[inline]
+fn table_value(encoded_base: i32, index: i32) -> i32 {
+    if is_compact_u16_offset(encoded_base) {
+        return unsafe { load_u16_i32(plan_addr(compact_u16_offset(encoded_base)) + index * 2) };
+    }
+    if is_compact_i16_offset(encoded_base) {
+        return unsafe { load_i16(plan_addr(compact_i16_offset(encoded_base)) + index * 2) };
+    }
+    unsafe { load_i32(plan_addr(encoded_base) + index * 4) }
+}
+
+#[inline]
+fn header_table_value(field: i32, index: i32) -> i32 {
+    table_value(header(field), index)
+}
+
+#[inline]
+fn align8(value: i32) -> i32 {
+    (value + 7) & !7
+}
+
+#[no_mangle]
+pub extern "C" fn abi_version() -> i32 {
+    WASM_ABI_VERSION
+}
+
+#[no_mangle]
+pub extern "C" fn plan_version() -> i32 {
+    header(PLAN_HEADER_PARSER_PLAN_VERSION)
+}
+
+#[no_mangle]
+pub extern "C" fn semantics_version() -> i32 {
+    RUNTIME_IMPLEMENTATION_VERSION
+}
+
+#[no_mangle]
+pub extern "C" fn reset() {}
+
+#[no_mangle]
+pub extern "C" fn plan_buffer_base() -> i32 {
+    unsafe { (&__heap_base as *const u8 as usize) as i32 }
+}
+
+#[no_mangle]
+pub extern "C" fn input_base() -> i32 {
+    let base = loaded_plan_base();
+    if base < 0 {
+        return 0;
+    }
+    align8(base + header(PLAN_HEADER_BYTE_LENGTH))
+}
+
+#[no_mangle]
+pub extern "C" fn max_pages() -> i32 {
+    MAX_WASM_PAGES
+}
+
+#[no_mangle]
+pub extern "C" fn source_encoding() -> i32 {
+    SOURCE_ENCODING_UTF16
+}
+
+#[no_mangle]
+pub extern "C" fn span_unit() -> i32 {
+    SPAN_UNIT_UTF16
+}
+
+#[no_mangle]
+pub extern "C" fn lex_result_i32_count() -> i32 {
+    LEX_RESULT_I32_COUNT
+}
+
+#[no_mangle]
+pub extern "C" fn token_record_i32_count() -> i32 {
+    TOKEN_RECORD_I32_COUNT
+}
+
+#[no_mangle]
+pub extern "C" fn host_ownership_model() -> i32 {
+    HOST_OWNERSHIP_CALLER_MANAGED
+}
+
+#[no_mangle]
+pub extern "C" fn result_lifetime_model() -> i32 {
+    RESULT_LIFETIME_CALLER_BUFFER
+}
+
+#[no_mangle]
+pub extern "C" fn load_plan(ptr: i32, len: i32) -> i32 {
+    if ptr <= 0 {
+        return 0;
+    }
+    if ptr & 3 != 0 {
+        return 0;
+    }
+    if len < PLAN_HEADER_BYTES {
+        return 0;
+    }
+    if header_at(ptr, PLAN_HEADER_MAGIC) != PLAN_MAGIC {
+        return 0;
+    }
+    if header_at(ptr, PLAN_HEADER_FORMAT_VERSION) != PLAN_FORMAT_VERSION {
+        return 0;
+    }
+    let core_byte_length = header_at(ptr, PLAN_HEADER_BYTE_LENGTH);
+    if core_byte_length < PLAN_HEADER_BYTES {
+        return 0;
+    }
+    if core_byte_length > len {
+        return 0;
+    }
+    unsafe {
+        PLAN_BASE = ptr;
+        PLAN_LENGTH = len;
+    }
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn lex_one(src: i32, len: i32, offset: i32, result: i32) -> i32 {
+    let mut state = 0;
+    let mut index = offset;
+    let mut best_spec = -1;
+    let mut best_end = offset;
+
+    while index < len {
+        let decoded = decode_code_point(src, index, len);
+        let target = transition(state, decoded.code_point);
+        if target < 0 {
+            break;
+        }
+        index += decoded.width;
+        state = target;
+        let accept = header_table_value(PLAN_HEADER_ACCEPTS, state);
+        if accept >= 0 {
+            best_spec = accept;
+            best_end = index;
+        }
+    }
+
+    if best_spec >= 0 {
+        unsafe {
+            store_i32(result, best_spec);
+            store_i32(result + 4, best_end);
+        }
+        return 1;
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
+    let mut offset = 0;
+    let mut count = 0;
+
+    while offset < len {
+        let mut state = 0;
+        let mut index = offset;
+        let mut best_spec = -1;
+        let mut best_end = offset;
+        let mut best_state = -1;
+
+        while index < len {
+            let decoded = decode_code_point(src, index, len);
+            let target = transition(state, decoded.code_point);
+            if target < 0 {
+                break;
+            }
+            index += decoded.width;
+            state = target;
+            let accept = header_table_value(PLAN_HEADER_ACCEPTS, state);
+            if accept >= 0 {
+                best_spec = accept;
+                best_end = index;
+                best_state = state;
+            }
+        }
+
+        let spec;
+        let end;
+        if best_spec >= 0 {
+            spec = best_spec;
+            end = best_end;
+        } else {
+            let decoded = decode_code_point(src, offset, len);
+            spec = -1;
+            end = offset + decoded.width;
+        }
+
+        store_token_record(tokens, count, spec, offset, end, best_state);
+        offset = end;
+        count += 1;
+    }
+
+    count
+}
+
+struct DecodedCodePoint {
+    code_point: i32,
+    width: i32,
+}
+
+fn decode_code_point(src: i32, index: i32, len: i32) -> DecodedCodePoint {
+    let unit = unsafe { load_u16(src + index * 2) };
+    let mut code_point = unit;
+    let mut width = 1;
+    if unit >= 0xd800 && unit <= 0xdbff && index + 1 < len {
+        let next = unsafe { load_u16(src + (index + 1) * 2) };
+        if next >= 0xdc00 && next <= 0xdfff {
+            code_point = ((unit - 0xd800) << 10) + (next - 0xdc00) + 0x1_0000;
+            width = 2;
+        }
+    }
+    DecodedCodePoint {
+        code_point: code_point as i32,
+        width,
+    }
+}
+
+fn transition(state: i32, code_point: i32) -> i32 {
+    if state < 0 || state >= header(PLAN_HEADER_DFA_STATE_COUNT) {
+        return -1;
+    }
+
+    if code_point >= 0 && code_point < 128 {
+        let ascii_offset = header(PLAN_HEADER_ASCII_TRANSITIONS);
+        if ascii_offset >= 0 {
+            let value = table_value(ascii_offset, state * 128 + code_point);
+            if value >= 0 {
+                return value;
+            }
+        }
+        if is_compact_i16_offset(ascii_offset) {
+            let compact_offset = compact_i16_offset(ascii_offset);
+            let value =
+                unsafe { load_i16(plan_addr(compact_offset) + (state * 128 + code_point) * 2) };
+            if value >= 0 {
+                return value;
+            }
+        }
+    }
+
+    let rows = header(PLAN_HEADER_TRANSITION_ROWS);
+    let mut index = table_value(rows, state);
+    let end = table_value(rows, state + 1);
+    while index < end {
+        let base = plan_addr(header(PLAN_HEADER_TRANSITIONS)) + index * 12;
+        let start = unsafe { load_i32(base) };
+        let stop = unsafe { load_i32(base + 4) };
+        if code_point >= start && code_point <= stop {
+            return unsafe { load_i32(base + 8) };
+        }
+        index += 1;
+    }
+    -1
+}
+
+#[no_mangle]
+pub extern "C" fn parser_action(state: i32, terminal: i32) -> i32 {
+    table_lookup(
+        state,
+        terminal,
+        PLAN_HEADER_ACTION_ROWS,
+        PLAN_HEADER_ACTION_PAIRS,
+        PLAN_HEADER_PARSER_STATE_COUNT,
+        0,
+        true,
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn parser_goto(state: i32, nonterminal: i32) -> i32 {
+    table_lookup(
+        state,
+        nonterminal,
+        PLAN_HEADER_GOTO_ROWS,
+        PLAN_HEADER_GOTO_PAIRS,
+        PLAN_HEADER_PARSER_STATE_COUNT,
+        -1,
+        false,
+    )
+}
+
+fn table_lookup(
+    state: i32,
+    key: i32,
+    rows_header: i32,
+    pairs_header: i32,
+    state_count_header: i32,
+    missing: i32,
+    decode_action: bool,
+) -> i32 {
+    if state < 0 || state >= header(state_count_header) {
+        return missing;
+    }
+    let rows = header(rows_header);
+    let mut index = table_value(rows, state);
+    let end = table_value(rows, state + 1);
+    let pairs = header(pairs_header);
+    while index < end {
+        if pair_key(pairs, index) == key {
+            return pair_value(pairs, index, decode_action);
+        }
+        index += 1;
+    }
+    missing
+}
+
+#[no_mangle]
+pub extern "C" fn parser_actions(state: i32, terminal: i32, output: i32, capacity: i32) -> i32 {
+    if state < 0 || state >= header(PLAN_HEADER_PARSER_STATE_COUNT) {
+        return -1;
+    }
+    let rows = header(PLAN_HEADER_ACTION_ROWS);
+    let mut index = table_value(rows, state);
+    let end = table_value(rows, state + 1);
+    let pairs = header(PLAN_HEADER_ACTION_PAIRS);
+    let mut count = 0;
+    while index < end {
+        if pair_key(pairs, index) == terminal {
+            if count < capacity {
+                unsafe { store_i32(output + count * 4, pair_value(pairs, index, true)) };
+            }
+            count += 1;
+        }
+        index += 1;
+    }
+    count
+}
+
+fn pair_key(encoded_pairs: i32, index: i32) -> i32 {
+    if is_compact_u16_offset(encoded_pairs) {
+        return unsafe { load_u16_i32(plan_addr(compact_u16_offset(encoded_pairs)) + index * 4) };
+    }
+    unsafe { load_i32(plan_addr(encoded_pairs) + index * 8) }
+}
+
+fn pair_value(encoded_pairs: i32, index: i32, decode_action: bool) -> i32 {
+    if is_compact_u16_offset(encoded_pairs) {
+        let raw =
+            unsafe { load_u16_i32(plan_addr(compact_u16_offset(encoded_pairs)) + index * 4 + 2) };
+        if decode_action {
+            return decode_compact_action(raw);
+        }
+        return raw;
+    }
+    unsafe { load_i32(plan_addr(encoded_pairs) + index * 8 + 4) }
+}
+
+fn decode_compact_action(raw: i32) -> i32 {
+    let kind = raw >> 14;
+    let payload = raw & 0x3fff;
+    if kind == 1 {
+        return ACTION_SHIFT | payload;
+    }
+    if kind == 2 {
+        return ACTION_REDUCE | payload;
+    }
+    if kind == 3 {
+        return ACTION_ACCEPT;
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn parser_select_action(
+    state: i32,
+    accepting_state: i32,
+    _fallback_spec: i32,
+    result: i32,
+) -> i32 {
+    if accepting_state < 0 || accepting_state >= header(PLAN_HEADER_DFA_STATE_COUNT) {
+        return -1;
+    }
+
+    let selection = select_action(state, accepting_state, false);
+    unsafe {
+        store_i32(result, selection.checked_count);
+    }
+    if selection.selected_action == 0 {
+        return 0;
+    }
+    unsafe {
+        store_i32(result + 4, selection.selected_spec);
+        store_i32(result + 8, selection.selected_terminal);
+        store_i32(result + 12, selection.selected_action);
+    }
+    1
+}
+
+struct Selection {
+    checked_count: i32,
+    choice_count: i32,
+    selected_spec: i32,
+    selected_terminal: i32,
+    selected_action: i32,
+    trivia_spec: i32,
+    main_candidate_count: i32,
+}
+
+fn select_action(state: i32, accepting_state: i32, include_trivia: bool) -> Selection {
+    let mut selection = Selection {
+        checked_count: 0,
+        choice_count: 0,
+        selected_spec: -1,
+        selected_terminal: -1,
+        selected_action: 0,
+        trivia_spec: -1,
+        main_candidate_count: 0,
+    };
+
+    let rows = header(PLAN_HEADER_ACCEPT_CANDIDATE_ROWS);
+    let mut index = table_value(rows, accepting_state);
+    let end = table_value(rows, accepting_state + 1);
+    while index < end {
+        let spec = table_value(header(PLAN_HEADER_ACCEPT_CANDIDATES), index);
+        selection.checked_count += 1;
+        if spec >= 0 && spec < header(PLAN_HEADER_SPEC_COUNT) {
+            let terminal = header_table_value(PLAN_HEADER_SPEC_TERMINALS, spec);
+            if include_trivia && terminal < 0 {
+                if selection.trivia_spec < 0 {
+                    selection.trivia_spec = spec;
+                }
+            } else if terminal >= 0 {
+                selection.main_candidate_count += 1;
+                let action = parser_action(state, terminal);
+                if action != 0 {
+                    selection.choice_count += 1;
+                    if selection.selected_action == 0 {
+                        selection.selected_spec = spec;
+                        selection.selected_terminal = terminal;
+                        selection.selected_action = action;
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    selection
+}
+
+fn select_trace_action(state: i32, accepting_state: i32, _fallback_spec: i32, result: i32) -> i32 {
+    if accepting_state < 0 || accepting_state >= header(PLAN_HEADER_DFA_STATE_COUNT) {
+        return -1;
+    }
+    let selection = select_action(state, accepting_state, true);
+    unsafe {
+        store_i32(result, selection.checked_count);
+        store_i32(result + 16, selection.trivia_spec);
+        store_i32(result + 20, selection.main_candidate_count);
+    }
+    if selection.choice_count == 0 {
+        return 0;
+    }
+    unsafe {
+        store_i32(result + 4, selection.selected_spec);
+        store_i32(result + 8, selection.selected_terminal);
+        store_i32(result + 12, selection.selected_action);
+    }
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn parse_trace(
+    src: i32,
+    len: i32,
+    token_ptr: i32,
+    token_capacity: i32,
+    trace_ptr: i32,
+    trace_capacity: i32,
+    result: i32,
+    stack_ptr: i32,
+    stack_capacity: i32,
+    preserve_trivia: i32,
+    max_trace_actions: i32,
+) -> i32 {
+    let mut token_read = 0;
+    let mut token_write = 0;
+    let mut trace_count = 0;
+    let mut current_state = 0;
+
+    if token_capacity < len {
+        return return_parse_trace_status(
+            PARSE_STATUS_INTERNAL,
+            result,
+            token_write,
+            trace_count,
+            len,
+            current_state,
+            token_read,
+        );
+    }
+    if stack_capacity < 1 {
+        return return_parse_trace_status(
+            PARSE_STATUS_INTERNAL,
+            result,
+            token_write,
+            trace_count,
+            len,
+            current_state,
+            token_read,
+        );
+    }
+
+    let raw_token_count = lex_all(src, len, 0, token_ptr);
+    if raw_token_count < 0 || raw_token_count > token_capacity {
+        return return_parse_trace_status(
+            PARSE_STATUS_INTERNAL,
+            result,
+            token_write,
+            trace_count,
+            len,
+            current_state,
+            token_read,
+        );
+    }
+
+    unsafe { store_i32(stack_ptr, 0) };
+    let mut state_count = 1;
+
+    loop {
+        if state_count < 1 {
+            return return_parse_trace_status(
+                PARSE_STATUS_INTERNAL,
+                result,
+                token_write,
+                trace_count,
+                len,
+                current_state,
+                token_read,
+            );
+        }
+        current_state = load_stack_value(stack_ptr, state_count);
+        let action: i32;
+        let start: i32;
+        let accepting_state;
+        let mut selected_spec = -1;
+
+        if token_read < raw_token_count {
+            let record = token_record_address(token_ptr, token_read);
+            let spec = unsafe { load_i32(record) };
+            start = unsafe { load_i32(record + 4) };
+            let end = unsafe { load_i32(record + 8) };
+            accepting_state = unsafe { load_i32(record + 12) };
+            if spec < 0 {
+                return return_parse_trace_status(
+                    PARSE_STATUS_UNEXPECTED,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+
+            let status = select_trace_action(current_state, accepting_state, spec, result);
+            if status == 1 {
+                selected_spec = unsafe { load_i32(result + 4) };
+                action = unsafe { load_i32(result + 12) };
+            } else if status == 2 {
+                return return_parse_trace_status(
+                    PARSE_STATUS_AMBIGUOUS,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            } else if status == 0 {
+                let trivia_spec = unsafe { load_i32(result + 16) };
+                let main_candidate_count = unsafe { load_i32(result + 20) };
+                if main_candidate_count == 0 {
+                    if trivia_spec >= 0 {
+                        if preserve_trivia != 0 {
+                            store_token_record(
+                                token_ptr,
+                                token_write,
+                                trivia_spec,
+                                start,
+                                end,
+                                accepting_state,
+                            );
+                            token_write += 1;
+                        }
+                        token_read += 1;
+                        continue;
+                    }
+                    return return_parse_trace_status(
+                        PARSE_STATUS_UNEXPECTED,
+                        result,
+                        token_write,
+                        trace_count,
+                        start,
+                        current_state,
+                        token_read,
+                    );
+                }
+                return return_parse_trace_status(
+                    PARSE_STATUS_UNEXPECTED,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            } else {
+                return return_parse_trace_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+        } else {
+            start = len;
+            accepting_state = -1;
+            action = parser_action(current_state, header(PLAN_HEADER_EOF_TERMINAL));
+            if action <= 0 {
+                return return_parse_trace_status(
+                    PARSE_STATUS_UNEXPECTED,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+        }
+
+        if action == 0 {
+            break;
+        }
+        if trace_count >= trace_capacity || trace_count >= max_trace_actions {
+            return return_parse_trace_status(
+                PARSE_STATUS_TRACE_LIMIT,
+                result,
+                token_write,
+                trace_count,
+                start,
+                current_state,
+                token_read,
+            );
+        }
+        unsafe { store_i32(trace_ptr + trace_count * 4, action) };
+        trace_count += 1;
+
+        let kind = action & ACTION_KIND_MASK;
+        let payload = action & ACTION_PAYLOAD_MASK;
+        if kind == ACTION_SHIFT {
+            if token_read >= raw_token_count {
+                return return_parse_trace_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            let record = token_record_address(token_ptr, token_read);
+            let end = unsafe { load_i32(record + 8) };
+            store_token_record(
+                token_ptr,
+                token_write,
+                selected_spec,
+                start,
+                end,
+                accepting_state,
+            );
+            token_write += 1;
+            token_read += 1;
+            if state_count >= stack_capacity {
+                return return_parse_trace_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            store_stack_value(stack_ptr, state_count, payload);
+            state_count += 1;
+            continue;
+        }
+
+        if kind == ACTION_REDUCE {
+            if payload < 0 || payload >= header(PLAN_HEADER_PRODUCTION_COUNT) {
+                return return_parse_trace_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            let production = plan_addr(header(PLAN_HEADER_PRODUCTIONS)) + payload * 16;
+            let lhs = unsafe { load_i32(production) };
+            let rhs_length = unsafe { load_i32(production + 4) };
+            if state_count < rhs_length {
+                return return_parse_trace_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            state_count -= rhs_length;
+            let goto_source_state = load_stack_value(stack_ptr, state_count);
+            let goto_state = parser_goto(goto_source_state, lhs);
+            if goto_state < 0 || state_count >= stack_capacity {
+                return return_parse_trace_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    trace_count,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            store_stack_value(stack_ptr, state_count, goto_state);
+            state_count += 1;
+            continue;
+        }
+
+        if kind == ACTION_ACCEPT {
+            return return_parse_trace_status(
+                PARSE_STATUS_OK,
+                result,
+                token_write,
+                trace_count,
+                start,
+                current_state,
+                token_read,
+            );
+        }
+
+        return return_parse_trace_status(
+            PARSE_STATUS_INTERNAL,
+            result,
+            token_write,
+            trace_count,
+            start,
+            current_state,
+            token_read,
+        );
+    }
+
+    return_parse_trace_status(
+        PARSE_STATUS_INTERNAL,
+        result,
+        token_write,
+        trace_count,
+        len,
+        current_state,
+        token_read,
+    )
+}
+
+fn return_parse_trace_status(
+    status: i32,
+    result: i32,
+    token_count: i32,
+    trace_count: i32,
+    offset: i32,
+    state: i32,
+    token_read: i32,
+) -> i32 {
+    unsafe {
+        store_i32(result, token_count);
+        store_i32(result + 4, trace_count);
+        store_i32(result + 8, offset);
+        store_i32(result + 12, state);
+        store_i32(result + 16, token_read);
+        store_i32(result + 20, 0);
+    }
+    status
+}
+
+#[inline]
+fn token_record_address(token_ptr: i32, index: i32) -> i32 {
+    token_ptr + index * TOKEN_RECORD_I32_COUNT * 4
+}
+
+fn store_token_record(
+    token_ptr: i32,
+    index: i32,
+    spec: i32,
+    start: i32,
+    end: i32,
+    accepting_state: i32,
+) {
+    let record = token_record_address(token_ptr, index);
+    unsafe {
+        store_i32(record, spec);
+        store_i32(record + 4, start);
+        store_i32(record + 8, end);
+        store_i32(record + 12, accepting_state);
+    }
+}
+
+#[inline]
+fn load_stack_value(stack_ptr: i32, state_count: i32) -> i32 {
+    unsafe { load_i32(stack_ptr + (state_count - 1) * 4) }
+}
+
+#[inline]
+fn store_stack_value(stack_ptr: i32, index: i32, value: i32) {
+    unsafe { store_i32(stack_ptr + index * 4, value) }
+}
+
+#[no_mangle]
+pub extern "C" fn parse_cursor(
+    src: i32,
+    len: i32,
+    token_ptr: i32,
+    token_capacity: i32,
+    rule_ptr: i32,
+    rule_capacity: i32,
+    child_ptr: i32,
+    child_capacity: i32,
+    field_ptr: i32,
+    field_capacity: i32,
+    value_ptr: i32,
+    value_capacity: i32,
+    value_item_ptr: i32,
+    value_item_capacity: i32,
+    result: i32,
+    stack_ptr: i32,
+    fragment_ptr: i32,
+    fragment_capacity: i32,
+    preserve_trivia: i32,
+    max_trace_actions: i32,
+) -> i32 {
+    let ctx = CursorCtx {
+        token_ptr,
+        token_capacity,
+        rule_ptr,
+        rule_capacity,
+        child_ptr,
+        child_capacity,
+        field_ptr,
+        field_capacity,
+        value_ptr,
+        value_capacity,
+        value_item_ptr,
+        value_item_capacity,
+        result,
+        fragment_ptr,
+    };
+    ctx.initialize_result();
+
+    let mut token_read = 0;
+    let mut token_write = 0;
+    let mut action_count = 0;
+    let mut current_state = 0;
+    let mut fragment_count = 0;
+
+    if token_capacity < len {
+        return return_parse_cursor_status(
+            PARSE_CURSOR_STATUS_CAPACITY,
+            result,
+            token_write,
+            len,
+            current_state,
+            token_read,
+        );
+    }
+    if fragment_capacity < 1 {
+        return return_parse_cursor_status(
+            PARSE_CURSOR_STATUS_CAPACITY,
+            result,
+            token_write,
+            len,
+            current_state,
+            token_read,
+        );
+    }
+
+    let raw_token_count = lex_all(src, len, 0, token_ptr);
+    if raw_token_count < 0 {
+        return return_parse_cursor_status(
+            PARSE_STATUS_INTERNAL,
+            result,
+            token_write,
+            len,
+            current_state,
+            token_read,
+        );
+    }
+    if raw_token_count > token_capacity {
+        return return_parse_cursor_status(
+            PARSE_CURSOR_STATUS_CAPACITY,
+            result,
+            token_write,
+            len,
+            current_state,
+            token_read,
+        );
+    }
+
+    unsafe { store_i32(stack_ptr, 0) };
+    let mut state_count = 1;
+
+    loop {
+        if state_count < 1 {
+            return return_parse_cursor_status(
+                PARSE_STATUS_INTERNAL,
+                result,
+                token_write,
+                len,
+                current_state,
+                token_read,
+            );
+        }
+        current_state = load_stack_value(stack_ptr, state_count);
+        let action: i32;
+        let start: i32;
+        let end: i32;
+        let accepting_state: i32;
+        let mut selected_spec = -1;
+
+        if token_read < raw_token_count {
+            let record = token_record_address(token_ptr, token_read);
+            let spec = unsafe { load_i32(record) };
+            start = unsafe { load_i32(record + 4) };
+            end = unsafe { load_i32(record + 8) };
+            accepting_state = unsafe { load_i32(record + 12) };
+            if spec < 0 {
+                return return_parse_cursor_status(
+                    PARSE_STATUS_UNEXPECTED,
+                    result,
+                    token_write,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+
+            let selection = select_action(current_state, accepting_state, true);
+            if selection.choice_count == 0 {
+                if selection.main_candidate_count == 0 {
+                    if selection.trivia_spec >= 0 {
+                        if preserve_trivia != 0 {
+                            store_token_record(
+                                token_ptr,
+                                token_write,
+                                selection.trivia_spec,
+                                start,
+                                end,
+                                accepting_state,
+                            );
+                            token_write += 1;
+                        }
+                        token_read += 1;
+                        action = 0;
+                    } else {
+                        return return_parse_cursor_status(
+                            PARSE_STATUS_UNEXPECTED,
+                            result,
+                            token_write,
+                            start,
+                            current_state,
+                            token_read,
+                        );
+                    }
+                } else {
+                    return return_parse_cursor_status(
+                        PARSE_STATUS_UNEXPECTED,
+                        result,
+                        token_write,
+                        start,
+                        current_state,
+                        token_read,
+                    );
+                }
+            } else {
+                selected_spec = selection.selected_spec;
+                action = selection.selected_action;
+            }
+        } else {
+            start = len;
+            end = len;
+            accepting_state = -1;
+            action = parser_action(current_state, header(PLAN_HEADER_EOF_TERMINAL));
+            if action <= 0 {
+                return return_parse_cursor_status(
+                    PARSE_STATUS_UNEXPECTED,
+                    result,
+                    token_write,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+        }
+
+        if action == 0 {
+            continue;
+        }
+        if action_count >= max_trace_actions {
+            return return_parse_cursor_status(
+                PARSE_STATUS_TRACE_LIMIT,
+                result,
+                token_write,
+                start,
+                current_state,
+                token_read,
+            );
+        }
+        action_count += 1;
+
+        let kind = action & ACTION_KIND_MASK;
+        let payload = action & ACTION_PAYLOAD_MASK;
+        if kind == ACTION_SHIFT {
+            let status = append_shift_cursor_fragment(
+                &ctx,
+                token_write,
+                selected_spec,
+                start,
+                end,
+                accepting_state,
+                fragment_count,
+                token_read,
+            );
+            if status != PARSE_STATUS_OK {
+                return return_parse_cursor_status(
+                    status,
+                    result,
+                    token_write,
+                    start,
+                    accepting_state,
+                    token_read,
+                );
+            }
+            token_write += 1;
+            token_read += 1;
+            fragment_count += 1;
+            if state_count >= fragment_capacity {
+                return return_parse_cursor_status(
+                    PARSE_CURSOR_STATUS_CAPACITY,
+                    result,
+                    token_write,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            store_stack_value(stack_ptr, state_count, payload);
+            state_count += 1;
+            continue;
+        }
+
+        if kind == ACTION_REDUCE {
+            if payload < 0 || payload >= header(PLAN_HEADER_PRODUCTION_COUNT) {
+                return return_parse_cursor_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            let production = plan_addr(header(PLAN_HEADER_PRODUCTIONS)) + payload * 16;
+            let lhs = unsafe { load_i32(production) };
+            let rhs_length = unsafe { load_i32(production + 4) };
+            let reducer_kind = unsafe { load_i32(production + 8) };
+            let reducer_arg = unsafe { load_i32(production + 12) };
+            if state_count < rhs_length || fragment_count < rhs_length {
+                return return_parse_cursor_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            let rhs_start = fragment_count - rhs_length;
+            state_count -= rhs_length;
+            let goto_source_state = load_stack_value(stack_ptr, state_count);
+            let reduced = reduce_cursor_production(
+                &ctx,
+                reducer_kind,
+                reducer_arg,
+                rhs_start,
+                rhs_length,
+                start,
+                token_write,
+                token_read,
+            );
+            if reduced.status != PARSE_STATUS_OK {
+                return return_parse_cursor_status(
+                    reduced.status,
+                    result,
+                    token_write,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            fragment_count = reduced.fragment_count;
+
+            let goto_state = parser_goto(goto_source_state, lhs);
+            if goto_state < 0 {
+                return return_parse_cursor_status(
+                    PARSE_STATUS_INTERNAL,
+                    result,
+                    token_write,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            if state_count >= fragment_capacity {
+                return return_parse_cursor_status(
+                    PARSE_CURSOR_STATUS_CAPACITY,
+                    result,
+                    token_write,
+                    start,
+                    current_state,
+                    token_read,
+                );
+            }
+            store_stack_value(stack_ptr, state_count, goto_state);
+            state_count += 1;
+            continue;
+        }
+
+        if kind == ACTION_ACCEPT {
+            return accept_cursor_result(
+                &ctx,
+                fragment_count,
+                token_write,
+                start,
+                current_state,
+                token_read,
+            );
+        }
+
+        return return_parse_cursor_status(
+            PARSE_STATUS_INTERNAL,
+            result,
+            token_write,
+            start,
+            current_state,
+            token_read,
+        );
+    }
+}
+
+struct CursorCtx {
+    token_ptr: i32,
+    token_capacity: i32,
+    rule_ptr: i32,
+    rule_capacity: i32,
+    child_ptr: i32,
+    child_capacity: i32,
+    field_ptr: i32,
+    field_capacity: i32,
+    value_ptr: i32,
+    value_capacity: i32,
+    value_item_ptr: i32,
+    value_item_capacity: i32,
+    result: i32,
+    fragment_ptr: i32,
+}
+
+impl CursorCtx {
+    fn initialize_result(&self) {
+        let mut field = 0;
+        while field < PARSE_CURSOR_RESULT_I32_COUNT {
+            let mut value = 0;
+            if field == CURSOR_RESULT_ROOT_REF {
+                value = -1;
+            }
+            self.store_result(field, value);
+            field += 1;
+        }
+    }
+
+    #[inline]
+    fn result_value(&self, field: i32) -> i32 {
+        unsafe { load_i32(self.result + field * 4) }
+    }
+
+    #[inline]
+    fn store_result(&self, field: i32, value: i32) {
+        unsafe { store_i32(self.result + field * 4, value) }
+    }
+
+    fn append_value(&self, kind: i32, number: i32, item_start: i32, item_count: i32) -> i32 {
+        let value_count = self.result_value(CURSOR_RESULT_VALUE_COUNT);
+        if value_count >= self.value_capacity {
+            return -1;
+        }
+        let record = cursor_value_record_address(self.value_ptr, value_count);
+        unsafe {
+            store_i32(record, kind);
+            store_i32(record + 4, number);
+            store_i32(record + 8, item_start);
+            store_i32(record + 12, item_count);
+        }
+        self.store_result(CURSOR_RESULT_VALUE_COUNT, value_count + 1);
+        value_count
+    }
+
+    fn append_child(&self, reference: i32) -> i32 {
+        let count = self.result_value(CURSOR_RESULT_CHILD_COUNT);
+        if count >= self.child_capacity {
+            return -1;
+        }
+        unsafe { store_i32(self.child_ptr + count * 4, reference) };
+        self.store_result(CURSOR_RESULT_CHILD_COUNT, count + 1);
+        count
+    }
+
+    fn copy_children(&self, source_start: i32, source_count: i32) -> i32 {
+        let output_start = self.result_value(CURSOR_RESULT_CHILD_COUNT);
+        let mut index = 0;
+        while index < source_count {
+            let reference = unsafe { load_i32(self.child_ptr + (source_start + index) * 4) };
+            if self.append_child(reference) < 0 {
+                return -1;
+            }
+            index += 1;
+        }
+        output_start
+    }
+
+    fn append_field(&self, field_id: i32, value_id: i32) -> i32 {
+        let count = self.result_value(CURSOR_RESULT_FIELD_COUNT);
+        if count >= self.field_capacity {
+            return -1;
+        }
+        let record = cursor_field_record_address(self.field_ptr, count);
+        unsafe {
+            store_i32(record, field_id);
+            store_i32(record + 4, value_id);
+        }
+        self.store_result(CURSOR_RESULT_FIELD_COUNT, count + 1);
+        count
+    }
+
+    fn copy_fields(&self, source_start: i32, source_count: i32) -> i32 {
+        let output_start = self.result_value(CURSOR_RESULT_FIELD_COUNT);
+        let mut index = 0;
+        while index < source_count {
+            let record = cursor_field_record_address(self.field_ptr, source_start + index);
+            let field_id = unsafe { load_i32(record) };
+            let value_id = unsafe { load_i32(record + 4) };
+            if self.append_field(field_id, value_id) < 0 {
+                return -1;
+            }
+            index += 1;
+        }
+        output_start
+    }
+
+    fn append_value_item(&self, value_id: i32) -> i32 {
+        let count = self.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT);
+        if count >= self.value_item_capacity {
+            return -1;
+        }
+        unsafe { store_i32(self.value_item_ptr + count * 4, value_id) };
+        self.store_result(CURSOR_RESULT_VALUE_ITEM_COUNT, count + 1);
+        count
+    }
+
+    fn append_array_copy_plus(&self, old_value_id: i32, add_value_id: i32, flatten: i32) -> i32 {
+        let old_record = cursor_value_record_address(self.value_ptr, old_value_id);
+        let old_kind = unsafe { load_i32(old_record) };
+        if old_kind != CURSOR_VALUE_ARRAY {
+            return -2;
+        }
+        let old_start = unsafe { load_i32(old_record + 8) };
+        let old_count = unsafe { load_i32(old_record + 12) };
+        let item_start = self.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT);
+        let mut item_count = 0;
+        let mut index = 0;
+        while index < old_count {
+            let item_value = unsafe { load_i32(self.value_item_ptr + (old_start + index) * 4) };
+            if self.append_value_item(item_value) < 0 {
+                return -1;
+            }
+            item_count += 1;
+            index += 1;
+        }
+
+        if flatten != 0 {
+            let add_record = cursor_value_record_address(self.value_ptr, add_value_id);
+            let add_kind = unsafe { load_i32(add_record) };
+            if add_kind == CURSOR_VALUE_ARRAY {
+                let add_start = unsafe { load_i32(add_record + 8) };
+                let add_count = unsafe { load_i32(add_record + 12) };
+                let mut add_index = 0;
+                while add_index < add_count {
+                    let item_value =
+                        unsafe { load_i32(self.value_item_ptr + (add_start + add_index) * 4) };
+                    if self.append_value_item(item_value) < 0 {
+                        return -1;
+                    }
+                    item_count += 1;
+                    add_index += 1;
+                }
+            } else {
+                if self.append_value_item(add_value_id) < 0 {
+                    return -1;
+                }
+                item_count += 1;
+            }
+        } else {
+            if self.append_value_item(add_value_id) < 0 {
+                return -1;
+            }
+            item_count += 1;
+        }
+
+        self.append_value(CURSOR_VALUE_ARRAY, -1, item_start, item_count)
+    }
+
+    fn create_single_value_array(&self, item_value: i32) -> i32 {
+        let item_start = self.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT);
+        if self.append_value_item(item_value) < 0 {
+            return -1;
+        }
+        self.append_value(CURSOR_VALUE_ARRAY, -1, item_start, 1)
+    }
+
+    fn append_repeated_fields(
+        &self,
+        target_start: i32,
+        source_start: i32,
+        source_count: i32,
+    ) -> i32 {
+        let mut source_index = 0;
+        while source_index < source_count {
+            let source_record =
+                cursor_field_record_address(self.field_ptr, source_start + source_index);
+            let source_field_id = unsafe { load_i32(source_record) };
+            let source_value_id = unsafe { load_i32(source_record + 4) };
+            let search_end = self.result_value(CURSOR_RESULT_FIELD_COUNT);
+            let mut search_index = target_start;
+            let mut found = 0;
+            while search_index < search_end {
+                let target_record = cursor_field_record_address(self.field_ptr, search_index);
+                if unsafe { load_i32(target_record) } == source_field_id {
+                    let target_value_id = unsafe { load_i32(target_record + 4) };
+                    let target_value_record =
+                        cursor_value_record_address(self.value_ptr, target_value_id);
+                    if unsafe { load_i32(target_value_record) } == CURSOR_VALUE_ARRAY {
+                        let new_value_id =
+                            self.append_array_copy_plus(target_value_id, source_value_id, 1);
+                        if new_value_id < 0 {
+                            return new_value_id;
+                        }
+                        unsafe { store_i32(target_record + 4, new_value_id) };
+                        found = 1;
+                        break;
+                    }
+                }
+                search_index += 1;
+            }
+            if found == 0 {
+                let new_value_id = self.create_single_value_array(source_value_id);
+                if new_value_id < 0 {
+                    return new_value_id;
+                }
+                if self.append_field(source_field_id, new_value_id) < 0 {
+                    return -1;
+                }
+            }
+            source_index += 1;
+        }
+        0
+    }
+
+    fn append_rule(
+        &self,
+        rule_id: i32,
+        span_start: i32,
+        span_end: i32,
+        token_start: i32,
+        token_end: i32,
+        child_start: i32,
+        child_count: i32,
+        field_start: i32,
+        field_count: i32,
+    ) -> i32 {
+        let rule_count = self.result_value(CURSOR_RESULT_RULE_COUNT);
+        if rule_count >= self.rule_capacity {
+            return -1;
+        }
+        let record = self.rule_ptr + rule_count * CURSOR_RULE_RECORD_I32_COUNT * 4;
+        unsafe {
+            store_i32(record, rule_id);
+            store_i32(record + 4, span_start);
+            store_i32(record + 8, span_end);
+            store_i32(record + 12, token_start);
+            store_i32(record + 16, token_end);
+            store_i32(record + 20, child_start);
+            store_i32(record + 24, child_count);
+            store_i32(record + 28, field_start);
+            store_i32(record + 32, field_count);
+        }
+        self.store_result(CURSOR_RESULT_RULE_COUNT, rule_count + 1);
+        rule_count << 1
+    }
+}
+
+struct ReduceResult {
+    status: i32,
+    fragment_count: i32,
+}
+
+fn return_parse_cursor_status(
+    status: i32,
+    result: i32,
+    token_count: i32,
+    offset: i32,
+    state: i32,
+    token_read: i32,
+) -> i32 {
+    unsafe {
+        store_i32(result + CURSOR_RESULT_TOKEN_COUNT * 4, token_count);
+        store_i32(result + CURSOR_RESULT_ERROR_OFFSET * 4, offset);
+        store_i32(result + CURSOR_RESULT_ERROR_STATE * 4, state);
+        store_i32(result + CURSOR_RESULT_TOKEN_READ * 4, token_read);
+    }
+    status
+}
+
+#[inline]
+fn cursor_value_record_address(value_ptr: i32, index: i32) -> i32 {
+    value_ptr + index * CURSOR_VALUE_RECORD_I32_COUNT * 4
+}
+
+#[inline]
+fn cursor_field_record_address(field_ptr: i32, index: i32) -> i32 {
+    field_ptr + index * CURSOR_FIELD_RECORD_I32_COUNT * 4
+}
+
+#[inline]
+fn fragment_address(ctx: &CursorCtx, index: i32) -> i32 {
+    ctx.fragment_ptr + index * FRAGMENT_I32_COUNT * 4
+}
+
+#[inline]
+fn fragment_field(ctx: &CursorCtx, index: i32, field: i32) -> i32 {
+    unsafe { load_i32(fragment_address(ctx, index) + field * 4) }
+}
+
+#[inline]
+fn store_fragment_field(ctx: &CursorCtx, index: i32, field: i32, value: i32) {
+    unsafe { store_i32(fragment_address(ctx, index) + field * 4, value) }
+}
+
+fn store_result_fragment(
+    ctx: &CursorCtx,
+    index: i32,
+    value: i32,
+    child_start: i32,
+    child_count: i32,
+    field_start: i32,
+    field_count: i32,
+    span_start: i32,
+    span_end: i32,
+    token_start: i32,
+    token_end: i32,
+) {
+    store_fragment_field(ctx, index, FRAGMENT_VALUE, value);
+    store_fragment_field(ctx, index, FRAGMENT_CHILD_START, child_start);
+    store_fragment_field(ctx, index, FRAGMENT_CHILD_COUNT, child_count);
+    store_fragment_field(ctx, index, FRAGMENT_FIELD_START, field_start);
+    store_fragment_field(ctx, index, FRAGMENT_FIELD_COUNT, field_count);
+    store_fragment_field(ctx, index, FRAGMENT_SPAN_START, span_start);
+    store_fragment_field(ctx, index, FRAGMENT_SPAN_END, span_end);
+    store_fragment_field(ctx, index, FRAGMENT_TOKEN_START, token_start);
+    store_fragment_field(ctx, index, FRAGMENT_TOKEN_END, token_end);
+}
+
+fn append_shift_cursor_fragment(
+    ctx: &CursorCtx,
+    token_write: i32,
+    selected_spec: i32,
+    start: i32,
+    end: i32,
+    accepting_state: i32,
+    fragment_count: i32,
+    token_read: i32,
+) -> i32 {
+    if token_write >= ctx.token_capacity {
+        return PARSE_CURSOR_STATUS_CAPACITY;
+    }
+    store_token_record(
+        ctx.token_ptr,
+        token_write,
+        selected_spec,
+        start,
+        end,
+        accepting_state,
+    );
+    let token_ref = (token_write << 1) | 1;
+    let value = ctx.append_value(CURSOR_VALUE_REF, token_ref, -1, 0);
+    if value < 0 {
+        return PARSE_CURSOR_STATUS_CAPACITY;
+    }
+    let child_start = ctx.append_child(token_ref);
+    if child_start < 0 {
+        return PARSE_CURSOR_STATUS_CAPACITY;
+    }
+    let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
+    store_result_fragment(
+        ctx,
+        fragment_count,
+        value,
+        child_start,
+        1,
+        field_start,
+        0,
+        start,
+        end,
+        token_write,
+        token_write + 1,
+    );
+    let _ = token_read;
+    PARSE_STATUS_OK
+}
+
+fn reduce_cursor_production(
+    ctx: &CursorCtx,
+    reducer_kind: i32,
+    reducer_arg: i32,
+    rhs_start: i32,
+    rhs_length: i32,
+    offset: i32,
+    token_write: i32,
+    token_read: i32,
+) -> ReduceResult {
+    if reducer_kind == CURSOR_REDUCER_START
+        || reducer_kind == CURSOR_REDUCER_TERMINAL
+        || reducer_kind == CURSOR_REDUCER_RULE_REF
+        || reducer_kind == CURSOR_REDUCER_IDENTITY
+        || reducer_kind == CURSOR_REDUCER_OPTIONAL_SOME
+    {
+        return ReduceResult {
+            status: PARSE_STATUS_OK,
+            fragment_count: rhs_start + 1,
+        };
+    }
+
+    if reducer_kind == CURSOR_REDUCER_RULE {
+        return reduce_cursor_rule(ctx, reducer_arg, rhs_start, offset, token_write, token_read);
+    }
+    if reducer_kind == CURSOR_REDUCER_OPTIONAL_EMPTY {
+        return reduce_cursor_empty(
+            ctx,
+            CURSOR_VALUE_NULL,
+            rhs_start,
+            offset,
+            token_write,
+            token_read,
+        );
+    }
+    if reducer_kind == CURSOR_REDUCER_REPEAT_EMPTY {
+        return reduce_cursor_empty(
+            ctx,
+            CURSOR_VALUE_ARRAY,
+            rhs_start,
+            offset,
+            token_write,
+            token_read,
+        );
+    }
+    if reducer_kind == CURSOR_REDUCER_SEQUENCE {
+        return reduce_cursor_sequence(ctx, rhs_start, rhs_length, offset, token_write, token_read);
+    }
+    if reducer_kind == CURSOR_REDUCER_REPEAT1_FIRST
+        || reducer_kind == CURSOR_REDUCER_SEPARATED_FIRST
+    {
+        return reduce_cursor_first_repeated(ctx, rhs_start, offset, token_write, token_read);
+    }
+    if reducer_kind == CURSOR_REDUCER_REPEAT_APPEND || reducer_kind == CURSOR_REDUCER_REPEAT1_APPEND
+    {
+        return reduce_cursor_append(ctx, 0, rhs_start, offset, token_write, token_read);
+    }
+    if reducer_kind == CURSOR_REDUCER_SEPARATED_APPEND {
+        return reduce_cursor_append(ctx, 1, rhs_start, offset, token_write, token_read);
+    }
+    if reducer_kind == CURSOR_REDUCER_FIELD {
+        return reduce_cursor_field(ctx, reducer_arg, rhs_start, offset, token_write, token_read);
+    }
+
+    ReduceResult {
+        status: PARSE_STATUS_INTERNAL,
+        fragment_count: rhs_start,
+    }
+}
+
+fn reduce_cursor_rule(
+    ctx: &CursorCtx,
+    rule_id: i32,
+    rhs_start: i32,
+    offset: i32,
+    token_write: i32,
+    token_read: i32,
+) -> ReduceResult {
+    let span_start = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_START);
+    let span_end = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_END);
+    let token_start = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_START);
+    let token_end = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_END);
+    let source_child_start = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_START);
+    let source_child_count = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_COUNT);
+    let source_field_start = fragment_field(ctx, rhs_start, FRAGMENT_FIELD_START);
+    let source_field_count = fragment_field(ctx, rhs_start, FRAGMENT_FIELD_COUNT);
+    let rule_ref = ctx.append_rule(
+        rule_id,
+        span_start,
+        span_end,
+        token_start,
+        token_end,
+        source_child_start,
+        source_child_count,
+        source_field_start,
+        source_field_count,
+    );
+    if rule_ref < 0 {
+        return capacity_result(rhs_start);
+    }
+    let value = ctx.append_value(CURSOR_VALUE_REF, rule_ref, -1, 0);
+    if value < 0 {
+        return capacity_result(rhs_start);
+    }
+    let child_start = ctx.append_child(rule_ref);
+    if child_start < 0 {
+        return capacity_result(rhs_start);
+    }
+    let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
+    store_result_fragment(
+        ctx,
+        rhs_start,
+        value,
+        child_start,
+        1,
+        field_start,
+        0,
+        span_start,
+        span_end,
+        token_start,
+        token_end,
+    );
+    let _ = (offset, token_write, token_read);
+    ok_result(rhs_start + 1)
+}
+
+fn reduce_cursor_empty(
+    ctx: &CursorCtx,
+    value_kind: i32,
+    rhs_start: i32,
+    offset: i32,
+    token_write: i32,
+    token_read: i32,
+) -> ReduceResult {
+    let item_start;
+    if value_kind == CURSOR_VALUE_ARRAY {
+        item_start = ctx.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT);
+    } else {
+        item_start = -1;
+    }
+    let value = ctx.append_value(value_kind, -1, item_start, 0);
+    if value < 0 {
+        return capacity_result(rhs_start);
+    }
+    let child_start = ctx.result_value(CURSOR_RESULT_CHILD_COUNT);
+    let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
+    store_result_fragment(
+        ctx,
+        rhs_start,
+        value,
+        child_start,
+        0,
+        field_start,
+        0,
+        offset,
+        offset,
+        token_write,
+        token_write,
+    );
+    let _ = token_read;
+    ok_result(rhs_start + 1)
+}
+
+fn reduce_cursor_sequence(
+    ctx: &CursorCtx,
+    rhs_start: i32,
+    rhs_length: i32,
+    offset: i32,
+    token_write: i32,
+    token_read: i32,
+) -> ReduceResult {
+    let mut value = ctx.append_value(
+        CURSOR_VALUE_ARRAY,
+        -1,
+        ctx.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT),
+        0,
+    );
+    if value < 0 {
+        return capacity_result(rhs_start);
+    }
+
+    let mut index = 0;
+    while index < rhs_length {
+        let item_value = fragment_field(ctx, rhs_start + index, FRAGMENT_VALUE);
+        value = ctx.append_array_copy_plus(value, item_value, 0);
+        if value < 0 {
+            return capacity_result(rhs_start);
+        }
+        index += 1;
+    }
+
+    let child_start = ctx.result_value(CURSOR_RESULT_CHILD_COUNT);
+    let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
+    index = 0;
+    while index < rhs_length {
+        let source_child_start = fragment_field(ctx, rhs_start + index, FRAGMENT_CHILD_START);
+        let source_child_count = fragment_field(ctx, rhs_start + index, FRAGMENT_CHILD_COUNT);
+        if ctx.copy_children(source_child_start, source_child_count) < 0 {
+            return capacity_result(rhs_start);
+        }
+        let source_field_start = fragment_field(ctx, rhs_start + index, FRAGMENT_FIELD_START);
+        let source_field_count = fragment_field(ctx, rhs_start + index, FRAGMENT_FIELD_COUNT);
+        if ctx.copy_fields(source_field_start, source_field_count) < 0 {
+            return capacity_result(rhs_start);
+        }
+        index += 1;
+    }
+    let child_count = ctx.result_value(CURSOR_RESULT_CHILD_COUNT) - child_start;
+    let field_count = ctx.result_value(CURSOR_RESULT_FIELD_COUNT) - field_start;
+
+    let span_start;
+    let span_end;
+    let token_start;
+    let token_end;
+    if rhs_length == 0 {
+        span_start = offset;
+        span_end = offset;
+        token_start = token_write;
+        token_end = token_write;
+    } else {
+        let last = rhs_start + rhs_length - 1;
+        span_start = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_START);
+        span_end = fragment_field(ctx, last, FRAGMENT_SPAN_END);
+        token_start = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_START);
+        token_end = fragment_field(ctx, last, FRAGMENT_TOKEN_END);
+    }
+    store_result_fragment(
+        ctx,
+        rhs_start,
+        value,
+        child_start,
+        child_count,
+        field_start,
+        field_count,
+        span_start,
+        span_end,
+        token_start,
+        token_end,
+    );
+    let _ = token_read;
+    ok_result(rhs_start + 1)
+}
+
+fn reduce_cursor_first_repeated(
+    ctx: &CursorCtx,
+    rhs_start: i32,
+    offset: i32,
+    token_write: i32,
+    token_read: i32,
+) -> ReduceResult {
+    let item_value = fragment_field(ctx, rhs_start, FRAGMENT_VALUE);
+    let item_child_start = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_START);
+    let item_child_count = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_COUNT);
+    let item_field_start = fragment_field(ctx, rhs_start, FRAGMENT_FIELD_START);
+    let item_field_count = fragment_field(ctx, rhs_start, FRAGMENT_FIELD_COUNT);
+    let item_span_start = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_START);
+    let item_span_end = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_END);
+    let item_token_start = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_START);
+    let item_token_end = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_END);
+
+    let mut value = ctx.append_value(
+        CURSOR_VALUE_ARRAY,
+        -1,
+        ctx.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT),
+        0,
+    );
+    if value < 0 {
+        return capacity_result(rhs_start);
+    }
+    value = ctx.append_array_copy_plus(value, item_value, 0);
+    if value < 0 {
+        return capacity_result(rhs_start);
+    }
+    let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
+    let appended = ctx.append_repeated_fields(field_start, item_field_start, item_field_count);
+    if appended < 0 {
+        return capacity_result(rhs_start);
+    }
+    let field_count = ctx.result_value(CURSOR_RESULT_FIELD_COUNT) - field_start;
+    store_result_fragment(
+        ctx,
+        rhs_start,
+        value,
+        item_child_start,
+        item_child_count,
+        field_start,
+        field_count,
+        item_span_start,
+        item_span_end,
+        item_token_start,
+        item_token_end,
+    );
+    let _ = (offset, token_write, token_read);
+    ok_result(rhs_start + 1)
+}
+
+fn reduce_cursor_append(
+    ctx: &CursorCtx,
+    separated: i32,
+    rhs_start: i32,
+    offset: i32,
+    token_write: i32,
+    token_read: i32,
+) -> ReduceResult {
+    let item_index_offset = if separated == 1 { 2 } else { 1 };
+    let mut value = fragment_field(ctx, rhs_start, FRAGMENT_VALUE);
+    let item_value = fragment_field(ctx, rhs_start + item_index_offset, FRAGMENT_VALUE);
+    value = ctx.append_array_copy_plus(value, item_value, 0);
+    if value < 0 {
+        return capacity_result(rhs_start);
+    }
+
+    let child_start = ctx.result_value(CURSOR_RESULT_CHILD_COUNT);
+    let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
+    if copy_fragment_children(ctx, rhs_start, 0) < 0 {
+        return capacity_result(rhs_start);
+    }
+    if copy_fragment_fields(ctx, rhs_start, 0) < 0 {
+        return capacity_result(rhs_start);
+    }
+    if separated == 1 {
+        if copy_fragment_children_and_repeated_fields(ctx, rhs_start, 1, field_start) < 0 {
+            return capacity_result(rhs_start);
+        }
+    }
+    if copy_fragment_children_and_repeated_fields(ctx, rhs_start, item_index_offset, field_start)
+        < 0
+    {
+        return capacity_result(rhs_start);
+    }
+
+    let child_count = ctx.result_value(CURSOR_RESULT_CHILD_COUNT) - child_start;
+    let field_count = ctx.result_value(CURSOR_RESULT_FIELD_COUNT) - field_start;
+    let span_start = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_START);
+    let span_end = fragment_field(ctx, rhs_start + item_index_offset, FRAGMENT_SPAN_END);
+    let token_start = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_START);
+    let token_end = fragment_field(ctx, rhs_start + item_index_offset, FRAGMENT_TOKEN_END);
+    store_result_fragment(
+        ctx,
+        rhs_start,
+        value,
+        child_start,
+        child_count,
+        field_start,
+        field_count,
+        span_start,
+        span_end,
+        token_start,
+        token_end,
+    );
+    let _ = (offset, token_write, token_read);
+    ok_result(rhs_start + 1)
+}
+
+fn reduce_cursor_field(
+    ctx: &CursorCtx,
+    field_id: i32,
+    rhs_start: i32,
+    offset: i32,
+    token_write: i32,
+    token_read: i32,
+) -> ReduceResult {
+    let value = fragment_field(ctx, rhs_start, FRAGMENT_VALUE);
+    let child_start = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_START);
+    let child_count = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_COUNT);
+    let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
+    if ctx.append_field(field_id, value) < 0 {
+        return capacity_result(rhs_start);
+    }
+    let span_start = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_START);
+    let span_end = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_END);
+    let token_start = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_START);
+    let token_end = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_END);
+    store_result_fragment(
+        ctx,
+        rhs_start,
+        value,
+        child_start,
+        child_count,
+        field_start,
+        1,
+        span_start,
+        span_end,
+        token_start,
+        token_end,
+    );
+    let _ = (offset, token_write, token_read);
+    ok_result(rhs_start + 1)
+}
+
+fn copy_fragment_children(ctx: &CursorCtx, rhs_start: i32, offset: i32) -> i32 {
+    let source_child_start = fragment_field(ctx, rhs_start + offset, FRAGMENT_CHILD_START);
+    let source_child_count = fragment_field(ctx, rhs_start + offset, FRAGMENT_CHILD_COUNT);
+    ctx.copy_children(source_child_start, source_child_count)
+}
+
+fn copy_fragment_fields(ctx: &CursorCtx, rhs_start: i32, offset: i32) -> i32 {
+    let source_field_start = fragment_field(ctx, rhs_start + offset, FRAGMENT_FIELD_START);
+    let source_field_count = fragment_field(ctx, rhs_start + offset, FRAGMENT_FIELD_COUNT);
+    ctx.copy_fields(source_field_start, source_field_count)
+}
+
+fn copy_fragment_children_and_repeated_fields(
+    ctx: &CursorCtx,
+    rhs_start: i32,
+    offset: i32,
+    field_start: i32,
+) -> i32 {
+    if copy_fragment_children(ctx, rhs_start, offset) < 0 {
+        return -1;
+    }
+    let source_field_start = fragment_field(ctx, rhs_start + offset, FRAGMENT_FIELD_START);
+    let source_field_count = fragment_field(ctx, rhs_start + offset, FRAGMENT_FIELD_COUNT);
+    ctx.append_repeated_fields(field_start, source_field_start, source_field_count)
+}
+
+fn accept_cursor_result(
+    ctx: &CursorCtx,
+    mut fragment_count: i32,
+    token_write: i32,
+    offset: i32,
+    state: i32,
+    token_read: i32,
+) -> i32 {
+    if fragment_count < 1 {
+        return return_parse_cursor_status(
+            PARSE_STATUS_INTERNAL,
+            ctx.result,
+            token_write,
+            offset,
+            state,
+            token_read,
+        );
+    }
+    fragment_count -= 1;
+    let value_id = fragment_field(ctx, fragment_count, FRAGMENT_VALUE);
+    let record = cursor_value_record_address(ctx.value_ptr, value_id);
+    if unsafe { load_i32(record) } != CURSOR_VALUE_REF {
+        return return_parse_cursor_status(
+            PARSE_STATUS_INTERNAL,
+            ctx.result,
+            token_write,
+            offset,
+            state,
+            token_read,
+        );
+    }
+    let reference = unsafe { load_i32(record + 4) };
+    if (reference & 1) != 0 {
+        return return_parse_cursor_status(
+            PARSE_STATUS_INTERNAL,
+            ctx.result,
+            token_write,
+            offset,
+            state,
+            token_read,
+        );
+    }
+    ctx.store_result(CURSOR_RESULT_ROOT_REF, reference);
+    return_parse_cursor_status(
+        PARSE_STATUS_OK,
+        ctx.result,
+        token_write,
+        offset,
+        state,
+        token_read,
+    )
+}
+
+#[inline]
+fn ok_result(fragment_count: i32) -> ReduceResult {
+    ReduceResult {
+        status: PARSE_STATUS_OK,
+        fragment_count,
+    }
+}
+
+#[inline]
+fn capacity_result(fragment_count: i32) -> ReduceResult {
+    ReduceResult {
+        status: PARSE_CURSOR_STATUS_CAPACITY,
+        fragment_count,
+    }
+}
+
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {}
+}

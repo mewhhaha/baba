@@ -7,13 +7,13 @@ the generated artifacts and runtime contracts easy to inspect.
 It demonstrates:
 
 - explicit token and skip declarations, comments, literals, fields, optionals,
-  repetitions, separated lists, and generated CST fields;
+  repetitions, separated lists, and generated cursor fields;
 - parser-contextual token selection with `A` and `B`, where standalone `lex()`
   chooses `A` for `x`, but `parse()` can select `B` in the `> x;` context;
 - declared parser conflicts for tuple/group type syntax;
 - generated Wasm parser API, including parser-plan identity, runtime
-  implementation identity, `parseTokens`, `parseTokensUnchecked`, parser
-  instances, reset/dispose, and ABI metadata;
+  implementation identity, cursor parsing, lazy lex tapes, trace validation,
+  parser instances, reset/dispose, and ABI metadata;
 - external `parser.wasm` and `parser.plan` loading through the API.
 
 ## Recreate This Example

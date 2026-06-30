@@ -416,6 +416,51 @@ export type KitParseEventResult =
     diagnostics: readonly KitParseDiagnostic[];
   };
 
+export type KitCursorFieldValue =
+  | KitSyntaxCursor
+  | readonly KitCursorFieldValue[]
+  | null;
+
+export type KitSyntaxCursor = KitRuleCursor | KitTokenCursor;
+
+export interface KitRuleCursor<N extends string = string> {
+  readonly type: "rule";
+  readonly name: N;
+  readonly span: KitSpan;
+  readonly tokenRange: { start: number; end: number };
+  readonly childCount: number;
+  child(index: number): KitSyntaxCursor | undefined;
+  children(): readonly KitSyntaxCursor[];
+  field(name: string): KitCursorFieldValue | undefined;
+  fieldArray(name: string): readonly KitCursorFieldValue[];
+}
+
+export interface KitTokenCursor {
+  readonly type: "token";
+  readonly tokenType: "named" | "literal";
+  readonly kind: string;
+  readonly text: string;
+  readonly span: KitSpan;
+  readonly tokenIndex: number;
+  toToken(): KitMainNamedToken | KitLiteralToken;
+}
+
+export type KitCursorParseResult<
+  Root extends KitRuleCursor = KitRuleCursor,
+> =
+  | {
+    ok: true;
+    source: string;
+    cursor: Root;
+    diagnostics: readonly [];
+  }
+  | {
+    ok: false;
+    source: string;
+    cursor: null;
+    diagnostics: readonly KitParseDiagnostic[];
+  };
+
 export type KitValidateParseResult =
   | {
     ok: true;
@@ -440,6 +485,24 @@ interface EventFragment {
   events: KitParseEvent[];
   span: KitSpan | null;
   tokenRange: TokenRange | null;
+}
+
+interface CursorFragment {
+  value: CursorDraftValue;
+  children: number[];
+  fields: CursorFieldCapture[];
+  span: KitSpan | null;
+  tokenRange: TokenRange | null;
+}
+
+type CursorDraftValue =
+  | { kind: "null" }
+  | { kind: "ref"; ref: number }
+  | { kind: "array"; items: CursorDraftValue[] };
+
+interface CursorFieldCapture {
+  name: string;
+  value: CursorDraftValue;
 }
 
 interface FieldCapture {
@@ -470,6 +533,7 @@ interface ParseLexCandidateSite {
 interface FieldConfig {
   array: boolean;
   nullable: boolean;
+  valueArray: boolean;
 }
 
 interface RuntimeRuleFieldSchema {
@@ -490,12 +554,13 @@ type BranchAdvanceResult =
   | { kind: "success"; result: InternalParseResult }
   | { kind: "failure"; failure: ParseFailure };
 
-type KitParseExecutionMode = "cst" | "validate" | "events";
+type KitParseExecutionMode = "cst" | "validate" | "events" | "cursor";
 
 type InternalParseResult =
   | KitParseResult
   | KitValidateParseResult
-  | KitParseEventResult;
+  | KitParseEventResult
+  | KitCursorParseResult;
 
 interface ParseFailure {
   diagnostic: KitParseDiagnostic;
@@ -945,17 +1010,14 @@ function lexForParseWithKit(
     }
     const tokenIndex = tokens.length;
     tokens.push(mainCandidates[0].token);
-    sites.push({ tokenIndex, candidates: mainCandidates });
+    if (mainCandidates.length > 1) {
+      sites.push({ tokenIndex, candidates: mainCandidates });
+    }
     offset = scanned.end;
   }
 
   const eof = eofToken(source.length);
-  const eofIndex = tokens.length;
   tokens.push(eof);
-  sites.push({
-    tokenIndex: eofIndex,
-    candidates: [{ token: eof, terminal: kit.bnf.eofTerminal }],
-  });
   return { source, tokens, diagnostics, sites };
 }
 
@@ -1010,6 +1072,25 @@ export function parseEventsWithKit(
       lexed.sites,
       options.contextualLexingStats,
       { ...options, mode: "events" },
+    ),
+  );
+}
+
+export function parseCursorWithKit(
+  kit: ParserKit,
+  source: string,
+  options: KitParseOptions = {},
+): KitCursorParseResult {
+  const lexed = lexForParseWithKit(kit, source, options);
+  return cursorResult(
+    parseTokenList(
+      kit,
+      source,
+      lexed.tokens,
+      lexicalDiagnostics(lexed.diagnostics),
+      lexed.sites,
+      options.contextualLexingStats,
+      { ...options, mode: "cursor" },
     ),
   );
 }
@@ -1094,6 +1175,27 @@ export function parseTokenEventsWithKit(
   );
 }
 
+export function parseTokenCursorWithKit(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+): KitCursorParseResult {
+  assertParserKit(kit);
+  const streamDiagnostics = validateTokenStream(kit, source, tokens);
+  const tokenDiagnostics = lexicalTokenDiagnostics(kit, tokens);
+  return cursorResult(
+    parseTokenList(
+      kit,
+      source,
+      tokens,
+      combineDiagnostics(streamDiagnostics, tokenDiagnostics),
+      [],
+      undefined,
+      { mode: "cursor" },
+    ),
+  );
+}
+
 export function parseTokensLazyWithKit(
   kit: ParserKit,
   source: string,
@@ -1170,6 +1272,25 @@ export function parseTokenEventsUncheckedWithKit(
   );
 }
 
+export function parseTokenCursorUncheckedWithKit(
+  kit: ParserKit,
+  source: string,
+  tokens: readonly KitToken[],
+): KitCursorParseResult {
+  assertParserKit(kit);
+  return cursorResult(
+    parseTokenList(
+      kit,
+      source,
+      tokens,
+      lexicalTokenDiagnostics(kit, tokens),
+      [],
+      undefined,
+      { mode: "cursor" },
+    ),
+  );
+}
+
 export function parseTokensLazyUncheckedWithKit(
   kit: ParserKit,
   source: string,
@@ -1222,6 +1343,32 @@ function eventResult(result: InternalParseResult): KitParseEventResult {
     };
 }
 
+function cursorResult(result: InternalParseResult): KitCursorParseResult {
+  if (result.ok && "cursor" in result) {
+    return result;
+  }
+  if (!result.ok) {
+    return {
+      ok: false,
+      source: result.source,
+      cursor: null,
+      diagnostics: result.diagnostics,
+    };
+  }
+  return {
+    ok: false,
+    source: result.source,
+    cursor: null,
+    diagnostics: [
+      kitParseDiagnostic(
+        "PARSER_INTERNAL_ERROR",
+        "Parser accepted without producing a cursor.",
+        { start: result.source.length, end: result.source.length },
+      ),
+    ],
+  };
+}
+
 function parseTokenList(
   kit: ParserKit,
   source: string,
@@ -1238,6 +1385,14 @@ function parseTokenList(
     }
     if (mode === "events") {
       return { ok: false, source, events: [], diagnostics: lexicalDiagnostics };
+    }
+    if (mode === "cursor") {
+      return {
+        ok: false,
+        source,
+        cursor: null,
+        diagnostics: lexicalDiagnostics,
+      };
     }
     return {
       ok: false,
@@ -1268,6 +1423,10 @@ function parseTokenList(
   );
   const ambiguityMode = options.ambiguityMode ?? "first-success";
   const runtime = runtimeTables(kit);
+  let cursorTape: CursorTapeBuilder | undefined;
+  if (mode === "cursor") {
+    cursorTape = new CursorTapeBuilder(runtime, source, tokens);
+  }
   const sitesByToken = new Map(
     candidateSites.map((site) => [site.tokenIndex, site.candidates]),
   );
@@ -1291,6 +1450,7 @@ function parseTokenList(
       stats,
       maxTraceActions,
       mode,
+      cursorTape,
     );
     emitContextualStats(contextualLexingStats, stats);
     return result;
@@ -1333,6 +1493,7 @@ function parseTokenList(
         maxExploredBranches,
         () => ++traceActions,
         mode,
+        cursorTape,
       );
       if (traceActions > maxTraceActions) {
         const diagnostic = kitParseDiagnostic(
@@ -1399,6 +1560,7 @@ function parseDeterministicTokenList(
   stats: ContextualStatsState,
   maxTraceActions: number,
   mode: KitParseExecutionMode,
+  cursorTape: CursorTapeBuilder | undefined,
 ): InternalParseResult {
   const branch: ParseBranch = {
     states: [0],
@@ -1420,6 +1582,7 @@ function parseDeterministicTokenList(
       0,
       () => ++traceActions,
       mode,
+      cursorTape,
     );
     if (traceActions > maxTraceActions) {
       return failedParseResult(
@@ -1467,6 +1630,9 @@ function failedParseResult(
   if (mode === "events") {
     return { ok: false, source, events: [], diagnostics };
   }
+  if (mode === "cursor") {
+    return { ok: false, source, cursor: null, diagnostics };
+  }
   return { ok: false, root: null, source, tokens, diagnostics };
 }
 
@@ -1482,6 +1648,7 @@ function advanceBranch(
   maxExploredBranches: number,
   nextTraceAction: () => number,
   mode: KitParseExecutionMode,
+  cursorTape: CursorTapeBuilder | undefined,
 ): BranchAdvanceResult {
   branch.index = skipTrivia(tokens, branch.index);
   const token = tokens[branch.index] ?? eofToken(source.length);
@@ -1541,6 +1708,7 @@ function advanceBranch(
         stats,
         nextTraceAction,
         mode,
+        cursorTape,
       );
       if (advanced.kind === "success" || advanced.kind === "failure") {
         return advanced;
@@ -1562,6 +1730,7 @@ function advanceBranch(
     stats,
     nextTraceAction,
     mode,
+    cursorTape,
   );
 }
 
@@ -1577,16 +1746,19 @@ function applyAction(
   stats: ContextualStatsState,
   nextTraceAction: () => number,
   mode: KitParseExecutionMode,
+  cursorTape: CursorTapeBuilder | undefined,
 ): BranchAdvanceResult {
   nextTraceAction();
   if (action.kind === "shift") {
     branch.states.push(action.state);
     if (mode !== "validate") {
-      branch.values.push(
-        mode === "events"
-          ? eventTokenFragment(runtime, token, branch.index)
-          : shiftedToken(token, branch.index),
-      );
+      if (mode === "events") {
+        branch.values.push(eventTokenFragment(runtime, token, branch.index));
+      } else if (mode === "cursor") {
+        branch.values.push(cursorTokenFragment(token, branch.index));
+      } else {
+        branch.values.push(shiftedToken(token, branch.index));
+      }
     }
     if (token !== tokens[branch.index]) {
       branch.tokenOverrides.set(branch.index, token);
@@ -1596,6 +1768,19 @@ function applyAction(
   }
 
   if (action.kind === "accept") {
+    if (mode === "cursor") {
+      if (cursorTape === undefined) {
+        throw new Error("Cursor parse mode is missing cursor tape state.");
+      }
+      return {
+        kind: "success",
+        result: acceptedCursorResult(
+          source,
+          cursorTape,
+          branch.values.at(-1),
+        ),
+      };
+    }
     return {
       kind: "success",
       result: mode === "validate"
@@ -1629,17 +1814,30 @@ function applyAction(
   );
   let reduced: unknown;
   try {
-    reduced = mode === "validate"
-      ? null
-      : mode === "events"
-      ? reduceEventProduction(
+    if (mode === "validate") {
+      reduced = null;
+    } else if (mode === "events") {
+      reduced = reduceEventProduction(
         runtime,
         production.reducer,
         rhsValues,
         token.span.start,
         branch.index,
-      )
-      : reduceProduction(
+      );
+    } else if (mode === "cursor") {
+      if (cursorTape === undefined) {
+        throw new Error("Cursor parse mode is missing cursor tape state.");
+      }
+      reduced = reduceCursorProduction(
+        runtime,
+        cursorTape,
+        production.reducer,
+        rhsValues,
+        token.span.start,
+        branch.index,
+      );
+    } else {
+      reduced = reduceProduction(
         kit,
         runtime,
         production.reducer,
@@ -1647,6 +1845,7 @@ function applyAction(
         token.span.start,
         branch.index,
       );
+    }
   } catch (error) {
     return {
       kind: "failure",
@@ -1823,6 +2022,275 @@ function reduceEventProduction(
       };
     }
   }
+}
+
+function reduceCursorProduction(
+  runtime: RuntimeTables,
+  tape: CursorTapeBuilder,
+  reducer: ParserKitReducerSpec,
+  rhs: readonly unknown[],
+  offset: number,
+  tokenIndex: number,
+): CursorFragment {
+  switch (reducer.kind) {
+    case "start":
+      return toCursorFragment(rhs[0]);
+    case "rule": {
+      const fragment = toCursorFragment(rhs[0]);
+      let span = fragment.span;
+      if (span === null) {
+        span = { start: 0, end: 0 };
+      }
+      let tokenRange = fragment.tokenRange;
+      if (tokenRange === null) {
+        tokenRange = { start: tokenIndex, end: tokenIndex };
+      }
+      const ref = tape.addRule(
+        reducer.ruleId,
+        span,
+        tokenRange,
+        fragment.children,
+        fragment.fields,
+      );
+      return cursorRuleFragment(ref, span, tokenRange);
+    }
+    case "terminal":
+    case "ruleRef":
+    case "identity":
+    case "optionalSome":
+      return toCursorFragment(rhs[0]);
+    case "sequence":
+      return cursorSequenceFragment(rhs, offset, tokenIndex);
+    case "optionalEmpty":
+      return cursorEmptyFragment(cursorNullDraft(), offset, tokenIndex);
+    case "repeatEmpty":
+      return cursorEmptyFragment(cursorArrayDraft([]), offset, tokenIndex);
+    case "repeatAppend":
+    case "repeat1Append":
+      return appendCursorFragment(
+        toCursorFragment(rhs[0]),
+        toCursorFragment(rhs[1]),
+      );
+    case "repeat1First": {
+      const item = toCursorFragment(rhs[0]);
+      item.value = cursorArrayDraft([item.value]);
+      wrapCursorRepeatedFields(item.fields);
+      return item;
+    }
+    case "separatedFirst": {
+      const item = toCursorFragment(rhs[0]);
+      item.value = cursorArrayDraft([item.value]);
+      wrapCursorRepeatedFields(item.fields);
+      return item;
+    }
+    case "separatedAppend":
+      return appendCursorSeparatedFragment(
+        toCursorFragment(rhs[0]),
+        toCursorFragment(rhs[1]),
+        toCursorFragment(rhs[2]),
+      );
+    case "field": {
+      const fragment = toCursorFragment(rhs[0]);
+      return {
+        value: fragment.value,
+        children: fragment.children,
+        fields: [{
+          name: reducer.name,
+          value: fragment.value,
+        }],
+        span: fragment.span,
+        tokenRange: fragment.tokenRange,
+      };
+    }
+  }
+}
+
+function cursorTokenFragment(
+  token: KitToken,
+  tokenIndex: number,
+): CursorFragment {
+  if (!isMainSyntaxToken(token)) {
+    throw new Error("Expected shifted main syntax token.");
+  }
+  const ref = cursorTokenRef(tokenIndex);
+  return {
+    value: cursorRefDraft(ref),
+    children: [ref],
+    fields: [],
+    span: token.span,
+    tokenRange: { start: tokenIndex, end: tokenIndex + 1 },
+  };
+}
+
+function cursorRuleFragment(
+  ref: number,
+  span: KitSpan,
+  tokenRange: TokenRange,
+): CursorFragment {
+  return {
+    value: cursorRefDraft(ref),
+    children: [ref],
+    fields: [],
+    span,
+    tokenRange,
+  };
+}
+
+function cursorSequenceFragment(
+  values: readonly unknown[],
+  offset: number,
+  tokenIndex: number,
+): CursorFragment {
+  const fragmentValues: CursorDraftValue[] = [];
+  const children: number[] = [];
+  const fields: CursorFieldCapture[] = [];
+  let span: KitSpan | null = null;
+  let tokenRange: TokenRange | null = null;
+  for (const value of values) {
+    const part = toCursorFragment(value);
+    fragmentValues.push(part.value);
+    appendAll(children, part.children);
+    appendAll(fields, part.fields);
+    span = combineSpans(span, part.span);
+    tokenRange = combineTokenRanges(tokenRange, part.tokenRange);
+  }
+  if (span === null) {
+    span = { start: offset, end: offset };
+  }
+  if (tokenRange === null) {
+    tokenRange = { start: tokenIndex, end: tokenIndex };
+  }
+  return {
+    value: cursorArrayDraft(fragmentValues),
+    children,
+    fields,
+    span,
+    tokenRange,
+  };
+}
+
+function cursorEmptyFragment(
+  value: CursorDraftValue,
+  offset: number,
+  tokenIndex: number,
+): CursorFragment {
+  return {
+    value,
+    children: [],
+    fields: [],
+    span: { start: offset, end: offset },
+    tokenRange: { start: tokenIndex, end: tokenIndex },
+  };
+}
+
+function appendCursorFragment(
+  list: CursorFragment,
+  item: CursorFragment,
+): CursorFragment {
+  cursorMutableArrayDraft(list.value).push(item.value);
+  appendAll(list.children, item.children);
+  appendCursorRepeatedFields(list.fields, item.fields);
+  return {
+    value: list.value,
+    children: list.children,
+    fields: list.fields,
+    span: combineSpans(list.span, item.span),
+    tokenRange: combineTokenRanges(list.tokenRange, item.tokenRange),
+  };
+}
+
+function appendCursorSeparatedFragment(
+  list: CursorFragment,
+  separator: CursorFragment,
+  item: CursorFragment,
+): CursorFragment {
+  cursorMutableArrayDraft(list.value).push(item.value);
+  appendAll(list.children, separator.children);
+  appendAll(list.children, item.children);
+  appendCursorRepeatedFields(list.fields, separator.fields);
+  appendCursorRepeatedFields(list.fields, item.fields);
+  return {
+    value: list.value,
+    children: list.children,
+    fields: list.fields,
+    span: combineSpans(combineSpans(list.span, separator.span), item.span),
+    tokenRange: combineTokenRanges(
+      combineTokenRanges(list.tokenRange, separator.tokenRange),
+      item.tokenRange,
+    ),
+  };
+}
+
+function appendCursorRepeatedFields(
+  target: CursorFieldCapture[],
+  values: readonly CursorFieldCapture[],
+): void {
+  for (const value of values) {
+    const existing = target.find((capture) => capture.name === value.name);
+    if (existing !== undefined && existing.value.kind === "array") {
+      appendCursorFieldValue(existing.value, value.value);
+      continue;
+    }
+    target.push({
+      name: value.name,
+      value: cursorArrayDraft([value.value]),
+    });
+  }
+}
+
+function wrapCursorRepeatedFields(fields: CursorFieldCapture[]): void {
+  for (const field of fields) {
+    if (field.value.kind === "array") continue;
+    field.value = cursorArrayDraft([field.value]);
+  }
+}
+
+function appendCursorFieldValue(
+  target: CursorDraftValue,
+  value: CursorDraftValue,
+): void {
+  if (target.kind !== "array") {
+    throw new Error("Expected cursor field capture array.");
+  }
+  if (value.kind === "array") {
+    for (const item of value.items) {
+      target.items.push(item);
+    }
+    return;
+  }
+  target.items.push(value);
+}
+
+function toCursorFragment(value: unknown): CursorFragment {
+  if (isCursorFragment(value)) return value;
+  throw new Error("Expected parser reduction cursor fragment.");
+}
+
+function cursorNullDraft(): CursorDraftValue {
+  return { kind: "null" };
+}
+
+function cursorRefDraft(ref: number): CursorDraftValue {
+  return { kind: "ref", ref };
+}
+
+function cursorArrayDraft(items: CursorDraftValue[]): CursorDraftValue {
+  return { kind: "array", items };
+}
+
+function cursorMutableArrayDraft(value: CursorDraftValue): CursorDraftValue[] {
+  if (value.kind === "array") return value.items;
+  throw new Error("Expected parser reduction cursor array.");
+}
+
+function cloneCursorDraftValue(value: CursorDraftValue): CursorDraftValue {
+  if (value.kind === "null") return cursorNullDraft();
+  if (value.kind === "ref") return cursorRefDraft(value.ref);
+  const items: CursorDraftValue[] = [];
+  for (const item of value.items) {
+    items.push(cloneCursorDraftValue(item));
+  }
+  return cursorArrayDraft(items);
 }
 
 function eventTokenFragment(
@@ -2131,6 +2599,442 @@ function acceptedEventResult(
   };
 }
 
+function acceptedCursorResult(
+  source: string,
+  tape: CursorTapeBuilder,
+  accepted: unknown,
+): KitCursorParseResult {
+  try {
+    const fragment = toCursorFragment(accepted);
+    if (fragment.value.kind !== "ref") {
+      throw new Error("Parser accepted without producing a cursor root.");
+    }
+    if (cursorRefIsToken(fragment.value.ref)) {
+      throw new Error("Parser accepted a token cursor as the root.");
+    }
+    return {
+      ok: true,
+      source,
+      cursor: tape.cursorForRuleRef(fragment.value.ref),
+      diagnostics: [],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      source,
+      cursor: null,
+      diagnostics: [
+        internalParserDiagnostic(error, {
+          start: source.length,
+          end: source.length,
+        }),
+      ],
+    };
+  }
+}
+
+const cursorValueNull = 0;
+const cursorValueRef = 1;
+const cursorValueArray = 2;
+
+class CursorTapeBuilder {
+  private readonly ruleIds: number[] = [];
+  private readonly ruleStarts: number[] = [];
+  private readonly ruleEnds: number[] = [];
+  private readonly ruleTokenStarts: number[] = [];
+  private readonly ruleTokenEnds: number[] = [];
+  private readonly ruleChildStarts: number[] = [];
+  private readonly ruleChildCounts: number[] = [];
+  private readonly ruleFieldStarts: number[] = [];
+  private readonly ruleFieldCounts: number[] = [];
+  private readonly childRefs: number[] = [];
+  private readonly fieldNameIds: number[] = [];
+  private readonly fieldValues: CursorDraftValue[] = [];
+  private readonly valueKinds: number[] = [];
+  private readonly valueNumbers: number[] = [];
+  private readonly valueStarts: number[] = [];
+  private readonly valueCounts: number[] = [];
+  private readonly valueItems: number[] = [];
+  private readonly ruleCache: (KitRuleCursor | undefined)[] = [];
+  private readonly tokenCache: (KitTokenCursor | undefined)[] = [];
+
+  constructor(
+    private readonly runtime: RuntimeTables,
+    private readonly source: string,
+    private readonly tokens: readonly KitToken[],
+  ) {}
+
+  addRule(
+    ruleId: number,
+    span: KitSpan,
+    tokenRange: TokenRange,
+    children: readonly number[],
+    captures: readonly CursorFieldCapture[],
+  ): number {
+    const name = this.runtime.ruleNames[ruleId];
+    if (name === undefined) {
+      throw new Error("Rule reducer references an unknown rule.");
+    }
+    const ruleIndex = this.ruleIds.length;
+    this.ruleIds.push(ruleId);
+    this.ruleStarts.push(span.start);
+    this.ruleEnds.push(span.end);
+    this.ruleTokenStarts.push(tokenRange.start);
+    this.ruleTokenEnds.push(tokenRange.end);
+    this.ruleChildStarts.push(this.childRefs.length);
+    this.ruleChildCounts.push(children.length);
+    for (const child of children) {
+      this.childRefs.push(child);
+    }
+    const fieldStart = this.fieldNameIds.length;
+    this.appendRuleFields(ruleId, captures);
+    this.ruleFieldStarts.push(fieldStart);
+    this.ruleFieldCounts.push(this.fieldNameIds.length - fieldStart);
+    return cursorRuleRef(ruleIndex);
+  }
+
+  cursorForRuleRef(ref: number): KitRuleCursor {
+    if (cursorRefIsToken(ref)) {
+      throw new Error("Expected a rule cursor reference.");
+    }
+    return this.ruleCursor(cursorRefIndex(ref));
+  }
+
+  private appendRuleFields(
+    ruleId: number,
+    captures: readonly CursorFieldCapture[],
+  ): void {
+    const schema = this.runtime.fieldSchemas[ruleId];
+    if (schema === undefined || schema.entries.length === 0) {
+      if (captures.length > 0) {
+        throw new Error("Rule has field captures but no field schema.");
+      }
+      return;
+    }
+    const counts = Object.create(null) as Record<string, number>;
+    for (const [name] of schema.entries) {
+      counts[name] = 0;
+    }
+    for (const capture of captures) {
+      const config = schema.byName[capture.name];
+      if (config === undefined) {
+        throw new Error(`Unknown field capture '${capture.name}'.`);
+      }
+      let count = counts[capture.name];
+      if (count === undefined) count = 0;
+      count++;
+      counts[capture.name] = count;
+      if (!config.array && !config.valueArray && count > 1) {
+        throw new Error(
+          `Scalar field '${capture.name}' was captured more than once.`,
+        );
+      }
+      const fieldId = this.runtime.fieldIds.get(capture.name);
+      if (fieldId === undefined) {
+        throw new Error(`Unknown field id '${capture.name}'.`);
+      }
+      this.fieldNameIds.push(fieldId);
+      this.fieldValues.push(capture.value);
+    }
+    for (const [name, config] of schema.entries) {
+      let count = counts[name];
+      if (count === undefined) count = 0;
+      if (config.array || config.valueArray) {
+        continue;
+      }
+      if (!config.nullable && count !== 1) {
+        throw new Error(
+          `Required field '${name}' was captured ${count} times.`,
+        );
+      }
+      if (config.nullable && count > 1) {
+        throw new Error(
+          `Nullable field '${name}' was captured more than once.`,
+        );
+      }
+    }
+  }
+
+  private appendValue(value: CursorDraftValue): number {
+    if (value.kind === "null") {
+      const id = this.valueKinds.length;
+      this.valueKinds.push(cursorValueNull);
+      this.valueNumbers.push(-1);
+      this.valueStarts.push(-1);
+      this.valueCounts.push(0);
+      return id;
+    }
+    if (value.kind === "ref") {
+      const id = this.valueKinds.length;
+      this.valueKinds.push(cursorValueRef);
+      this.valueNumbers.push(value.ref);
+      this.valueStarts.push(-1);
+      this.valueCounts.push(0);
+      return id;
+    }
+    const id = this.valueKinds.length;
+    const start = this.valueItems.length;
+    for (let index = 0; index < value.items.length; index++) {
+      this.valueItems.push(-1);
+    }
+    this.valueKinds.push(cursorValueArray);
+    this.valueNumbers.push(-1);
+    this.valueStarts.push(start);
+    this.valueCounts.push(value.items.length);
+    for (let index = 0; index < value.items.length; index++) {
+      const item = value.items[index];
+      if (item === undefined) {
+        throw new Error("Cursor field array item is missing.");
+      }
+      this.valueItems[start + index] = this.appendValue(item);
+    }
+    return id;
+  }
+
+  private ruleCursor(ruleIndex: number): KitRuleCursor {
+    const cached = this.ruleCache[ruleIndex];
+    if (cached !== undefined) return cached;
+    const ruleId = this.ruleIds[ruleIndex];
+    if (ruleId === undefined) {
+      throw new Error("Cursor references an unknown rule node.");
+    }
+    const name = this.runtime.ruleNames[ruleId];
+    if (name === undefined) {
+      throw new Error("Cursor references an unknown rule id.");
+    }
+    const span = {
+      start: this.requiredNumber(this.ruleStarts, ruleIndex, "rule start"),
+      end: this.requiredNumber(this.ruleEnds, ruleIndex, "rule end"),
+    };
+    const tokenRange = {
+      start: this.requiredNumber(
+        this.ruleTokenStarts,
+        ruleIndex,
+        "rule token start",
+      ),
+      end: this.requiredNumber(
+        this.ruleTokenEnds,
+        ruleIndex,
+        "rule token end",
+      ),
+    };
+    let childrenCache: readonly KitSyntaxCursor[] | undefined;
+    const tape = this;
+    const cursor: KitRuleCursor = {
+      type: "rule",
+      name,
+      span,
+      tokenRange,
+      childCount: this.requiredNumber(
+        this.ruleChildCounts,
+        ruleIndex,
+        "rule child count",
+      ),
+      child(index: number): KitSyntaxCursor | undefined {
+        if (!Number.isInteger(index) || index < 0) return undefined;
+        if (index >= cursor.childCount) return undefined;
+        const start = tape.requiredNumber(
+          tape.ruleChildStarts,
+          ruleIndex,
+          "rule child start",
+        );
+        const ref = tape.childRefs[start + index];
+        if (ref === undefined) {
+          throw new Error("Cursor child edge is missing.");
+        }
+        return tape.elementForRef(ref);
+      },
+      children(): readonly KitSyntaxCursor[] {
+        if (childrenCache !== undefined) return childrenCache;
+        const children: KitSyntaxCursor[] = [];
+        for (let index = 0; index < cursor.childCount; index++) {
+          const child = cursor.child(index);
+          if (child === undefined) {
+            throw new Error("Cursor child edge is missing.");
+          }
+          children.push(child);
+        }
+        childrenCache = children;
+        return childrenCache;
+      },
+      field(name: string): KitCursorFieldValue | undefined {
+        const schema = tape.runtime.fieldSchemas[ruleId];
+        if (schema === undefined) return undefined;
+        const config = schema.byName[name];
+        if (config === undefined) return undefined;
+        const expectedFieldId = tape.runtime.fieldIds.get(name);
+        if (expectedFieldId === undefined) {
+          throw new Error(`Unknown field id '${name}'.`);
+        }
+        const fieldStart = tape.requiredNumber(
+          tape.ruleFieldStarts,
+          ruleIndex,
+          "rule field start",
+        );
+        const fieldCount = tape.requiredNumber(
+          tape.ruleFieldCounts,
+          ruleIndex,
+          "rule field count",
+        );
+        if (config.array || config.valueArray) {
+          const values: KitCursorFieldValue[] = [];
+          for (let index = 0; index < fieldCount; index++) {
+            const fieldId = tape.fieldNameIds[fieldStart + index];
+            if (fieldId === undefined) {
+              throw new Error("Cursor field edge is missing a name.");
+            }
+            if (fieldId !== expectedFieldId) continue;
+            const value = tape.fieldValues[fieldStart + index];
+            if (value === undefined) {
+              throw new Error("Cursor field edge is missing a value.");
+            }
+            if (config.valueArray && value.kind === "array") {
+              for (const item of value.items) {
+                values.push(tape.valueFromDraft(item));
+              }
+            } else {
+              values.push(tape.valueFromDraft(value));
+            }
+          }
+          return values;
+        }
+        for (let index = 0; index < fieldCount; index++) {
+          const fieldId = tape.fieldNameIds[fieldStart + index];
+          if (fieldId === undefined) {
+            throw new Error("Cursor field edge is missing a name.");
+          }
+          if (fieldId !== expectedFieldId) continue;
+          const value = tape.fieldValues[fieldStart + index];
+          if (value === undefined) {
+            throw new Error("Cursor field edge is missing a value.");
+          }
+          return tape.valueFromDraft(value);
+        }
+        if (config.nullable) return null;
+        return undefined;
+      },
+      fieldArray(name: string): readonly KitCursorFieldValue[] {
+        const value = cursor.field(name);
+        if (Array.isArray(value)) return value;
+        if (value === undefined || value === null) return [];
+        return [value];
+      },
+    };
+    this.ruleCache[ruleIndex] = cursor;
+    return cursor;
+  }
+
+  private tokenCursor(tokenIndex: number): KitTokenCursor {
+    const cached = this.tokenCache[tokenIndex];
+    if (cached !== undefined) return cached;
+    const token = this.tokens[tokenIndex];
+    if (token === undefined) {
+      throw new Error("Cursor references an unknown token.");
+    }
+    if (!isMainSyntaxToken(token)) {
+      throw new Error("Cursor references a non-syntax token.");
+    }
+    let tokenType: "named" | "literal";
+    let kind: string;
+    if (token.type === "named") {
+      tokenType = "named";
+      kind = token.kind;
+    } else {
+      tokenType = "literal";
+      kind = token.literal;
+    }
+    const cursor: KitTokenCursor = {
+      type: "token",
+      tokenType,
+      kind,
+      get text() {
+        return token.text;
+      },
+      span: token.span,
+      tokenIndex,
+      toToken() {
+        return token;
+      },
+    };
+    this.tokenCache[tokenIndex] = cursor;
+    return cursor;
+  }
+
+  private elementForRef(ref: number): KitSyntaxCursor {
+    if (cursorRefIsToken(ref)) {
+      return this.tokenCursor(cursorRefIndex(ref));
+    }
+    return this.ruleCursor(cursorRefIndex(ref));
+  }
+
+  private valueFromDraft(value: CursorDraftValue): KitCursorFieldValue {
+    if (value.kind === "null") return null;
+    if (value.kind === "ref") return this.elementForRef(value.ref);
+    const values: KitCursorFieldValue[] = [];
+    for (const item of value.items) {
+      values.push(this.valueFromDraft(item));
+    }
+    return values;
+  }
+
+  private valueForId(valueId: number): KitCursorFieldValue {
+    const kind = this.valueKinds[valueId];
+    if (kind === cursorValueNull) return null;
+    if (kind === cursorValueRef) {
+      const ref = this.valueNumbers[valueId];
+      if (ref === undefined || ref < 0) {
+        throw new Error("Cursor field value is missing a reference.");
+      }
+      return this.elementForRef(ref);
+    }
+    if (kind === cursorValueArray) {
+      const start = this.valueStarts[valueId];
+      const count = this.valueCounts[valueId];
+      if (start === undefined || count === undefined) {
+        throw new Error("Cursor field array value is incomplete.");
+      }
+      const values: KitCursorFieldValue[] = [];
+      for (let index = 0; index < count; index++) {
+        const itemId = this.valueItems[start + index];
+        if (itemId === undefined) {
+          throw new Error("Cursor field array item is missing.");
+        }
+        values.push(this.valueForId(itemId));
+      }
+      return values;
+    }
+    throw new Error("Cursor field value has an unknown kind.");
+  }
+
+  private requiredNumber(
+    values: readonly number[],
+    index: number,
+    label: string,
+  ): number {
+    const value = values[index];
+    if (value === undefined) {
+      throw new Error(`Cursor tape is missing ${label}.`);
+    }
+    return value;
+  }
+}
+
+function cursorRuleRef(index: number): number {
+  return index * 2;
+}
+
+function cursorTokenRef(index: number): number {
+  return index * 2 + 1;
+}
+
+function cursorRefIsToken(ref: number): boolean {
+  return ref % 2 === 1;
+}
+
+function cursorRefIndex(ref: number): number {
+  return Math.floor(ref / 2);
+}
+
 interface LazyRuleDraft {
   ruleId: number;
   start: number;
@@ -2405,7 +3309,11 @@ function runtimeTables(kit: ParserKit): RuntimeTables {
     const entries = schema.fields.map((field) =>
       [
         field.name,
-        { array: field.array, nullable: field.nullable },
+        {
+          array: field.array,
+          nullable: field.nullable,
+          valueArray: field.type.startsWith("ReadonlyArray<"),
+        },
       ] as const
     );
     const byName = Object.create(null) as Record<string, FieldConfig>;
@@ -3156,6 +4064,27 @@ function cloneBranch(branch: ParseBranch): ParseBranch {
 }
 
 function cloneBranchValue(value: unknown): unknown {
+  if (isCursorFragment(value)) {
+    let span = value.span;
+    if (value.span !== null) {
+      span = { ...value.span };
+    }
+    let tokenRange = value.tokenRange;
+    if (value.tokenRange !== null) {
+      tokenRange = { ...value.tokenRange };
+    }
+    const fields = value.fields.map((field) => ({
+      name: field.name,
+      value: cloneCursorDraftValue(field.value),
+    }));
+    return {
+      value: cloneCursorDraftValue(value.value),
+      children: [...value.children],
+      fields,
+      span,
+      tokenRange,
+    };
+  }
   if (isFragment(value)) {
     let fragmentValue = value.value;
     if (Array.isArray(value.value)) {
@@ -3288,12 +4217,33 @@ function isRuleNode(value: unknown): value is KitRuleNode {
 }
 
 function isFragment(value: unknown): value is Fragment {
-  return !!value &&
-    typeof value === "object" &&
-    "value" in value &&
-    "children" in value &&
-    "fields" in value &&
-    "tokenRange" in value;
+  if (!value || typeof value !== "object") return false;
+  if (!("value" in value)) return false;
+  if (!("children" in value)) return false;
+  if (!("fields" in value)) return false;
+  if (!("tokenRange" in value)) return false;
+  if (isCursorDraftValue((value as { value?: unknown }).value)) return false;
+  return true;
+}
+
+function isCursorFragment(value: unknown): value is CursorFragment {
+  if (!value || typeof value !== "object") return false;
+  if (!("value" in value)) return false;
+  if (!("children" in value)) return false;
+  if (!("fields" in value)) return false;
+  if (!("tokenRange" in value)) return false;
+  const fragment = value as { value?: unknown; children?: unknown };
+  if (!isCursorDraftValue(fragment.value)) return false;
+  return Array.isArray(fragment.children);
+}
+
+function isCursorDraftValue(value: unknown): value is CursorDraftValue {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as { kind?: unknown; items?: unknown; ref?: unknown };
+  if (draft.kind === "null") return true;
+  if (draft.kind === "ref") return typeof draft.ref === "number";
+  if (draft.kind === "array") return Array.isArray(draft.items);
+  return false;
 }
 
 function isShiftedToken(value: unknown): value is ShiftedToken {

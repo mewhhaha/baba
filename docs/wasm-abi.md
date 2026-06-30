@@ -11,7 +11,10 @@ Component Model package, WIT bindings, WASI library, or browser-only package.
 
 Generated Wasm bundles also include `wasm/abi.json` and `wasm/parser.plan`.
 Hosts should treat the JSON file as the machine-readable descriptor for the
-generic core ABI. Grammar-specific runtime data lives in `parser.plan`.
+generic core ABI. Grammar-specific runtime data lives in `parser.plan`. The
+generic core module is built ahead of time from Baba's `no_std` Rust engine
+source and embedded in the package; the ABI is the compatibility contract, not
+the Rust source layout.
 
 ## Versioning
 
@@ -20,15 +23,16 @@ The generated descriptor has:
 ```json
 {
   "format": "baba-wasm-abi",
-  "version": 1
+  "version": 7
 }
 ```
 
 The core module exports `load_plan(planPtr, planLength) -> i32`,
-`abi_version() -> i32`, `plan_version() -> i32`, and
-`semantics_version() -> i32`. For ABI version 3, the generated adapter writes
-`parser.plan` into linear memory, calls `load_plan`, and then checks that the
-descriptor and core exports agree before the adapter uses the module.
+`plan_buffer_base() -> i32`, `input_base() -> i32`, `abi_version() -> i32`,
+`plan_version() -> i32`, and `semantics_version() -> i32`. For ABI version 7,
+the generated adapter writes `parser.plan` into linear memory at or after
+`plan_buffer_base()`, calls `load_plan`, and then checks that the descriptor and
+core exports agree before the adapter uses the module.
 
 The descriptor also records:
 
@@ -40,44 +44,56 @@ The descriptor also records:
 
 ## Core Exports
 
-ABI version 3 core modules export:
+ABI version 7 core modules export:
 
-| Export                                                              | Kind     | Contract                                                                         |
-| ------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------- |
-| `memory`                                                            | memory   | Linear memory owned by the instance.                                             |
-| `lex_one(sourcePtr, sourceLength, offset, resultPtr) -> i32`        | function | Writes one lexical result and returns `1`, or returns `0` when no token matches. |
-| `lex_all(sourcePtr, sourceLength, resultPtr, tokenPtr) -> i32`      | function | Writes token records and returns the token count.                                |
-| `parser_action(state, terminal) -> i32`                             | function | Returns the first encoded LR action for deterministic callers.                   |
-| `parser_actions(state, terminal, actionPtr, actionCapacity) -> i32` | function | Writes all encoded LR actions for a state/terminal pair and returns their count. |
-| `parser_goto(state, nonterminal) -> i32`                            | function | Returns a parser state, or `-1` when absent.                                     |
-| `load_plan(planPtr, planLength) -> i32`                             | function | Loads the external parser plan and returns `1` when accepted.                    |
-| `abi_version() -> i32`                                              | function | Returns the core ABI version.                                                    |
-| `plan_version() -> i32`                                             | function | Returns the loaded portable parser-plan version, or `0` before `load_plan`.      |
-| `semantics_version() -> i32`                                        | function | Returns the runtime implementation semantics version.                            |
-| `reset() -> void`                                                   | function | Clears reusable core runtime state.                                              |
-| `input_base() -> i32`                                               | function | Returns the first byte offset available for host input.                          |
-| `max_pages() -> i32`                                                | function | Returns the configured maximum linear-memory page count.                         |
-| `source_encoding() -> i32`                                          | function | Returns the source encoding enum.                                                |
-| `span_unit() -> i32`                                                | function | Returns the public span unit enum.                                               |
-| `lex_result_i32_count() -> i32`                                     | function | Returns the width of a lexical result record.                                    |
-| `token_record_i32_count() -> i32`                                   | function | Returns the width of a token record.                                             |
-| `host_ownership_model() -> i32`                                     | function | Returns the input/result ownership enum.                                         |
-| `result_lifetime_model() -> i32`                                    | function | Returns the raw result lifetime enum.                                            |
+| Export                   | Kind     | Contract                                                                         |
+| ------------------------ | -------- | -------------------------------------------------------------------------------- |
+| `memory`                 | memory   | Linear memory owned by the instance.                                             |
+| `lex_one`                | function | Writes one lexical result and returns `1`, or returns `0` when no token matches. |
+| `lex_all`                | function | Writes token records and returns the token count.                                |
+| `parser_action`          | function | Returns the first encoded LR action for deterministic callers.                   |
+| `parser_actions`         | function | Writes all encoded LR actions for a state/terminal pair and returns their count. |
+| `parser_select_action`   | function | Selects a contextual token/action pair for a parser state.                       |
+| `parse_trace`            | function | Parses to an action trace for validation and cursor replay.                      |
+| `parse_cursor`           | function | Parses directly into cursor tapes.                                               |
+| `parser_goto`            | function | Returns a parser state, or `-1` when absent.                                     |
+| `load_plan`              | function | Loads the external parser plan and returns `1` when accepted.                    |
+| `abi_version`            | function | Returns the core ABI version.                                                    |
+| `plan_version`           | function | Returns the loaded portable parser-plan version, or `0` before `load_plan`.      |
+| `semantics_version`      | function | Returns the runtime implementation semantics version.                            |
+| `reset`                  | function | Clears reusable core runtime state.                                              |
+| `plan_buffer_base`       | function | Returns the first implementation-safe offset where the host may copy the plan.   |
+| `input_base`             | function | Returns the first byte offset available for host input.                          |
+| `max_pages`              | function | Returns the configured maximum linear-memory page count.                         |
+| `source_encoding`        | function | Returns the source encoding enum.                                                |
+| `span_unit`              | function | Returns the public span unit enum.                                               |
+| `lex_result_i32_count`   | function | Returns the width of a lexical result record.                                    |
+| `token_record_i32_count` | function | Returns the width of a token record.                                             |
+| `host_ownership_model`   | function | Returns the input/result ownership enum.                                         |
+| `result_lifetime_model`  | function | Returns the raw result lifetime enum.                                            |
 
 All numeric parameters and results use WebAssembly `i32`. Linear-memory byte
 offsets and lengths are non-negative 32-bit values. Multi-byte fields use
 little-endian WebAssembly memory order and 4-byte alignment for `i32` records.
+The generated `wasm/abi.json` descriptor records the exact parameter lists for
+each exported function.
 
 ## External Plan
 
-ABI version 3 keeps grammar-specific DFA and LR table data outside
+ABI version 7 keeps grammar-specific DFA and LR table data outside
 `parser.wasm`. The generated `parser.plan` starts with the core table section
 expected by `load_plan`, followed by shared runtime metadata used by the
-TypeScript adapter. The host writes `parser.plan` bytes into linear memory at
-offset `0` and calls `load_plan(0, planLength)`. The adapter treats any result
-other than `1` as an invalid plan. After a successful load, `input_base()`
-returns the first byte offset after the core table section, aligned for
-caller-managed input.
+TypeScript adapter. The host calls `plan_buffer_base()`, writes `parser.plan`
+bytes at that nonzero offset, and calls `load_plan(planPtr, planLength)`. The
+adapter treats any result other than `1` as an invalid plan. After a successful
+load, `input_base()` returns the first byte offset after the loaded core table
+section, aligned for caller-managed input.
+
+The current core table section uses format version 2. It keeps section offsets
+in the header and may store dense DFA/LR helper sections as compact `i16` or
+`u16` cells when all generated values fit. This compact encoding is an internal
+core-plan detail; hosts should validate the plan with `wasm/abi.json` and
+`load_plan` rather than decoding those tables directly.
 
 The descriptor exposes plan metadata under `core.plan`, including the plan
 storage mode, the `load_plan` export name, the generated `parser.plan` path, and
@@ -85,7 +101,7 @@ the combined plan layout.
 
 ## Source And Spans
 
-ABI version 3 uses source encoding enum value `1`, meaning UTF-16 code units.
+ABI version 7 uses source encoding enum value `1`, meaning UTF-16 code units.
 The host writes the source into linear memory as contiguous unsigned 16-bit code
 units. `sourceLength` is a count of UTF-16 code units, not bytes.
 
@@ -102,7 +118,8 @@ characters therefore occupy two units in public spans.
 | `specIndex` | `i32` |    `0` |
 | `end`       | `i32` |    `4` |
 
-`lex_all` writes token records at `tokenPtr`:
+`lex_all(sourcePtr, sourceLength, mode, tokenPtr)` writes token records at
+`tokenPtr`. The current mode value is `0`.
 
 | Field            | Type  | Offset |
 | ---------------- | ----- | -----: |
@@ -111,17 +128,47 @@ characters therefore occupy two units in public spans.
 | `end`            | `i32` |    `8` |
 | `acceptingState` | `i32` |   `12` |
 
-The descriptor exposes these widths as `core.layouts.lexResult.i32Count` and
-`core.layouts.tokenRecord.i32Count`.
+`parse_trace` writes a trace result record at `resultPtr`:
+
+| Field              | Type  | Offset |
+| ------------------ | ----- | -----: |
+| `tokenRecordCount` | `i32` |    `0` |
+| `traceActionCount` | `i32` |    `4` |
+| `errorOffset`      | `i32` |    `8` |
+| `errorState`       | `i32` |   `12` |
+| `tokenReadCount`   | `i32` |   `16` |
+| `reserved`         | `i32` |   `20` |
+
+`parse_cursor` writes a cursor result record at `resultPtr`:
+
+| Field              | Type  | Offset |
+| ------------------ | ----- | -----: |
+| `tokenRecordCount` | `i32` |    `0` |
+| `ruleRecordCount`  | `i32` |    `4` |
+| `childRefCount`    | `i32` |    `8` |
+| `fieldRecordCount` | `i32` |   `12` |
+| `valueRecordCount` | `i32` |   `16` |
+| `valueItemCount`   | `i32` |   `20` |
+| `rootRef`          | `i32` |   `24` |
+| `errorOffset`      | `i32` |   `28` |
+| `errorState`       | `i32` |   `32` |
+| `tokenReadCount`   | `i32` |   `36` |
+
+Cursor rule records contain rule id, source span, token range, child slice, and
+field slice. Cursor field records contain field id and value id. Cursor value
+records encode null, element references, and array slices.
+
+The descriptor exposes these widths under `core.layouts`, including `lexResult`,
+`tokenRecord`, `parseTraceResult`, `parseCursorResult`, `cursorRuleRecord`,
+`cursorFieldRecord`, and `cursorValueRecord`.
 
 ## Memory Ownership And Lifetime
 
 Host ownership model enum value `1` means caller-managed linear memory buffers.
 The host chooses writable input, result, and token-record offsets at or after
-`input_base()`. Since `parser.plan` is loaded at the start of memory,
-`input_base()` is only stable after `load_plan` succeeds. The generated
-TypeScript adapter uses the instance memory, copies JavaScript source text into
-UTF-16 memory, and allocates result buffers after the source.
+`input_base()`. `input_base()` is only stable after `load_plan` succeeds. The
+generated TypeScript adapter uses the instance memory, copies JavaScript source
+text into UTF-16 memory, and allocates result buffers after the source.
 
 Result lifetime enum value `1` means low-level core results remain valid in the
 caller-provided buffers until the host overwrites those buffers, calls
@@ -138,12 +185,12 @@ growth.
 handles. It does not promise to shrink linear memory; repeated parses may reuse
 the previous high-water allocation.
 
-ABI version 3 has instance-owned core memory. Generated adapters expose
+ABI version 7 has instance-owned core memory. Generated adapters expose
 `createParser()` and `createParserAsync()` as the public lifecycle API. Each
 parser instance owns its `WebAssembly.Instance`, memory, loaded plan, shared
 runtime parser, and disposed state. `reset()` on a parser instance clears
 reusable core state. `dispose()` invalidates the parser instance; subsequent
-`lex()`, `parse()`, or token-stream calls on that instance throw from the shared
+`lex()`, `parse()`, or `validate()` calls on that instance throw from the shared
 adapter.
 
 Generated adapters create isolated instances with
@@ -157,7 +204,7 @@ where the host permits workers.
 
 ## Limits And Overflow
 
-ABI version 3 uses 65,536-byte WebAssembly pages and a configured maximum of
+ABI version 7 uses 65,536-byte WebAssembly pages and a configured maximum of
 65,535 pages. Adapter-side offset arithmetic checks multiplication, addition,
 alignment, and page-count growth against the 32-bit Wasm address space before
 calling `memory.grow()`.

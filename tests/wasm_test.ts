@@ -13,6 +13,15 @@ import {
   hashRuntimeImplementationSource,
   RUNTIME_IMPLEMENTATION_METADATA,
 } from "../src/targets/runtime/implementation.ts";
+import {
+  WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+  WASM_CURSOR_RULE_RECORD_I32_COUNT,
+  WASM_CURSOR_VALUE_RECORD_I32_COUNT,
+  WASM_I32_BYTES,
+  WASM_PARSE_CURSOR_RESULT_I32_COUNT,
+  WASM_TOKEN_RECORD_I32_COUNT,
+  WASM_UTF16_UNIT_BYTES,
+} from "../src/targets/runtime/wasm_abi.ts";
 import { validateCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
 import type { BabaMetadata } from "../src/ast.ts";
 
@@ -21,7 +30,7 @@ const STATEMENT_GRAMMAR = `
   token INT = /[0-9]+/ ;
   skip WS = /[ \\t\\r\\n]+/ ;
 
-  module = statement* ;
+  module = statements:statement* ;
   statement = "let" name:IDENT "=" value:INT ";" | "if" condition:IDENT ";" ;
 `;
 
@@ -34,25 +43,53 @@ interface TokenLike {
   literal?: string;
 }
 
-interface NodeLike {
-  fields: Record<string, TokenLike>;
-  children: NodeLike[];
-  span: { start: number; end: number };
-}
-
 interface DiagnosticLike {
   code: string;
   expected?: readonly string[];
+  found?: string;
+  span?: { start: number; end: number };
 }
 
-interface LexResultLike {
-  tokens: readonly TokenLike[];
+interface TokenTapeLike {
+  length: number;
+  token(index: number): TokenLike | undefined;
+}
+
+interface LexTapeResultLike {
+  tokenTape: TokenTapeLike;
   diagnostics: readonly DiagnosticLike[];
 }
 
-type ParseResultLike =
-  | { ok: true; root: NodeLike; diagnostics: readonly DiagnosticLike[] }
-  | { ok: false; root: null; diagnostics: readonly DiagnosticLike[] };
+type CursorFieldValueLike =
+  | CursorRuleLike
+  | CursorTokenLike
+  | readonly CursorFieldValueLike[]
+  | null;
+
+interface CursorRuleLike {
+  type: "rule";
+  name: string;
+  span: { start: number; end: number };
+  tokenRange: { start: number; end: number };
+  childCount: number;
+  child(index: number): CursorRuleLike | CursorTokenLike | undefined;
+  children(): readonly (CursorRuleLike | CursorTokenLike)[];
+  field(name: string): CursorFieldValueLike | undefined;
+  fieldArray(name: string): readonly CursorFieldValueLike[];
+}
+
+interface CursorTokenLike {
+  type: "token";
+  tokenType: "named" | "literal";
+  kind: string;
+  text: string;
+  span: { start: number; end: number };
+  tokenIndex: number;
+}
+
+type CursorParseResultLike =
+  | { ok: true; cursor: CursorRuleLike; diagnostics: readonly DiagnosticLike[] }
+  | { ok: false; cursor: null; diagnostics: readonly DiagnosticLike[] };
 
 type ValidateResultLike = {
   ok: boolean;
@@ -60,22 +97,45 @@ type ValidateResultLike = {
 };
 
 interface GeneratedParser {
-  lex(source: string, options?: Record<string, unknown>): LexResultLike;
+  lex(source: string, options?: Record<string, unknown>): LexTapeResultLike;
   parse(
     source: string,
     options?: Record<string, unknown>,
-  ): ParseResultLike | LexResultLike | ValidateResultLike;
-  parseTokens(
+  ): CursorParseResultLike;
+  validate(
     source: string,
-    tokens: readonly unknown[],
     options?: Record<string, unknown>,
-  ): ParseResultLike | LexResultLike | ValidateResultLike;
-  parseTokensUnchecked(
-    source: string,
-    tokens: readonly unknown[],
-    options?: Record<string, unknown>,
-  ): ParseResultLike | LexResultLike | ValidateResultLike;
+  ): ValidateResultLike;
   dispose(): void;
+}
+
+interface RawCursorWasmExports {
+  memory: WebAssembly.Memory;
+  plan_buffer_base(): number;
+  input_base(): number;
+  load_plan(planPtr: number, planLength: number): number;
+  parse_cursor(
+    sourcePtr: number,
+    sourceLength: number,
+    tokenPtr: number,
+    tokenCapacity: number,
+    rulePtr: number,
+    ruleCapacity: number,
+    childPtr: number,
+    childCapacity: number,
+    fieldPtr: number,
+    fieldCapacity: number,
+    valuePtr: number,
+    valueCapacity: number,
+    valueItemPtr: number,
+    valueItemCapacity: number,
+    resultPtr: number,
+    stackPtr: number,
+    fragmentPtr: number,
+    fragmentCapacity: number,
+    preserveTrivia: number,
+    maxTraceActions: number,
+  ): number;
 }
 
 interface GeneratedWasmModule {
@@ -140,6 +200,20 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
   assertIncludes(modSource, "@mewhhaha/baba/runtime/wasm");
   assertNotIncludes(modSource, "parserTraceRuntimeBytes");
   assertNotIncludes(modSource, "wasmBytes");
+  const abi = JSON.parse(textFile(bundle, "wasm/abi.json")) as {
+    core?: {
+      exports?: readonly {
+        name?: string;
+        params?: readonly string[];
+      }[];
+    };
+  };
+  const lexAll = abi.core?.exports?.find((entry) => entry.name === "lex_all");
+  assert(lexAll, "Expected lex_all in abi.json.");
+  assertEquals(
+    lexAll.params?.join(","),
+    "sourcePtr,sourceLength,mode,tokenPtr",
+  );
   assertNotIncludes(
     bundle.files.map((file) => file.path).join(","),
     "lexer.ts",
@@ -167,8 +241,12 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
       bytes: await Deno.readFile(`${dir}/wasm/parser.wasm`),
       plan: await Deno.readFile(`${dir}/wasm/parser.plan`),
     });
-    const parsed = parser.parse("ok") as ParseResultLike;
+    assertEquals("parseTree" in parser, false);
+    assertEquals("parseTokens" in parser, false);
+    assertEquals("parseTokensUnchecked" in parser, false);
+    const parsed = parser.parse("ok");
     assertEquals(parsed.ok, true);
+    assert(parsed.cursor);
     parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });
@@ -176,7 +254,7 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
 });
 
 Deno.test("runtime manifest contains only active shared sources", async () => {
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 27);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 33);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
@@ -205,6 +283,12 @@ Deno.test("runtime manifest contains only active shared sources", async () => {
       "runtime-language-artifact-manifest",
       "wasm-abi-constants",
       "wasm-core-runtime",
+      "wasm-core-runtime-build-script",
+      "wasm-core-runtime-rust-manifest",
+      "wasm-core-runtime-rust-lockfile",
+      "wasm-core-runtime-rust-build-config",
+      "wasm-core-runtime-rust-source",
+      "wasm-core-runtime-embedded-bytes",
       "shared-parser-plan-adapter-api",
       "shared-wasm-runtime-api",
       "shared-generic-wasm-executor",
@@ -250,58 +334,292 @@ Deno.test("Wasm core and wrapper are stable across grammars", () => {
   );
 });
 
+Deno.test("Wasm target emits typed cursor result surface", async () => {
+  const bundle = wasmBundle(STATEMENT_GRAMMAR);
+  const syntax = textFile(bundle, "wasm/syntax.ts");
+  assertIncludes(
+    syntax,
+    'export interface ModuleCursor extends RuleCursorBase<"module">',
+  );
+  assertIncludes(
+    syntax,
+    'field(name: "statements"): ReadonlyArray<StatementCursor>;',
+  );
+  assertIncludes(
+    syntax,
+    'field(name: "name"): TokenCursor<"named", "IDENT"> | null;',
+  );
+  assertIncludes(syntax, "export type RootCursor = ModuleCursor;");
+  assertEquals(syntax.includes("maxExploredBranches"), true);
+  assertEquals(syntax.includes("maxQueuedBranches"), false);
+  assertEquals(syntax.includes("ambiguityMode"), true);
+
+  const dir = await Deno.makeTempDir();
+  try {
+    await applyBundle(bundle, { root: dir });
+    await Deno.writeTextFile(
+      `${dir}/consumer.ts`,
+      `
+        import {
+          createParser,
+          type CursorParseResult,
+          type ModuleCursor,
+          type RootCursor,
+          type StatementCursor,
+          type TokenCursor,
+        } from "./wasm/mod.ts";
+
+        declare const bytes: Uint8Array;
+        declare const plan: Uint8Array;
+
+        const parser = createParser({ bytes, plan });
+        const result = parser.parse("let x = 42;");
+        const typedResult: CursorParseResult<RootCursor> = result;
+        parser.parse("let x = 42;", {
+          preserveTrivia: true,
+          contextualLexingStats(stats: unknown) {
+            stats;
+          },
+          maxExploredBranches: 8,
+          maxTraceActions: 1024,
+          ambiguityMode: "reject-ambiguous-success",
+        });
+        parser.validate("let x = 42;", {
+          maxExploredBranches: 8,
+          maxTraceActions: 1024,
+          ambiguityMode: "first-success",
+        });
+        if (typedResult.ok) {
+          const root: ModuleCursor = typedResult.cursor;
+          const statements: ReadonlyArray<StatementCursor> =
+            root.field("statements");
+          const first = statements[0];
+          if (first !== undefined) {
+            const maybeName = first.field("name");
+            if (maybeName !== null) {
+              const token: TokenCursor<"named", "IDENT"> = maybeName;
+              const kind: "IDENT" = token.kind;
+              kind;
+            }
+          }
+        }
+      `,
+    );
+    await denoCheck(`${dir}/consumer.ts`);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("package exports expose only current runtime entrypoint", async () => {
+  const config = JSON.parse(await Deno.readTextFile("deno.json")) as {
+    exports?: Record<string, string>;
+  };
+  assert(config.exports, "Expected deno.json exports.");
+  assertEquals(config.exports["./runtime"], undefined);
+  assertEquals(config.exports["./runtime/wasm"], "./src/runtime/wasm.ts");
+});
+
 Deno.test("shared Wasm adapter preserves lexer and parser behavior", async () => {
   const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
   try {
     const parser = mod.createParser({ bytes, plan });
     const lexed = parser.lex("let x = 42;");
     assertEquals(lexed.diagnostics.length, 0);
-    assertEquals(lexed.tokens[0].type, "literal");
-    assertEquals(lexed.tokens[0].text, "let");
-    assertEquals(lexed.tokens[2].kind, "IDENT");
-    assertEquals(lexed.tokens[2].span.start, 4);
-    assert(
-      lexed.tokens.some((token: { kind?: string; channel: string }) =>
-        token.kind === "WS" && token.channel === "trivia"
-      ),
-      "Expected trivia token.",
+    assertEquals("tokens" in lexed, false);
+    assertEquals("toTokens" in lexed, false);
+    const firstToken = lexed.tokenTape.token(0);
+    assert(firstToken);
+    assertEquals(firstToken.type, "literal");
+    assertEquals(firstToken.text, "let");
+    const nameToken = lexed.tokenTape.token(2);
+    assert(nameToken);
+    assertEquals(nameToken.kind, "IDENT");
+    assertEquals(nameToken.span.start, 4);
+    assertEquals(lexed.tokenTape.token(2), nameToken);
+    assertEquals("toTokens" in lexed.tokenTape, false);
+    assertEquals(lexed.tokenTape.token(1)?.kind, "WS");
+    assertEquals(lexed.tokenTape.token(1)?.channel, "trivia");
+
+    const cursorParsed = parser.parse("let x = 42;");
+    assertEquals(cursorParsed.ok, true);
+    assert(cursorParsed.cursor);
+    assertEquals(cursorParsed.cursor.name, "module");
+    assertEquals(cursorParsed.cursor.span.start, 0);
+    assertEquals(cursorParsed.cursor.span.end, 11);
+    assertEquals(cursorParsed.cursor.tokenRange.start, 0);
+    assertEquals(cursorParsed.cursor.childCount, 1);
+    const cursorStatements = cursorParsed.cursor.field("statements");
+    assert(Array.isArray(cursorStatements), "Expected repeated field array.");
+    assertEquals(cursorStatements.length, 1);
+    const cursorStatement = cursorParsed.cursor.child(0);
+    assertCursorRule(cursorStatement, "statement");
+    assertEquals(
+      cursorStatement.children().map((child) => cursorLabel(child)).join(" "),
+      'token:"let" token:IDENT token:"=" token:INT token:";"',
     );
+    const cursorName = cursorStatement.field("name");
+    assertCursorToken(cursorName, "IDENT");
+    assertEquals(cursorName.text, "x");
+    assertEquals("toToken" in cursorName, false);
+    assertEquals(cursorName.span.start, 4);
+    const cursorValue = cursorStatement.field("value");
+    assertCursorToken(cursorValue, "INT");
+    assertEquals(cursorValue.text, "42");
+    assertEquals("parseTree" in parser, false);
+    assertEquals("parseTokens" in parser, false);
+    assertEquals("parseTokensUnchecked" in parser, false);
 
-    const parsed = parser.parse("let x = 42;") as ParseResultLike;
-    assertEquals(parsed.ok, true);
-    assert(parsed.root);
-    const statement = parsed.root.children[0];
-    assertEquals(statement.fields.name.text, "x");
-    assertEquals(statement.fields.value.text, "42");
-    assertEquals(parsed.root.span.start, 0);
-    assertEquals(parsed.root.span.end, 11);
-
-    const checked = parser.parseTokens(
-      "let x = 42;",
-      lexed.tokens,
-    ) as ParseResultLike;
-    const unchecked = parser.parseTokensUnchecked(
-      "let x = 42;",
-      lexed.tokens,
-    ) as ParseResultLike;
-    assertEquals(checked.ok, true);
-    assertEquals(unchecked.ok, true);
-
-    const invalid = parser.parse("let = 42;") as ParseResultLike;
+    const invalid = parser.parse("let = 42;");
     assertEquals(invalid.ok, false);
+    assertEquals(invalid.cursor, null);
     assertEquals(invalid.diagnostics[0].code, "PARSE_UNEXPECTED_TOKEN");
     assert(invalid.diagnostics[0].expected);
     assertIncludes(invalid.diagnostics[0].expected.join(","), "IDENT");
 
-    const tokenMode = parser.parse("let x = 42;", {
-      mode: "tokens",
-    }) as LexResultLike;
-    assertEquals(tokenMode.tokens.length, lexed.tokens.length);
-    const validateMode = parser.parse("let x = 42;", {
-      mode: "validate",
-    }) as ValidateResultLike;
+    const missingFinalToken = parser.parse("let x = 42 ");
+    assertEquals(missingFinalToken.ok, false);
+    assertEquals(
+      missingFinalToken.diagnostics[0].code,
+      "PARSE_UNEXPECTED_TOKEN",
+    );
+    assertEquals(missingFinalToken.diagnostics[0].found, "EOF");
+    assertEquals(missingFinalToken.diagnostics[0].span?.start, 11);
+    assertEquals(missingFinalToken.diagnostics[0].span?.end, 11);
+
+    const tokenMode = parser.lex("let x = 42;");
+    assertEquals(tokenMode.tokenTape.length, lexed.tokenTape.length);
+    const validateMode = parser.validate("let x = 42;");
     assertEquals(validateMode.ok, true);
+    const invalidValidate = parser.validate("let = 42;");
+    assertEquals(invalidValidate.ok, false);
+    assertEquals(
+      invalidValidate.diagnostics[0].code,
+      "PARSE_UNEXPECTED_TOKEN",
+    );
+    const missingFinalTokenValidate = parser.validate("let x = 42 ");
+    assertEquals(missingFinalTokenValidate.ok, false);
+    assertEquals(missingFinalTokenValidate.diagnostics[0].found, "EOF");
     parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm parse_cursor export materializes cursor tapes", async () => {
+  const { dir, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const instantiated = await WebAssembly.instantiate(
+      bytes,
+      {},
+    ) as unknown as {
+      instance: WebAssembly.Instance;
+    };
+    const wasm = instantiated.instance
+      .exports as unknown as RawCursorWasmExports;
+    const planPtr = wasm.plan_buffer_base();
+    assert(planPtr > 0, "Expected nonzero Wasm plan buffer base.");
+    if (wasm.memory.buffer.byteLength < planPtr + plan.byteLength) {
+      const missing = planPtr + plan.byteLength - wasm.memory.buffer.byteLength;
+      wasm.memory.grow(Math.ceil(missing / 65_536));
+    }
+    new Uint8Array(wasm.memory.buffer, planPtr, plan.byteLength).set(plan);
+    assertEquals(wasm.load_plan(planPtr, plan.byteLength), 1);
+
+    const source = "let x = 42;";
+    const sourcePtr = wasm.input_base();
+    assert(sourcePtr > planPtr);
+    const tokenCapacity = source.length + 1;
+    const structuralCapacity = 128;
+    const tokenPtr = alignTest(
+      sourcePtr + source.length * WASM_UTF16_UNIT_BYTES,
+      WASM_I32_BYTES,
+    );
+    const rulePtr = alignTest(
+      tokenPtr + tokenCapacity * WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const ruleCapacity = structuralCapacity;
+    const childPtr = alignTest(
+      rulePtr +
+        ruleCapacity * WASM_CURSOR_RULE_RECORD_I32_COUNT * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const childCapacity = structuralCapacity * 4;
+    const fieldPtr = alignTest(
+      childPtr + childCapacity * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const fieldCapacity = structuralCapacity * 4;
+    const valuePtr = alignTest(
+      fieldPtr +
+        fieldCapacity * WASM_CURSOR_FIELD_RECORD_I32_COUNT * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const valueCapacity = structuralCapacity * 8;
+    const valueItemPtr = alignTest(
+      valuePtr +
+        valueCapacity * WASM_CURSOR_VALUE_RECORD_I32_COUNT * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const valueItemCapacity = structuralCapacity * 8;
+    const resultPtr = alignTest(
+      valueItemPtr + valueItemCapacity * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const stackPtr = alignTest(
+      resultPtr + WASM_PARSE_CURSOR_RESULT_I32_COUNT * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const fragmentPtr = alignTest(
+      stackPtr + structuralCapacity * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const requiredBytes = fragmentPtr +
+      structuralCapacity * 9 * WASM_I32_BYTES;
+    if (wasm.memory.buffer.byteLength < requiredBytes) {
+      const missing = requiredBytes - wasm.memory.buffer.byteLength;
+      wasm.memory.grow(Math.ceil(missing / 65_536));
+    }
+    const view = new DataView(wasm.memory.buffer);
+    for (let index = 0; index < source.length; index++) {
+      view.setUint16(
+        sourcePtr + index * WASM_UTF16_UNIT_BYTES,
+        source.charCodeAt(index),
+        true,
+      );
+    }
+    const status = wasm.parse_cursor(
+      sourcePtr,
+      source.length,
+      tokenPtr,
+      tokenCapacity,
+      rulePtr,
+      ruleCapacity,
+      childPtr,
+      childCapacity,
+      fieldPtr,
+      fieldCapacity,
+      valuePtr,
+      valueCapacity,
+      valueItemPtr,
+      valueItemCapacity,
+      resultPtr,
+      stackPtr,
+      fragmentPtr,
+      structuralCapacity,
+      0,
+      10_000,
+    );
+    assertEquals(status, 0);
+    assertEquals(view.getInt32(resultPtr, true), 5);
+    assert(view.getInt32(resultPtr + WASM_I32_BYTES, true) >= 2);
+    assert(view.getInt32(resultPtr + WASM_I32_BYTES * 2, true) > 0);
+    assert(view.getInt32(resultPtr + WASM_I32_BYTES * 3, true) > 0);
+    assert(view.getInt32(resultPtr + WASM_I32_BYTES * 4, true) > 0);
+    assert(view.getInt32(resultPtr + WASM_I32_BYTES * 5, true) > 0);
+    const rootRef = view.getInt32(resultPtr + WASM_I32_BYTES * 6, true);
+    assertEquals(rootRef % 2, 0);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -311,31 +629,65 @@ Deno.test("shared Wasm adapter resolves contextual token candidates from Wasm le
   const grammar = `
     token IDENT = /[a-z]+/ ;
     skip WS = /[ \\t\\r\\n]+/ ;
-    module = statement* ;
-    statement = "if" value:IDENT ";" | value:IDENT ";" ;
+    module = statement ;
+    statement = value:IDENT ";" | "@" keyword:"if" ";" ;
   `;
   const { dir, mod, bytes, plan } = await materialize(grammar);
   try {
     const parser = mod.createParser({ bytes, plan });
-    let stats: unknown;
-    const parsedIdent = parser.parse("if;", {
-      contextualLexingStats(value: unknown) {
-        stats = value;
-      },
-    }) as ParseResultLike;
-    assertEquals(parsedIdent.ok, true);
-    assert(parsedIdent.root);
-    assertEquals(parsedIdent.root.children[0].fields.value.text, "if");
-    assert(stats && typeof stats === "object");
-    assertEquals(
-      (stats as { ambiguousLexicalSites?: unknown }).ambiguousLexicalSites,
-      1,
-    );
+    const cursorIdent = parser.parse("if;");
+    assertEquals(cursorIdent.ok, true);
+    assert(cursorIdent.cursor);
+    const cursorIdentStatement = cursorIdent.cursor.child(0);
+    assertCursorRule(cursorIdentStatement, "statement");
+    const cursorIdentValue = cursorIdentStatement.field("value");
+    assertCursorToken(cursorIdentValue, "IDENT");
+    assertEquals(cursorIdentValue.text, "if");
 
-    const parsedKeyword = parser.parse("if name;") as ParseResultLike;
-    assertEquals(parsedKeyword.ok, true);
-    assert(parsedKeyword.root);
-    assertEquals(parsedKeyword.root.children[0].fields.value.text, "name");
+    const cursorKeyword = parser.parse("@if;");
+    assertEquals(cursorKeyword.ok, true);
+    assert(cursorKeyword.cursor);
+    const cursorStatement = cursorKeyword.cursor.child(0);
+    assertCursorRule(cursorStatement, "statement");
+    const cursorValue = cursorStatement.field("keyword");
+    assertCursorToken(cursorValue, "if");
+    assertEquals(cursorValue.text, "if");
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm cursor parser selects the first viable token candidate deterministically", async () => {
+  const grammar = `
+    token IDENT = /[a-z]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = statement ;
+    statement = "return" value:IDENT ";" | value:IDENT ";" ;
+  `;
+  const { dir, mod, bytes, plan } = await materialize(grammar);
+  try {
+    const parser = mod.createParser({ bytes, plan });
+    const cursorKeyword = parser.parse("return x;");
+    assertEquals(cursorKeyword.ok, true);
+    assert(cursorKeyword.cursor);
+    const keywordStatement = cursorKeyword.cursor.child(0);
+    assertCursorRule(keywordStatement, "statement");
+    const keywordValue = keywordStatement.field("value");
+    assertCursorToken(keywordValue, "IDENT");
+    assertEquals(keywordValue.text, "x");
+
+    const validateKeyword = parser.validate("return x;");
+    assertEquals(validateKeyword.ok, true);
+
+    const cursorIdent = parser.parse("name;");
+    assertEquals(cursorIdent.ok, true);
+    assert(cursorIdent.cursor);
+    const identStatement = cursorIdent.cursor.child(0);
+    assertCursorRule(identStatement, "statement");
+    const identValue = identStatement.field("value");
+    assertCursorToken(identValue, "IDENT");
+    assertEquals(identValue.text, "name");
     parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });
@@ -354,14 +706,19 @@ Deno.test("shared Wasm adapter explores declared branching LR action sets", asyn
   );
   try {
     const parser = mod.createParser({ bytes, plan });
-    const parsed = parser.parse("a") as ParseResultLike;
-    assertEquals(parsed.ok, true);
-
-    const ambiguous = parser.parse("a", {
-      ambiguityMode: "reject-ambiguous-success",
-    }) as ParseResultLike;
-    assertEquals(ambiguous.ok, false);
-    assertEquals(ambiguous.diagnostics[0].code, "PARSER_AMBIGUOUS_PARSE");
+    assertEquals("parseTree" in parser, false);
+    const cursorParsed = parser.parse("a");
+    assertEquals(cursorParsed.ok, false);
+    assertEquals(
+      cursorParsed.diagnostics[0].code,
+      "PARSER_AMBIGUOUS_PARSE",
+    );
+    const validateParsed = parser.validate("a");
+    assertEquals(validateParsed.ok, false);
+    assertEquals(
+      validateParsed.diagnostics[0].code,
+      "PARSER_AMBIGUOUS_PARSE",
+    );
 
     parser.dispose();
   } finally {
@@ -381,10 +738,21 @@ Deno.test("shared Wasm adapter loads concurrent parser instances with different 
       bytes: beta.bytes,
       plan: beta.plan,
     });
-    assertEquals((alphaParser.parse("alpha") as ParseResultLike).ok, true);
-    assertEquals((alphaParser.parse("beta!") as ParseResultLike).ok, false);
-    assertEquals((betaParser.parse("beta!") as ParseResultLike).ok, true);
-    assertEquals((betaParser.parse("alpha") as ParseResultLike).ok, false);
+    assertEquals(alphaParser.parse("alpha").ok, true);
+    assertEquals(alphaParser.parse("beta!").ok, false);
+    assertEquals(betaParser.parse("beta!").ok, true);
+    assertEquals(betaParser.parse("alpha").ok, false);
+    const alphaCursor = alphaParser.parse("alpha");
+    const betaCursor = betaParser.parse("beta!");
+    assertEquals(alphaCursor.ok, true);
+    assertEquals(betaCursor.ok, true);
+    assert(alphaCursor.cursor);
+    assert(betaCursor.cursor);
+    assertEquals(
+      cursorLabel(alphaCursor.cursor.children()[0]),
+      'token:"alpha"',
+    );
+    assertEquals(cursorLabel(betaCursor.cursor.children()[0]), 'token:"beta"');
     alphaParser.dispose();
     betaParser.dispose();
   } finally {
@@ -448,13 +816,57 @@ Deno.test("shared Wasm adapter supports async URL loading", async () => {
       url: dataUrl(bytes, "application/wasm"),
       planUrl: dataUrl(plan, "application/octet-stream"),
     });
-    const parsed = parser.parse("ok") as ParseResultLike;
+    const parsed = parser.parse("ok");
     assertEquals(parsed.ok, true);
+    assert(parsed.cursor);
     parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+function assertCursorRule(
+  value:
+    | CursorFieldValueLike
+    | CursorRuleLike
+    | CursorTokenLike
+    | undefined,
+  name?: string,
+): asserts value is CursorRuleLike {
+  assert(value !== undefined && value !== null, "Expected cursor rule.");
+  assert(!Array.isArray(value), "Expected cursor rule, found array.");
+  const element = value as CursorRuleLike | CursorTokenLike;
+  assert(element.type === "rule", "Expected cursor rule.");
+  if (name !== undefined) {
+    assertEquals(element.name, name);
+  }
+}
+
+function assertCursorToken(
+  value:
+    | CursorFieldValueLike
+    | CursorRuleLike
+    | CursorTokenLike
+    | undefined,
+  kind: string,
+): asserts value is CursorTokenLike {
+  assert(value !== undefined && value !== null, "Expected cursor token.");
+  assert(!Array.isArray(value), "Expected cursor token, found array.");
+  const element = value as CursorRuleLike | CursorTokenLike;
+  assert(element.type === "token", "Expected cursor token.");
+  assertEquals(element.kind, kind);
+}
+
+function cursorLabel(
+  value: CursorRuleLike | CursorTokenLike | undefined,
+): string {
+  assert(value !== undefined, "Expected cursor element.");
+  if (value.type === "rule") return `rule:${value.name}`;
+  if (value.tokenType === "literal") {
+    return `token:${JSON.stringify(value.kind)}`;
+  }
+  return `token:${value.kind}`;
+}
 
 function wasmBundle(source: string, metadata?: BabaMetadata) {
   let result: ReturnType<typeof compile>;
@@ -541,4 +953,8 @@ function dataUrl(bytes: Uint8Array, mime: string): URL {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return new URL(`data:${mime};base64,${btoa(binary)}`);
+}
+
+function alignTest(value: number, alignment: number): number {
+  return Math.ceil(value / alignment) * alignment;
 }

@@ -15,11 +15,14 @@ wasm/
   syntax.ts
 ```
 
-`parser.wasm` contains the generic lexer/parser lookup runtime. `parser.plan`
-contains the generated DFA/LR core data plus the shared TypeScript runtime
-metadata used for token, diagnostic, CST, and reducer materialization. `mod.ts`
-is a thin wrapper around `@mewhhaha/baba/runtime/wasm`; `syntax.ts` is the typed
-token/node surface and does not contain runtime tables.
+`parser.wasm` contains the generic lexer/parser lookup runtime. The engine is
+authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded
+in the Baba package; grammar generation does not invoke Cargo or require Rust on
+the user's machine. `parser.plan` contains the generated DFA/LR core data plus
+the shared TypeScript runtime metadata used for token, diagnostic, and cursor
+access. `mod.ts` is a thin wrapper around `@mewhhaha/baba/runtime/wasm`;
+`syntax.ts` is the typed token/cursor surface and does not contain runtime
+tables.
 
 ## Generation
 
@@ -37,6 +40,7 @@ const bytes = await Deno.readFile("generated/wasm/parser.wasm");
 const plan = await Deno.readFile("generated/wasm/parser.plan");
 const parser = createParser({ bytes, plan });
 const result = parser.parse(source);
+const firstToken = parser.lex(source).tokenTape.token(0);
 parser.dispose();
 ```
 
@@ -51,8 +55,19 @@ Generated `mod.ts` exports:
 - Wasm ABI constants
 
 The parser instance returned by `createParser({ bytes, plan })` or
-`createParser({ module, plan })` exposes `lex`, `parse`, `parseTokens`,
-`parseTokensUnchecked`, `reset`, and `dispose`.
+`createParser({ module, plan })` exposes:
+
+- `parse(source, options?)`: cursor-first parse. A successful result contains
+  `cursor`, not a materialized object tree. `syntax.ts` exports `RootCursor` and
+  rule-specific cursor interfaces with typed field accessors for downstream
+  TypeScript consumers.
+- `lex(source, options?)`: lazy token tape result. Use `tokenTape.token(index)`
+  for indexed access to token records.
+- `validate(source, options?)`: Wasm trace validation with structured
+  diagnostics and no object-tree construction.
+- `reset()` and `dispose()`.
+
+Generated Wasm parser instances expose only the methods listed above.
 
 ## ABI Descriptor
 
@@ -65,7 +80,7 @@ The parser instance returned by `createParser({ bytes, plan })` or
 - memory layout constants
 - exported Wasm function names
 - external plan path and storage layout
-- token and lex-result record layouts
+- token, lex-result, trace-result, and cursor-tape record layouts
 - parser trace status codes
 - parser diagnostic code schemas
 

@@ -8,14 +8,13 @@
 
 -
 
-## Legacy Flags
-
--
-
 ## Migration Examples
 
 ```ts
-import { parse } from "./generated/mod.ts";
+import { createParser } from "./generated/wasm/mod.ts";
+
+const parser = createParser({ bytes, plan });
+const result = parser.parse(source);
 ```
 
 ## Performance Numbers

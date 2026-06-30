@@ -1,8 +1,4 @@
-import {
-  type AnyRuleNode,
-  createParser,
-  type SyntaxElement,
-} from "./generated/wasm/mod.ts";
+import { type AnyRuleCursor, createParser } from "./generated/wasm/mod.ts";
 
 const parser = createParser({
   bytes: Deno.readFileSync(
@@ -1330,90 +1326,74 @@ class WasmBuilder {
 
 function parseProgram(source: string): Program {
   const parsed = parser.parse(source, { preserveTrivia: false });
-  if (!parsed.ok || !parsed.root) {
+  if (!parsed.ok) {
     const diagnostics = parsed.diagnostics.map((diagnostic) =>
       `${diagnostic.code} at ${diagnostic.span.start}: ${diagnostic.message}`
     ).join("\n");
     throw new Error(`Parse failed:\n${diagnostics}`);
   }
 
-  const definitions = parsed.root.children.filter(isRuleNode).map(
+  const definitions = parsed.cursor.children().filter(isRuleNode).map(
     parseDefinition,
   );
   return { definitions };
 }
 
-function parseDefinition(node: AnyRuleNode): Definition {
+function parseDefinition(node: AnyRuleCursor): Definition {
   if (node.name !== "definition") {
     throw new Error(`Expected definition, got ${node.name}.`);
   }
-  const fields = node.fields as {
-    name: { text: string };
-    params: readonly { text: string }[];
-    body: AnyRuleNode;
-  };
   return {
-    name: fields.name.text,
-    params: fields.params.map((param) => param.text),
-    body: parseExpr(fields.body),
+    name: requiredTokenText(node, "name"),
+    params: tokenTextArray(node, "params"),
+    body: parseExpr(requiredRuleField(node, "body")),
   };
 }
 
-function parseExpr(node: AnyRuleNode): Expr {
+function parseExpr(node: AnyRuleCursor): Expr {
   switch (node.name) {
     case "expr":
     case "primary":
     case "unary":
       return parseExpr(childRule(node));
     case "let_expr": {
-      const fields = node.fields as {
-        name: { text: string };
-        value: AnyRuleNode;
-        body: AnyRuleNode;
-      };
       return {
         kind: "let",
-        name: fields.name.text,
-        value: parseExpr(fields.value),
-        body: parseExpr(fields.body),
+        name: requiredTokenText(node, "name"),
+        value: parseExpr(requiredRuleField(node, "value")),
+        body: parseExpr(requiredRuleField(node, "body")),
       };
     }
     case "if_expr": {
-      const fields = node.fields as {
-        hint?: AnyRuleNode;
-        condition: AnyRuleNode;
-        consequent: AnyRuleNode;
-        alternate: AnyRuleNode;
-      };
-      const hint = fields.hint ? childRule(fields.hint).name : undefined;
+      const hintNode = optionalRuleField(node, "hint");
+      let hint: string | undefined;
+      if (hintNode !== null) {
+        hint = childRule(hintNode).name;
+      }
       return {
         kind: "if",
         hint: hint === "likely" || hint === "unlikely" ? hint : undefined,
-        condition: parseExpr(fields.condition),
-        consequent: parseExpr(fields.consequent),
-        alternate: parseExpr(fields.alternate),
+        condition: parseExpr(requiredRuleField(node, "condition")),
+        consequent: parseExpr(requiredRuleField(node, "consequent")),
+        alternate: parseExpr(requiredRuleField(node, "alternate")),
       };
     }
     case "fun_expr": {
-      const fields = node.fields as {
-        param: { text: string };
-        body: AnyRuleNode;
-      };
       return {
         kind: "fun",
-        param: fields.param.text,
-        body: parseExpr(fields.body),
+        param: requiredTokenText(node, "param"),
+        body: parseExpr(requiredRuleField(node, "body")),
       };
     }
     case "lazy_expr":
       return {
         kind: "lazy",
-        body: parseExpr((node.fields as { body: AnyRuleNode }).body),
+        body: parseExpr(requiredRuleField(node, "body")),
       };
     case "force_expr":
       return {
         kind: "force",
-        body: parseExpr((node.fields as { body: AnyRuleNode }).body),
+        body: parseExpr(requiredRuleField(node, "body")),
       };
     case "equality":
       return foldBinary(
@@ -1442,56 +1422,50 @@ function parseExpr(node: AnyRuleNode): Expr {
       return {
         kind: "unary",
         op: "neg",
-        body: parseExpr((node.fields as { body: AnyRuleNode }).body),
+        body: parseExpr(requiredRuleField(node, "body")),
       };
     case "call": {
-      const fields = node.fields as {
-        callee: AnyRuleNode;
-        args: readonly AnyRuleNode[];
-      };
       return {
         kind: "call",
-        callee: parseExpr(fields.callee),
-        argLists: fields.args.map(parseCallArguments),
+        callee: parseExpr(requiredRuleField(node, "callee")),
+        argLists: ruleFieldArray(node, "args").map(parseCallArguments),
       };
     }
     case "integer":
       return {
         kind: "int",
-        value: integer((node.fields as { value: { text: string } }).value.text),
+        value: integer(requiredTokenText(node, "value")),
       };
     case "variable":
       return {
         kind: "name",
-        name: (node.fields as { name: { text: string } }).name.text,
+        name: requiredTokenText(node, "name"),
       };
     case "tick":
       return {
         kind: "tick",
-        value: parseExpr((node.fields as { value: AnyRuleNode }).value),
+        value: parseExpr(requiredRuleField(node, "value")),
       };
     case "group":
-      return parseExpr((node.fields as { body: AnyRuleNode }).body);
+      return parseExpr(requiredRuleField(node, "body"));
     default:
       throw new Error(`Unsupported syntax node ${node.name}.`);
   }
 }
 
 function foldBinary(
-  node: AnyRuleNode,
+  node: AnyRuleCursor,
   leftField: string,
   restField: string,
   opFromName: (name: string) => BinaryOp,
 ): Expr {
-  const fields = node.fields as Record<string, unknown>;
-  let expr = parseExpr(fields[leftField] as AnyRuleNode);
-  for (const tail of fields[restField] as readonly AnyRuleNode[]) {
-    const tailFields = tail.fields as { op: AnyRuleNode; right: AnyRuleNode };
+  let expr = parseExpr(requiredRuleField(node, leftField));
+  for (const tail of ruleFieldArray(node, restField)) {
     expr = {
       kind: "binary",
-      op: opFromName(childRule(tailFields.op).name),
+      op: opFromName(childRule(requiredRuleField(tail, "op")).name),
       left: expr,
-      right: parseExpr(tailFields.right),
+      right: parseExpr(requiredRuleField(tail, "right")),
     };
   }
   return expr;
@@ -1512,17 +1486,15 @@ function comparisonOperator(name: string): BinaryOp {
   }
 }
 
-function parseCallArguments(node: AnyRuleNode): readonly Expr[] {
-  const values = (node.fields as { values?: AnyRuleNode }).values;
-  if (!values) return [];
-  const fields = values.fields as {
-    head: AnyRuleNode;
-    tail: readonly AnyRuleNode[];
-  };
+function parseCallArguments(node: AnyRuleCursor): readonly Expr[] {
+  const values = optionalRuleField(node, "values");
+  if (values === null) {
+    return [];
+  }
   return [
-    parseExpr(fields.head),
-    ...fields.tail.map((tail) =>
-      parseExpr((tail.fields as { value: AnyRuleNode }).value)
+    parseExpr(requiredRuleField(values, "head")),
+    ...ruleFieldArray(values, "tail").map((tail) =>
+      parseExpr(requiredRuleField(tail, "value"))
     ),
   ];
 }
@@ -1721,14 +1693,86 @@ function i32(value: number): number[] {
   return bytes;
 }
 
-function childRule(node: AnyRuleNode): AnyRuleNode {
-  const child = node.children.find(isRuleNode);
+function childRule(node: AnyRuleCursor): AnyRuleCursor {
+  const child = node.children().find(isRuleNode);
   if (!child) throw new Error(`Expected child rule for ${node.name}.`);
   return child;
 }
 
-function isRuleNode(node: SyntaxElement): node is AnyRuleNode {
-  return node.type === "rule";
+function isRuleNode(node: unknown): node is AnyRuleCursor {
+  return !!node && typeof node === "object" &&
+    (node as { type?: unknown }).type === "rule";
+}
+
+function requiredRuleField(
+  node: AnyRuleCursor,
+  name: string,
+): AnyRuleCursor {
+  const value = node.field(name);
+  if (!isRuleNode(value)) {
+    throw new Error(`Expected rule field ${name} on ${node.name}.`);
+  }
+  return value;
+}
+
+function optionalRuleField(
+  node: AnyRuleCursor,
+  name: string,
+): AnyRuleCursor | null {
+  const value = node.field(name);
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!isRuleNode(value)) {
+    throw new Error(`Expected optional rule field ${name} on ${node.name}.`);
+  }
+  return value;
+}
+
+function ruleFieldArray(
+  node: AnyRuleCursor,
+  name: string,
+): readonly AnyRuleCursor[] {
+  const values = node.fieldArray(name);
+  const result: AnyRuleCursor[] = [];
+  for (const value of values) {
+    if (!isRuleNode(value)) {
+      throw new Error(`Expected rule array field ${name} on ${node.name}.`);
+    }
+    result.push(value);
+  }
+  return result;
+}
+
+function requiredTokenText(node: AnyRuleCursor, name: string): string {
+  const value = node.field(name);
+  if (!isTokenCursor(value)) {
+    throw new Error(`Expected token field ${name} on ${node.name}.`);
+  }
+  return value.text;
+}
+
+function tokenTextArray(
+  node: AnyRuleCursor,
+  name: string,
+): readonly string[] {
+  const values = node.fieldArray(name);
+  const result: string[] = [];
+  for (const value of values) {
+    if (!isTokenCursor(value)) {
+      throw new Error(`Expected token array field ${name} on ${node.name}.`);
+    }
+    result.push(value.text);
+  }
+  return result;
+}
+
+function isTokenCursor(
+  value: unknown,
+): value is { type: "token"; text: string } {
+  return !!value && typeof value === "object" &&
+    (value as { type?: unknown }).type === "token" &&
+    typeof (value as { text?: unknown }).text === "string";
 }
 
 async function main(): Promise<void> {

@@ -20,13 +20,18 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
   const rootSchema = fieldSchemas.find((schema) =>
     schema.ruleId === analyzed.rootRule
   );
+  if (rootSchema === undefined) {
+    throw new Error(
+      `Could not find a generated field schema for root rule ${analyzed.rootRule}.`,
+    );
+  }
   return emitSyntaxModel({
     mainTokenKinds: mainTokens.map((token) => token.name),
     triviaTokenKinds: triviaTokens.map((token) => token.name),
     literalKinds: literals.map((literal) => literal.value),
     ruleNames: rules.map((rule) => rule.name),
     fieldSchemas,
-    rootNodeType: rootSchema?.nodeType ?? "AnyRuleNode",
+    rootNodeType: rootSchema.nodeType,
     parserPlanVersion: undefined,
     parserPlanSemantics: undefined,
   });
@@ -62,12 +67,34 @@ function emitSyntaxModel(model: {
     readonly fields: readonly {
       readonly name: string;
       readonly type: string;
+      readonly array?: boolean;
     }[];
   }[];
   rootNodeType: string;
   parserPlanVersion: number | undefined;
   parserPlanSemantics: string | undefined;
 }): string {
+  const cursorTypeByNodeType = new Map<string, string>();
+  for (const schema of model.fieldSchemas) {
+    cursorTypeByNodeType.set(schema.nodeType, cursorTypeName(schema.nodeType));
+  }
+  const cursorSchemas = model.fieldSchemas.map((schema) => ({
+    ...schema,
+    cursorType: cursorTypeForNodeType(cursorTypeByNodeType, schema.nodeType),
+    fields: schema.fields.map((field) => ({
+      ...field,
+      cursorType: cursorFieldType(field.type, cursorTypeByNodeType),
+      array: fieldIsArray(field),
+    })),
+  }));
+  const rootCursorTypeValue = cursorTypeByNodeType.get(model.rootNodeType);
+  if (rootCursorTypeValue === undefined) {
+    throw new Error(
+      `Could not find a generated cursor type for root node ${model.rootNodeType}.`,
+    );
+  }
+  const rootCursorType = rootCursorTypeValue;
+
   const lines: string[] = [
     generatedSourceBanner({
       parserPlanVersion: model.parserPlanVersion,
@@ -239,87 +266,127 @@ function emitSyntaxModel(model: {
     "export type RuleName =",
     ...unionLines(model.ruleNames),
     "",
-    "export interface RuleNodeBase<N extends RuleName = RuleName> {",
-    '  type: "rule";',
-    "  name: N;",
-    "  span: Span;",
-    "  tokenRange: { start: number; end: number };",
-    "  children: readonly SyntaxElement[];",
-    "  fields: unknown;",
-    "}",
-    "",
-    "export type EmptyFields = Record<string, never>;",
-    "",
   ];
 
-  for (const schema of model.fieldSchemas) {
+  lines.push(
+    "export interface TokenCursor<",
+    '  TokenType extends "named" | "literal" = "named" | "literal",',
+    "  K extends string = AnyMainTokenKind | AnyLiteralKind,",
+    "> {",
+    '  readonly type: "token";',
+    "  readonly tokenType: TokenType;",
+    "  readonly kind: K;",
+    "  readonly text: string;",
+    "  readonly span: Span;",
+    "  readonly tokenIndex: number;",
+    "}",
+    "",
+    "export type CursorFieldValue =",
+    "  | SyntaxCursor",
+    "  | readonly CursorFieldValue[]",
+    "  | null;",
+    "",
+    "export type SyntaxCursor = AnyRuleCursor | TokenCursor;",
+    "",
+    "export interface RuleCursorBase<N extends RuleName = RuleName> {",
+    '  readonly type: "rule";',
+    "  readonly name: N;",
+    "  readonly span: Span;",
+    "  readonly tokenRange: { start: number; end: number };",
+    "  readonly childCount: number;",
+    "  child(index: number): SyntaxCursor | undefined;",
+    "  children(): readonly SyntaxCursor[];",
+    "  field(name: string): CursorFieldValue | undefined;",
+    "  fieldArray(name: string): readonly CursorFieldValue[];",
+    "}",
+    "",
+  );
+
+  for (const schema of cursorSchemas) {
     lines.push(
-      `export interface ${schema.nodeType} extends RuleNodeBase<${
+      `export interface ${schema.cursorType} extends RuleCursorBase<${
         quote(schema.ruleName)
       }> {`,
     );
-    if (schema.fields.length === 0) {
-      lines.push("  fields: EmptyFields;");
-    } else {
-      lines.push("  fields: {");
-      for (const field of schema.fields) {
-        lines.push(`    ${safeProperty(field.name)}: ${field.type};`);
+    for (const field of schema.fields) {
+      lines.push(
+        `  field(name: ${quote(field.name)}): ${field.cursorType};`,
+      );
+    }
+    if (schema.fields.length > 0) {
+      lines.push("  field(name: string): CursorFieldValue | undefined;");
+    }
+    for (const field of schema.fields) {
+      if (!field.array) {
+        continue;
       }
-      lines.push("  };");
+      lines.push(
+        `  fieldArray(name: ${quote(field.name)}): ${field.cursorType};`,
+      );
+    }
+    if (schema.fields.length > 0) {
+      lines.push("  fieldArray(name: string): readonly CursorFieldValue[];");
     }
     lines.push("}", "");
   }
 
   lines.push(
-    "export type AnyRuleNode =",
-    ...unionLines(model.fieldSchemas.map((schema) => schema.nodeType), false),
+    "export type AnyRuleCursor =",
+    ...unionLines(cursorSchemas.map((schema) => schema.cursorType), false),
     "",
-    `export type RootNode = ${model.rootNodeType};`,
+    "export type RuleCursor<N extends RuleName = RuleName> = Extract<",
+    "  AnyRuleCursor,",
+    "  { readonly name: N }",
+    ">;",
     "",
-    "export type SyntaxElement =",
-    "  | AnyRuleNode",
-    "  | MainNamedToken",
-    "  | LiteralToken;",
+    `export type RootCursor = ${rootCursorType};`,
     "",
     "export interface LexOptions {",
     "  preserveTrivia?: boolean;",
     "}",
     "",
-    "export interface LexResult {",
-    "  source: string;",
-    "  tokens: readonly Token[];",
-    "  diagnostics: readonly LexDiagnostic[];",
+    "export interface TokenTape {",
+    "  readonly length: number;",
+    "  token(index: number): Token | undefined;",
     "}",
     "",
-    "export interface ContextualLexingStats {",
-    "  ambiguousLexicalSites: number;",
-    "  contextualCandidateChecks: number;",
-    "  attemptedTokenSelections: number;",
-    "  reductionsBeforeTokenSelection: number;",
+    "export interface LexTapeResult {",
+    "  source: string;",
+    "  tokenTape: TokenTape;",
+    "  diagnostics: readonly LexDiagnostic[];",
     "}",
     "",
     "export interface ParseOptions {",
     "  preserveTrivia?: boolean;",
-    "  contextualLexingStats?: (stats: ContextualLexingStats) => void;",
+    "  contextualLexingStats?: (stats: unknown) => void;",
     "  maxExploredBranches?: number;",
-    "  maxQueuedBranches?: number;",
     "  maxTraceActions?: number;",
     '  ambiguityMode?: "first-success" | "reject-ambiguous-success";',
     "}",
     "",
-    "export type ParseResult<Root extends AnyRuleNode = RootNode> =",
+    "export type CursorParseResult<Root extends RuleCursor = RootCursor> =",
     "  | {",
     "    ok: true;",
-    "    root: Root;",
+    "    cursor: Root;",
     "    source: string;",
-    "    tokens: readonly Token[];",
     "    diagnostics: readonly [];",
     "  }",
     "  | {",
     "    ok: false;",
-    "    root: null;",
+    "    cursor: null;",
     "    source: string;",
-    "    tokens: readonly Token[];",
+    "    diagnostics: readonly ParseDiagnostic[];",
+    "  };",
+    "",
+    "export type ValidateParseResult =",
+    "  | {",
+    "    ok: true;",
+    "    source: string;",
+    "    diagnostics: readonly [];",
+    "  }",
+    "  | {",
+    "    ok: false;",
+    "    source: string;",
     "    diagnostics: readonly ParseDiagnostic[];",
     "  };",
     "",
@@ -338,8 +405,57 @@ function unionLines(values: readonly string[], quoteValues = true): string[] {
   );
 }
 
-function safeProperty(name: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : quote(name);
+function cursorTypeName(nodeType: string): string {
+  if (nodeType.endsWith("Node")) {
+    return `${nodeType.slice(0, -4)}Cursor`;
+  }
+  return `${nodeType}Cursor`;
+}
+
+function cursorTypeForNodeType(
+  cursorTypeByNodeType: ReadonlyMap<string, string>,
+  nodeType: string,
+): string {
+  const cursorType = cursorTypeByNodeType.get(nodeType);
+  if (cursorType === undefined) {
+    throw new Error(`Could not find cursor type for node type ${nodeType}.`);
+  }
+  return cursorType;
+}
+
+function cursorFieldType(
+  type: string,
+  cursorTypeByNodeType: ReadonlyMap<string, string>,
+): string {
+  let result = type.replace(
+    /NamedToken<([^>]+)>/g,
+    'TokenCursor<"named", $1>',
+  );
+  result = result.replace(
+    /LiteralToken<([^>]+)>/g,
+    'TokenCursor<"literal", $1>',
+  );
+  const entries = [...cursorTypeByNodeType.entries()].sort(
+    (left, right) => right[0].length - left[0].length,
+  );
+  for (const [nodeType, cursorType] of entries) {
+    const pattern = new RegExp(`\\b${escapeRegExp(nodeType)}\\b`, "g");
+    result = result.replace(pattern, cursorType);
+  }
+  return result;
+}
+
+function fieldIsArray(
+  field: { readonly type: string; readonly array?: boolean },
+): boolean {
+  if (field.array !== undefined) {
+    return field.array;
+  }
+  return field.type.startsWith("ReadonlyArray<");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
 function quote(value: string): string {

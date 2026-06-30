@@ -37,11 +37,16 @@ import {
 import {
   WASM_ABI_VERSION,
   WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
+  WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+  WASM_CURSOR_RULE_RECORD_I32_COUNT,
+  WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_I32_BYTES,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
+  WASM_PARSE_CURSOR_RESULT_I32_COUNT,
+  WASM_PARSE_TRACE_RESULT_I32_COUNT,
   WASM_RESULT_LIFETIME_CALLER_BUFFER,
   WASM_SOURCE_ENCODING_UTF16,
   WASM_SPAN_UNIT_UTF16,
@@ -104,15 +109,20 @@ export function planWasmTarget(
   const portableBnf = portablePlanToBnf(runtimePlan.portable);
   const portableLr = portablePlanToLrTable(runtimePlan.portable);
   const portableDfa = portablePlanToDfa(runtimePlan.portable);
+  let preserveTrivia = true;
+  if (options.preserveTrivia !== undefined) {
+    preserveTrivia = options.preserveTrivia;
+  }
+  const parserKit = createWasmRuntimeParserKit(
+    analyzed,
+    runtimePlan,
+    preserveTrivia,
+  );
   const wasm = emitWasmModule(
     portableDfa,
     portableLr,
     runtimePlan.portable.version,
-  );
-  const parserKit = createWasmRuntimeParserKit(
-    analyzed,
-    runtimePlan,
-    options.preserveTrivia ?? true,
+    wasmCoreRuntimeMetadata(parserKit, portableBnf),
   );
   const parserPlanBytes = encodeCombinedWasmParserPlan(
     wasm.planBytes,
@@ -302,6 +312,69 @@ function wasmAbiDescriptor(): unknown {
           bytes: WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES,
           fields: ["specIndex", "start", "end", "acceptingState"],
         },
+        parserSelection: {
+          i32Count: 4,
+          bytes: 4 * WASM_I32_BYTES,
+          fields: [
+            "checkedCandidateCount",
+            "selectedSpecIndex",
+            "selectedTerminal",
+            "encodedAction",
+          ],
+        },
+        parseTraceResult: {
+          i32Count: WASM_PARSE_TRACE_RESULT_I32_COUNT,
+          bytes: WASM_PARSE_TRACE_RESULT_I32_COUNT * WASM_I32_BYTES,
+          fields: [
+            "tokenRecordCount",
+            "traceActionCount",
+            "errorOffset",
+            "errorState",
+            "tokenReadCount",
+            "reserved",
+          ],
+        },
+        parseCursorResult: {
+          i32Count: WASM_PARSE_CURSOR_RESULT_I32_COUNT,
+          bytes: WASM_PARSE_CURSOR_RESULT_I32_COUNT * WASM_I32_BYTES,
+          fields: [
+            "tokenRecordCount",
+            "ruleRecordCount",
+            "childRefCount",
+            "fieldRecordCount",
+            "valueRecordCount",
+            "valueItemCount",
+            "rootRef",
+            "errorOffset",
+            "errorState",
+            "tokenReadCount",
+          ],
+        },
+        cursorRuleRecord: {
+          i32Count: WASM_CURSOR_RULE_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_RULE_RECORD_I32_COUNT * WASM_I32_BYTES,
+          fields: [
+            "ruleId",
+            "start",
+            "end",
+            "tokenStart",
+            "tokenEnd",
+            "childStart",
+            "childCount",
+            "fieldStart",
+            "fieldCount",
+          ],
+        },
+        cursorFieldRecord: {
+          i32Count: WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_FIELD_RECORD_I32_COUNT * WASM_I32_BYTES,
+          fields: ["fieldId", "valueId"],
+        },
+        cursorValueRecord: {
+          i32Count: WASM_CURSOR_VALUE_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_VALUE_RECORD_I32_COUNT * WASM_I32_BYTES,
+          fields: ["kind", "number", "itemStart", "itemCount"],
+        },
       },
       exports: [
         {
@@ -324,13 +397,69 @@ function wasmAbiDescriptor(): unknown {
           result: "actionCountOrMinusOne",
         },
         {
+          name: "parser_select_action",
+          params: [
+            "state",
+            "acceptingState",
+            "fallbackSpecIndex",
+            "selectionPtr",
+          ],
+          result:
+            "selectionStatusOneSelectedZeroUnexpectedTwoMultipleChoicesMinusOneInvalid",
+        },
+        {
+          name: "parse_trace",
+          params: [
+            "sourcePtr",
+            "sourceLength",
+            "tokenPtr",
+            "tokenCapacity",
+            "tracePtr",
+            "traceCapacity",
+            "resultPtr",
+            "stackPtr",
+            "stackCapacity",
+            "preserveTrivia",
+            "maxTraceActions",
+          ],
+          result:
+            "traceStatusZeroOkOneUnexpectedTwoInternalFourTraceLimitFiveAmbiguous",
+        },
+        {
+          name: "parse_cursor",
+          params: [
+            "sourcePtr",
+            "sourceLength",
+            "tokenPtr",
+            "tokenCapacity",
+            "rulePtr",
+            "ruleCapacity",
+            "childPtr",
+            "childCapacity",
+            "fieldPtr",
+            "fieldCapacity",
+            "valuePtr",
+            "valueCapacity",
+            "valueItemPtr",
+            "valueItemCapacity",
+            "resultPtr",
+            "stateStackPtr",
+            "fragmentStackPtr",
+            "fragmentCapacity",
+            "preserveTrivia",
+            "maxTraceActions",
+          ],
+          result:
+            "cursorStatusZeroOkOneUnexpectedTwoInternalThreeCapacityFourTraceLimitFiveAmbiguous",
+        },
+        {
           name: "parser_goto",
           params: ["state", "nonterminal"],
           result: "stateOrMinusOne",
         },
         {
           name: "lex_all",
-          params: ["sourcePtr", "sourceLength", "resultPtr", "tokenPtr"],
+          params: ["sourcePtr", "sourceLength", "mode", "tokenPtr"],
           result: "tokenRecordCount",
         },
         {
@@ -357,6 +486,11 @@ function wasmAbiDescriptor(): unknown {
           name: "reset",
           params: [],
           result: "void",
+        },
+        {
+          name: "plan_buffer_base",
+          params: [],
+          result: "i32",
         },
         {
           name: "input_base",
@@ -438,7 +572,7 @@ function wasmModSource(): string {
       parserPlanSemantics: "baba-portable-v1",
     })
   }
-import type { LexOptions, LexResult, ParseOptions, ParseResult, RootNode, Token } from "./syntax.ts";
+import type { CursorParseResult, LexOptions, LexTapeResult, ParseOptions, RootCursor, ValidateParseResult } from "./syntax.ts";
 import {
   createParser as createSharedParser,
   createParserAsync as createSharedParserAsync,
@@ -488,10 +622,9 @@ export interface AsyncParserInstanceOptions extends ParserInstanceOptions {
 }
 
 export interface ParserInstance {
-  lex(source: string, options?: LexOptions): LexResult;
-  parse(source: string, options?: ParseOptions): ParseResult<RootNode>;
-  parseTokens(source: string, tokens: readonly Token[], options?: ParseOptions): ParseResult<RootNode>;
-  parseTokensUnchecked(source: string, tokens: readonly Token[], options?: ParseOptions): ParseResult<RootNode>;
+  lex(source: string, options?: LexOptions): LexTapeResult;
+  parse(source: string, options?: ParseOptions): CursorParseResult<RootCursor>;
+  validate(source: string, options?: ParseOptions): ValidateParseResult;
   reset(): void;
   dispose(): void;
 }
@@ -791,6 +924,113 @@ function compactWasmRuntimePlan(kit: ParserKit): unknown {
   };
 }
 
+function wasmCoreRuntimeMetadata(
+  kit: ParserKit,
+  bnf: BnfGrammar,
+): {
+  readonly eofTerminal: number;
+  readonly terminalBySpec: readonly number[];
+  readonly acceptCandidates: readonly (readonly number[])[];
+  readonly productions: readonly {
+    readonly lhs: number;
+    readonly rhsLength: number;
+    readonly reducerKind: number;
+    readonly reducerArg: number;
+  }[];
+} {
+  const fieldIds = new Map<string, number>();
+  for (const schema of kit.fields.rules) {
+    for (const field of schema.fields) {
+      if (!fieldIds.has(field.name)) {
+        fieldIds.set(field.name, fieldIds.size);
+      }
+    }
+  }
+  const terminalBySpec = kit.lexer.specs.map((spec) => {
+    if (spec.type === "named") {
+      const token = kit.tokens.named.find((entry) => entry.id === spec.tokenId);
+      if (token === undefined) {
+        throw new Error("Wasm lexer spec references an unknown named token.");
+      }
+      if (token.channel === "trivia") return -1;
+      return terminalIdForNamedSpec(kit, spec.tokenId);
+    }
+    return terminalIdForLiteralSpec(kit, spec.literalId);
+  });
+  const acceptCandidates = kit.lexer.dfa.acceptCandidates;
+  if (acceptCandidates === undefined) {
+    throw new Error("Wasm lexer DFA is missing accept candidate rows.");
+  }
+  if (kit.bnf.productions.length !== bnf.productions.length) {
+    throw new Error("Wasm BNF production metadata is not aligned.");
+  }
+  const productions = bnf.productions.map((production, index) => {
+    if (production.id !== index) {
+      throw new Error("Wasm BNF production ids must be dense by index.");
+    }
+    const kitProduction = kit.bnf.productions[index];
+    if (kitProduction === undefined) {
+      throw new Error("Wasm reducer metadata is missing a production.");
+    }
+    const reducer = compactCoreReducer(kitProduction.reducer, fieldIds);
+    return {
+      lhs: production.lhs,
+      rhsLength: production.rhs.length,
+      reducerKind: reducer.kind,
+      reducerArg: reducer.arg,
+    };
+  });
+  return {
+    eofTerminal: kit.bnf.eofTerminal,
+    terminalBySpec,
+    acceptCandidates,
+    productions,
+  };
+}
+
+function compactCoreReducer(
+  reducer: ParserKit["bnf"]["productions"][number]["reducer"],
+  fieldIds: ReadonlyMap<string, number>,
+): { readonly kind: number; readonly arg: number } {
+  switch (reducer.kind) {
+    case "start":
+      return { kind: 0, arg: -1 };
+    case "rule":
+      return { kind: 1, arg: reducer.ruleId };
+    case "terminal":
+      return { kind: 2, arg: -1 };
+    case "ruleRef":
+      return { kind: 3, arg: -1 };
+    case "identity":
+      return { kind: 4, arg: -1 };
+    case "sequence":
+      return { kind: 5, arg: -1 };
+    case "optionalEmpty":
+      return { kind: 6, arg: -1 };
+    case "optionalSome":
+      return { kind: 7, arg: -1 };
+    case "repeatEmpty":
+      return { kind: 8, arg: -1 };
+    case "repeatAppend":
+      return { kind: 9, arg: -1 };
+    case "repeat1First":
+      return { kind: 10, arg: -1 };
+    case "repeat1Append":
+      return { kind: 11, arg: -1 };
+    case "separatedFirst":
+      return { kind: 12, arg: -1 };
+    case "separatedAppend":
+      return { kind: 13, arg: -1 };
+    case "field": {
+      const fieldId = fieldIds.get(reducer.name);
+      if (fieldId === undefined) {
+        throw new Error("Wasm field reducer references an unknown field.");
+      }
+      return { kind: 14, arg: fieldId };
+    }
+  }
+}
+
 function runtimeImplementationHash(kit: ParserKit): string {
   if (kit.runtimeImplementation !== undefined) {
     return kit.runtimeImplementation.hash;
@@ -849,6 +1089,26 @@ function compactAction(action: ParserKitLrAction) {
   if (action.kind === "shift") return [0, action.state];
   if (action.kind === "reduce") return [1, action.production];
   return [2];
+}
+
+function terminalIdForNamedSpec(kit: ParserKit, tokenId: number): number {
+  const terminal = kit.bnf.terminals.find((entry) =>
+    entry.kind === "named" && entry.tokenId === tokenId
+  );
+  if (terminal === undefined) {
+    throw new Error("Wasm named lexer spec has no parser terminal.");
+  }
+  return terminal.id;
+}
+
+function terminalIdForLiteralSpec(kit: ParserKit, literalId: number): number {
+  const terminal = kit.bnf.terminals.find((entry) =>
+    entry.kind === "literal" && entry.literalId === literalId
+  );
+  if (terminal === undefined) {
+    throw new Error("Wasm literal lexer spec has no parser terminal.");
+  }
+  return terminal.id;
 }
 
 function orderAcceptCandidates(

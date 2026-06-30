@@ -31,23 +31,17 @@ export interface TargetTiming {
   readonly writeBundleMs: number;
   readonly importMs: number;
   readonly createParserMs: number;
-  readonly firstParseMs: number;
-  readonly secondParseMs: number;
-  readonly tokensSmallMs: number;
-  readonly tokensMediumMs: number;
-  readonly tokensSmallCount: number;
-  readonly tokensSmallNsPerToken: number;
-  readonly tokensSmallNsPerCodeUnit: number;
-  readonly validateSmallMs: number;
-  readonly validateMediumMs: number;
-  readonly eventsSmallMs: number;
-  readonly eventsMediumMs: number;
-  readonly cstLazySmallMs: number;
-  readonly cstLazyChildrenSmallMs: number;
-  readonly cstFullSmallMs: number;
-  readonly cstFullSmallNodeCount: number;
-  readonly mediumParseMs: number;
-  readonly largeParseMs: number;
+  readonly lexTapeSmallMs: number;
+  readonly lexTapeMediumMs: number;
+  readonly lexTapeSmallCount: number;
+  readonly lexTapeSmallNsPerToken: number;
+  readonly lexTapeSmallNsPerCodeUnit: number;
+  readonly validateTraceSmallMs: number;
+  readonly validateTraceMediumMs: number;
+  readonly cursorParseFirstMs: number;
+  readonly cursorParseSecondMs: number;
+  readonly cursorParseMediumMs: number;
+  readonly cursorParseLargeMs: number;
 }
 
 export interface WasmTargetTiming extends TargetTiming {
@@ -254,117 +248,59 @@ async function benchWasmTarget(
     imported.value.createParser({ bytes: wasmBytes, plan: planBytes })
   );
   const parser = create.value as {
+    lex(source: string): RuntimeLexTapeLike;
     parse(
       source: string,
-      options?: {
-        mode?: "tokens" | "validate" | "events" | "cst-lazy" | "cst-full";
-      },
-    ): RuntimeParseLike;
+    ): RuntimeCursorParseLike;
+    validate(source: string): RuntimeParseLike;
   };
-  const first = time(() => parser.parse(smallInput));
-  const second = time(() => parser.parse(smallInput));
-  const tokensSmall = time(() => parser.parse(smallInput, { mode: "tokens" }));
-  const tokensMedium = time(() =>
-    parser.parse(mediumInput, { mode: "tokens" })
-  );
-  const tokensSmallCount = tokensSmall.value.tokens?.length ?? 0;
-  const validateSmall = time(() =>
-    parser.parse(smallInput, { mode: "validate" })
-  );
-  const validateMedium = time(() =>
-    parser.parse(mediumInput, { mode: "validate" })
-  );
-  const eventsSmall = time(() => parser.parse(smallInput, { mode: "events" }));
-  const eventsMedium = time(() =>
-    parser.parse(mediumInput, { mode: "events" })
-  );
-  const cstLazySmall = time(() =>
-    parser.parse(smallInput, { mode: "cst-lazy" })
-  );
-  const cstLazyChildrenSmall = time(() => {
-    const result = parser.parse(smallInput, { mode: "cst-lazy" });
-    if (result.ok && result.root) result.root.children;
-    return result;
-  });
-  const cstFullSmall = time(() =>
-    parser.parse(smallInput, { mode: "cst-full" })
-  );
-  const cstFullSmallNodeCount = countParseResultRuleNodes(cstFullSmall.value);
-  const medium = time(() => parser.parse(mediumInput));
-  const large = time(() => parser.parse(largeInput));
+  const lexTapeSmall = time(() => parser.lex(smallInput));
+  const lexTapeMedium = time(() => parser.lex(mediumInput));
+  const lexTapeSmallCount = lexTapeSmall.value.tokenTape.length;
+  const validateTraceSmall = time(() => parser.validate(smallInput));
+  const validateTraceMedium = time(() => parser.validate(mediumInput));
+  const cursorFirst = time(() => parser.parse(smallInput));
+  const cursorSecond = time(() => parser.parse(smallInput));
+  const cursorMedium = time(() => parser.parse(mediumInput));
+  const cursorLarge = time(() => parser.parse(largeInput));
   return {
     generatedBytes: generatedBytes(bundle.files),
-    wasmBytes: wasmBytes?.byteLength ?? binaryBytes(bundle.files, ".wasm"),
+    wasmBytes: wasmBytes.byteLength,
     compileGrammarMs: compileResult.ms,
     writeBundleMs: write.ms,
     importMs: imported.ms,
     createParserMs: create.ms,
     compileModuleMs: compileModule,
     instantiateMs: create.ms,
-    firstParseMs: first.ms,
-    secondParseMs: second.ms,
-    tokensSmallMs: tokensSmall.ms,
-    tokensMediumMs: tokensMedium.ms,
-    tokensSmallCount,
-    tokensSmallNsPerToken: nsPerUnit(tokensSmall.ms, tokensSmallCount),
-    tokensSmallNsPerCodeUnit: nsPerUnit(tokensSmall.ms, smallInput.length),
-    validateSmallMs: validateSmall.ms,
-    validateMediumMs: validateMedium.ms,
-    eventsSmallMs: eventsSmall.ms,
-    eventsMediumMs: eventsMedium.ms,
-    cstLazySmallMs: cstLazySmall.ms,
-    cstLazyChildrenSmallMs: cstLazyChildrenSmall.ms,
-    cstFullSmallMs: cstFullSmall.ms,
-    cstFullSmallNodeCount,
-    mediumParseMs: medium.ms,
-    largeParseMs: large.ms,
+    lexTapeSmallMs: lexTapeSmall.ms,
+    lexTapeMediumMs: lexTapeMedium.ms,
+    lexTapeSmallCount,
+    lexTapeSmallNsPerToken: nsPerUnit(lexTapeSmall.ms, lexTapeSmallCount),
+    lexTapeSmallNsPerCodeUnit: nsPerUnit(
+      lexTapeSmall.ms,
+      smallInput.length,
+    ),
+    validateTraceSmallMs: validateTraceSmall.ms,
+    validateTraceMediumMs: validateTraceMedium.ms,
+    cursorParseFirstMs: cursorFirst.ms,
+    cursorParseSecondMs: cursorSecond.ms,
+    cursorParseMediumMs: cursorMedium.ms,
+    cursorParseLargeMs: cursorLarge.ms,
   };
+}
+
+interface RuntimeLexTapeLike {
+  readonly tokenTape: { readonly length: number };
+}
+
+interface RuntimeCursorParseLike {
+  readonly ok?: boolean;
+  readonly cursor?: unknown;
+  readonly diagnostics?: readonly unknown[];
 }
 
 interface RuntimeParseLike {
   readonly ok?: boolean;
-  readonly root?: RuntimeRuleNodeLike | null;
-  readonly tokens?: readonly unknown[];
-}
-
-interface RuntimeRuleNodeLike {
-  readonly type?: string;
-  readonly children: readonly unknown[];
-}
-
-function countParseResultRuleNodes(result: RuntimeParseLike): number {
-  if (!result.ok) {
-    return 0;
-  }
-  if (!result.root) {
-    return 0;
-  }
-  return countRuleNodes(result.root);
-}
-
-function countRuleNodes(value: unknown): number {
-  if (!isRuntimeRuleNode(value)) {
-    return 0;
-  }
-  let count = 1;
-  for (const child of value.children) {
-    count += countRuleNodes(child);
-  }
-  return count;
-}
-
-function isRuntimeRuleNode(value: unknown): value is RuntimeRuleNodeLike {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as { type?: unknown; children?: unknown };
-  if (candidate.type !== "rule") {
-    return false;
-  }
-  if (!Array.isArray(candidate.children)) {
-    return false;
-  }
-  return true;
 }
 
 function planStatsFromRuntimePlan(kit: {
@@ -515,7 +451,7 @@ export async function applyRuntimeBudgets(
       checks,
       fixture.name,
       "smallParseMsMax",
-      wasm?.firstParseMs,
+      wasm?.cursorParseFirstMs,
       budget.smallParseMsMax,
     );
     addRuntimeBudgetCheck(
@@ -590,17 +526,13 @@ function renderTextReport(report: RuntimeBenchReport): string {
           formatBytes(wasm.wasmBytes)
         } wasm, import ${formatMs(wasm.importMs)}, instantiate ${
           formatMs(wasm.instantiateMs)
-        }, first parse ${formatMs(wasm.firstParseMs)}, validate ${
-          formatMs(wasm.validateSmallMs)
-        }, tokens ${formatMs(wasm.tokensSmallMs)}, events ${
-          formatMs(wasm.eventsSmallMs)
-        }, cst-lazy ${formatMs(wasm.cstLazySmallMs)}, lazy children ${
-          formatMs(wasm.cstLazyChildrenSmallMs)
-        }, cst-full ${formatMs(wasm.cstFullSmallMs)}`,
-        `    lexer: ${formatNumber(wasm.tokensSmallCount)} small tokens, ${
-          formatNumber(wasm.tokensSmallNsPerToken)
+        }, cursorParse ${formatMs(wasm.cursorParseFirstMs)}, validateTrace ${
+          formatMs(wasm.validateTraceSmallMs)
+        }, lexTape ${formatMs(wasm.lexTapeSmallMs)}`,
+        `    lexer: ${formatNumber(wasm.lexTapeSmallCount)} small tokens, ${
+          formatNumber(wasm.lexTapeSmallNsPerToken)
         } ns/token, ${
-          formatNumber(wasm.tokensSmallNsPerCodeUnit)
+          formatNumber(wasm.lexTapeSmallNsPerCodeUnit)
         } ns/code unit`,
       );
     }
@@ -657,9 +589,9 @@ function renderComparison(
     pushDelta(
       lines,
       current.name,
-      "first parse",
-      previous.targets.wasm?.firstParseMs,
-      current.targets.wasm?.firstParseMs,
+      "cursor parse",
+      previous.targets.wasm?.cursorParseFirstMs,
+      current.targets.wasm?.cursorParseFirstMs,
       formatMs,
     );
   }

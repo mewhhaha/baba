@@ -2,18 +2,44 @@
 
 ## Unreleased
 
+## 3.0.0
+
 ### Added
 
-- Added grammar v2 documentation, conformance fixtures, seedable fuzzing,
-  portable plan v2 validation, and the shared TypeScript grammar-v2 runtime
-  adapter.
-- Added parser-v2 performance gates and final cutover benchmark guidance.
+- Added cursor-first generated parser output types in `syntax.ts`, including
+  typed `RootCursor` and rule cursor surfaces for parser consumers.
+- Added a Rust-authored, ahead-of-time built generic Wasm parser engine with
+  embedded runtime bytes and a `build:wasm-engine:check` drift check.
+- Added a current-state docs index and publish the maintained docs set with the
+  package.
 
 ### Changed
 
-- Updated primary docs to present grammar v2 as the documented parser path and
-  to isolate the legacy EBNF CLI/generated-target path as compatibility
-  infrastructure.
+- Updated README, docs, and examples to describe the current generated Wasm
+  parser API: cursor parse, lazy lex tape, validation trace, reset, and dispose.
+- Changed generated Wasm parser instances so `parse()` returns cursor parse
+  results. The generated parser API no longer exposes CST/object parse modes.
+- Changed generated `lex()` to return a lazy token tape and changed `validate()`
+  to use Wasm trace validation without token or CST construction.
+- Changed the Wasm core ABI to version 7. Hosts must load `parser.plan` at the
+  exported `plan_buffer_base()` instead of assuming offset zero.
+- Changed `parser.plan` core table encoding to format 2 with compact DFA/LR
+  sections, reducing large grammar plan size while keeping `parser.wasm`
+  grammar-independent.
+- Changed runtime benchmarks to report `lexTape`, `validateTrace`, and
+  `cursorParse` for the supported generated Wasm API.
+
+### Removed
+
+- Removed generated public `parse()` mode overloads that returned different
+  shapes through the main generated Wasm parser API.
+- Removed generated public `parseTree()`, `parseTokens()`, and
+  `parseTokensUnchecked()` migration hooks.
+- Removed generated public bulk token-object materialization helpers
+  `LexTapeResult.tokens`, `LexTapeResult.toTokens()`, and
+  `TokenTape.toTokens()`.
+- Removed generated CST node and `ParseResult` types from `syntax.ts`.
+- Removed obsolete ADR, research, and stale versioned public docs from `docs/`.
 
 ## 2.0.1
 

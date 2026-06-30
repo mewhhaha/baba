@@ -1,7 +1,7 @@
 import {
-  type AnyRuleNode,
+  type AnyRuleCursor,
   createParser,
-  type InstructionNode,
+  type InstructionCursor,
 } from "./generated/wasm/mod.ts";
 
 const parser = createParser({
@@ -41,13 +41,13 @@ const MAX_REPEAT_COUNT = 1_000_000;
 
 export function compileBrainfuck(source: string): Op[] {
   const parsed = parser.parse(source, { preserveTrivia: false });
-  if (!parsed.ok || !parsed.root) {
+  if (!parsed.ok) {
     const diagnostics = parsed.diagnostics.map((diagnostic) =>
       `${diagnostic.code} at ${diagnostic.span.start}: ${diagnostic.message}`
     ).join("\n");
     throw new Error(`Parse failed:\n${diagnostics}`);
   }
-  return compileInstructions(parsed.root.children.filter(isInstruction));
+  return compileInstructions(parsed.cursor.children().filter(isInstruction));
 }
 
 export function runBrainfuck(source: string, options: RunOptions = {}): string {
@@ -55,11 +55,11 @@ export function runBrainfuck(source: string, options: RunOptions = {}): string {
 }
 
 function compileInstructions(
-  instructions: readonly InstructionNode[],
+  instructions: readonly InstructionCursor[],
   ops: Op[] = [],
 ): Op[] {
   for (const instruction of instructions) {
-    const operation = instruction.children.find(isRuleNode);
+    const operation = instruction.children().find(isRuleNode);
     if (!operation) continue;
     const count = instructionRepeatCount(instruction);
     if (count === 0) continue;
@@ -87,14 +87,14 @@ function compileInstructions(
         for (let index = 0; index < count; index++) {
           const open = ops.length;
           ops.push({ kind: "jumpIfZero", target: -1 });
-          compileInstructions(operation.fields.body, ops);
+          compileInstructions(operation.field("body"), ops);
           const close = ops.length;
           ops.push({ kind: "jumpIfNonZero", target: open });
           ops[open] = { kind: "jumpIfZero", target: close + 1 };
         }
         break;
       case "fork": {
-        const forkOps = compileInstructions(operation.fields.body);
+        const forkOps = compileInstructions(operation.field("body"));
         pushRepeated(ops, { kind: "fork", ops: forkOps }, count);
         break;
       }
@@ -106,8 +106,8 @@ function compileInstructions(
   return ops;
 }
 
-function instructionRepeatCount(instruction: InstructionNode): number {
-  const text = instruction.fields.count?.text ?? "1";
+function instructionRepeatCount(instruction: InstructionCursor): number {
+  const text = instruction.field("count")?.text ?? "1";
   const count = Number(text);
   if (!Number.isSafeInteger(count)) {
     throw new Error(`Repeat count ${JSON.stringify(text)} is too large.`);
@@ -223,11 +223,11 @@ function execute(ops: readonly Op[], options: RunOptions): string {
   }
 }
 
-function isInstruction(node: unknown): node is InstructionNode {
+function isInstruction(node: unknown): node is InstructionCursor {
   return isRuleNode(node) && node.name === "instruction";
 }
 
-function isRuleNode(node: unknown): node is AnyRuleNode {
+function isRuleNode(node: unknown): node is AnyRuleCursor {
   return !!node && typeof node === "object" &&
     (node as { type?: unknown }).type === "rule";
 }

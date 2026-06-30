@@ -4,9 +4,9 @@ import {
 } from "./compact_plan_binary.ts";
 
 const CORE_PLAN_MAGIC = 0x31505742;
-const CORE_PLAN_FORMAT_VERSION = 1;
+const CORE_PLAN_FORMAT_VERSION = 2;
 const CORE_PLAN_VERSION = 1;
-const CORE_PLAN_HEADER_I32_COUNT = 14;
+const CORE_PLAN_HEADER_I32_COUNT = 21;
 const CORE_PLAN_HEADER_BYTES = CORE_PLAN_HEADER_I32_COUNT * 4;
 const CORE_HEADER_MAGIC = 0;
 const CORE_HEADER_FORMAT_VERSION = 1;
@@ -22,7 +22,16 @@ const CORE_HEADER_ACTION_PAIRS = 10;
 const CORE_HEADER_GOTO_ROWS = 11;
 const CORE_HEADER_GOTO_PAIRS = 12;
 const CORE_HEADER_BYTE_LENGTH = 13;
+const CORE_HEADER_SPEC_COUNT = 14;
+const CORE_HEADER_EOF_TERMINAL = 15;
+const CORE_HEADER_SPEC_TERMINALS = 16;
+const CORE_HEADER_ACCEPT_CANDIDATE_ROWS = 17;
+const CORE_HEADER_ACCEPT_CANDIDATES = 18;
+const CORE_HEADER_PRODUCTION_COUNT = 19;
+const CORE_HEADER_PRODUCTIONS = 20;
 const I32_BYTES = 4;
+const COMPACT_I16_OFFSET_TAG = 2;
+const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 const WASM_PLAN_RUNTIME_SECTION_MAGIC = new Uint8Array([
   66,
   65,
@@ -52,6 +61,11 @@ export interface ValidatedWasmParserPlan {
   readonly runtimeMetadataHeaderOffset: number;
   readonly runtimeMetadataOffset: number;
   readonly runtimeMetadataLength: number;
+}
+
+interface CompactSectionOffset {
+  readonly offset: number;
+  readonly cellBytes: 2 | 4;
 }
 
 export function encodeCombinedWasmParserPlan(
@@ -186,13 +200,52 @@ function validateCorePlan(planBytes: Uint8Array): {
   }
 
   const accepts = readI32(planBytes, CORE_HEADER_ACCEPTS);
-  const asciiTransitions = readI32(planBytes, CORE_HEADER_ASCII_TRANSITIONS);
-  const transitionRows = readI32(planBytes, CORE_HEADER_TRANSITION_ROWS);
+  const asciiTransitions = decodeOptionalCompactI16Offset(
+    readI32(planBytes, CORE_HEADER_ASCII_TRANSITIONS),
+    "ASCII transitions",
+  );
+  const transitionRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_TRANSITION_ROWS),
+    "transition rows",
+  );
   const transitions = readI32(planBytes, CORE_HEADER_TRANSITIONS);
-  const actionRows = readI32(planBytes, CORE_HEADER_ACTION_ROWS);
-  const actionPairs = readI32(planBytes, CORE_HEADER_ACTION_PAIRS);
-  const gotoRows = readI32(planBytes, CORE_HEADER_GOTO_ROWS);
-  const gotoPairs = readI32(planBytes, CORE_HEADER_GOTO_PAIRS);
+  const actionRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_ACTION_ROWS),
+    "action rows",
+  );
+  const actionPairs = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_ACTION_PAIRS),
+    "action pairs",
+  );
+  const gotoRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_GOTO_ROWS),
+    "goto rows",
+  );
+  const gotoPairs = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_GOTO_PAIRS),
+    "goto pairs",
+  );
+  const specCount = readNonNegativeI32(
+    planBytes,
+    CORE_HEADER_SPEC_COUNT,
+    "lexer spec count",
+  );
+  const eofTerminal = readI32(planBytes, CORE_HEADER_EOF_TERMINAL);
+  if (eofTerminal < 0) {
+    throw new Error("Wasm parser plan EOF terminal must be non-negative.");
+  }
+  const specTerminals = readI32(planBytes, CORE_HEADER_SPEC_TERMINALS);
+  const acceptCandidateRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_ACCEPT_CANDIDATE_ROWS),
+    "lexer accept candidate rows",
+  );
+  const acceptCandidates = readI32(planBytes, CORE_HEADER_ACCEPT_CANDIDATES);
+  const productionCount = readNonNegativeI32(
+    planBytes,
+    CORE_HEADER_PRODUCTION_COUNT,
+    "production count",
+  );
+  const productions = readI32(planBytes, CORE_HEADER_PRODUCTIONS);
 
   validateSection(
     "accepts",
@@ -200,13 +253,13 @@ function validateCorePlan(planBytes: Uint8Array): {
     checkedMul(dfaStateCount, I32_BYTES, "accepts byte length"),
     coreByteLength,
   );
-  if (asciiTransitions !== -1) {
+  if (asciiTransitions !== null) {
     validateSection(
       "ASCII transitions",
-      asciiTransitions,
+      asciiTransitions.offset,
       checkedMul(
         checkedMul(dfaStateCount, 128, "ASCII transition count"),
-        I32_BYTES,
+        asciiTransitions.cellBytes,
         "ASCII transition byte length",
       ),
       coreByteLength,
@@ -214,25 +267,69 @@ function validateCorePlan(planBytes: Uint8Array): {
   }
   validateSection(
     "transition rows",
-    transitionRows,
-    checkedMul(dfaStateCount + 1, I32_BYTES, "transition row byte length"),
+    transitionRows.offset,
+    checkedMul(
+      dfaStateCount + 1,
+      transitionRows.cellBytes,
+      "transition row byte length",
+    ),
     coreByteLength,
   );
   validateSection("transitions", transitions, 0, coreByteLength);
   validateSection(
     "action rows",
-    actionRows,
-    checkedMul(parserStateCount + 1, I32_BYTES, "action row byte length"),
+    actionRows.offset,
+    checkedMul(
+      parserStateCount + 1,
+      actionRows.cellBytes,
+      "action row byte length",
+    ),
     coreByteLength,
   );
-  validateSection("action pairs", actionPairs, 0, coreByteLength);
+  validateSection("action pairs", actionPairs.offset, 0, coreByteLength);
   validateSection(
     "goto rows",
-    gotoRows,
-    checkedMul(parserStateCount + 1, I32_BYTES, "goto row byte length"),
+    gotoRows.offset,
+    checkedMul(
+      parserStateCount + 1,
+      gotoRows.cellBytes,
+      "goto row byte length",
+    ),
     coreByteLength,
   );
-  validateSection("goto pairs", gotoPairs, 0, coreByteLength);
+  validateSection("goto pairs", gotoPairs.offset, 0, coreByteLength);
+  validateSection(
+    "lexer spec terminals",
+    specTerminals,
+    checkedMul(specCount, I32_BYTES, "lexer spec terminal byte length"),
+    coreByteLength,
+  );
+  validateSection(
+    "lexer accept candidate rows",
+    acceptCandidateRows.offset,
+    checkedMul(
+      dfaStateCount + 1,
+      acceptCandidateRows.cellBytes,
+      "lexer accept candidate row byte length",
+    ),
+    coreByteLength,
+  );
+  validateSection(
+    "lexer accept candidates",
+    acceptCandidates,
+    0,
+    coreByteLength,
+  );
+  validateSection(
+    "productions",
+    productions,
+    checkedMul(
+      checkedMul(productionCount, 4, "production row i32 count"),
+      I32_BYTES,
+      "production byte length",
+    ),
+    coreByteLength,
+  );
   validateMonotonicRows(
     planBytes,
     transitionRows,
@@ -250,6 +347,12 @@ function validateCorePlan(planBytes: Uint8Array): {
     gotoRows,
     parserStateCount + 1,
     "goto rows",
+  );
+  validateMonotonicRows(
+    planBytes,
+    acceptCandidateRows,
+    dfaStateCount + 1,
+    "lexer accept candidate rows",
   );
   return { coreByteLength, parserPlanVersion };
 }
@@ -271,20 +374,73 @@ function validateSection(
   }
 }
 
+function decodeOptionalCompactI16Offset(
+  encoded: number,
+  name: string,
+): { readonly offset: number; readonly cellBytes: 2 | 4 } | null {
+  if (encoded === -1) {
+    return null;
+  }
+  if (encoded < -1) {
+    const offset = -encoded - COMPACT_I16_OFFSET_TAG;
+    if (offset < CORE_PLAN_HEADER_BYTES) {
+      throw new Error(`Wasm parser plan ${name} compact offset is invalid.`);
+    }
+    return { offset, cellBytes: 2 };
+  }
+  return { offset: encoded, cellBytes: 4 };
+}
+
+function decodeCompactOffset(
+  encoded: number,
+  name: string,
+): CompactSectionOffset {
+  if (encoded <= -COMPACT_U16_OFFSET_BASE) {
+    const offset = -encoded - COMPACT_U16_OFFSET_BASE;
+    if (offset < CORE_PLAN_HEADER_BYTES) {
+      throw new Error(`Wasm parser plan ${name} compact offset is invalid.`);
+    }
+    return { offset, cellBytes: 2 };
+  }
+  if (encoded < -1) {
+    const offset = -encoded - COMPACT_I16_OFFSET_TAG;
+    if (offset < CORE_PLAN_HEADER_BYTES) {
+      throw new Error(`Wasm parser plan ${name} compact offset is invalid.`);
+    }
+    return { offset, cellBytes: 2 };
+  }
+  if (encoded < CORE_PLAN_HEADER_BYTES) {
+    throw new Error(`Wasm parser plan ${name} offset is invalid.`);
+  }
+  return { offset: encoded, cellBytes: 4 };
+}
+
 function validateMonotonicRows(
   bytes: Uint8Array,
-  offset: number,
+  section: CompactSectionOffset,
   count: number,
   name: string,
 ): void {
   let previous = 0;
   for (let index = 0; index < count; index++) {
-    const current = readI32AtByteOffset(bytes, offset + index * I32_BYTES);
+    const current = readRowValue(bytes, section, index);
     if (current < previous) {
       throw new Error(`Wasm parser plan ${name} are not monotonic.`);
     }
     previous = current;
   }
+}
+
+function readRowValue(
+  bytes: Uint8Array,
+  section: CompactSectionOffset,
+  index: number,
+): number {
+  const byteOffset = section.offset + index * section.cellBytes;
+  if (section.cellBytes === 2) {
+    return readU16AtByteOffset(bytes, byteOffset);
+  }
+  return readI32AtByteOffset(bytes, byteOffset);
 }
 
 function readNonNegativeI32(
@@ -317,6 +473,14 @@ function readU32(bytes: Uint8Array, byteOffset: number): number {
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return view.getUint32(byteOffset, true);
+}
+
+function readU16AtByteOffset(bytes: Uint8Array, byteOffset: number): number {
+  if (byteOffset + 2 > bytes.byteLength) {
+    throw new Error("Wasm parser plan is truncated.");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return view.getUint16(byteOffset, true);
 }
 
 function writeU32(bytes: Uint8Array, byteOffset: number, value: number): void {

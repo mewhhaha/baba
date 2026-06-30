@@ -19,6 +19,8 @@ export {
   validateParserKit as validateParserPlan,
 } from "./parser_plan.ts";
 export type {
+  KitCursorFieldValue as CursorFieldValue,
+  KitCursorParseResult as CursorParseResult,
   KitEofToken as EofToken,
   KitErrorToken as ErrorToken,
   KitLexDiagnostic as LexDiagnostic,
@@ -27,28 +29,36 @@ export type {
   KitLiteralToken as LiteralToken,
   KitMainNamedToken as MainNamedToken,
   KitParseDiagnostic as ParseDiagnostic,
+  KitRuleCursor as RuleCursor,
   KitRuleNode as RuleNode,
   KitSpan as Span,
+  KitSyntaxCursor as SyntaxCursor,
   KitSyntaxElement as SyntaxElement,
   KitToken as Token,
+  KitTokenCursor as TokenCursor,
   KitTriviaToken as TriviaToken,
   ParserKit as RuntimeParserPlan,
   ParserKitValidationIssue as RuntimeParserPlanValidationIssue,
 } from "./parser_plan.ts";
 import {
   assertParserKit as assertRuntimeParserPlan,
+  type KitCursorParseResult,
   type KitLexOptions,
   type KitLexResult,
   type KitParseEvent,
   type KitParseEventResult,
   type KitParseResult,
+  type KitRuleCursor,
   type KitRuleNode,
   type KitToken,
   lexWithKit,
+  parseCursorWithKit,
   parseEventsWithKit,
   parseLazyWithKit,
   type ParserKit as RuntimeParserPlan,
   type ParserKitValidationIssue as RuntimeParserPlanValidationIssue,
+  parseTokenCursorUncheckedWithKit,
+  parseTokenCursorWithKit,
   parseTokenEventsUncheckedWithKit,
   parseTokenEventsWithKit,
   parseTokensLazyUncheckedWithKit,
@@ -68,6 +78,7 @@ export type ParseMode =
   | "tokens"
   | "validate"
   | "events"
+  | "cursor"
   | "cst-full"
   | "cst-lazy";
 
@@ -81,6 +92,7 @@ export interface ParseOptions extends KitLexOptions {
 
 export type ParseResult<Root extends KitRuleNode = KitRuleNode> =
   | KitParseResult<Root>
+  | KitCursorParseResult<KitRuleCursor>
   | KitParseEventResult
   | KitLexResult
   | ValidateParseResult;
@@ -112,6 +124,10 @@ export interface RuntimeParser<Root extends KitRuleNode = KitRuleNode> {
     source: string,
     options: ParseOptions & { mode: "events" },
   ): KitParseEventResult;
+  parse(
+    source: string,
+    options: ParseOptions & { mode: "cursor" },
+  ): KitCursorParseResult<KitRuleCursor>;
   parse(source: string, options?: ParseOptions): KitParseResult<Root>;
   parseTokens(
     source: string,
@@ -128,6 +144,11 @@ export interface RuntimeParser<Root extends KitRuleNode = KitRuleNode> {
     tokens: readonly KitToken[],
     options: ParseOptions & { mode: "events" },
   ): KitParseEventResult;
+  parseTokens(
+    source: string,
+    tokens: readonly KitToken[],
+    options: ParseOptions & { mode: "cursor" },
+  ): KitCursorParseResult<KitRuleCursor>;
   parseTokens(
     source: string,
     tokens: readonly KitToken[],
@@ -148,6 +169,11 @@ export interface RuntimeParser<Root extends KitRuleNode = KitRuleNode> {
     tokens: readonly KitToken[],
     options: ParseOptions & { mode: "events" },
   ): KitParseEventResult;
+  parseTokensUnchecked(
+    source: string,
+    tokens: readonly KitToken[],
+    options: ParseOptions & { mode: "cursor" },
+  ): KitCursorParseResult<KitRuleCursor>;
   parseTokensUnchecked(
     source: string,
     tokens: readonly KitToken[],
@@ -173,54 +199,80 @@ export function createParser<Root extends KitRuleNode = KitRuleNode>(
   const parse: RuntimeParser<Root>["parse"] = ((
     source: string,
     parseOptions?: ParseOptions,
-  ) =>
-    parseOptions?.mode === "tokens"
-      ? lexWithKit(plan, source, parseOptions)
-      : parseOptions?.mode === "validate"
-      ? validateWithKit(plan, source, parseOptions)
-      : parseOptions?.mode === "events"
-      ? parseEventsWithKit(plan, source, parseOptions)
-      : parseOptions?.mode === "cst-lazy"
-      ? parseLazyWithKit(plan, source, parseOptions) as KitParseResult<Root>
-      : parseWithKit(plan, source, parseOptions) as KitParseResult<
+  ) => {
+    if (parseOptions !== undefined && parseOptions.mode === "tokens") {
+      return lexWithKit(plan, source, parseOptions);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "validate") {
+      return validateWithKit(plan, source, parseOptions);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "events") {
+      return parseEventsWithKit(plan, source, parseOptions);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "cursor") {
+      return parseCursorWithKit(plan, source, parseOptions);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "cst-lazy") {
+      return parseLazyWithKit(plan, source, parseOptions) as KitParseResult<
         Root
-      >) as RuntimeParser<Root>["parse"];
+      >;
+    }
+    return parseWithKit(plan, source, parseOptions) as KitParseResult<Root>;
+  }) as RuntimeParser<Root>["parse"];
   const parseTokens: RuntimeParser<Root>["parseTokens"] = ((
     source: string,
     tokens: readonly KitToken[],
     parseOptions?: ParseOptions,
-  ) =>
-    parseOptions?.mode === "tokens"
-      ? { source, tokens, diagnostics: [] }
-      : parseOptions?.mode === "validate"
-      ? validateTokensWithKit(plan, source, tokens)
-      : parseOptions?.mode === "events"
-      ? parseTokenEventsWithKit(plan, source, tokens)
-      : parseOptions?.mode === "cst-lazy"
-      ? parseTokensLazyWithKit(plan, source, tokens) as KitParseResult<Root>
-      : parseTokensWithKit(plan, source, tokens) as KitParseResult<
+  ) => {
+    if (parseOptions !== undefined && parseOptions.mode === "tokens") {
+      return { source, tokens, diagnostics: [] };
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "validate") {
+      return validateTokensWithKit(plan, source, tokens);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "events") {
+      return parseTokenEventsWithKit(plan, source, tokens);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "cursor") {
+      return parseTokenCursorWithKit(plan, source, tokens);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "cst-lazy") {
+      return parseTokensLazyWithKit(plan, source, tokens) as KitParseResult<
         Root
-      >) as RuntimeParser<Root>["parseTokens"];
+      >;
+    }
+    return parseTokensWithKit(plan, source, tokens) as KitParseResult<Root>;
+  }) as RuntimeParser<Root>["parseTokens"];
   const parseTokensUnchecked: RuntimeParser<Root>["parseTokensUnchecked"] = ((
     source: string,
     tokens: readonly KitToken[],
     parseOptions?: ParseOptions,
-  ) =>
-    parseOptions?.mode === "tokens"
-      ? { source, tokens, diagnostics: [] }
-      : parseOptions?.mode === "validate"
-      ? validateTokensUncheckedWithKit(plan, source, tokens)
-      : parseOptions?.mode === "events"
-      ? parseTokenEventsUncheckedWithKit(plan, source, tokens)
-      : parseOptions?.mode === "cst-lazy"
-      ? parseTokensLazyUncheckedWithKit(plan, source, tokens) as KitParseResult<
-        Root
-      >
-      : parseTokensUncheckedWithKit(
+  ) => {
+    if (parseOptions !== undefined && parseOptions.mode === "tokens") {
+      return { source, tokens, diagnostics: [] };
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "validate") {
+      return validateTokensUncheckedWithKit(plan, source, tokens);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "events") {
+      return parseTokenEventsUncheckedWithKit(plan, source, tokens);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "cursor") {
+      return parseTokenCursorUncheckedWithKit(plan, source, tokens);
+    }
+    if (parseOptions !== undefined && parseOptions.mode === "cst-lazy") {
+      return parseTokensLazyUncheckedWithKit(
         plan,
         source,
         tokens,
-      ) as KitParseResult<Root>) as RuntimeParser<Root>["parseTokensUnchecked"];
+      ) as KitParseResult<Root>;
+    }
+    return parseTokensUncheckedWithKit(
+      plan,
+      source,
+      tokens,
+    ) as KitParseResult<Root>;
+  }) as RuntimeParser<Root>["parseTokensUnchecked"];
   return {
     plan,
     lex(source, lexOptions) {

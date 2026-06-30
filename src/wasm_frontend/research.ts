@@ -1,9 +1,14 @@
 import {
   WASM_ABI_VERSION,
+  WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+  WASM_CURSOR_RULE_RECORD_I32_COUNT,
+  WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
+  WASM_PARSE_CURSOR_RESULT_I32_COUNT,
+  WASM_PARSE_TRACE_RESULT_I32_COUNT,
   WASM_RESULT_LIFETIME_CALLER_BUFFER,
   WASM_SOURCE_ENCODING_UTF16,
   WASM_SPAN_UNIT_UTF16,
@@ -54,6 +59,11 @@ export interface WasmFrontendRequirements {
   readonly resultLifetimeModel: number;
   readonly lexResultI32Count: number;
   readonly tokenRecordI32Count: number;
+  readonly parseTraceResultI32Count: number;
+  readonly parseCursorResultI32Count: number;
+  readonly cursorRuleRecordI32Count: number;
+  readonly cursorFieldRecordI32Count: number;
+  readonly cursorValueRecordI32Count: number;
   readonly requiredExports: readonly string[];
   readonly forbiddenDefaultDependencies: readonly string[];
 }
@@ -97,11 +107,19 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
   resultLifetimeModel: WASM_RESULT_LIFETIME_CALLER_BUFFER,
   lexResultI32Count: WASM_LEX_RESULT_I32_COUNT,
   tokenRecordI32Count: WASM_TOKEN_RECORD_I32_COUNT,
+  parseTraceResultI32Count: WASM_PARSE_TRACE_RESULT_I32_COUNT,
+  parseCursorResultI32Count: WASM_PARSE_CURSOR_RESULT_I32_COUNT,
+  cursorRuleRecordI32Count: WASM_CURSOR_RULE_RECORD_I32_COUNT,
+  cursorFieldRecordI32Count: WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+  cursorValueRecordI32Count: WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   requiredExports: [
     "memory",
     "lex_one",
     "parser_action",
     "parser_actions",
+    "parser_select_action",
+    "parse_trace",
+    "parse_cursor",
     "parser_goto",
     "lex_all",
     "load_plan",
@@ -109,6 +127,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "plan_version",
     "semantics_version",
     "reset",
+    "plan_buffer_base",
     "input_base",
     "max_pages",
     "source_encoding",
@@ -281,8 +300,8 @@ export const wasmFrontendCandidates: readonly WasmFrontendCandidate[] = [
   {
     id: "rust",
     name: "Rust",
-    status: "watch",
-    priority: 6,
+    status: "candidate",
+    priority: 1,
     command: "cargo",
     distribution: "external-toolchain",
     packageFit: "external-only",
@@ -293,13 +312,13 @@ export const wasmFrontendCandidates: readonly WasmFrontendCandidate[] = [
       "https://doc.rust-lang.org/rustc/platform-support/wasm32v1-none.html",
     ],
     notes: [
-      "Best production-control fallback when ABI stability matters more than frontend ergonomics.",
+      "Selected for the ahead-of-time generic parser.wasm engine; normal grammar generation copies embedded bytes and does not invoke Cargo.",
       "wasm32-unknown-unknown makes minimal host assumptions and can produce bare-bones Wasm binaries.",
       "Default target features can change over time, so portable builds need explicit feature gates or wasm32v1-none where it fits.",
     ],
     requiredSpikeChecks: [
-      "Build a no_std minimal ABI fixture for wasm32-unknown-unknown or wasm32v1-none.",
-      "Reject panicking, allocator, or formatting paths in the generated parser core unless they are explicitly measured.",
+      "Keep the checked-in no_std engine import-free and ABI-compatible with wasm-abi.md.",
+      "Reject panicking, allocator, or formatting paths in the parser core unless they are explicitly measured.",
       "Validate export names, import section, and target features in the produced Wasm.",
     ],
   },
@@ -387,7 +406,6 @@ export const wasmFrontendRecommendation: WasmFrontendRecommendation = {
   ],
   externalComparisonSpikes: [
     "assemblyscript",
-    "rust",
     "zig",
     "grain",
     "tinygo",

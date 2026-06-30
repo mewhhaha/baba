@@ -13,29 +13,25 @@ target support, planning limits, output packaging, and generated-size checks.
 Target-neutral planning diagnostics use portable codes. Target-specific
 packaging diagnostics remain owned by their target.
 
-Grammar v2 diagnostics use stable `GRAMMAR_V2_*` codes for syntax, analysis,
-token conflicts, lexer modes, layout, parser planning, recovery, modules, and
-portable-plan validation. Runtime v2 recovery diagnostics include expected token
-names, actual token name, and a structured recovery action (`insert`, `delete`,
-or `abort`).
-
 Examples include:
 
 - `PORTABLE_EXTERNAL_TOKENS_UNSUPPORTED`;
+- `PORTABLE_LEXER_TOKEN_OVERLAP`;
 - `PORTABLE_LEXER_STATE_LIMIT`;
 - `PORTABLE_PARSER_STATE_LIMIT`;
-- `TS_GENERATED_BYTE_LIMIT`;
+- `PORTABLE_PARSER_TABLE_ENTRY_LIMIT`;
 - `WASM_GENERATED_BYTE_LIMIT`.
 
 ## Runtime Diagnostics
 
-Generated parsers report lexical errors, unexpected tokens, trailing input,
-token-stream validation failures, branch or trace exhaustion, ambiguous parse
-results, and internal invariant failures through structured parse diagnostics.
+Generated Wasm parsers report lexical errors, unexpected tokens, trailing input,
+branch or trace exhaustion, unresolved parser branching, and internal invariant
+failures through structured parse diagnostics. `parse()` and `validate()` return
+those diagnostics without constructing object trees.
 
-Generated TypeScript and Wasm runtimes expose matching public diagnostic shapes.
-Wasm `abi.json` additionally records numeric runtime diagnostic schemas for
-low-level hosts.
+Generated `syntax.ts` includes the public diagnostic types for TypeScript
+consumers. `wasm/abi.json` records the numeric runtime diagnostic schemas for
+low-level hosts that call `parser.wasm` directly.
 
 ## Messages
 
@@ -48,8 +44,3 @@ compatibility break when the code and payload semantics stay the same.
 Repository parity tests include reproducible mismatch diagnostics: fixture name,
 source path, operation, first differing normalized JSON path, actual and
 expected values, options, and a command that reproduces the case.
-
-For grammar v2, TypeScript runtime behavior is the executable target. Wasm v2
-parity currently records an explicit deferred target status in the portable plan
-instead of pretending that the v1 generic Wasm executor can consume v2 mode,
-CST, AST, and recovery sections.

@@ -30,26 +30,17 @@ Generated-size limits cover the emitted Wasm bundle artifacts.
 
 ## Runtime Limits
 
-Generated parser options can bound ambiguity and trace work:
+Generated parser options can bound trace work:
 
-- `maxExploredBranches`;
-- `maxQueuedBranches`;
 - `maxTraceActions`.
 
 Exhaustion reports structured parser diagnostics such as `PARSER_BRANCH_LIMIT`
 or `PARSER_TRACE_LIMIT`.
 
-Generated Wasm parser instances also accept `ParserInstanceLimits` through
-`createParser({ limits })`, `createParserAsync({ limits })`, and the low-level
-Wasm factory functions. The adapter enforces bounds for input UTF-16 units,
-token capacity/count, parser stack capacity, requested branch and trace
-ceilings, copied branch-cell budget, public CST node/child materialization,
-lex/parse diagnostics, and Wasm memory pages. These failures throw
-`WasmResourceLimitError` with stable codes: `INPUT_LIMIT_EXCEEDED`,
-`TOKEN_LIMIT_EXCEEDED`, `PARSER_STACK_LIMIT_EXCEEDED`,
-`PARSER_BRANCH_LIMIT_EXCEEDED`, `TRACE_LIMIT_EXCEEDED`,
-`CST_NODE_LIMIT_EXCEEDED`, `DIAGNOSTIC_LIMIT_EXCEEDED`, or
-`MEMORY_LIMIT_EXCEEDED`.
+The generated Wasm adapter grows its internal token, trace, stack, and cursor
+buffers as needed within WebAssembly memory limits. Invalid option values throw
+JavaScript errors at the adapter boundary. Expected parse exhaustion returns a
+parse result with diagnostics.
 
 ## Size Budgets
 

@@ -66,8 +66,8 @@ Step 4: write `interpreter.ts`, importing the generated parser:
 The interpreter loads `generated/wasm/parser.wasm` and
 `generated/wasm/parser.plan` through the generated Wasm wrapper.
 
-The interpreter compiles the generated CST into JavaScript functions, resolves
-named definitions lazily, and evaluates each `emit` statement.
+The interpreter walks generated cursors to compile JavaScript functions,
+resolves named definitions lazily, and evaluates each `emit` statement.
 
 Step 5: run the sample programs.
 

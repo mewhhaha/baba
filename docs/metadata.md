@@ -1,6 +1,6 @@
 # Metadata
 
-Status: current metadata guide for schema version 2.
+Status: current metadata guide.
 
 Baba metadata is optional JSON loaded next to a grammar or passed through the
 CLI. Metadata controls parser conflict policy, root selection, and runtime

@@ -1,6 +1,11 @@
 import { compile, formatDiagnostic, parseMetadata } from "../../src/mod.ts";
 import { applyBundle } from "../../src/output.ts";
 import * as wasm from "./generated/wasm/mod.ts";
+import type {
+  AnyRuleCursor,
+  LexTapeResult,
+  Token,
+} from "./generated/wasm/mod.ts";
 
 const here = new URL(".", import.meta.url);
 const sourcePath = Deno.args.find((arg) => !arg.startsWith("--")) ??
@@ -36,7 +41,7 @@ try {
   assertEquals(wasm.parserPlanFormat, "baba-parser-plan");
   assertEquals(wasm.parserPlanVersion, 1);
   assertEquals(wasm.parserPlanSemantics, "baba-portable-v1");
-  assertEquals(wasm.wasmAbiVersion, 1);
+  assertEquals(wasm.wasmAbiVersion, 7);
 
   const abi = JSON.parse(
     await Deno.readTextFile(new URL("generated/wasm/abi.json", here)),
@@ -46,39 +51,22 @@ try {
   const lexed = wasmParser.lex(source, { preserveTrivia: true });
   assertEquals(lexed.diagnostics.length, 0);
   assert(
-    lexed.tokens.some((token) => token.type === "named" && token.kind === "A"),
+    tokenTapeHasNamed(lexed, "A"),
     "standalone lex should choose the higher-priority A token for x",
   );
 
-  const leftTokens = wasmParser.lex("< x;").tokens;
-  const checkedTokens = wasmParser.parseTokens("< x;", leftTokens);
-  assertSameParse("checked token stream", checkedTokens);
-  assertSameParse(
-    "unchecked token stream",
-    wasmParser.parseTokensUnchecked("< x;", leftTokens),
-  );
+  const contextualLeft = wasmParser.parse("< x;");
+  assertSameParse("contextual left branch", contextualLeft);
+  assertEquals(contextualValueKind(contextualLeft), "A");
 
   const globallyLexedRight = wasmParser.lex("> x;");
   assert(
-    globallyLexedRight.tokens.some((token) =>
-      token.type === "named" && token.kind === "A"
-    ),
+    tokenTapeHasNamed(globallyLexedRight, "A"),
     "standalone lex should choose the higher-priority A token for x",
   );
   const contextualRight = wasmParser.parse("> x;");
   assertSameParse("contextual right branch", contextualRight);
-  const checkedRight = wasmParser.parseTokens(
-    "> x;",
-    globallyLexedRight.tokens,
-  );
-  assertEquals(checkedRight.ok, false);
-  assert(
-    checkedRight.diagnostics.some((diagnostic) =>
-      diagnostic.code === "PARSE_UNEXPECTED_TOKEN" ||
-      diagnostic.code === "PARSE_INVALID_TOKEN_STREAM"
-    ),
-    "checked token streams should report the globally lexed A token as invalid where B is required",
-  );
+  assertEquals(contextualValueKind(contextualRight), "B");
 } finally {
   wasmParser.dispose();
 }
@@ -91,7 +79,7 @@ if (Deno.args.includes("--external-wasm")) {
 
 console.log(
   [
-    `parsed ${parsedSource.root?.fields.items.length ?? 0} feature-tour items`,
+    `parsed ${parsedItemCount(parsedSource)} feature-tour items`,
     `plan ${wasm.parserPlanVersion}`,
     `runtime ${wasm.runtimeImplementationVersion} ${wasm.runtimeImplementationHash}`,
     `wasm ABI ${wasm.wasmAbiVersion}`,
@@ -178,6 +166,69 @@ function assertSameParse(
       )
     }`,
   );
+}
+
+function parsedItemCount(
+  result: ReturnType<typeof wasmParser.parse>,
+): number {
+  if (!result.ok) {
+    return 0;
+  }
+  return result.cursor.field("items").length;
+}
+
+function tokenTapeHasNamed(result: LexTapeResult, kind: string): boolean {
+  for (let index = 0; index < result.tokenTape.length; index++) {
+    const token = result.tokenTape.token(index);
+    if (isNamedToken(token) && token.kind === kind) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function contextualValueKind(
+  result: ReturnType<typeof wasmParser.parse>,
+): string {
+  if (!result.ok) {
+    throw new Error("Cannot inspect contextual value from failed parse.");
+  }
+  const item = result.cursor.field("items")[0];
+  if (item === undefined) {
+    throw new Error("Expected contextual item.");
+  }
+  const contextual = childRule(item);
+  if (contextual.name !== "contextual") {
+    throw new Error(`Expected contextual item, got ${contextual.name}.`);
+  }
+  const value = contextual.field("value");
+  if (value === undefined || value === null || Array.isArray(value)) {
+    throw new Error("Expected contextual token value.");
+  }
+  if (value.type !== "token") {
+    throw new Error("Expected contextual token value.");
+  }
+  return value.kind;
+}
+
+function childRule(node: AnyRuleCursor): AnyRuleCursor {
+  const child = node.children().find(isRuleCursor);
+  if (child === undefined) {
+    throw new Error(`Expected child rule for ${node.name}.`);
+  }
+  return child;
+}
+
+function isRuleCursor(value: unknown): value is AnyRuleCursor {
+  return !!value && typeof value === "object" &&
+    (value as { type?: unknown }).type === "rule";
+}
+
+function isNamedToken(value: Token | undefined): value is Extract<
+  Token,
+  { readonly type: "named" }
+> {
+  return value !== undefined && value.type === "named";
 }
 
 function assertNoErrors(

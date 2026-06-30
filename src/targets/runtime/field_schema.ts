@@ -238,10 +238,21 @@ const reservedGeneratedTypeNames = new Set([
   "AnyRuleNode",
   "RootNode",
   "SyntaxElement",
+  "CursorFieldValue",
+  "SyntaxCursor",
+  "AnyRuleCursor",
+  "RuleCursor",
+  "RuleCursorBase",
+  "TokenCursor",
+  "RootCursor",
   "LexOptions",
+  "TokenTape",
+  "LexTapeResult",
   "LexResult",
   "ParseOptions",
   "ParseResult",
+  "CursorParseResult",
+  "ValidateParseResult",
 ]);
 
 function combineSequence(maps: readonly OccurrenceMap[]): OccurrenceMap {

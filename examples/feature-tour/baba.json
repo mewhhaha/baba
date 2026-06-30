@@ -2,8 +2,8 @@
   "version": 2,
   "word": "IDENT",
   "parser": {
-    "conflicts": [
-      { "conflict": "c_c0b22aed305af8bf" }
+    "resolutions": [
+      { "conflict": "c_c0b22aed305af8bf", "prefer": "shift" }
     ]
   },
   "queries": {

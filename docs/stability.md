@@ -12,7 +12,6 @@ The exported modules in `deno.json` are the stable public library surface:
 
 - `@mewhhaha/baba`;
 - `@mewhhaha/baba/cli`;
-- `@mewhhaha/baba/runtime`;
 - `@mewhhaha/baba/runtime/wasm`.
 
 Patch and minor releases may add options, result fields, diagnostics, helper
@@ -50,9 +49,9 @@ Generated Wasm parser modules expose a stable ergonomic API:
 - `createParser({ bytes, plan })`;
 - `createParser({ module, plan })`;
 - `createParserAsync(options)`;
-- parser instances with `lex`, `parse`, `parseTokens`, `parseTokensUnchecked`,
-  `reset`, and `dispose`;
-- generated token, node, result, and diagnostic types in `syntax.ts`.
+- parser instances with `lex`, `parse`, `validate`, `reset`, and `dispose`;
+- generated token, rule-specific cursor, lexer tape, cursor parse, validation,
+  and diagnostic types in `syntax.ts`.
 
 Generated source layout and private helper names are not stable. Consumers
 should import from the generated module entrypoint rather than reaching into
@@ -61,7 +60,7 @@ runtime helper internals.
 ## Wasm ABI
 
 The generated Wasm core ABI is versioned separately from package and parser-plan
-versions. ABI version `3` is documented in `docs/wasm-abi.md` and described by
+versions. ABI version `7` is documented in `docs/wasm-abi.md` and described by
 each generated `wasm/abi.json`. Changes to exported core functions, record
 layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.

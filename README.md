@@ -9,7 +9,10 @@ The public flow is intentionally small:
 grammar.ebnf + baba.json -> generated/wasm parser and lexer
 ```
 
-Only the Wasm parser/lexer bundle is part of the public generation path.
+Only the Wasm parser/lexer bundle is part of the public generation path. The
+generated `parser.wasm` is a generic Rust-authored engine embedded in the Baba
+package; grammar generation only writes grammar-specific plan/types around that
+prebuilt engine.
 
 ## Quick Start
 
@@ -54,8 +57,15 @@ const bytes = await Deno.readFile("generated/wasm/parser.wasm");
 const plan = await Deno.readFile("generated/wasm/parser.plan");
 const parser = createParser({ bytes, plan });
 
-const tokens = parser.lex("let answer = 42;");
+const lexed = parser.lex("let answer = 42;");
 const parsed = parser.parse("let answer = 42;");
+
+if (parsed.ok) {
+  console.log(parsed.cursor.name);
+}
+
+const firstToken = lexed.tokenTape.token(0);
+console.log(firstToken?.text);
 
 parser.dispose();
 ```
@@ -134,3 +144,14 @@ Generated `mod.ts` exports:
 
 Each `createParser()` call owns its own `WebAssembly.Instance`, memory, parser
 state, source buffers, and disposal lifecycle.
+
+Parser instances expose a Wasm-first runtime surface:
+
+- `parse(source, options?)` returns a cursor parse result. Cursors expose rule
+  and token data through lightweight accessors and avoid materializing an object
+  tree. Generated `syntax.ts` includes `RootCursor` plus rule-specific cursor
+  interfaces with typed `field("name")` overloads for consumer code.
+- `lex(source, options?)` returns a lazy token tape. Use `tokenTape.token(i)`
+  for indexed access to token records.
+- `validate(source, options?)` runs the Wasm trace validator and returns
+  diagnostics without building token objects or an object tree.
