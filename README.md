@@ -123,6 +123,11 @@ Only non-empty files are written. The generated paths deliberately use
 Baba output. The current public target does not generate `grammar.js`; it emits
 query fragments and the Wasm parser artifacts.
 
+## Grammar Reference
+
+The full Baba grammar specification is in [`docs/grammar.md`](docs/grammar.md), which is the canonical source for the language syntax and accepted features.
+Use this README for quick examples; use the grammar reference for complete token/rule grammar rules, precedence, contextual lexing, modes, and parser-target support constraints.
+
 ## Metadata
 
 Metadata is optional. The primary parser metadata today is conflict policy:
