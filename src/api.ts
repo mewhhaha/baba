@@ -87,22 +87,16 @@ export function validateGrammar(
     return [toBabaError(error, "VALIDATION_ERROR").toDiagnostic()];
   }
 
-  const portability = normalizePortability(options.portability, targets);
-  const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
-  const analyzed = analyzePreparedGrammar(prepared.grammar, {
-    name: selectedGrammarName(undefined, prepared.name),
-    rootRule: options.rootRule,
-    metadata: options.metadata,
-    regexLimits: {
-      sourceLengthLimit: runtimeOptions.regexSourceLengthLimit,
-      nestingLimit: regexNestingLimit(runtimeOptions),
-    },
-    grammarExpressionDepthLimit: runtimeOptions.grammarExpressionDepthLimit,
-  });
+  const { analyzed, runtimeOptions, metadata, portability } =
+    analyzeForPlanning(
+      prepared.grammar,
+      targets,
+      selectedGrammarName(undefined, prepared.name),
+      options,
+    );
   diagnostics.push(...analyzed.diagnostics);
   if (hasErrors(diagnostics)) return diagnostics;
 
-  const metadata = metadataOrEmpty(options.metadata);
   const runtimePlan = planPortableRuntime(
     analyzed,
     runtimeOptions,
@@ -152,20 +146,13 @@ export function compile(
     };
   }
 
-  const grammar = prepared.grammar;
-  const metadata = metadataOrEmpty(options.metadata);
-  const portability = normalizePortability(options.portability, targets);
-  const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
-  const analyzed = analyzePreparedGrammar(grammar, {
-    name: selectedGrammarName(options.name, prepared.name),
-    rootRule: options.rootRule,
-    metadata,
-    regexLimits: {
-      sourceLengthLimit: runtimeOptions.regexSourceLengthLimit,
-      nestingLimit: regexNestingLimit(runtimeOptions),
-    },
-    grammarExpressionDepthLimit: runtimeOptions.grammarExpressionDepthLimit,
-  });
+  const { analyzed, runtimeOptions, metadata, portability } =
+    analyzeForPlanning(
+      prepared.grammar,
+      targets,
+      selectedGrammarName(options.name, prepared.name),
+      options,
+    );
   diagnostics.push(...analyzed.diagnostics);
   let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
   const runtimePlan = planPortableRuntime(
@@ -343,6 +330,36 @@ function selectedGrammarName(
   if (name !== undefined) return name;
   if (parsedName !== undefined) return parsedName;
   return "grammar";
+}
+
+interface PlannedGrammar {
+  readonly analyzed: AnalyzedGrammar;
+  readonly runtimeOptions: RuntimeParserPlanningOptions;
+  readonly metadata: BabaMetadata;
+  readonly portability: PortabilityMode;
+}
+
+/** Shared analyze-and-plan setup used by both validateGrammar and compile. */
+function analyzeForPlanning(
+  grammar: GrammarObject,
+  targets: readonly GenerateTarget[],
+  name: string,
+  options: CompileOptions | ValidateOptions,
+): PlannedGrammar {
+  const portability = normalizePortability(options.portability, targets);
+  const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
+  const metadata = metadataOrEmpty(options.metadata);
+  const analyzed = analyzePreparedGrammar(grammar, {
+    name,
+    rootRule: options.rootRule,
+    metadata,
+    regexLimits: {
+      sourceLengthLimit: runtimeOptions.regexSourceLengthLimit,
+      nestingLimit: regexNestingLimit(runtimeOptions),
+    },
+    grammarExpressionDepthLimit: runtimeOptions.grammarExpressionDepthLimit,
+  });
+  return { analyzed, runtimeOptions, metadata, portability };
 }
 
 function analyzePreparedGrammar(

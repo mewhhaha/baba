@@ -333,24 +333,22 @@ function runtimeCapabilityDiagnostics(
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   for (const external of analyzed.reachableExternals) {
-    diagnostics.push({
-      code: `${config.codePrefix}_EXTERNAL_TOKENS_UNSUPPORTED`,
-      severity: "error",
-      backend: config.backend,
-      message:
-        `The ${config.label} target cannot generate scanner behavior for external token '${external}'. External scanner metadata is accepted only for compatibility with older Tree-sitter grammar generation; replace the external token with an explicit portable token for Wasm output.`,
-    });
+    diagnostics.push(targetDiagnostic(
+      config,
+      "EXTERNAL_TOKENS_UNSUPPORTED",
+      "error",
+      `The ${config.label} target cannot generate scanner behavior for external token '${external}'. External scanner metadata is accepted only for compatibility with older Tree-sitter grammar generation; replace the external token with an explicit portable token for Wasm output.`,
+    ));
   }
 
   for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
     if (ruleMeta.token?.kind === "token.immediate") {
-      diagnostics.push({
-        code: `${config.codePrefix}_TOKEN_IMMEDIATE_UNSUPPORTED`,
-        severity: "error",
-        backend: config.backend,
-        message:
-          `The ${config.label} target does not support token.immediate metadata on rule '${ruleName}' because it may alter accepted whitespace.`,
-      });
+      diagnostics.push(targetDiagnostic(
+        config,
+        "TOKEN_IMMEDIATE_UNSUPPORTED",
+        "error",
+        `The ${config.label} target does not support token.immediate metadata on rule '${ruleName}' because it may alter accepted whitespace.`,
+      ));
     }
     if (
       portability !== "off" &&
@@ -489,67 +487,56 @@ function runtimeTokenOverlapDiagnostics(
         : { distinguishable: false };
       if (left.priority !== right.priority) {
         if (skipOnly) {
-          diagnostics.push({
-            code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
-            severity: "warning",
-            backend: config.backend,
-            message: `${tokenLabel(left)} and ${
-              tokenLabel(right)
-            } can both match ${
+          diagnostics.push(targetDiagnostic(
+            config,
+            "LEXER_TOKEN_OVERLAP",
+            "warning",
+            `${tokenLabel(left)} and ${tokenLabel(right)} can both match ${
               JSON.stringify(witness)
             }. Priority ${selected.priority} selects ${
               tokenLabel(selected)
             } before ${tokenLabel(shadowed)} for this trivia input.`,
-            span: shadowed.span,
-            related: overlapRelated(left, right),
-          });
+            { span: shadowed.span, related: overlapRelated(left, right) },
+          ));
           continue;
         }
         if (selected.kind === "skip") {
-          diagnostics.push({
-            code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
-            severity: "error",
-            backend: config.backend,
-            message: `${tokenLabel(left)} and ${
-              tokenLabel(right)
-            } can both match ${
+          diagnostics.push(targetDiagnostic(
+            config,
+            "LEXER_TOKEN_OVERLAP",
+            "error",
+            `${tokenLabel(left)} and ${tokenLabel(right)} can both match ${
               JSON.stringify(witness)
             }. Priority ${selected.priority} selects ${
               tokenLabel(selected)
             } before ${tokenLabel(shadowed)}, so ${
               tokenLabel(shadowed)
             } cannot reach the parser for this input.`,
-            span: selected.span,
-            related: overlapRelated(left, right),
-          });
+            { span: selected.span, related: overlapRelated(left, right) },
+          ));
           continue;
         }
         if (shadowed.kind === "skip") {
-          diagnostics.push({
-            code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
-            severity: "warning",
-            backend: config.backend,
-            message: `${tokenLabel(left)} and ${
-              tokenLabel(right)
-            } can both match ${
+          diagnostics.push(targetDiagnostic(
+            config,
+            "LEXER_TOKEN_OVERLAP",
+            "warning",
+            `${tokenLabel(left)} and ${tokenLabel(right)} can both match ${
               JSON.stringify(witness)
             }. Priority ${selected.priority} selects ${
               tokenLabel(selected)
             } before ${
               tokenLabel(shadowed)
             }; the parser token remains reachable, but this input is not trivia for portable targets.`,
-            span: shadowed.span,
-            related: overlapRelated(left, right),
-          });
+            { span: shadowed.span, related: overlapRelated(left, right) },
+          ));
           continue;
         }
-        diagnostics.push({
-          code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
-          severity: "warning",
-          backend: config.backend,
-          message: `${tokenLabel(left)} and ${
-            tokenLabel(right)
-          } can both match ${
+        diagnostics.push(targetDiagnostic(
+          config,
+          "LEXER_TOKEN_OVERLAP",
+          "warning",
+          `${tokenLabel(left)} and ${tokenLabel(right)} can both match ${
             JSON.stringify(witness)
           }. Priority ${selected.priority} selects ${
             tokenLabel(selected)
@@ -560,18 +547,21 @@ function runtimeTokenOverlapDiagnostics(
               } when the LR parser state expects it separately.`
               : "The LR table has no state pair that expects these tokens separately; the explicit priority is the only portable distinction for this witness."
           }`,
-          span: shadowed.span,
-          related: overlapRelated(left, right),
-        });
+          { span: shadowed.span, related: overlapRelated(left, right) },
+        ));
         continue;
       }
-      diagnostics.push({
-        code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
-        severity: skipOnly || (mainTokenOnly && tokenContext.distinguishable)
-          ? "warning"
-          : "error",
-        backend: config.backend,
-        message: `${tokenLabel(left)} and ${tokenLabel(right)} can both match ${
+      let severity: "error" | "warning";
+      if (skipOnly || (mainTokenOnly && tokenContext.distinguishable)) {
+        severity = "warning";
+      } else {
+        severity = "error";
+      }
+      diagnostics.push(targetDiagnostic(
+        config,
+        "LEXER_TOKEN_OVERLAP",
+        severity,
+        `${tokenLabel(left)} and ${tokenLabel(right)} can both match ${
           JSON.stringify(witness)
         }. The standalone lexer would select ${tokenLabel(selected)} before ${
           tokenLabel(shadowed)
@@ -582,9 +572,8 @@ function runtimeTokenOverlapDiagnostics(
             ? ". The LR table has no state pair that expects these tokens separately, so contextual parse() cannot distinguish them. Add an explicit priority if one token should win, merge the tokens, or change the grammar so each token is expected in a distinct parser context"
             : ""
         }.`,
-        span: right.span,
-        related: overlapRelated(left, right),
-      });
+        { span: right.span, related: overlapRelated(left, right) },
+      ));
     }
   }
   return { diagnostics, pairsCompared: overlapBudget.pairsCompared() };
@@ -650,23 +639,25 @@ function runtimeShadowedTokenDiagnostics(
           lr,
         )
       );
-    diagnostics.push({
-      code: `${config.codePrefix}_SHADOWED_TOKEN_LANGUAGE`,
-      severity: "warning",
-      backend: config.backend,
-      message: `${
+    diagnostics.push(targetDiagnostic(
+      config,
+      "SHADOWED_TOKEN_LANGUAGE",
+      "warning",
+      `${
         tokenLabel(token)
       } is completely shadowed by higher-precedence lexer candidates under standalone lex() and cannot be emitted globally.${
         contextual
           ? " Contextual parse() can still recover it in parser states that expect the shadowed token separately."
           : " No parser context can recover it from the covering candidates."
       }`,
-      span: token.span,
-      related: candidates.slice(0, 5).map((candidate) => ({
-        message: `Covering candidate: ${candidate.label}`,
-        span: candidate.span,
-      })),
-    });
+      {
+        span: token.span,
+        related: candidates.slice(0, 5).map((candidate) => ({
+          message: `Covering candidate: ${candidate.label}`,
+          span: candidate.span,
+        })),
+      },
+    ));
   }
   return { diagnostics, analyses };
 }
@@ -783,19 +774,21 @@ function runtimeUnusedSkipDiagnostics(
       throw error;
     }
     if (uncovered !== null) continue;
-    diagnostics.push({
-      code: `${config.codePrefix}_UNUSED_SKIP_DECLARATION`,
-      severity: "warning",
-      backend: config.backend,
-      message: `${
+    diagnostics.push(targetDiagnostic(
+      config,
+      "UNUSED_SKIP_DECLARATION",
+      "warning",
+      `${
         tokenLabel(skip)
       } is completely shadowed by higher-precedence lexer candidates and is never emitted as portable trivia.`,
-      span: skip.span,
-      related: candidates.slice(0, 5).map((candidate) => ({
-        message: `Covering candidate: ${candidate.label}`,
-        span: candidate.span,
-      })),
-    });
+      {
+        span: skip.span,
+        related: candidates.slice(0, 5).map((candidate) => ({
+          message: `Covering candidate: ${candidate.label}`,
+          span: candidate.span,
+        })),
+      },
+    ));
   }
   return { diagnostics, analyses };
 }
@@ -858,14 +851,15 @@ function runtimeLiteralDiagnostics(
     .filter((literal) =>
       analyzed.reachableLiterals.has(literal.id) && literal.value.length === 0
     )
-    .map((literal): Diagnostic => ({
-      code: `${config.codePrefix}_LEXER_GENERATION_ERROR`,
-      severity: "error",
-      backend: config.backend,
-      message:
+    .map((literal): Diagnostic =>
+      targetDiagnostic(
+        config,
+        "LEXER_GENERATION_ERROR",
+        "error",
         `The ${config.label} target cannot generate a zero-length literal token.`,
-      span: literal.span,
-    }));
+        { span: literal.span },
+      )
+    );
 }
 
 function runtimeLiteralOverlapDiagnostics(
@@ -927,34 +921,38 @@ function runtimeLiteralOverlapDiagnostics(
       }
       if (!witness) continue;
       if (token.kind === "skip") {
-        diagnostics.push({
-          code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
-          severity: "error",
-          backend: config.backend,
-          message: `${tokenLabel(token)} and literal ${
+        diagnostics.push(targetDiagnostic(
+          config,
+          "LEXER_TOKEN_OVERLAP",
+          "error",
+          `${tokenLabel(token)} and literal ${
             JSON.stringify(literal.value)
           } can both match ${
             JSON.stringify(witness)
           }. Trivia cannot overlap a reachable literal because that literal may be skipped before the parser can consume it.`,
-          span: token.span,
-          related: tokenLiteralOverlapRelated(token, literal),
-        });
+          {
+            span: token.span,
+            related: tokenLiteralOverlapRelated(token, literal),
+          },
+        ));
         continue;
       }
-      diagnostics.push({
-        code: `${config.codePrefix}_LEXER_TOKEN_OVERLAP`,
-        severity: "error",
-        backend: config.backend,
-        message: `${tokenLabel(token)} and literal ${
+      diagnostics.push(targetDiagnostic(
+        config,
+        "LEXER_TOKEN_OVERLAP",
+        "error",
+        `${tokenLabel(token)} and literal ${
           JSON.stringify(literal.value)
         } can both match ${
           JSON.stringify(witness)
         }. Priority ${token.priority} would select ${
           tokenLabel(token)
         } before the literal, making the literal unavailable for this input.`,
-        span: token.span,
-        related: tokenLiteralOverlapRelated(token, literal),
-      });
+        {
+          span: token.span,
+          related: tokenLiteralOverlapRelated(token, literal),
+        },
+      ));
     }
   }
   return { diagnostics, pairsCompared: overlapBudget.pairsCompared() };
@@ -990,142 +988,112 @@ function runtimeLexerDfaDiagnostics(
   };
   if (dfa.states.length <= limit) return { diagnostics: [], dfa, stats };
   return {
-    diagnostics: [{
-      code: `${config.codePrefix}_LEXER_STATE_LIMIT`,
-      severity: "error",
-      backend: config.backend,
-      message:
-        `The ${config.label} lexer generated ${dfa.states.length} DFA states, exceeding the configured limit (${limit}).`,
-    }],
+    diagnostics: [targetDiagnostic(
+      config,
+      "LEXER_STATE_LIMIT",
+      "error",
+      `The ${config.label} lexer generated ${dfa.states.length} DFA states, exceeding the configured limit (${limit}).`,
+    )],
     stats,
   };
 }
+
+const RUNTIME_LIMIT_OPTION_VALIDATIONS: ReadonlyArray<{
+  readonly name: string;
+  readonly codeSuffix: string;
+  readonly value: (options: RuntimeParserPlanningOptions) => number | undefined;
+}> = [
+  {
+    name: "lexerStateLimit",
+    codeSuffix: "LEXER_STATE_LIMIT",
+    value: (options) => options.lexerStateLimit,
+  },
+  {
+    name: "regexSourceLengthLimit",
+    codeSuffix: "REGEX_SOURCE_LIMIT",
+    value: (options) => options.regexSourceLengthLimit,
+  },
+  {
+    name: "regexNestingLimit",
+    codeSuffix: "REGEX_NESTING_LIMIT",
+    value: (options) => options.regexNestingLimit,
+  },
+  {
+    name: "regexAstNodeLimit",
+    codeSuffix: "REGEX_AST_NODE_LIMIT",
+    value: (options) => options.regexAstNodeLimit,
+  },
+  {
+    name: "regexBoundedRepeatLimit",
+    codeSuffix: "REGEX_REPEAT_EXPANSION_LIMIT",
+    value: (options) => options.regexBoundedRepeatLimit,
+  },
+  {
+    name: "regexNfaStateLimit",
+    codeSuffix: "REGEX_NFA_STATE_LIMIT",
+    value: (options) => options.regexNfaStateLimit,
+  },
+  {
+    name: "regexDfaStateLimit",
+    codeSuffix: "REGEX_DFA_STATE_LIMIT",
+    value: (options) => options.regexDfaStateLimit,
+  },
+  {
+    name: "regexOverlapStateLimit",
+    codeSuffix: "REGEX_OVERLAP_WORK_LIMIT",
+    value: (options) => options.regexOverlapStateLimit,
+  },
+  {
+    name: "regexOverlapPairLimit",
+    codeSuffix: "REGEX_OVERLAP_WORK_LIMIT",
+    value: (options) => options.regexOverlapPairLimit,
+  },
+  {
+    name: "grammarExpressionDepthLimit",
+    codeSuffix: "GRAMMAR_EXPRESSION_DEPTH_LIMIT",
+    value: (options) => options.grammarExpressionDepthLimit,
+  },
+  {
+    name: "lrClosureWorkLimit",
+    codeSuffix: "LR_CLOSURE_WORK_LIMIT",
+    value: (options) => options.lrClosureWorkLimit,
+  },
+  {
+    name: "parserStateLimit",
+    codeSuffix: "PARSER_STATE_LIMIT",
+    value: (options) => options.parserStateLimit,
+  },
+  {
+    name: "parserItemLimit",
+    codeSuffix: "PARSER_ITEM_LIMIT",
+    value: (options) => options.parserItemLimit,
+  },
+  {
+    name: "parserTableEntryLimit",
+    codeSuffix: "PARSER_TABLE_ENTRY_LIMIT",
+    value: (options) => options.parserTableEntryLimit,
+  },
+  {
+    name: "diagnosticLimit",
+    codeSuffix: "DIAGNOSTIC_LIMIT_REACHED",
+    value: (options) => options.diagnosticLimit,
+  },
+];
 
 function runtimeOptionsDiagnostics(
   options: RuntimeParserPlanningOptions,
   config: RuntimeParserTargetConfig,
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.lexerStateLimit,
-    "lexerStateLimit",
-    `${config.codePrefix}_LEXER_STATE_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.regexSourceLengthLimit,
-    "regexSourceLengthLimit",
-    `${config.codePrefix}_REGEX_SOURCE_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.regexNestingLimit,
-    "regexNestingLimit",
-    `${config.codePrefix}_REGEX_NESTING_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.regexAstNodeLimit,
-    "regexAstNodeLimit",
-    `${config.codePrefix}_REGEX_AST_NODE_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.regexBoundedRepeatLimit,
-    "regexBoundedRepeatLimit",
-    `${config.codePrefix}_REGEX_REPEAT_EXPANSION_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.regexNfaStateLimit,
-    "regexNfaStateLimit",
-    `${config.codePrefix}_REGEX_NFA_STATE_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.regexDfaStateLimit,
-    "regexDfaStateLimit",
-    `${config.codePrefix}_REGEX_DFA_STATE_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.regexOverlapStateLimit,
-    "regexOverlapStateLimit",
-    `${config.codePrefix}_REGEX_OVERLAP_WORK_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.regexOverlapPairLimit,
-    "regexOverlapPairLimit",
-    `${config.codePrefix}_REGEX_OVERLAP_WORK_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.grammarExpressionDepthLimit,
-    "grammarExpressionDepthLimit",
-    `${config.codePrefix}_GRAMMAR_EXPRESSION_DEPTH_LIMIT`,
-    config,
-  );
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.lrClosureWorkLimit,
-    "lrClosureWorkLimit",
-    `${config.codePrefix}_LR_CLOSURE_WORK_LIMIT`,
-    config,
-  );
-  if (
-    options.parserStateLimit !== undefined &&
-    (!Number.isInteger(options.parserStateLimit) ||
-      options.parserStateLimit < 1)
-  ) {
-    diagnostics.push({
-      code: `${config.codePrefix}_PARSER_STATE_LIMIT`,
-      severity: "error",
-      backend: config.backend,
-      message: "parserStateLimit must be a positive integer.",
-    });
+  for (const validation of RUNTIME_LIMIT_OPTION_VALIDATIONS) {
+    validatePositiveIntegerOption(
+      diagnostics,
+      validation.value(options),
+      validation.name,
+      `${config.codePrefix}_${validation.codeSuffix}`,
+      config,
+    );
   }
-  if (
-    options.parserItemLimit !== undefined &&
-    (!Number.isInteger(options.parserItemLimit) ||
-      options.parserItemLimit < 1)
-  ) {
-    diagnostics.push({
-      code: `${config.codePrefix}_PARSER_ITEM_LIMIT`,
-      severity: "error",
-      backend: config.backend,
-      message: "parserItemLimit must be a positive integer.",
-    });
-  }
-  if (
-    options.parserTableEntryLimit !== undefined &&
-    (!Number.isInteger(options.parserTableEntryLimit) ||
-      options.parserTableEntryLimit < 1)
-  ) {
-    diagnostics.push({
-      code: `${config.codePrefix}_PARSER_TABLE_ENTRY_LIMIT`,
-      severity: "error",
-      backend: config.backend,
-      message: "parserTableEntryLimit must be a positive integer.",
-    });
-  }
-  validatePositiveIntegerOption(
-    diagnostics,
-    options.diagnosticLimit,
-    "diagnosticLimit",
-    `${config.codePrefix}_DIAGNOSTIC_LIMIT_REACHED`,
-    config,
-  );
   return diagnostics;
 }
 
@@ -1145,14 +1113,13 @@ function createOverlapPairBudget(
         return null;
       }
       if (pairs >= limit) {
-        return {
-          code: `${config.codePrefix}_REGEX_OVERLAP_WORK_LIMIT`,
-          severity: "error",
-          backend: config.backend,
-          message:
-            `${config.label} overlap analysis compared ${pairs} token/literal pairs, reaching regexOverlapPairLimit (${limit}).`,
-          span,
-        };
+        return targetDiagnostic(
+          config,
+          "REGEX_OVERLAP_WORK_LIMIT",
+          "error",
+          `${config.label} overlap analysis compared ${pairs} token/literal pairs, reaching regexOverlapPairLimit (${limit}).`,
+          { span },
+        );
       }
       pairs++;
       return null;
@@ -1176,15 +1143,14 @@ function capDiagnostics(
   const suppressed = diagnostics.length - limit;
   return [
     ...diagnostics.slice(0, limit),
-    {
-      code: `${config.codePrefix}_DIAGNOSTIC_LIMIT_REACHED`,
-      severity: "warning",
-      backend: config.backend,
-      message:
-        `The ${config.label} target suppressed ${suppressed} additional diagnostic${
-          suppressed === 1 ? "" : "s"
-        } after reaching diagnosticLimit (${limit}).`,
-    },
+    targetDiagnostic(
+      config,
+      "DIAGNOSTIC_LIMIT_REACHED",
+      "warning",
+      `The ${config.label} target suppressed ${suppressed} additional diagnostic${
+        suppressed === 1 ? "" : "s"
+      } after reaching diagnosticLimit (${limit}).`,
+    ),
   ];
 }
 
@@ -1198,6 +1164,29 @@ function diagnosticSuppressedCount(
     diagnostics.length <= limit
   ) return 0;
   return diagnostics.length - limit;
+}
+
+function targetDiagnostic(
+  config: RuntimeParserTargetConfig,
+  codeSuffix: string,
+  severity: "error" | "warning",
+  message: string,
+  details: {
+    readonly span?: Diagnostic["span"];
+    readonly path?: string;
+    readonly related?: Diagnostic["related"];
+  } = {},
+): Diagnostic {
+  const diagnostic: Diagnostic = {
+    code: `${config.codePrefix}_${codeSuffix}`,
+    severity,
+    backend: config.backend,
+    message,
+  };
+  if (details.span !== undefined) diagnostic.span = details.span;
+  if (details.path !== undefined) diagnostic.path = details.path;
+  if (details.related !== undefined) diagnostic.related = details.related;
+  return diagnostic;
 }
 
 function validatePositiveIntegerOption(
