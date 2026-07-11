@@ -158,7 +158,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_core_runtime_bytes.ts",
       role: "wasm-core-runtime-embedded-bytes",
-      hash: "fnv1a64:9d7e6fe68cc42dc3",
+      hash: "fnv1a64:03e9676c5b43e6e8",
     },
     {
       path: "src/runtime/mod.ts",
@@ -192,7 +192,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:b8104c00b668e9d6" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:a484fbf697ac94bb" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

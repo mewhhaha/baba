@@ -14,6 +14,11 @@ jobs:
         with:
           deno-version: v2.8.0
 
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup target add wasm32-unknown-unknown --toolchain 1.94.0
+
       - uses: bytecodealliance/actions/wasm-tools/setup@v1
 
       - uses: bytecodealliance/actions/wasmtime/setup@v1
@@ -43,6 +48,12 @@ jobs:
 
       - name: Bootstrap drift check
         run: deno task bootstrap:check
+
+      - name: Embedded Wasm engine drift check
+        run: deno task build:wasm-engine:check
+
+      - name: Embedded grammar parser drift check
+        run: deno task build:grammar-parser:check
 
       - name: Size budget check
         run: deno task size:check
