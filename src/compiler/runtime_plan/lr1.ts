@@ -75,6 +75,22 @@ interface LrTransitionEdge {
   symbol: BnfSymbol;
 }
 
+interface LrStateConstruction {
+  states: LrState[];
+  transitions: Map<string, number>;
+  transitionEdges: LrTransitionEdge[];
+  diagnostics: Diagnostic[];
+  totalCoreItems: number;
+  totalItems: number;
+  closureWork: number;
+}
+
+interface ActionGotoTable {
+  actions: Map<number, Map<number, LrActionSet>>;
+  gotos: Map<number, Map<number, number>>;
+  diagnostics: Diagnostic[];
+}
+
 export function buildCanonicalLr1Table(
   grammar: BnfGrammar,
   options: {
@@ -87,6 +103,62 @@ export function buildCanonicalLr1Table(
   },
 ): LrTable {
   const analysis = analyzeFirst(grammar);
+  const construction = buildLrStates(grammar, analysis, options);
+  const table = buildActionGotoTable(
+    grammar,
+    construction.states,
+    construction.transitions,
+    construction.transitionEdges,
+    options,
+  );
+
+  const diagnostics: Diagnostic[] = [
+    ...construction.diagnostics,
+    ...table.diagnostics,
+  ];
+  const actionEntries = countActionEntries(table.actions);
+  const gotoEntries = countEntries(table.gotos);
+  const tableEntries = actionEntries + gotoEntries;
+  if (
+    options.tableEntryLimit !== undefined &&
+    tableEntries > options.tableEntryLimit
+  ) {
+    diagnostics.push({
+      code: "RUNTIME_PARSER_TABLE_ENTRY_LIMIT",
+      severity: "error",
+      backend: "runtime",
+      message:
+        `The portable parser exceeded the ACTION/GOTO table entry limit (${options.tableEntryLimit}).`,
+    });
+  }
+
+  return {
+    states: construction.states,
+    actions: table.actions,
+    gotos: table.gotos,
+    stats: {
+      bnfProductions: grammar.productions.length,
+      states: construction.states.length,
+      coreItems: construction.totalCoreItems,
+      items: construction.totalItems,
+      closureWork: construction.closureWork,
+      actionEntries,
+      gotoEntries,
+      tableEntries,
+    },
+    diagnostics,
+  };
+}
+
+function buildLrStates(
+  grammar: BnfGrammar,
+  analysis: FirstAnalysis,
+  options: {
+    stateLimit: number;
+    itemLimit?: number;
+    closureWorkLimit?: number;
+  },
+): LrStateConstruction {
   const diagnostics: Diagnostic[] = [];
   const stateByKey = new Map<string, number>();
   const transitions = new Map<string, number>();
@@ -176,6 +248,28 @@ export function buildCanonicalLr1Table(
     }
   }
 
+  return {
+    states,
+    transitions,
+    transitionEdges,
+    diagnostics,
+    totalCoreItems,
+    totalItems,
+    closureWork: closureBudget.used,
+  };
+}
+
+function buildActionGotoTable(
+  grammar: BnfGrammar,
+  states: readonly LrState[],
+  transitions: ReadonlyMap<string, number>,
+  transitionEdges: readonly LrTransitionEdge[],
+  options: {
+    conflictGroups?: readonly ParserConflictDeclarationMetadata[];
+    conflictResolutions?: readonly ParserConflictResolutionMetadata[];
+  },
+): ActionGotoTable {
+  const diagnostics: Diagnostic[] = [];
   const actions = new Map<number, Map<number, LrActionSet>>();
   const gotos = new Map<number, Map<number, number>>();
   const conflictResolutions = options.conflictResolutions ?? [];
@@ -269,9 +363,6 @@ export function buildCanonicalLr1Table(
     }
   }
 
-  const actionEntries = countActionEntries(actions);
-  const gotoEntries = countEntries(gotos);
-  const tableEntries = actionEntries + gotoEntries;
   diagnostics.push(
     ...unusedConflictResolutionDiagnostics(
       conflictResolutions,
@@ -279,35 +370,8 @@ export function buildCanonicalLr1Table(
     ),
     ...unusedConflictGroupDiagnostics(conflictGroups, conflictGroupUseCounts),
   );
-  if (
-    options.tableEntryLimit !== undefined &&
-    tableEntries > options.tableEntryLimit
-  ) {
-    diagnostics.push({
-      code: "RUNTIME_PARSER_TABLE_ENTRY_LIMIT",
-      severity: "error",
-      backend: "runtime",
-      message:
-        `The portable parser exceeded the ACTION/GOTO table entry limit (${options.tableEntryLimit}).`,
-    });
-  }
 
-  return {
-    states,
-    actions,
-    gotos,
-    stats: {
-      bnfProductions: grammar.productions.length,
-      states: states.length,
-      coreItems: totalCoreItems,
-      items: totalItems,
-      closureWork: closureBudget.used,
-      actionEntries,
-      gotoEntries,
-      tableEntries,
-    },
-    diagnostics,
-  };
+  return { actions, gotos, diagnostics };
 }
 
 function countLookaheadEntries(items: readonly LrItem[]): number {
