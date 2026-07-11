@@ -39,7 +39,16 @@ export function analyzeGrammar(
     grammarExpressionDepthLimit?: number;
   } = {},
 ): AnalyzedGrammar {
-  const rootRuleName = options.rootRule ?? grammar.rules[0]?.name ?? "module";
+  let rootRuleName: string | undefined;
+  if (options.rootRule !== undefined) {
+    rootRuleName = options.rootRule;
+  } else if (grammar.rules.length > 0) {
+    rootRuleName = grammar.rules[0].name;
+  } else {
+    // No rules and no requested root: collectGrammarDiagnostics reports
+    // GRAMMAR_EMPTY, so no root rule is invented here.
+    rootRuleName = undefined;
+  }
   const tokenRegexes = grammar.tokens.map((token) =>
     parseTokenRegex(token.pattern, token.name, token.span, options.regexLimits)
   );
@@ -229,7 +238,15 @@ export function analyzeGrammar(
     };
   });
 
-  const rootRule = rulesByName.get(rootRuleName) ?? 0;
+  let rootRule: RuleId = 0;
+  if (rootRuleName !== undefined) {
+    const resolvedRootRule = rulesByName.get(rootRuleName);
+    if (resolvedRootRule !== undefined) {
+      rootRule = resolvedRootRule;
+    }
+    // An unresolved name was already reported as UNKNOWN_ROOT_RULE by
+    // collectGrammarDiagnostics; rule 0 keeps the errored result materializable.
+  }
   const reachableRules = collectReachableRules(rules, rootRule);
   const reachableTokens = new Set<TokenId>();
   const reachableLiterals = new Set<LiteralId>();
