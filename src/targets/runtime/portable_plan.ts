@@ -14,6 +14,18 @@ import type {
   LrTable,
 } from "../../compiler/runtime_plan/lr1.ts";
 import { collectRuleFieldSchemas } from "./field_schema.ts";
+import {
+  canonicalValue,
+  fnv1a64String,
+  hasId,
+  integerProperty,
+  isRecord,
+  isSupportedInteger,
+  isUnicodeScalar,
+  lookaheadValues,
+  stringProperty,
+  visitJson,
+} from "../../compiler/portable_plan_shared.ts";
 
 const PORTABLE_PLAN_FORMAT = "baba-parser-plan";
 const PORTABLE_PLAN_VERSION = 1;
@@ -22,7 +34,6 @@ const PORTABLE_REDUCER_SEMANTICS = "baba-reducer-v1";
 const PORTABLE_DIAGNOSTIC_SEMANTICS = "baba-runtime-diagnostics-v1";
 const PORTABLE_SOURCE_SPAN_UNIT = "utf16-code-units";
 const PORTABLE_UNICODE_SEMANTICS = "unicode-code-point-v1";
-const MAX_SAFE_SERIALIZED_INTEGER = Number.MAX_SAFE_INTEGER;
 
 /**
  * Portable parser-plan v1 is a runtime data contract, not a package-versioned
@@ -661,15 +672,6 @@ function terminalIdForLiteral(bnf: BnfGrammar, literalId: number): number {
     ?.id ?? -1;
 }
 
-function lookaheadValues(lookaheads: LookaheadBitset): number[] {
-  const values: number[] = [];
-  for (let index = 0; index < lookaheads.size; index++) {
-    const word = lookaheads.words[index >> 5] ?? 0;
-    if ((word & (1 << (index & 31))) !== 0) values.push(index);
-  }
-  return values;
-}
-
 function lookaheadBitset(
   values: readonly number[],
   size: number,
@@ -1302,25 +1304,6 @@ function hashPortableParserPlan(plan: PortableParserPlan): string {
   return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
 }
 
-function fnv1a64String(source: string): string {
-  let hash = 0xcbf29ce484222325n;
-  for (let index = 0; index < source.length; index++) {
-    hash ^= BigInt(source.charCodeAt(index));
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return hash.toString(16).padStart(16, "0");
-}
-
-function canonicalValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalValue);
-  if (!isRecord(value)) return value;
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) {
-    result[key] = canonicalValue(value[key]);
-  }
-  return result;
-}
-
 function validateActionRows(
   rows: readonly unknown[],
   terminals: readonly unknown[],
@@ -1571,10 +1554,6 @@ function validateSequentialIds(
   }
 }
 
-function hasId(values: readonly unknown[], id: number): boolean {
-  return values.some((value) => isRecord(value) && value.id === id);
-}
-
 function hasRuleId(nonterminals: readonly unknown[], ruleId: number): boolean {
   return nonterminals.some((value) =>
     isRecord(value) && value.ruleId === ruleId
@@ -1607,48 +1586,6 @@ function getArray(
   return child;
 }
 
-function integerProperty(
-  value: Record<string, unknown>,
-  key: string,
-  path: string,
-  fail: (path: string, message: string) => void,
-): number | undefined {
-  const child = value[key];
-  if (!isSupportedInteger(child)) {
-    fail(path, "must be a supported non-negative integer.");
-    return undefined;
-  }
-  return child;
-}
-
-function stringProperty(
-  value: Record<string, unknown>,
-  key: string,
-  path: string,
-  fail: (path: string, message: string) => void,
-): string | undefined {
-  const child = value[key];
-  if (typeof child !== "string") {
-    fail(path, "must be a string.");
-    return undefined;
-  }
-  return child;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isSupportedInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 &&
-    value <= MAX_SAFE_SERIALIZED_INTEGER;
-}
-
-function isUnicodeScalar(value: number): boolean {
-  return value >= 0 && value <= 0x10ffff &&
-    !(value >= 0xd800 && value <= 0xdfff);
-}
-
 function isReducerOp(value: unknown): value is PortableReducerPlan["op"] {
   return value === "start" || value === "rule" || value === "terminal" ||
     value === "rule-ref" || value === "identity" || value === "sequence" ||
@@ -1657,22 +1594,4 @@ function isReducerOp(value: unknown): value is PortableReducerPlan["op"] {
     value === "repeat1-first" || value === "repeat1-append" ||
     value === "separated-first" || value === "separated-append" ||
     value === "field";
-}
-
-function visitJson(
-  value: unknown,
-  path: string,
-  visit: (path: string, value: unknown) => void,
-): void {
-  visit(path, value);
-  if (Array.isArray(value)) {
-    value.forEach((entry, index) =>
-      visitJson(entry, `${path}[${index}]`, visit)
-    );
-    return;
-  }
-  if (!isRecord(value)) return;
-  for (const [key, child] of Object.entries(value)) {
-    visitJson(child, `${path}.${key}`, visit);
-  }
 }

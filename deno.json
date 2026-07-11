@@ -44,6 +44,7 @@
       "src/compiler/grammar_rs/Cargo.toml",
       "src/compiler/grammar_rs/src/lib.rs",
       "src/compiler/ir.ts",
+      "src/compiler/portable_plan_shared.ts",
       "src/compiler/regex/ast.ts",
       "src/compiler/regex/dfa.ts",
       "src/compiler/regex/diagnostics.ts",
