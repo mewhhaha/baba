@@ -10,6 +10,8 @@ maintain a Baba parser without reading historical design material first.
 - [Metadata](metadata.md): optional `baba.json` fields for root selection,
   parser conflicts, and target behavior.
 - [Wasm Target](wasm.md): generated files and the TypeScript runtime API.
+- [Migrating to Baba 5](migrating-to-5.md): required import, parser creation,
+  regeneration, option, and diagnostic changes from Baba 4.
 - [Wasm ABI](wasm-abi.md): low-level host contract for `parser.wasm`,
   `parser.plan`, and `abi.json`.
 - [Diagnostics](diagnostics.md): stable diagnostic codes and result shapes.

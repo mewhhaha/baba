@@ -39,7 +39,8 @@
   materializers, and modular BRL Wasm backend files.
 
 Metadata-v1 `parser.plan` files must be regenerated with Baba 5. The portable
-parser-plan version remains 1 and the Wasm ABI remains version 7.
+parser-plan version remains 1 and the Wasm ABI remains version 7. See
+[Migrating to Baba 5](docs/migrating-to-5.md) for required consumer changes.
 
 ## 4.0.0
 
