@@ -33,7 +33,9 @@ The most relevant runtime benchmark fields are:
 - `compileModuleMs`;
 - `createParserMs`;
 - `generatedBytes`;
-- `planStats`.
+- `planStats`;
+- `artifactSizes.corePlanBinaryBytes`;
+- `artifactSizes.runtimeMetadataBinaryBytes`.
 
 Budgets live in `size-budgets.json`.
 

@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+## 5.0.0
+
+### Added
+
+- Added parser-plan runtime metadata subsection version 2 and exposed
+  `parserPlanRuntimeMetadataVersion` from generated modules, manifests, and ABI
+  descriptors.
+- Added combined-plan inspection with exact core and runtime-metadata sizes and
+  core table counts.
+
+### Changed
+
+- Made `@mewhhaha/baba/runtime/generated-wasm` the only public runtime export.
+- Required synchronous parser creation to provide `plan` and exactly one of
+  `bytes` or `module`. Asynchronous creation now requires exactly one of
+  `bytes`, `module`, or `url`, and exactly one of `plan` or `planUrl`.
+- Reduced generated parse options to `preserveTrivia` and `maxTraceActions`.
+- Replaced the full TypeScript `ParserKit` copy in `parser.plan` with minimal
+  host metadata. Core DFA/LR tables, productions, reducers, and planning
+  statistics are no longer duplicated.
+- Slimmed the generated Wasm loader to the source-only cursor, lazy lexer tape,
+  trace validation, diagnostics, memory, reset, and disposal paths.
+- Prepared package metadata and documentation for version 5.0.0.
+
+### Removed
+
+- Removed the `@mewhhaha/baba/runtime/wasm` compatibility facade and generic
+  Wasm executor.
+- Removed `contextualLexingStats`, `maxExploredBranches`, `ambiguityMode`, and
+  the unused parser-creation `validate` option from the generated API.
+- Removed generated public `PARSE_INVALID_TOKEN_STREAM` and
+  `PARSER_BRANCH_LIMIT` diagnostics and numeric helpers. Their numeric IDs
+  remain reserved by the internal reference runtime.
+- Stopped publishing the internal TypeScript reference runtime, public BRL
+  materializers, and modular BRL Wasm backend files.
+
+Metadata-v1 `parser.plan` files must be regenerated with Baba 5. The portable
+parser-plan version remains 1 and the Wasm ABI remains version 7.
+
 ## 4.0.0
 
 ### Added

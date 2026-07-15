@@ -12,8 +12,7 @@ The exported modules in `deno.json` are the stable public library surface:
 
 - `@mewhhaha/baba`;
 - `@mewhhaha/baba/cli`;
-- `@mewhhaha/baba/runtime/generated-wasm`;
-- `@mewhhaha/baba/runtime/wasm`.
+- `@mewhhaha/baba/runtime/generated-wasm`.
 
 Patch and minor releases may add options, result fields, diagnostics, helper
 exports, and target capabilities. Removing exports, changing accepted option
@@ -43,6 +42,10 @@ fields, canonical ordering, reducer opcodes, diagnostic schema, and validation
 rules. Breaking changes require a new plan version or a separately versioned
 subsection.
 
+Generated `parser.plan` files currently use runtime metadata subsection version
+`2`. Metadata version `1` is not accepted by Baba 5 loaders; regenerate those
+plans with Baba 5. The portable parser-plan version remains `1`.
+
 ## Generated Wasm API
 
 Generated Wasm parser modules expose a stable ergonomic API:
@@ -68,9 +71,8 @@ status tables require an ABI version change.
 
 The TypeScript Wasm adapter API is stable at the generated module entrypoint.
 Generated modules import their loader from
-`@mewhhaha/baba/runtime/generated-wasm`. The older `@mewhhaha/baba/runtime/wasm`
-export remains a compatibility facade for shared/auto runtime helpers. Low-level
-helper names and embedded byte-array layout are implementation details.
+`@mewhhaha/baba/runtime/generated-wasm`. Low-level helper names and embedded
+byte-array layout are implementation details.
 
 ## Internal BRL
 

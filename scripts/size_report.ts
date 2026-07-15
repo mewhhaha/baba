@@ -6,6 +6,7 @@ interface FileEntry {
 interface SizeReport {
   readonly generatedAt: string;
   readonly root: string;
+  readonly generatedWasmLoaderSourceBytes: number;
   readonly repository: {
     readonly fileCount: number;
     readonly bytes: number;
@@ -61,6 +62,7 @@ interface SizeBudgets {
   readonly publishPayloadBytes?: number;
   readonly publishGeneratedExampleBytes?: number;
   readonly largestPublishFileBytes?: number;
+  readonly generatedWasmLoaderSourceBytes?: number;
 }
 
 interface SizeBudgetResult {
@@ -91,10 +93,20 @@ export async function buildSizeReport(root = "."): Promise<SizeReport> {
   const generatedFiles = allFiles.filter((file) =>
     file.path.startsWith("examples/") && file.path.includes("/generated/")
   );
+  const generatedWasmLoader = allFiles.find((file) =>
+    file.path === "src/runtime/generated_wasm.ts"
+  );
+  if (generatedWasmLoader === undefined) {
+    throw new Error(
+      "Size report could not find src/runtime/generated_wasm.ts.",
+    );
+  }
+  const generatedWasmLoaderSourceBytes = generatedWasmLoader.size;
 
   return {
     generatedAt: new Date().toISOString(),
     root: normalizedRoot,
+    generatedWasmLoaderSourceBytes,
     repository: {
       fileCount: allFiles.length,
       bytes: sumBytes(allFiles),
@@ -180,6 +192,12 @@ function budgetChecks(
     report.publishPayload.largestFiles[0]?.size ?? 0,
     budgets.largestPublishFileBytes,
   );
+  addBudgetCheck(
+    checks,
+    "generatedWasmLoaderSourceBytes",
+    report.generatedWasmLoaderSourceBytes,
+    budgets.generatedWasmLoaderSourceBytes,
+  );
   return checks;
 }
 
@@ -205,6 +223,9 @@ function renderHumanReport(report: SizeReport): string {
     } across ${report.publishPayload.fileCount} files`,
     `Generated example bytes in publish payload: ${
       formatBytes(report.publishPayload.generatedExampleBytes)
+    }`,
+    `Generated Wasm loader source: ${
+      formatBytes(report.generatedWasmLoaderSourceBytes)
     }`,
     "",
     "Top-level repository bytes:",

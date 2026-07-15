@@ -34,7 +34,7 @@ grammar.baba + baba.json -> generated/wasm/
 The generated `wasm/` directory contains:
 
 - `parser.wasm`: the prebuilt generic lexer/parser engine;
-- `parser.plan`: grammar-specific DFA/LR tables and runtime metadata;
+- `parser.plan`: grammar-specific DFA/LR tables and minimal runtime metadata v2;
 - `mod.ts`: the generated TypeScript entrypoint;
 - `syntax.ts`: generated cursor, token tape, diagnostic, and result types;
 - `abi.json`: the machine-readable low-level Wasm ABI descriptor;

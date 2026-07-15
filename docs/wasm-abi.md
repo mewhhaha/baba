@@ -23,7 +23,14 @@ The generated descriptor has:
 ```json
 {
   "format": "baba-wasm-abi",
-  "version": 7
+  "version": 1,
+  "parserPlan": {
+    "version": 1,
+    "runtimeMetadataVersion": 2
+  },
+  "core": {
+    "abiVersion": 7
+  }
 }
 ```
 
@@ -36,8 +43,9 @@ core exports agree before the adapter uses the module.
 
 The descriptor also records:
 
-- `parserPlan.format`, `parserPlan.version`, `parserPlan.semantics`, and the
-  external storage layout;
+- `parserPlan.format`, `parserPlan.version`,
+  `parserPlan.runtimeMetadataVersion`, `parserPlan.semantics`, and the external
+  storage layout;
 - `runtimeImplementation.format`, `runtimeImplementation.version`,
   `runtimeImplementation.semantics`, and `runtimeImplementation.hash`;
 - the numeric parser diagnostic code table and diagnostic detail schemas.
@@ -94,6 +102,14 @@ in the header and may store dense DFA/LR helper sections as compact `i16` or
 `u16` cells when all generated values fit. This compact encoding is an internal
 core-plan detail; hosts should validate the plan with `wasm/abi.json` and
 `load_plan` rather than decoding those tables directly.
+
+The runtime metadata subsection is independently versioned and currently uses
+version `2`. It contains only runtime identity, trivia and conflict policy, rule
+names, token/literal mappings, lexer specifications and accept candidates,
+terminal displays, and cursor field schemas. DFA transitions, LR actions and
+gotos, productions, reducers, and planning statistics are not duplicated in host
+metadata. Baba 5 rejects metadata version `1` with an instruction to regenerate
+the plan.
 
 The descriptor exposes plan metadata under `core.plan`, including the plan
 storage mode, the `load_plan` export name, the generated `parser.plan` path, and
@@ -187,11 +203,10 @@ the previous high-water allocation.
 
 ABI version 7 has instance-owned core memory. Generated adapters expose
 `createParser()` and `createParserAsync()` as the public lifecycle API. Each
-parser instance owns its `WebAssembly.Instance`, memory, loaded plan, shared
-runtime parser, and disposed state. `reset()` on a parser instance clears
-reusable core state. `dispose()` invalidates the parser instance; subsequent
-`lex()`, `parse()`, or `validate()` calls on that instance throw from the shared
-adapter.
+parser instance owns its `WebAssembly.Instance`, memory, loaded plan, and
+disposed state. `reset()` on a parser instance clears reusable core state.
+`dispose()` invalidates the parser instance; subsequent `lex()`, `parse()`, or
+`validate()` calls on that instance throw from the shared adapter.
 
 Generated adapters create isolated instances with
 `createParser({ bytes, plan })`, `createParser({ module, plan })`, or
@@ -209,11 +224,9 @@ ABI version 7 uses 65,536-byte WebAssembly pages and a configured maximum of
 alignment, and page-count growth against the 32-bit Wasm address space before
 calling `memory.grow()`.
 
-Parser branch and trace limits are part of the generated public parse API and
-trace runtime contract:
-
-- `PARSER_BRANCH_LIMIT` reports explored or queued branch exhaustion;
-- `PARSER_TRACE_LIMIT` reports action-trace exhaustion.
+The generated public parse API exposes `maxTraceActions`. `PARSER_TRACE_LIMIT`
+reports action-trace exhaustion. Branch-limit numeric IDs remain reserved
+internally but are not part of the source-only generated API.
 
 The descriptor's `traceStatuses` table maps low-level trace status numbers to
 the generated adapter constants.

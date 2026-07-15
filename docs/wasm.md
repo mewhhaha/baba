@@ -27,8 +27,10 @@ contract without reintroducing `grammar.js` generation.
 authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded
 in the Baba package; grammar generation does not invoke Cargo or require Rust on
 the user's machine. `parser.plan` contains the generated DFA/LR core data plus
-the shared TypeScript runtime metadata used for token, diagnostic, and cursor
-access. `mod.ts` is a thin wrapper around
+runtime metadata version 2 used for runtime identity, token and literal names,
+trivia policy, expected-token displays, and cursor field schemas. DFA
+transitions, LR tables, productions, and reducers remain solely in the core
+section. `mod.ts` is a thin wrapper around
 `@mewhhaha/baba/runtime/generated-wasm`; `syntax.ts` is the typed token/cursor
 surface and does not contain runtime tables.
 
@@ -81,6 +83,9 @@ The parser instance returned by `createParser({ bytes, plan })` or
 - `reset()` and `dispose()`.
 
 Generated Wasm parser instances expose only the methods listed above.
+Synchronous creation requires `plan` and exactly one of `bytes` or `module`.
+Asynchronous creation requires exactly one of `bytes`, `module`, or `url`, and
+exactly one of `plan` or `planUrl`.
 
 ## ABI Descriptor
 
@@ -102,6 +107,6 @@ rather than depending on the TypeScript adapter internals.
 
 ## Lifecycle
 
-Each parser instance owns its `WebAssembly.Instance`, loaded plan, shared
-runtime parser, and disposed state. Use `dispose()` when the parser is no longer
-needed. Use separate parser instances for concurrent or isolated work.
+Each parser instance owns its `WebAssembly.Instance`, loaded plan, memory, and
+disposed state. Use `dispose()` when the parser is no longer needed. Use
+separate parser instances for concurrent or isolated work.

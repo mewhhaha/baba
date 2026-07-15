@@ -21,84 +21,19 @@ export const RUNTIME_IMPLEMENTATION_SEMANTICS =
 export const RUNTIME_IMPLEMENTATION_SOURCES:
   readonly RuntimeImplementationSourceMetadata[] = [
     {
-      path: "src/runtime/source_map.brl",
-      role: "shared-brl-source-map",
-      hash: "fnv1a64:224c05ae079edd0a",
+      path: "src/runtime/compact_plan_binary.ts",
+      role: "compact-runtime-metadata-codec",
+      hash: "fnv1a64:c920595dc4afeea6",
     },
     {
-      path: "src/runtime/lexer.brl",
-      role: "shared-brl-lexer",
-      hash: "fnv1a64:f7c666153fd2abb7",
+      path: "src/runtime/wasm_plan.ts",
+      role: "combined-wasm-parser-plan-format",
+      hash: "fnv1a64:15c7e0052862f724",
     },
     {
-      path: "src/runtime/parser.brl",
-      role: "shared-brl-parser",
-      hash: "fnv1a64:a7969cc9921f67d4",
-    },
-    {
-      path: "src/runtime/branch_search.brl",
-      role: "shared-brl-branch-search",
-      hash: "fnv1a64:1911bf79e43284a6",
-    },
-    {
-      path: "src/runtime/reductions.brl",
-      role: "shared-brl-reductions",
-      hash: "fnv1a64:42b9767fe38c09d1",
-    },
-    {
-      path: "src/runtime/cst.brl",
-      role: "shared-brl-cst",
-      hash: "fnv1a64:301481c1d6bd2e3e",
-    },
-    {
-      path: "src/runtime/token_stream.brl",
-      role: "shared-brl-token-stream",
-      hash: "fnv1a64:69213d70c0219621",
-    },
-    {
-      path: "src/runtime/diagnostics.brl",
-      role: "shared-brl-diagnostics",
-      hash: "fnv1a64:ce4d444938367a40",
-    },
-    {
-      path: "src/targets/runtime/public_source_text.ts",
-      role: "public-source-text-boundary",
-      hash: "fnv1a64:85aedc2a4c7538d6",
-    },
-    {
-      path: "src/targets/runtime/public_lex_diagnostic_materializer.ts",
-      role: "public-lex-diagnostic-materializer",
-      hash: "fnv1a64:00da88a24f229bfe",
-    },
-    {
-      path: "src/targets/runtime/public_lex_result_materializer.ts",
-      role: "public-lex-result-materializer",
-      hash: "fnv1a64:0032dfe5d1d49041",
-    },
-    {
-      path: "src/targets/runtime/public_token_materializer.ts",
-      role: "public-token-materializer",
-      hash: "fnv1a64:d330acf141d38ce7",
-    },
-    {
-      path: "src/targets/runtime/public_diagnostic_materializer.ts",
-      role: "public-diagnostic-materializer",
-      hash: "fnv1a64:e2b2be5c37cdeffb",
-    },
-    {
-      path: "src/targets/runtime/public_parse_result_materializer.ts",
-      role: "public-parse-result-materializer",
-      hash: "fnv1a64:f17bda91bb4f9cfb",
-    },
-    {
-      path: "src/targets/runtime/public_field_materializer.ts",
-      role: "public-field-materializer",
-      hash: "fnv1a64:a9bcd76e98c51ee5",
-    },
-    {
-      path: "src/targets/runtime/public_rule_node_materializer.ts",
-      role: "public-rule-node-materializer",
-      hash: "fnv1a64:574e52fa708fe9e5",
+      path: "src/runtime/generated_wasm.ts",
+      role: "generated-wasm-parser-loader",
+      hash: "fnv1a64:93f92739043bf498",
     },
     {
       path: "src/targets/runtime/diagnostic_codes.ts",
@@ -106,29 +41,14 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
       hash: "fnv1a64:68ecf2feab9f4e9d",
     },
     {
-      path: "src/targets/runtime/language_sources.ts",
-      role: "runtime-language-source",
-      hash: "fnv1a64:c37c4378ae453e01",
-    },
-    {
-      path: "src/targets/runtime/language.ts",
-      role: "runtime-language-compiler",
-      hash: "fnv1a64:6f5893ae4b55f8aa",
-    },
-    {
-      path: "src/targets/runtime/language_artifacts.ts",
-      role: "runtime-language-artifact-manifest",
-      hash: "fnv1a64:495f395c96083fb6",
-    },
-    {
       path: "src/targets/runtime/wasm_abi.ts",
       role: "wasm-abi-constants",
-      hash: "fnv1a64:8148efebfe9ef466",
+      hash: "fnv1a64:6060fb66d30c7a6d",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime.ts",
       role: "wasm-core-runtime",
-      hash: "fnv1a64:3b545d325405bd8c",
+      hash: "fnv1a64:15a62d388132b2b6",
     },
     {
       path: "scripts/build_wasm_engine.ts",
@@ -161,38 +81,13 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
       hash: "fnv1a64:03e9676c5b43e6e8",
     },
     {
-      path: "src/runtime/mod.ts",
-      role: "shared-parser-plan-adapter-api",
-      hash: "fnv1a64:d76c8e4318ccdc5c",
-    },
-    {
-      path: "src/runtime/generated_wasm.ts",
-      role: "generated-wasm-parser-loader",
-      hash: "fnv1a64:25dc7bcb50f9ed7e",
-    },
-    {
-      path: "src/runtime/wasm.ts",
-      role: "shared-wasm-runtime-api",
-      hash: "fnv1a64:a33f6bfe3346723e",
-    },
-    {
-      path: "src/runtime/wasm_executor.ts",
-      role: "shared-generic-wasm-executor",
-      hash: "fnv1a64:0ef417aba3bc8330",
-    },
-    {
-      path: "src/runtime/parser_plan.ts",
-      role: "shared-runtime-parser-plan",
-      hash: "fnv1a64:dbdc3f6596d2d401",
-    },
-    {
       path: "src/targets/runtime/provenance.ts",
       role: "generated-source-provenance",
       hash: "fnv1a64:5c376f22eb5e986c",
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:a484fbf697ac94bb" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:9b25cc0c8ab36db3" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

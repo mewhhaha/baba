@@ -25,9 +25,10 @@ Examples include:
 ## Runtime Diagnostics
 
 Generated Wasm parsers report lexical errors, unexpected tokens, trailing input,
-branch or trace exhaustion, unresolved parser branching, and internal invariant
-failures through structured parse diagnostics. `parse()` and `validate()` return
-those diagnostics without constructing object trees.
+trace exhaustion, unresolved parser branching, and internal invariant failures
+through structured parse diagnostics. `parse()` and `validate()` return those
+diagnostics without constructing object trees. Source-only generated parsers do
+not expose `PARSE_INVALID_TOKEN_STREAM` or `PARSER_BRANCH_LIMIT`.
 
 Generated `syntax.ts` includes the public diagnostic types for TypeScript
 consumers. `wasm/abi.json` records the numeric runtime diagnostic schemas for

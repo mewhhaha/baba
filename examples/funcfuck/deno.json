@@ -1,6 +1,6 @@
 {
   "imports": {
-    "@mewhhaha/baba/runtime/wasm": "../../src/runtime/wasm.ts"
+    "@mewhhaha/baba/runtime/generated-wasm": "../../src/runtime/generated_wasm.ts"
   },
   "tasks": {
     "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.baba --out generated --name funcfuck --root module --metadata baba.json --target wasm",

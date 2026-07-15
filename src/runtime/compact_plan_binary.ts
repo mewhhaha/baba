@@ -24,6 +24,7 @@ export interface CompactPlanBinaryInfo {
   readonly jsonBytes: number;
   readonly rootKind: string;
   readonly metadata?: {
+    readonly runtimeMetadataVersion?: number;
     readonly parserPlanVersion?: number;
     readonly parserPlanHash?: string;
     readonly runtimeImplementationHash?: string;
@@ -101,6 +102,24 @@ function compactMetadata(value: unknown): CompactPlanBinaryInfo["metadata"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const meta = (value as { m?: unknown }).m;
   if (Array.isArray(meta)) {
+    if (meta[0] === 2) {
+      const metadata: {
+        runtimeMetadataVersion: number;
+        parserPlanVersion?: number;
+        parserPlanHash?: string;
+        runtimeImplementationHash?: string;
+      } = { runtimeMetadataVersion: 2 };
+      if (typeof meta[2] === "number") {
+        metadata.parserPlanVersion = meta[2];
+      }
+      if (typeof meta[4] === "string") {
+        metadata.parserPlanHash = meta[4];
+      }
+      if (typeof meta[8] === "string") {
+        metadata.runtimeImplementationHash = meta[8];
+      }
+      return metadata;
+    }
     return {
       parserPlanVersion: typeof meta[1] === "number" ? meta[1] : undefined,
       parserPlanHash: typeof meta[3] === "string" ? meta[3] : undefined,

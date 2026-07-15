@@ -23,7 +23,13 @@ import {
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
 } from "../src/targets/runtime/wasm_abi.ts";
-import { validateCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
+import {
+  decodeCombinedWasmParserPlan,
+  encodeCombinedWasmParserPlan,
+  inspectCombinedWasmParserPlan,
+  parserPlanRuntimeMetadataVersion,
+  validateCombinedWasmParserPlan,
+} from "../src/runtime/wasm_plan.ts";
 import type { BabaMetadata } from "../src/ast.ts";
 
 const STATEMENT_GRAMMAR = `
@@ -140,16 +146,8 @@ interface RawCursorWasmExports {
 }
 
 interface GeneratedWasmModule {
-  createParser(options: {
-    bytes?: Uint8Array;
-    module?: WebAssembly.Module;
-    plan?: Uint8Array;
-  }): GeneratedParser;
-  createParserAsync(options: {
-    url?: URL;
-    planUrl?: URL;
-    plan?: Uint8Array;
-  }): Promise<GeneratedParser>;
+  createParser(options: unknown): GeneratedParser;
+  createParserAsync(options: unknown): Promise<GeneratedParser>;
 }
 
 Deno.test("Wasm target validates generated size and parser stats options", () => {
@@ -232,6 +230,8 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
   assertNotIncludes(modSource, "parserTraceRuntimeBytes");
   assertNotIncludes(modSource, "wasmBytes");
   const abi = JSON.parse(textFile(bundle, "wasm/abi.json")) as {
+    parserPlan?: { runtimeMetadataVersion?: number };
+    parserDiagnosticCodes?: Record<string, number>;
     core?: {
       exports?: readonly {
         name?: string;
@@ -239,6 +239,19 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
       }[];
     };
   };
+  assertEquals(
+    abi.parserPlan?.runtimeMetadataVersion,
+    parserPlanRuntimeMetadataVersion,
+  );
+  assertEquals(abi.parserDiagnosticCodes?.parseInvalidTokenStream, undefined);
+  assertEquals(abi.parserDiagnosticCodes?.branchLimit, undefined);
+  const manifest = JSON.parse(textFile(bundle, "wasm/manifest.json")) as {
+    parserPlan?: { runtimeMetadataVersion?: number };
+  };
+  assertEquals(
+    manifest.parserPlan?.runtimeMetadataVersion,
+    parserPlanRuntimeMetadataVersion,
+  );
   const lexAll = abi.core?.exports?.find((entry) => entry.name === "lex_all");
   assert(lexAll, "Expected lex_all in abi.json.");
   assertEquals(
@@ -261,6 +274,12 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
     await denoCheck(`${dir}/wasm/mod.ts`);
     const mod = await import(`file://${dir}/wasm/mod.ts`);
     assertEquals("lex" in mod, false);
+    assertEquals("parserDiagnosticCodeBranchLimit" in mod, false);
+    assertEquals("parserDiagnosticCodeParseInvalidTokenStream" in mod, false);
+    assertEquals(
+      mod.parserPlanRuntimeMetadataVersion,
+      parserPlanRuntimeMetadataVersion,
+    );
     assertThrowsIncludes(
       () =>
         mod.createParser({
@@ -373,34 +392,18 @@ Deno.test("Wasm target emits Tree-sitter query fragments from metadata", () => {
   assertIncludes(injections, '#set! injection.language "markdown"');
 });
 
-Deno.test("runtime manifest contains only active shared sources", async () => {
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 34);
+Deno.test("runtime manifest contains only active Wasm sources", async () => {
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 13);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
   assertEquals(
     roles.join("\n"),
     [
-      "shared-brl-source-map",
-      "shared-brl-lexer",
-      "shared-brl-parser",
-      "shared-brl-branch-search",
-      "shared-brl-reductions",
-      "shared-brl-cst",
-      "shared-brl-token-stream",
-      "shared-brl-diagnostics",
-      "public-source-text-boundary",
-      "public-lex-diagnostic-materializer",
-      "public-lex-result-materializer",
-      "public-token-materializer",
-      "public-diagnostic-materializer",
-      "public-parse-result-materializer",
-      "public-field-materializer",
-      "public-rule-node-materializer",
+      "compact-runtime-metadata-codec",
+      "combined-wasm-parser-plan-format",
+      "generated-wasm-parser-loader",
       "parser-diagnostic-codes",
-      "runtime-language-source",
-      "runtime-language-compiler",
-      "runtime-language-artifact-manifest",
       "wasm-abi-constants",
       "wasm-core-runtime",
       "wasm-core-runtime-build-script",
@@ -409,11 +412,6 @@ Deno.test("runtime manifest contains only active shared sources", async () => {
       "wasm-core-runtime-rust-build-config",
       "wasm-core-runtime-rust-source",
       "wasm-core-runtime-embedded-bytes",
-      "shared-parser-plan-adapter-api",
-      "generated-wasm-parser-loader",
-      "shared-wasm-runtime-api",
-      "shared-generic-wasm-executor",
-      "shared-runtime-parser-plan",
       "generated-source-provenance",
     ].join("\n"),
   );
@@ -455,6 +453,70 @@ Deno.test("Wasm core and wrapper are stable across grammars", () => {
   );
 });
 
+Deno.test("combined parser plans round-trip runtime metadata v2 with exact section sizes", () => {
+  const bundle = wasmBundle(STATEMENT_GRAMMAR);
+  const file = bundle.files.find((entry) => entry.path === "wasm/parser.plan");
+  assert(file, "Expected wasm/parser.plan.");
+  assert(file.encoding === "binary", "Expected a binary parser plan.");
+  const validated = validateCombinedWasmParserPlan(file.content);
+  const decoded = decodeCombinedWasmParserPlan(file.content);
+  const inspected = inspectCombinedWasmParserPlan(file.content);
+  assertEquals(
+    validated.runtimeMetadataVersion,
+    parserPlanRuntimeMetadataVersion,
+  );
+  assertEquals(
+    decoded.runtimeMetadataVersion,
+    parserPlanRuntimeMetadataVersion,
+  );
+  assertEquals(
+    inspected.corePlanBytes + inspected.runtimeMetadataHeaderBytes +
+      inspected.runtimeMetadataBytes,
+    inspected.totalBytes,
+  );
+  assertEquals(inspected.totalBytes, file.content.byteLength);
+  assertEquals(
+    inspected.runtimeMetadataHeaderBytes,
+    validated.runtimeMetadataOffset - validated.runtimeMetadataHeaderOffset,
+  );
+  const reencoded = encodeCombinedWasmParserPlan(
+    file.content.subarray(0, validated.coreByteLength),
+    decoded.compactRuntimePlan,
+  );
+  assertEquals(
+    JSON.stringify(
+      decodeCombinedWasmParserPlan(reencoded).compactRuntimePlan,
+    ),
+    JSON.stringify(decoded.compactRuntimePlan),
+  );
+
+  const versionOne = new Uint8Array(file.content);
+  new DataView(
+    versionOne.buffer,
+    versionOne.byteOffset,
+    versionOne.byteLength,
+  ).setUint32(validated.runtimeMetadataHeaderOffset + 13, 1, true);
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(versionOne),
+    "runtime metadata version 1",
+  );
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(versionOne),
+    "Regenerate the parser plan with Baba 5",
+  );
+
+  const malformedMagic = new Uint8Array(file.content);
+  malformedMagic[validated.runtimeMetadataHeaderOffset] = 0;
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(malformedMagic),
+    "runtime metadata magic is invalid",
+  );
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(file.content.slice(0, -1)),
+    "runtime metadata length is invalid",
+  );
+});
+
 Deno.test("Wasm target emits typed cursor result surface", async () => {
   const bundle = wasmBundle(STATEMENT_GRAMMAR);
   const syntax = textFile(bundle, "wasm/syntax.ts");
@@ -471,9 +533,13 @@ Deno.test("Wasm target emits typed cursor result surface", async () => {
     'field(name: "name"): TokenCursor<"named", "IDENT"> | null;',
   );
   assertIncludes(syntax, "export type RootCursor = ModuleCursor;");
-  assertEquals(syntax.includes("maxExploredBranches"), true);
+  assertEquals(syntax.includes("contextualLexingStats"), false);
+  assertEquals(syntax.includes("maxExploredBranches"), false);
   assertEquals(syntax.includes("maxQueuedBranches"), false);
-  assertEquals(syntax.includes("ambiguityMode"), true);
+  assertEquals(syntax.includes("ambiguityMode"), false);
+  assertEquals(syntax.includes("PARSE_INVALID_TOKEN_STREAM"), false);
+  assertEquals(syntax.includes("PARSER_BRANCH_LIMIT"), false);
+  assertEquals(syntax.includes("maxTraceActions"), true);
 
   const dir = await Deno.makeTempDir();
   try {
@@ -483,6 +549,7 @@ Deno.test("Wasm target emits typed cursor result surface", async () => {
       `
         import {
           createParser,
+          createParserAsync,
           type CursorParseResult,
           type ModuleCursor,
           type RootCursor,
@@ -491,24 +558,33 @@ Deno.test("Wasm target emits typed cursor result surface", async () => {
         } from "./wasm/mod.ts";
 
         declare const bytes: Uint8Array;
+        declare const module: WebAssembly.Module;
         declare const plan: Uint8Array;
+        declare const url: URL;
+        declare const planUrl: URL;
 
         const parser = createParser({ bytes, plan });
+        createParser({ module, plan });
+        await createParserAsync({ bytes, plan });
+        await createParserAsync({ module, planUrl });
+        await createParserAsync({ url, plan });
+        await createParserAsync({ url, planUrl });
+        // @ts-expect-error plan is required
+        createParser({ bytes });
+        // @ts-expect-error bytes and module are mutually exclusive
+        createParser({ bytes, module, plan });
+        // @ts-expect-error a Wasm source is required
+        await createParserAsync({ plan });
+        // @ts-expect-error plan and planUrl are mutually exclusive
+        await createParserAsync({ bytes, plan, planUrl });
         const result = parser.parse("let x = 42;");
         const typedResult: CursorParseResult<RootCursor> = result;
         parser.parse("let x = 42;", {
           preserveTrivia: true,
-          contextualLexingStats(stats: unknown) {
-            stats;
-          },
-          maxExploredBranches: 8,
           maxTraceActions: 1024,
-          ambiguityMode: "reject-ambiguous-success",
         });
         parser.validate("let x = 42;", {
-          maxExploredBranches: 8,
           maxTraceActions: 1024,
-          ambiguityMode: "first-success",
         });
         if (typedResult.ok) {
           const root: ModuleCursor = typedResult.cursor;
@@ -538,7 +614,7 @@ Deno.test("package exports expose only current runtime entrypoint", async () => 
   };
   assert(config.exports, "Expected deno.json exports.");
   assertEquals(config.exports["./runtime"], undefined);
-  assertEquals(config.exports["./runtime/wasm"], "./src/runtime/wasm.ts");
+  assertEquals(config.exports["./runtime/wasm"], undefined);
   assertEquals(
     config.exports["./runtime/generated-wasm"],
     "./src/runtime/generated_wasm.ts",
@@ -894,6 +970,34 @@ Deno.test("shared Wasm adapter validates external plan bytes", async () => {
       "requires parser plan bytes",
     );
     assertThrowsIncludes(
+      () => mod.createParser({ plan }),
+      "exactly one of bytes or module; received bytes=false, module=false",
+    );
+    const module = new WebAssembly.Module(
+      new Uint8Array(bytes).buffer,
+    );
+    assertThrowsIncludes(
+      () => mod.createParser({ bytes, module, plan }),
+      "exactly one of bytes or module; received bytes=true, module=true",
+    );
+    await assertRejectsIncludes(
+      () => mod.createParserAsync({ bytes }),
+      "exactly one of plan or planUrl; received plan=false, planUrl=false",
+    );
+    await assertRejectsIncludes(
+      () => mod.createParserAsync({ bytes, module, plan }),
+      "exactly one of bytes, module, or url; received bytes=true, module=true, url=false",
+    );
+    await assertRejectsIncludes(
+      () =>
+        mod.createParserAsync({
+          bytes,
+          plan,
+          planUrl: dataUrl(plan, "application/octet-stream"),
+        }),
+      "exactly one of plan or planUrl; received plan=true, planUrl=true",
+    );
+    assertThrowsIncludes(
       () => mod.createParser({ bytes, plan: plan.slice(0, 12) }),
       "truncated",
     );
@@ -1078,6 +1182,19 @@ function dataUrl(bytes: Uint8Array, mime: string): URL {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return new URL(`data:${mime};base64,${btoa(binary)}`);
+}
+
+async function assertRejectsIncludes(
+  operation: () => Promise<unknown>,
+  expected: string,
+): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    assertIncludes(String(error), expected);
+    return;
+  }
+  throw new Error(`Expected promise rejection containing ${expected}.`);
 }
 
 function alignTest(value: number, alignment: number): number {

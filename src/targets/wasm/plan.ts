@@ -7,24 +7,21 @@ import type {
 } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
-import type { BnfGrammar } from "../../compiler/runtime_plan/bnf.ts";
-import type { LrAction } from "../../compiler/runtime_plan/lr1.ts";
+import type {
+  BnfGrammar,
+  ReducerSpec,
+} from "../../compiler/runtime_plan/bnf.ts";
 import type { LrTable } from "../../compiler/runtime_plan/lr1.ts";
-import { collectRuleFieldSchemas } from "../runtime/field_schema.ts";
+import {
+  collectRuleFieldSchemas,
+  type RuleFieldSchema,
+} from "../runtime/field_schema.ts";
 import {
   PARSER_DIAGNOSTIC_CODES,
   PARSER_DIAGNOSTIC_DETAIL_KINDS,
   PARSER_DIAGNOSTIC_SCHEMAS,
 } from "../runtime/diagnostic_codes.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
-import {
-  RUNTIME_TRACE_STATUS_AMBIGUOUS,
-  RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
-  RUNTIME_TRACE_STATUS_INTERNAL,
-  RUNTIME_TRACE_STATUS_OK,
-  RUNTIME_TRACE_STATUS_TRACE_LIMIT,
-  RUNTIME_TRACE_STATUS_UNEXPECTED,
-} from "../runtime/language_sources.ts";
 import type {
   PortableParserPlan,
   PortableParserPlanMetadata,
@@ -47,6 +44,12 @@ import {
   WASM_SPAN_UNIT_UTF16,
   WASM_TARGET_KIND,
   WASM_TOKEN_RECORD_I32_COUNT,
+  WASM_TRACE_STATUS_AMBIGUOUS,
+  WASM_TRACE_STATUS_BRANCH_LIMIT,
+  WASM_TRACE_STATUS_INTERNAL,
+  WASM_TRACE_STATUS_OK,
+  WASM_TRACE_STATUS_TRACE_LIMIT,
+  WASM_TRACE_STATUS_UNEXPECTED,
   WASM_UTF16_UNIT_BYTES,
 } from "../runtime/wasm_abi.ts";
 import { emitSyntaxFromPortablePlan } from "../../compiler/runtime_plan/syntax_emit.ts";
@@ -57,14 +60,54 @@ import {
 } from "../runtime/plan.ts";
 import { generatedSourceBanner } from "../runtime/provenance.ts";
 import { emitWasmModule, type WasmModuleImage } from "./module_emit.ts";
-import type {
-  ParserKit,
-  ParserKitActionEntry,
-  ParserKitGotoEntry,
-  ParserKitLexerSpec,
-  ParserKitLrAction,
-} from "../../runtime/parser_plan.ts";
-import { encodeCombinedWasmParserPlan } from "../../runtime/wasm_plan.ts";
+import {
+  encodeCombinedWasmParserPlan,
+  parserPlanRuntimeMetadataVersion,
+} from "../../runtime/wasm_plan.ts";
+
+export interface WasmRuntimeMetadata {
+  readonly portablePlan: PortableParserPlanMetadata;
+  readonly runtimeImplementation: typeof RUNTIME_IMPLEMENTATION_METADATA;
+  readonly defaultPreserveTrivia: boolean;
+  readonly conflictProfile: "deterministic" | "branching";
+  readonly ruleNames: readonly string[];
+  readonly namedTokens: readonly WasmRuntimeNamedToken[];
+  readonly literalTokens: readonly WasmRuntimeLiteralToken[];
+  readonly lexerSpecs: readonly WasmRuntimeLexerSpec[];
+  readonly acceptCandidates: readonly (readonly number[])[];
+  readonly terminals: readonly WasmRuntimeTerminal[];
+  readonly fields: readonly RuleFieldSchema[];
+}
+
+export interface WasmRuntimeNamedToken {
+  readonly id: number;
+  readonly name: string;
+  readonly trivia: boolean;
+}
+
+export interface WasmRuntimeLiteralToken {
+  readonly id: number;
+  readonly value: string;
+}
+
+export type WasmRuntimeLexerSpec =
+  | { readonly type: "named"; readonly tokenId: number }
+  | { readonly type: "literal"; readonly literalId: number };
+
+export type WasmRuntimeTerminal =
+  | { readonly id: number; readonly type: "eof"; readonly display: string }
+  | {
+    readonly id: number;
+    readonly type: "named";
+    readonly display: string;
+    readonly tokenId: number;
+  }
+  | {
+    readonly id: number;
+    readonly type: "literal";
+    readonly display: string;
+    readonly literalId: number;
+  };
 
 export interface WasmPlan {
   analyzed: AnalyzedGrammar;
@@ -73,7 +116,7 @@ export interface WasmPlan {
   dfa: Dfa;
   portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
-  parserKit: ParserKit;
+  runtimeMetadata: WasmRuntimeMetadata;
   wasm: WasmModuleImage;
   parserPlanBytes: Uint8Array;
   directory: string;
@@ -108,7 +151,7 @@ export function planWasmTarget(
   if (options.preserveTrivia !== undefined) {
     preserveTrivia = options.preserveTrivia;
   }
-  const parserKit = createWasmRuntimeParserKit(
+  const runtimeMetadata = createWasmRuntimeMetadata(
     analyzed,
     runtimePlan,
     preserveTrivia,
@@ -117,11 +160,11 @@ export function planWasmTarget(
     portableDfa,
     portableLr,
     runtimePlan.portable.version,
-    wasmCoreRuntimeMetadata(parserKit, portableBnf),
+    wasmCoreRuntimeMetadata(analyzed, runtimePlan),
   );
   const parserPlanBytes = encodeCombinedWasmParserPlan(
     wasm.planBytes,
-    compactWasmRuntimePlan(parserKit),
+    compactWasmRuntimeMetadata(runtimeMetadata),
   );
   const generatedBytes = wasmGeneratedByteLengths(
     analyzed,
@@ -157,7 +200,7 @@ export function planWasmTarget(
     dfa: portableDfa,
     portable: runtimePlan.portable,
     portableMetadata: runtimePlan.portableMetadata,
-    parserKit,
+    runtimeMetadata,
     wasm,
     parserPlanBytes,
     directory: options.directory ?? "wasm",
@@ -228,6 +271,7 @@ function wasmRuntimeManifestSource(): string {
         parserPlan: {
           format: "baba-parser-plan",
           version: 1,
+          runtimeMetadataVersion: parserPlanRuntimeMetadataVersion,
           semantics: "baba-portable-v1",
           storage: "external-binary",
           moduleExport: "load_plan",
@@ -256,6 +300,7 @@ function wasmAbiDescriptor(): unknown {
     parserPlan: {
       format: "baba-parser-plan",
       version: 1,
+      runtimeMetadataVersion: parserPlanRuntimeMetadataVersion,
       semantics: "baba-portable-v1",
       storage: "external-binary",
     },
@@ -545,17 +590,27 @@ function wasmAbiDescriptor(): unknown {
       },
     },
     traceStatuses: {
-      ok: RUNTIME_TRACE_STATUS_OK,
-      unexpected: RUNTIME_TRACE_STATUS_UNEXPECTED,
-      internal: RUNTIME_TRACE_STATUS_INTERNAL,
-      branchLimit: RUNTIME_TRACE_STATUS_BRANCH_LIMIT,
-      traceLimit: RUNTIME_TRACE_STATUS_TRACE_LIMIT,
-      ambiguous: RUNTIME_TRACE_STATUS_AMBIGUOUS,
+      ok: WASM_TRACE_STATUS_OK,
+      unexpected: WASM_TRACE_STATUS_UNEXPECTED,
+      internal: WASM_TRACE_STATUS_INTERNAL,
+      branchLimit: WASM_TRACE_STATUS_BRANCH_LIMIT,
+      traceLimit: WASM_TRACE_STATUS_TRACE_LIMIT,
+      ambiguous: WASM_TRACE_STATUS_AMBIGUOUS,
     },
-    parserDiagnosticCodes: PARSER_DIAGNOSTIC_CODES,
+    parserDiagnosticCodes: {
+      parseLexicalError: PARSER_DIAGNOSTIC_CODES.parseLexicalError,
+      parseUnexpectedToken: PARSER_DIAGNOSTIC_CODES.parseUnexpectedToken,
+      parseTrailingInput: PARSER_DIAGNOSTIC_CODES.parseTrailingInput,
+      internalError: PARSER_DIAGNOSTIC_CODES.internalError,
+      traceLimit: PARSER_DIAGNOSTIC_CODES.traceLimit,
+      ambiguousParse: PARSER_DIAGNOSTIC_CODES.ambiguousParse,
+    },
     parserDiagnostics: {
       detailKinds: PARSER_DIAGNOSTIC_DETAIL_KINDS,
-      schemas: PARSER_DIAGNOSTIC_SCHEMAS,
+      schemas: PARSER_DIAGNOSTIC_SCHEMAS.filter((schema) => {
+        return schema.name !== "parseInvalidTokenStream" &&
+          schema.name !== "branchLimit";
+      }),
     },
   };
 }
@@ -573,15 +628,14 @@ import {
   createParserAsync as createSharedParserAsync,
 } from "@mewhhaha/baba/runtime/generated-wasm";
 import type {
+  AsyncParserInstanceOptions as SharedAsyncParserInstanceOptions,
   ParserInstanceOptions as SharedParserInstanceOptions,
 } from "@mewhhaha/baba/runtime/generated-wasm";
 
 export * from "./syntax.ts";
 export {
   parserDiagnosticCodeAmbiguousParse,
-  parserDiagnosticCodeBranchLimit,
   parserDiagnosticCodeInternalError,
-  parserDiagnosticCodeParseInvalidTokenStream,
   parserDiagnosticCodeParseLexicalError,
   parserDiagnosticCodeParseTrailingInput,
   parserDiagnosticCodeParseUnexpectedToken,
@@ -589,6 +643,7 @@ export {
   parserDiagnosticDetailKindNone,
   parserDiagnosticDetailKindParserState,
   parserPlanFormat,
+  parserPlanRuntimeMetadataVersion,
   parserPlanSemantics,
   parserPlanVersion,
   runtimeImplementationFormat,
@@ -607,14 +662,8 @@ export {
   wasmTokenRecordI32Count,
 } from "@mewhhaha/baba/runtime/generated-wasm";
 
-export interface ParserInstanceOptions extends SharedParserInstanceOptions {
-  plan: Uint8Array;
-}
-
-export interface AsyncParserInstanceOptions extends ParserInstanceOptions {
-  url?: URL;
-  planUrl?: URL;
-}
+export type ParserInstanceOptions = SharedParserInstanceOptions;
+export type AsyncParserInstanceOptions = SharedAsyncParserInstanceOptions;
 
 export interface ParserInstance {
   lex(source: string, options?: LexOptions): LexTapeResult;
@@ -636,292 +685,199 @@ export async function createParserAsync(
 `;
 }
 
-function createWasmRuntimeParserKit(
+function createWasmRuntimeMetadata(
   analyzed: AnalyzedGrammar,
   runtime: RuntimeParserPlan,
   preserveTrivia: boolean,
-): ParserKit {
-  const fieldSchemas = collectRuleFieldSchemas(analyzed);
-  const rootFieldSchema = fieldSchemas.find((schema) =>
-    schema.ruleId === analyzed.rootRule
-  );
-  let rootNodeType = "RuleNode";
-  if (rootFieldSchema !== undefined) {
-    rootNodeType = rootFieldSchema.nodeType;
+): WasmRuntimeMetadata {
+  const namedTokens: WasmRuntimeNamedToken[] = [];
+  const lexerSpecs: WasmRuntimeLexerSpec[] = [];
+  for (const token of analyzed.tokens) {
+    if (
+      token.kind !== "skip" && !analyzed.reachableTokens.has(token.id)
+    ) {
+      continue;
+    }
+    namedTokens.push({
+      id: token.id,
+      name: token.name,
+      trivia: token.kind === "skip",
+    });
+    lexerSpecs.push({ type: "named", tokenId: token.id });
   }
-  let rootRule = "module";
-  const analyzedRootRule = analyzed.rules[analyzed.rootRule];
-  if (analyzedRootRule !== undefined) {
-    rootRule = analyzedRootRule.name;
+  const literalTokens: WasmRuntimeLiteralToken[] = [];
+  for (const literal of analyzed.literals) {
+    if (!analyzed.reachableLiterals.has(literal.id)) {
+      continue;
+    }
+    literalTokens.push({ id: literal.id, value: literal.value });
+    lexerSpecs.push({ type: "literal", literalId: literal.id });
   }
-  let conflictProfile: "deterministic" | "branching" = "deterministic";
-  if (hasBranchingActions(runtime.lr.actions)) {
-    conflictProfile = "branching";
-  }
-  return {
-    schemaVersion: 1,
-    generator: "@mewhhaha/baba",
-    profile: "runtime",
-    portablePlan: { ...runtime.portableMetadata },
-    runtimeImplementation: {
-      format: RUNTIME_IMPLEMENTATION_METADATA.format,
-      version: RUNTIME_IMPLEMENTATION_METADATA.version,
-      semantics: RUNTIME_IMPLEMENTATION_METADATA.semantics,
-      hash: RUNTIME_IMPLEMENTATION_METADATA.hash,
-    },
-    grammar: {
-      name: analyzed.name,
-      rootRule,
-      rootRuleId: analyzed.rootRule,
-      rootNodeType,
-      rules: analyzed.rules.map((rule) => {
-        const schema = fieldSchemas.find((entry) => entry.ruleId === rule.id);
-        const ruleInfo: ParserKit["grammar"]["rules"][number] = {
-          id: rule.id,
-          name: rule.name,
-          reachable: analyzed.reachableRules.has(rule.id),
-          span: rule.span,
-        };
-        if (schema !== undefined) {
-          return { ...ruleInfo, nodeType: schema.nodeType };
-        }
-        return ruleInfo;
-      }),
-    },
-    tokens: {
-      named: analyzed.tokens.map((token) => {
-        let channel: "main" | "trivia" = "main";
-        if (token.kind === "skip") {
-          channel = "trivia";
-        }
-        return {
-          id: token.id,
-          name: token.name,
-          kind: token.kind,
-          channel,
-          pattern: token.patternSource,
-          priority: token.priority,
-          declarationOrder: token.declarationOrder,
-          reachable: token.kind === "skip" ||
-            analyzed.reachableTokens.has(token.id),
-          span: token.span,
-        };
-      }),
-      literals: analyzed.literals.map((literal) => ({
-        id: literal.id,
-        value: literal.value,
-        sourceOrder: literal.sourceOrder,
-        reachable: analyzed.reachableLiterals.has(literal.id),
-        span: literal.span,
-      })),
-    },
-    lexer: {
-      defaultPreserveTrivia: preserveTrivia,
-      specs: wasmLexerSpecs(analyzed),
-      dfa: {
-        start: runtime.dfa.start,
-        transitions: runtime.dfa.states.map((state) =>
-          state.transitions.map((transition) => ({
-            start: transition.start,
-            end: transition.end,
-            target: transition.target,
-          }))
-        ),
-        accepts: runtime.dfa.states.map((state) => {
-          if (state.selectedAccept === undefined) return -1;
-          if (state.selectedAccept === null) return -1;
-          return state.selectedAccept;
-        }),
-        acceptCandidates: runtime.portable.lexer.states.map((state) =>
-          orderAcceptCandidates(
-            runtime.portable.lexer.specifications,
-            state.accepts,
-          )
-        ),
-      },
-    },
-    bnf: {
-      startNonterminal: runtime.bnf.startNonterminal,
-      rootRuleNonterminal: runtime.bnf.rootRuleNonterminal,
-      eofTerminal: runtime.bnf.eofTerminal,
-      terminals: runtime.bnf.terminals.map((terminal) => ({ ...terminal })),
-      nonterminals: runtime.bnf.nonterminals.map((nonterminal) => ({
-        ...nonterminal,
-      })),
-      productions: runtime.bnf.productions.map((production) => ({
-        id: production.id,
-        lhs: production.lhs,
-        rhs: production.rhs.map((symbol) => ({ ...symbol })),
-        reducer: { ...production.reducer },
-      })),
-    },
-    lr: {
-      conflictProfile,
-      states: runtime.lr.states.map((state) => ({
-        id: state.id,
-        items: [],
-      })),
-      actions: wasmActionEntries(runtime.lr.actions),
-      gotos: wasmGotoEntries(runtime.lr.gotos),
-      stats: {
-        ...runtime.lr.stats,
-        coreItems: 0,
-        items: 0,
-      },
-    },
-    fields: {
-      rootNodeType,
-      rules: fieldSchemas.map((schema) => ({
-        ruleId: schema.ruleId,
-        ruleName: schema.ruleName,
-        nodeType: schema.nodeType,
-        fields: schema.fields.map((field) => ({ ...field })),
-      })),
-    },
-    displayNames: {
-      terminals: runtime.bnf.terminals.map((terminal) => ({
+  const terminals: WasmRuntimeTerminal[] = [];
+  for (const terminal of runtime.bnf.terminals) {
+    if (terminal.kind === "eof") {
+      terminals.push({
         id: terminal.id,
+        type: "eof",
         display: terminal.display,
-      })),
-      rules: analyzed.rules.map((rule) => ({
-        id: rule.id,
-        display: rule.name,
-      })),
-    },
+      });
+      continue;
+    }
+    if (terminal.kind === "named") {
+      if (terminal.tokenId === undefined) {
+        throw new Error(
+          `Wasm terminal ${terminal.id} is missing its named token id.`,
+        );
+      }
+      terminals.push({
+        id: terminal.id,
+        type: "named",
+        display: terminal.display,
+        tokenId: terminal.tokenId,
+      });
+      continue;
+    }
+    if (terminal.literalId === undefined) {
+      throw new Error(
+        `Wasm terminal ${terminal.id} is missing its literal id.`,
+      );
+    }
+    terminals.push({
+      id: terminal.id,
+      type: "literal",
+      display: terminal.display,
+      literalId: terminal.literalId,
+    });
+  }
+  let conflictProfile: WasmRuntimeMetadata["conflictProfile"] = "deterministic";
+  for (const row of runtime.lr.actions.values()) {
+    for (const actions of row.values()) {
+      if (actions.length > 1) {
+        conflictProfile = "branching";
+      }
+    }
+  }
+  const acceptCandidates = runtime.portable.lexer.states.map((state) => {
+    return [...state.accepts].sort((left, right) => {
+      const leftSpec = runtime.portable.lexer.specifications[left];
+      const rightSpec = runtime.portable.lexer.specifications[right];
+      if (leftSpec === undefined || rightSpec === undefined) {
+        return left - right;
+      }
+      let literalOrder = 0;
+      if (leftSpec.literal !== rightSpec.literal) {
+        if (leftSpec.literal) {
+          literalOrder = -1;
+        } else {
+          literalOrder = 1;
+        }
+      }
+      return rightSpec.priority - leftSpec.priority ||
+        literalOrder ||
+        leftSpec.order - rightSpec.order ||
+        left - right;
+    });
+  });
+  return {
+    portablePlan: runtime.portableMetadata,
+    runtimeImplementation: RUNTIME_IMPLEMENTATION_METADATA,
+    defaultPreserveTrivia: preserveTrivia,
+    conflictProfile,
+    ruleNames: analyzed.rules.map((rule) => rule.name),
+    namedTokens,
+    literalTokens,
+    lexerSpecs,
+    acceptCandidates,
+    terminals,
+    fields: collectRuleFieldSchemas(analyzed),
   };
 }
 
-function compactWasmRuntimePlan(kit: ParserKit): unknown {
+function compactWasmRuntimeMetadata(
+  metadata: WasmRuntimeMetadata,
+): unknown {
   let conflictProfile = 0;
-  if (kit.lr.conflictProfile === "branching") {
+  if (metadata.conflictProfile === "branching") {
     conflictProfile = 1;
+  }
+  const fieldIds = new Map<string, number>();
+  for (const schema of metadata.fields) {
+    for (const field of schema.fields) {
+      if (!fieldIds.has(field.name)) {
+        fieldIds.set(field.name, fieldIds.size);
+      }
+    }
   }
   return {
     m: [
-      kit.portablePlan.format,
-      kit.portablePlan.version,
-      kit.portablePlan.semantics,
-      kit.portablePlan.hash,
-      runtimeImplementationHash(kit),
+      parserPlanRuntimeMetadataVersion,
+      metadata.portablePlan.format,
+      metadata.portablePlan.version,
+      metadata.portablePlan.semantics,
+      metadata.portablePlan.hash,
+      metadata.runtimeImplementation.format,
+      metadata.runtimeImplementation.version,
+      metadata.runtimeImplementation.semantics,
+      metadata.runtimeImplementation.hash,
     ],
-    g: [
-      kit.grammar.name,
-      kit.grammar.rootRule,
-      kit.grammar.rootRuleId,
-      kit.grammar.rootNodeType,
-      kit.grammar.rules.map((rule) => [
-        rule.id,
-        rule.name,
-        rule.reachable,
-        rule.nodeType,
-      ]),
+    p: [
+      metadata.defaultPreserveTrivia,
+      conflictProfile,
     ],
-    t: [
-      kit.tokens.named.map((token) => {
-        let kind = 1;
-        if (token.kind === "token") kind = 0;
-        return [
-          token.id,
-          token.name,
-          kind,
-          token.priority,
-          token.declarationOrder,
-          token.reachable,
-        ];
-      }),
-      kit.tokens.literals.map((literal) => [
-        literal.id,
-        literal.value,
-        literal.sourceOrder,
-        literal.reachable,
-      ]),
-    ],
+    r: metadata.ruleNames,
+    n: metadata.namedTokens.map((token) => [
+      token.id,
+      token.name,
+      token.trivia,
+    ]),
+    i: metadata.literalTokens.map((literal) => [
+      literal.id,
+      literal.value,
+    ]),
     l: [
-      kit.lexer.defaultPreserveTrivia,
-      kit.lexer.specs.map((spec) => {
-        if (spec.type === "named") return [0, spec.tokenId];
+      metadata.lexerSpecs.map((spec) => {
+        if (spec.type === "named") {
+          return [0, spec.tokenId];
+        }
         return [1, spec.literalId];
       }),
-      kit.lexer.dfa.start,
-      kit.lexer.dfa.transitions.map((row) =>
-        row.map((transition) => [
-          transition.start,
-          transition.end,
-          transition.target,
-        ])
-      ),
-      kit.lexer.dfa.accepts,
-      kit.lexer.dfa.acceptCandidates,
+      metadata.acceptCandidates,
     ],
-    b: [
-      kit.bnf.startNonterminal,
-      kit.bnf.rootRuleNonterminal,
-      kit.bnf.eofTerminal,
-      kit.bnf.terminals.map(compactTerminal),
-      kit.bnf.nonterminals.map((nonterminal) => [
-        nonterminal.id,
-        nonterminal.name,
-        nonterminal.ruleId,
-        nonterminal.expressionId,
-      ]),
-      kit.bnf.productions.map((production) => [
-        production.id,
-        production.lhs,
-        production.rhs.map((symbol) => {
-          if (symbol.kind === "terminal") return [0, symbol.id];
-          return [1, symbol.id];
-        }),
-        compactReducer(production.reducer),
-      ]),
-    ],
-    r: [
-      conflictProfile,
-      kit.lr.states.length,
-      kit.lr.actions.map((entry) => [
-        entry.state,
-        entry.terminal,
-        entry.actions.map(compactAction),
-      ]),
-      kit.lr.gotos.map((entry) => [
-        entry.state,
-        entry.nonterminal,
-        entry.target,
-      ]),
-      [
-        kit.lr.stats.bnfProductions,
-        kit.lr.stats.states,
-        kit.lr.stats.coreItems,
-        kit.lr.stats.items,
-        kit.lr.stats.closureWork,
-        kit.lr.stats.actionEntries,
-        kit.lr.stats.gotoEntries,
-        kit.lr.stats.tableEntries,
-      ],
-    ],
+    d: metadata.terminals.map((terminal) => {
+      if (terminal.type === "eof") {
+        return [terminal.id, 0, terminal.display, -1];
+      }
+      if (terminal.type === "named") {
+        return [terminal.id, 1, terminal.display, terminal.tokenId];
+      }
+      return [terminal.id, 2, terminal.display, terminal.literalId];
+    }),
     f: [
-      kit.fields.rootNodeType,
-      kit.fields.rules.map((rule) => [
-        rule.ruleId,
-        rule.ruleName,
-        rule.nodeType,
-        rule.fields.map((field) => [
-          field.name,
-          field.type,
-          field.array,
-          field.nullable,
-        ]),
+      [...fieldIds.keys()],
+      metadata.fields.map((schema) => [
+        schema.ruleId,
+        schema.fields.map((field) => {
+          const fieldId = fieldIds.get(field.name);
+          if (fieldId === undefined) {
+            throw new Error(
+              `Wasm field '${field.name}' is missing its runtime field id.`,
+            );
+          }
+          return [
+            fieldId,
+            field.array,
+            field.nullable,
+            field.type.startsWith("ReadonlyArray<"),
+          ];
+        }),
       ]),
-    ],
-    d: [
-      kit.displayNames.terminals.map((entry) => [entry.id, entry.display]),
-      kit.displayNames.rules.map((entry) => [entry.id, entry.display]),
     ],
   };
 }
 
 function wasmCoreRuntimeMetadata(
-  kit: ParserKit,
-  bnf: BnfGrammar,
+  analyzed: AnalyzedGrammar,
+  runtime: RuntimeParserPlan,
 ): {
   readonly eofTerminal: number;
   readonly terminalBySpec: readonly number[];
@@ -934,312 +890,163 @@ function wasmCoreRuntimeMetadata(
   }[];
 } {
   const fieldIds = new Map<string, number>();
-  for (const schema of kit.fields.rules) {
+  for (const schema of collectRuleFieldSchemas(analyzed)) {
     for (const field of schema.fields) {
       if (!fieldIds.has(field.name)) {
         fieldIds.set(field.name, fieldIds.size);
       }
     }
   }
-  const terminalBySpec = kit.lexer.specs.map((spec) => {
-    if (spec.type === "named") {
-      const token = kit.tokens.named.find((entry) => entry.id === spec.tokenId);
-      if (token === undefined) {
-        throw new Error("Wasm lexer spec references an unknown named token.");
+  const terminalByNamedTokenId = new Map<number, number>();
+  const terminalByLiteralId = new Map<number, number>();
+  for (const terminal of runtime.bnf.terminals) {
+    if (terminal.kind === "named") {
+      if (terminal.tokenId === undefined) {
+        throw new Error(
+          `Wasm terminal ${terminal.id} is missing its named token id.`,
+        );
       }
-      if (token.channel === "trivia") return -1;
-      return terminalIdForNamedSpec(kit, spec.tokenId);
+      terminalByNamedTokenId.set(terminal.tokenId, terminal.id);
     }
-    return terminalIdForLiteralSpec(kit, spec.literalId);
+    if (terminal.kind === "literal") {
+      if (terminal.literalId === undefined) {
+        throw new Error(
+          `Wasm terminal ${terminal.id} is missing its literal id.`,
+        );
+      }
+      terminalByLiteralId.set(terminal.literalId, terminal.id);
+    }
+  }
+  const terminalBySpec: number[] = [];
+  for (const token of analyzed.tokens) {
+    if (
+      token.kind !== "skip" && !analyzed.reachableTokens.has(token.id)
+    ) {
+      continue;
+    }
+    if (token.kind === "skip") {
+      terminalBySpec.push(-1);
+      continue;
+    }
+    const terminal = terminalByNamedTokenId.get(token.id);
+    if (terminal === undefined) {
+      throw new Error(
+        `Wasm named token ${token.id} has no parser terminal.`,
+      );
+    }
+    terminalBySpec.push(terminal);
+  }
+  for (const literal of analyzed.literals) {
+    if (!analyzed.reachableLiterals.has(literal.id)) {
+      continue;
+    }
+    const terminal = terminalByLiteralId.get(literal.id);
+    if (terminal === undefined) {
+      throw new Error(
+        `Wasm literal ${literal.id} has no parser terminal.`,
+      );
+    }
+    terminalBySpec.push(terminal);
+  }
+  const acceptCandidates = runtime.portable.lexer.states.map((state) => {
+    return [...state.accepts].sort((left, right) => {
+      const leftSpec = runtime.portable.lexer.specifications[left];
+      const rightSpec = runtime.portable.lexer.specifications[right];
+      if (leftSpec === undefined || rightSpec === undefined) {
+        return left - right;
+      }
+      let literalOrder = 0;
+      if (leftSpec.literal !== rightSpec.literal) {
+        if (leftSpec.literal) {
+          literalOrder = -1;
+        } else {
+          literalOrder = 1;
+        }
+      }
+      return rightSpec.priority - leftSpec.priority ||
+        literalOrder ||
+        leftSpec.order - rightSpec.order ||
+        left - right;
+    });
   });
-  const acceptCandidates = kit.lexer.dfa.acceptCandidates;
-  if (acceptCandidates === undefined) {
-    throw new Error("Wasm lexer DFA is missing accept candidate rows.");
-  }
-  if (kit.bnf.productions.length !== bnf.productions.length) {
-    throw new Error("Wasm BNF production metadata is not aligned.");
-  }
-  const productions = bnf.productions.map((production, index) => {
+  const productions = runtime.bnf.productions.map((production, index) => {
     if (production.id !== index) {
-      throw new Error("Wasm BNF production ids must be dense by index.");
+      throw new Error(
+        `Wasm BNF production ${production.id} is not dense at index ${index}.`,
+      );
     }
-    const kitProduction = kit.bnf.productions[index];
-    if (kitProduction === undefined) {
-      throw new Error("Wasm reducer metadata is missing a production.");
+    let reducerKind: number;
+    let reducerArg = -1;
+    const reducer: ReducerSpec = production.reducer;
+    switch (reducer.kind) {
+      case "start":
+        reducerKind = 0;
+        break;
+      case "rule":
+        reducerKind = 1;
+        reducerArg = reducer.ruleId;
+        break;
+      case "terminal":
+        reducerKind = 2;
+        break;
+      case "ruleRef":
+        reducerKind = 3;
+        break;
+      case "identity":
+        reducerKind = 4;
+        break;
+      case "sequence":
+        reducerKind = 5;
+        break;
+      case "optionalEmpty":
+        reducerKind = 6;
+        break;
+      case "optionalSome":
+        reducerKind = 7;
+        break;
+      case "repeatEmpty":
+        reducerKind = 8;
+        break;
+      case "repeatAppend":
+        reducerKind = 9;
+        break;
+      case "repeat1First":
+        reducerKind = 10;
+        break;
+      case "repeat1Append":
+        reducerKind = 11;
+        break;
+      case "separatedFirst":
+        reducerKind = 12;
+        break;
+      case "separatedAppend":
+        reducerKind = 13;
+        break;
+      case "field": {
+        reducerKind = 14;
+        const fieldId = fieldIds.get(reducer.name);
+        if (fieldId === undefined) {
+          throw new Error(
+            `Wasm field reducer '${reducer.name}' has no runtime field id.`,
+          );
+        }
+        reducerArg = fieldId;
+        break;
+      }
     }
-    const reducer = compactCoreReducer(kitProduction.reducer, fieldIds);
     return {
       lhs: production.lhs,
       rhsLength: production.rhs.length,
-      reducerKind: reducer.kind,
-      reducerArg: reducer.arg,
+      reducerKind,
+      reducerArg,
     };
   });
   return {
-    eofTerminal: kit.bnf.eofTerminal,
+    eofTerminal: runtime.bnf.eofTerminal,
     terminalBySpec,
     acceptCandidates,
     productions,
   };
-}
-
-function compactCoreReducer(
-  reducer: ParserKit["bnf"]["productions"][number]["reducer"],
-  fieldIds: ReadonlyMap<string, number>,
-): { readonly kind: number; readonly arg: number } {
-  switch (reducer.kind) {
-    case "start":
-      return { kind: 0, arg: -1 };
-    case "rule":
-      return { kind: 1, arg: reducer.ruleId };
-    case "terminal":
-      return { kind: 2, arg: -1 };
-    case "ruleRef":
-      return { kind: 3, arg: -1 };
-    case "identity":
-      return { kind: 4, arg: -1 };
-    case "sequence":
-      return { kind: 5, arg: -1 };
-    case "optionalEmpty":
-      return { kind: 6, arg: -1 };
-    case "optionalSome":
-      return { kind: 7, arg: -1 };
-    case "repeatEmpty":
-      return { kind: 8, arg: -1 };
-    case "repeatAppend":
-      return { kind: 9, arg: -1 };
-    case "repeat1First":
-      return { kind: 10, arg: -1 };
-    case "repeat1Append":
-      return { kind: 11, arg: -1 };
-    case "separatedFirst":
-      return { kind: 12, arg: -1 };
-    case "separatedAppend":
-      return { kind: 13, arg: -1 };
-    case "field": {
-      const fieldId = fieldIds.get(reducer.name);
-      if (fieldId === undefined) {
-        throw new Error("Wasm field reducer references an unknown field.");
-      }
-      return { kind: 14, arg: fieldId };
-    }
-  }
-}
-
-function runtimeImplementationHash(kit: ParserKit): string {
-  if (kit.runtimeImplementation !== undefined) {
-    return kit.runtimeImplementation.hash;
-  }
-  return RUNTIME_IMPLEMENTATION_METADATA.hash;
-}
-
-function compactTerminal(terminal: ParserKit["bnf"]["terminals"][number]) {
-  if (terminal.kind === "eof") {
-    return [terminal.id, 0, terminal.key, terminal.display, undefined];
-  }
-  if (terminal.kind === "named") {
-    return [terminal.id, 1, terminal.key, terminal.display, terminal.tokenId];
-  }
-  return [terminal.id, 2, terminal.key, terminal.display, terminal.literalId];
-}
-
-function compactReducer(
-  reducer: ParserKit["bnf"]["productions"][number]["reducer"],
-) {
-  switch (reducer.kind) {
-    case "start":
-      return [0];
-    case "rule":
-      return [1, reducer.ruleId];
-    case "terminal":
-      return [2];
-    case "ruleRef":
-      return [3];
-    case "identity":
-      return [4];
-    case "sequence":
-      return [5];
-    case "optionalEmpty":
-      return [6];
-    case "optionalSome":
-      return [7];
-    case "repeatEmpty":
-      return [8];
-    case "repeatAppend":
-      return [9];
-    case "repeat1First":
-      return [10];
-    case "repeat1Append":
-      return [11];
-    case "separatedFirst":
-      return [12];
-    case "separatedAppend":
-      return [13];
-    case "field":
-      return [14, reducer.name];
-  }
-}
-
-function compactAction(action: ParserKitLrAction) {
-  if (action.kind === "shift") return [0, action.state];
-  if (action.kind === "reduce") return [1, action.production];
-  return [2];
-}
-
-function terminalIdForNamedSpec(kit: ParserKit, tokenId: number): number {
-  const terminal = kit.bnf.terminals.find((entry) =>
-    entry.kind === "named" && entry.tokenId === tokenId
-  );
-  if (terminal === undefined) {
-    throw new Error("Wasm named lexer spec has no parser terminal.");
-  }
-  return terminal.id;
-}
-
-function terminalIdForLiteralSpec(kit: ParserKit, literalId: number): number {
-  const terminal = kit.bnf.terminals.find((entry) =>
-    entry.kind === "literal" && entry.literalId === literalId
-  );
-  if (terminal === undefined) {
-    throw new Error("Wasm literal lexer spec has no parser terminal.");
-  }
-  return terminal.id;
-}
-
-function orderAcceptCandidates(
-  specs: RuntimeParserPlan["portable"]["lexer"]["specifications"],
-  accepts: readonly number[],
-): readonly number[] {
-  return [...accepts].sort((left, right) => {
-    const leftSpec = specs[left];
-    const rightSpec = specs[right];
-    if (leftSpec === undefined || rightSpec === undefined) {
-      return left - right;
-    }
-    let literalOrder = 0;
-    if (leftSpec.literal !== rightSpec.literal) {
-      if (leftSpec.literal) {
-        literalOrder = -1;
-      } else {
-        literalOrder = 1;
-      }
-    }
-    return rightSpec.priority - leftSpec.priority ||
-      literalOrder ||
-      leftSpec.order - rightSpec.order ||
-      left - right;
-  });
-}
-
-function wasmLexerSpecs(analyzed: AnalyzedGrammar): ParserKitLexerSpec[] {
-  const specs: ParserKitLexerSpec[] = [];
-  for (const token of analyzed.tokens) {
-    if (
-      token.kind === "skip" ||
-      (token.kind === "token" && analyzed.reachableTokens.has(token.id))
-    ) {
-      specs.push({
-        type: "named",
-        tokenId: token.id,
-      });
-    }
-  }
-  for (const literal of analyzed.literals) {
-    if (analyzed.reachableLiterals.has(literal.id)) {
-      specs.push({
-        type: "literal",
-        literalId: literal.id,
-      });
-    }
-  }
-  return specs;
-}
-
-function wasmActionEntries(
-  table: RuntimeParserPlan["lr"]["actions"],
-): ParserKitActionEntry[] {
-  const entries: ParserKitActionEntry[] = [];
-  for (
-    const [state, row] of [...table.entries()].sort(([left], [right]) =>
-      left - right
-    )
-  ) {
-    for (
-      const [terminal, actions] of [...row.entries()].sort((
-        [left],
-        [right],
-      ) => left - right)
-    ) {
-      entries.push({
-        state,
-        terminal,
-        actions: actions.map(wasmActionEntry).sort(compareActions),
-      });
-    }
-  }
-  return entries;
-}
-
-function wasmGotoEntries(
-  table: RuntimeParserPlan["lr"]["gotos"],
-): ParserKitGotoEntry[] {
-  const entries: ParserKitGotoEntry[] = [];
-  for (
-    const [state, row] of [...table.entries()].sort(([left], [right]) =>
-      left - right
-    )
-  ) {
-    for (
-      const [nonterminal, target] of [...row.entries()].sort((
-        [left],
-        [right],
-      ) => left - right)
-    ) {
-      entries.push({ state, nonterminal, target });
-    }
-  }
-  return entries;
-}
-
-function hasBranchingActions(
-  table: RuntimeParserPlan["lr"]["actions"],
-): boolean {
-  for (const row of table.values()) {
-    for (const actions of row.values()) {
-      if (actions.length > 1) return true;
-    }
-  }
-  return false;
-}
-
-function wasmActionEntry(action: LrAction): ParserKitLrAction {
-  if (action.kind === "shift") return { kind: "shift", state: action.state };
-  if (action.kind === "reduce") {
-    return { kind: "reduce", production: action.production };
-  }
-  return { kind: "accept" };
-}
-
-function compareActions(
-  left: ParserKitLrAction,
-  right: ParserKitLrAction,
-): number {
-  const leftRank = actionRank(left);
-  const rightRank = actionRank(right);
-  if (leftRank !== rightRank) return leftRank - rightRank;
-  if (left.kind === "shift" && right.kind === "shift") {
-    return left.state - right.state;
-  }
-  if (left.kind === "reduce" && right.kind === "reduce") {
-    return left.production - right.production;
-  }
-  return 0;
-}
-
-function actionRank(action: ParserKitLrAction): number {
-  if (action.kind === "shift") return 0;
-  if (action.kind === "reduce") return 1;
-  return 2;
 }
 
 function runtimePlanningOptions(

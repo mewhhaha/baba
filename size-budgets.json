@@ -1,7 +1,8 @@
 {
-  "publishPayloadBytes": 2023000,
+  "publishPayloadBytes": 1400000,
   "publishGeneratedExampleBytes": 0,
   "largestPublishFileBytes": 260000,
+  "generatedWasmLoaderSourceBytes": 120000,
   "runtimeBudgets": {
     "large-runtime": {
       "wasmBytesMax": {
@@ -16,13 +17,13 @@
         "currentBudget": 100,
         "targetBudget": 2
       },
-      "portablePlanJsonBytesMax": {
-        "currentBudget": 700000,
+      "parserPlanBinaryBytesMax": {
+        "currentBudget": 125000,
         "targetBudget": 100000
       },
-      "parserPlanBinaryBytesMax": {
-        "currentBudget": 350000,
-        "targetBudget": 100000
+      "runtimeMetadataBinaryBytesMax": {
+        "currentBudget": 10000,
+        "targetBudget": 7500
       }
     }
   }

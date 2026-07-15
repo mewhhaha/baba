@@ -180,11 +180,16 @@ Useful options:
 Generated `mod.ts` exports:
 
 - `createParser({ bytes, plan } | { module, plan })`
-- `createParserAsync({ bytes, plan } | { module, plan } | { url, planUrl })`
+- `createParserAsync()` with exactly one of `bytes`, `module`, or `url`, and
+  exactly one of `plan` or `planUrl`
 - parser-plan, runtime identity, and Wasm ABI constants
 
 Each `createParser()` call owns its own `WebAssembly.Instance`, memory, parser
 state, source buffers, and disposal lifecycle.
+
+`createParser()` does not load defaults: both the plan and exactly one Wasm
+module source are required. Baba 5 parser plans use runtime metadata version 2;
+regenerate plans produced by earlier Baba versions.
 
 Parser instances expose a Wasm-first runtime surface:
 

@@ -6,8 +6,7 @@ import {
   type GeneratedFile,
   parseMetadata,
 } from "../src/mod.ts";
-import { inflateCompactRuntimePlan } from "../src/runtime/mod.ts";
-import { decodeCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
+import { inspectCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
 
 export interface RuntimeBenchReport {
   readonly generatedAt: string;
@@ -55,33 +54,20 @@ export interface ArtifactSizes {
   readonly externalWasmBytes: number;
   readonly abiJsonBytes: number;
   readonly parserPlanBinaryBytes: number;
+  readonly corePlanBinaryBytes: number;
+  readonly runtimeMetadataBinaryBytes: number;
   readonly totalGeneratedBytes: number;
   readonly largestFile: { readonly path: string; readonly bytes: number };
 }
 
 export interface PlanStats {
-  readonly tokenCount: number;
-  readonly literalCount: number;
   readonly lexerStateCount: number;
   readonly lexerTransitionCount: number;
-  readonly lexerRowKinds: LexerRowKindStats;
   readonly acceptCandidateCount: number;
   readonly lrStateCount: number;
   readonly actionEntries: number;
   readonly gotoEntries: number;
   readonly productionCount: number;
-  readonly reducerCount: number;
-  readonly fieldCount: number;
-  readonly branchConflictCount: number;
-  readonly portablePlanJsonBytes: number;
-}
-
-export interface LexerRowKindStats {
-  empty: number;
-  single: number;
-  small: number;
-  binary: number;
-  ascii: number;
 }
 
 interface RuntimeBudgetConfig {
@@ -92,8 +78,8 @@ interface RuntimeFixtureBudget {
   readonly wasmBytesMax?: number | BudgetPair;
   readonly wasmColdInstantiateMsMax?: number | BudgetPair;
   readonly smallParseMsMax?: number | BudgetPair;
-  readonly portablePlanJsonBytesMax?: number | BudgetPair;
   readonly parserPlanBinaryBytesMax?: number | BudgetPair;
+  readonly runtimeMetadataBinaryBytesMax?: number | BudgetPair;
 }
 
 interface BudgetPair {
@@ -191,7 +177,7 @@ async function benchFixture(
   const bundle = allCompile.value.bundle;
   if (!bundle) throw new Error(`Fixture ${name} did not produce a bundle.`);
 
-  const planStats = planStatsFromRuntimePlan(runtimePlanFromBundle(bundle));
+  const planStats = planStatsFromBundle(bundle);
   const artifactSizes = artifactSizesFromBundle(bundle);
   const wasm = await benchWasmTarget(
     name,
@@ -303,50 +289,7 @@ interface RuntimeParseLike {
   readonly ok?: boolean;
 }
 
-function planStatsFromRuntimePlan(kit: {
-  tokens: { named: readonly unknown[]; literals: readonly unknown[] };
-  lexer: {
-    dfa: {
-      transitions: readonly (readonly unknown[])[];
-      accepts: readonly number[];
-    };
-  };
-  lr: {
-    states: readonly unknown[];
-    actions: readonly { actions: readonly unknown[] }[];
-    gotos: readonly unknown[];
-  };
-  bnf: { productions: readonly { reducer: unknown }[] };
-  fields: { rules: readonly { fields: readonly unknown[] }[] };
-}): PlanStats {
-  const portableJsonBytes = byteLength(JSON.stringify(kit));
-  return {
-    tokenCount: kit.tokens.named.length,
-    literalCount: kit.tokens.literals.length,
-    lexerStateCount: kit.lexer.dfa.transitions.length,
-    lexerTransitionCount: kit.lexer.dfa.transitions.reduce(
-      (sum, row) => sum + row.length,
-      0,
-    ),
-    lexerRowKinds: lexerRowKindStats(kit.lexer.dfa.transitions),
-    acceptCandidateCount: kit.lexer.dfa.accepts.length,
-    lrStateCount: kit.lr.states.length,
-    actionEntries: kit.lr.actions.length,
-    gotoEntries: kit.lr.gotos.length,
-    productionCount: kit.bnf.productions.length,
-    reducerCount:
-      kit.bnf.productions.filter((production) => production.reducer).length,
-    fieldCount: kit.fields.rules.reduce(
-      (sum, rule) => sum + rule.fields.length,
-      0,
-    ),
-    branchConflictCount:
-      kit.lr.actions.filter((entry) => entry.actions.length > 1).length,
-    portablePlanJsonBytes: portableJsonBytes,
-  };
-}
-
-function runtimePlanFromBundle(bundle: GeneratedBundle) {
+function planStatsFromBundle(bundle: GeneratedBundle): PlanStats {
   const file = bundle.files.find((entry) => entry.path === "wasm/parser.plan");
   if (file === undefined) {
     throw new Error("Wasm bundle did not include wasm/parser.plan.");
@@ -354,47 +297,16 @@ function runtimePlanFromBundle(bundle: GeneratedBundle) {
   if (file.encoding !== "binary") {
     throw new Error("wasm/parser.plan must be binary.");
   }
-  const decoded = decodeCombinedWasmParserPlan(file.content);
-  return inflateCompactRuntimePlan(decoded.compactRuntimePlan);
-}
-
-function lexerRowKindStats(
-  rows: readonly (readonly unknown[])[],
-): LexerRowKindStats {
-  const stats: LexerRowKindStats = {
-    empty: 0,
-    single: 0,
-    small: 0,
-    binary: 0,
-    ascii: 0,
+  const plan = inspectCombinedWasmParserPlan(file.content);
+  return {
+    lexerStateCount: plan.tables.lexerStates,
+    lexerTransitionCount: plan.tables.lexerTransitions,
+    acceptCandidateCount: plan.tables.lexerAcceptCandidates,
+    lrStateCount: plan.tables.parserStates,
+    actionEntries: plan.tables.parserActions,
+    gotoEntries: plan.tables.parserGotos,
+    productionCount: plan.tables.productions,
   };
-  for (const row of rows) {
-    const transitions = row as readonly {
-      readonly start: number;
-      readonly end: number;
-    }[];
-    if (transitions.length === 0) {
-      stats.empty++;
-    } else if (transitions.length === 1) {
-      stats.single++;
-    } else {
-      const asciiCoverage = transitions.reduce((count, transition) => {
-        const start = Math.max(0, transition.start);
-        const end = Math.min(127, transition.end);
-        return end >= start ? count + end - start + 1 : count;
-      }, 0);
-      if (
-        asciiCoverage >= 8 || (asciiCoverage > 0 && transitions.length >= 4)
-      ) {
-        stats.ascii++;
-      } else if (transitions.length <= 4) {
-        stats.small++;
-      } else {
-        stats.binary++;
-      }
-    }
-  }
-  return stats;
 }
 
 function artifactSizesFromBundle(bundle: GeneratedBundle): ArtifactSizes {
@@ -407,6 +319,13 @@ function artifactSizesFromBundle(bundle: GeneratedBundle): ArtifactSizes {
     (largest, file) => file.bytes > largest.bytes ? file : largest,
     { path: "", bytes: 0 },
   );
+  const parserPlan = bundle.files.find((file) =>
+    file.path === "wasm/parser.plan"
+  );
+  if (parserPlan === undefined || parserPlan.encoding !== "binary") {
+    throw new Error("Wasm bundle did not include a binary wasm/parser.plan.");
+  }
+  const plan = inspectCombinedWasmParserPlan(parserPlan.content);
   return {
     wasmAdapterSourceBytes: files.filter((file) =>
       file.path.startsWith("wasm/") && file.path.endsWith(".ts")
@@ -416,6 +335,8 @@ function artifactSizesFromBundle(bundle: GeneratedBundle): ArtifactSizes {
     parserPlanBinaryBytes: files
       .filter((file) => file.path.endsWith("/parser.plan"))
       .reduce((sum, file) => sum + file.bytes, 0),
+    corePlanBinaryBytes: plan.corePlanBytes,
+    runtimeMetadataBinaryBytes: plan.runtimeMetadataBytes,
     totalGeneratedBytes: files.reduce((sum, file) => sum + file.bytes, 0),
     largestFile,
   };
@@ -457,16 +378,16 @@ export async function applyRuntimeBudgets(
     addRuntimeBudgetCheck(
       checks,
       fixture.name,
-      "portablePlanJsonBytesMax",
-      fixture.planStats.portablePlanJsonBytes,
-      budget.portablePlanJsonBytesMax,
+      "parserPlanBinaryBytesMax",
+      fixture.artifactSizes.parserPlanBinaryBytes,
+      budget.parserPlanBinaryBytesMax,
     );
     addRuntimeBudgetCheck(
       checks,
       fixture.name,
-      "parserPlanBinaryBytesMax",
-      fixture.artifactSizes.parserPlanBinaryBytes,
-      budget.parserPlanBinaryBytesMax,
+      "runtimeMetadataBinaryBytesMax",
+      fixture.artifactSizes.runtimeMetadataBinaryBytes,
+      budget.runtimeMetadataBinaryBytesMax,
     );
   }
   return {
@@ -514,10 +435,14 @@ function renderTextReport(report: RuntimeBenchReport): string {
       }, largest ${
         formatBytes(fixture.artifactSizes.largestFile.bytes)
       } ${fixture.artifactSizes.largestFile.path}`,
-      `  plan: ${fixture.planStats.tokenCount} tokens, ${fixture.planStats.literalCount} literals, ${fixture.planStats.lexerStateCount} lexer states, ${fixture.planStats.lrStateCount} LR states, ${
-        formatBytes(fixture.planStats.portablePlanJsonBytes)
-      } runtime plan JSON`,
-      `  lexer rows: ${fixture.planStats.lexerRowKinds.ascii} ascii, ${fixture.planStats.lexerRowKinds.single} single, ${fixture.planStats.lexerRowKinds.small} small, ${fixture.planStats.lexerRowKinds.binary} binary, ${fixture.planStats.lexerRowKinds.empty} empty`,
+      `  plan: ${fixture.planStats.lexerStateCount} lexer states, ${fixture.planStats.lexerTransitionCount} lexer transitions, ${fixture.planStats.acceptCandidateCount} accept candidates, ${fixture.planStats.lrStateCount} LR states, ${fixture.planStats.actionEntries} actions, ${fixture.planStats.gotoEntries} gotos, ${fixture.planStats.productionCount} productions`,
+      `  plan bytes: ${
+        formatBytes(fixture.artifactSizes.corePlanBinaryBytes)
+      } core, ${
+        formatBytes(fixture.artifactSizes.runtimeMetadataBinaryBytes)
+      } runtime metadata, ${
+        formatBytes(fixture.artifactSizes.parserPlanBinaryBytes)
+      } total`,
     );
     const wasm = fixture.targets.wasm;
     if (wasm) {
@@ -576,6 +501,22 @@ function renderComparison(
       "wasm bytes",
       previous.targets.wasm?.wasmBytes,
       current.targets.wasm?.wasmBytes,
+      formatBytes,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "core plan bytes",
+      previous.artifactSizes.corePlanBinaryBytes,
+      current.artifactSizes.corePlanBinaryBytes,
+      formatBytes,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "runtime metadata bytes",
+      previous.artifactSizes.runtimeMetadataBinaryBytes,
+      current.artifactSizes.runtimeMetadataBinaryBytes,
       formatBytes,
     );
     pushDelta(

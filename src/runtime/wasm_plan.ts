@@ -47,20 +47,43 @@ const WASM_PLAN_RUNTIME_SECTION_MAGIC = new Uint8Array([
   84,
   0,
 ]);
-const WASM_PLAN_RUNTIME_SECTION_VERSION = 1;
+export const parserPlanRuntimeMetadataVersion = 2 as const;
 
 export interface DecodedWasmParserPlan {
   readonly coreByteLength: number;
   readonly parserPlanVersion: number;
+  readonly runtimeMetadataVersion: number;
   readonly compactRuntimePlan: unknown;
 }
 
 export interface ValidatedWasmParserPlan {
   readonly coreByteLength: number;
   readonly parserPlanVersion: number;
+  readonly runtimeMetadataVersion: number;
   readonly runtimeMetadataHeaderOffset: number;
   readonly runtimeMetadataOffset: number;
   readonly runtimeMetadataLength: number;
+}
+
+export interface WasmParserPlanInfo {
+  readonly format: "baba-parser-plan";
+  readonly coreFormatVersion: number;
+  readonly parserPlanVersion: number;
+  readonly runtimeMetadataVersion: number;
+  readonly totalBytes: number;
+  readonly corePlanBytes: number;
+  readonly runtimeMetadataHeaderBytes: number;
+  readonly runtimeMetadataBytes: number;
+  readonly tables: {
+    readonly lexerStates: number;
+    readonly lexerTransitions: number;
+    readonly lexerSpecifications: number;
+    readonly lexerAcceptCandidates: number;
+    readonly parserStates: number;
+    readonly parserActions: number;
+    readonly parserGotos: number;
+    readonly productions: number;
+  };
 }
 
 interface CompactSectionOffset {
@@ -86,7 +109,7 @@ export function encodeCombinedWasmParserPlan(
   let offset = corePlanBytes.byteLength;
   combined.set(WASM_PLAN_RUNTIME_SECTION_MAGIC, offset);
   offset += WASM_PLAN_RUNTIME_SECTION_MAGIC.byteLength;
-  writeU32(combined, offset, WASM_PLAN_RUNTIME_SECTION_VERSION);
+  writeU32(combined, offset, parserPlanRuntimeMetadataVersion);
   offset += I32_BYTES;
   writeU32(combined, offset, compactBytes.byteLength);
   offset += I32_BYTES;
@@ -107,6 +130,7 @@ export function decodeCombinedWasmParserPlan(
   return {
     coreByteLength: validated.coreByteLength,
     parserPlanVersion: validated.parserPlanVersion,
+    runtimeMetadataVersion: validated.runtimeMetadataVersion,
     compactRuntimePlan,
   };
 }
@@ -131,7 +155,12 @@ export function validateCombinedWasmParserPlan(
   offset += WASM_PLAN_RUNTIME_SECTION_MAGIC.byteLength;
   const sectionVersion = readU32(planBytes, offset);
   offset += I32_BYTES;
-  if (sectionVersion !== WASM_PLAN_RUNTIME_SECTION_VERSION) {
+  if (sectionVersion !== parserPlanRuntimeMetadataVersion) {
+    if (sectionVersion === 1) {
+      throw new Error(
+        "Unsupported Wasm parser plan runtime metadata version 1. Regenerate the parser plan with Baba 5.",
+      );
+    }
     throw new Error(
       `Unsupported Wasm parser plan runtime metadata version ${sectionVersion}.`,
     );
@@ -144,9 +173,74 @@ export function validateCombinedWasmParserPlan(
   return {
     coreByteLength: core.coreByteLength,
     parserPlanVersion: core.parserPlanVersion,
+    runtimeMetadataVersion: sectionVersion,
     runtimeMetadataHeaderOffset,
     runtimeMetadataOffset: offset,
     runtimeMetadataLength: compactLength,
+  };
+}
+
+export function inspectCombinedWasmParserPlan(
+  planBytes: Uint8Array,
+): WasmParserPlanInfo {
+  const validated = validateCombinedWasmParserPlan(planBytes);
+  const dfaStateCount = readI32(planBytes, CORE_HEADER_DFA_STATE_COUNT);
+  const parserStateCount = readI32(
+    planBytes,
+    CORE_HEADER_PARSER_STATE_COUNT,
+  );
+  const transitionRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_TRANSITION_ROWS),
+    "transition rows",
+  );
+  const actionRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_ACTION_ROWS),
+    "action rows",
+  );
+  const gotoRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_GOTO_ROWS),
+    "goto rows",
+  );
+  const acceptCandidateRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_ACCEPT_CANDIDATE_ROWS),
+    "lexer accept candidate rows",
+  );
+  return {
+    format: "baba-parser-plan",
+    coreFormatVersion: CORE_PLAN_FORMAT_VERSION,
+    parserPlanVersion: validated.parserPlanVersion,
+    runtimeMetadataVersion: validated.runtimeMetadataVersion,
+    totalBytes: planBytes.byteLength,
+    corePlanBytes: validated.coreByteLength,
+    runtimeMetadataHeaderBytes: validated.runtimeMetadataOffset -
+      validated.runtimeMetadataHeaderOffset,
+    runtimeMetadataBytes: validated.runtimeMetadataLength,
+    tables: {
+      lexerStates: dfaStateCount,
+      lexerTransitions: readRowValue(
+        planBytes,
+        transitionRows,
+        dfaStateCount,
+      ),
+      lexerSpecifications: readI32(planBytes, CORE_HEADER_SPEC_COUNT),
+      lexerAcceptCandidates: readRowValue(
+        planBytes,
+        acceptCandidateRows,
+        dfaStateCount,
+      ),
+      parserStates: parserStateCount,
+      parserActions: readRowValue(
+        planBytes,
+        actionRows,
+        parserStateCount,
+      ),
+      parserGotos: readRowValue(
+        planBytes,
+        gotoRows,
+        parserStateCount,
+      ),
+      productions: readI32(planBytes, CORE_HEADER_PRODUCTION_COUNT),
+    },
   };
 }
 
