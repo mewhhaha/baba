@@ -270,8 +270,8 @@ export interface GrammarExpressionOperator {
   span: SourceSpan;
 }
 
-/** Output target selected for a generation run. Baba currently generates Wasm only. */
-export type GenerateTarget = "wasm";
+/** Output target selected for a generation run. */
+export type GenerateTarget = "wasm" | "tree-sitter";
 
 /** Cross-target portability diagnostic policy. */
 export type PortabilityMode = "strict" | "warn" | "off";

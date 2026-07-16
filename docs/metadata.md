@@ -3,8 +3,8 @@
 Status: current metadata guide.
 
 Baba metadata is optional JSON loaded next to a grammar or passed through the
-CLI. Current metadata controls parser conflict policy and editor query fragments
-without changing the grammar language itself.
+CLI. It controls standalone parser conflict policy, Tree-sitter grammar shaping,
+and editor query fragments without changing the grammar language itself.
 
 ## Versioning
 
@@ -28,11 +28,6 @@ semantics must lower into that plan deterministically. Metadata that requires
 external scanner behavior should produce a structured diagnostic rather than
 silently changing runtime semantics.
 
-Legacy Tree-sitter grammar-generation fields such as `word`, `extras`,
-`externals`, and rule-shaping metadata may still parse for compatibility with
-older metadata files, but Baba no longer generates `grammar.js`. The current
-Tree-sitter-related output is query fragments under `queries/generated-*.scm`.
-
 ### Parser Conflict Policy
 
 The optional `parser` block controls standalone parser conflict handling:
@@ -54,6 +49,52 @@ The optional `parser` block controls standalone parser conflict handling:
 `resolutions` make a conflict deterministic. `conflicts` declares a conflict
 that may be explored with bounded branch search. Stable conflict IDs reported by
 diagnostics are required selectors for both fields.
+
+## Tree-sitter Grammar Metadata
+
+Select `--target tree-sitter` to emit `grammar.js` and non-empty
+`queries/generated-*.scm` files. Select `--target all` to emit these alongside
+the Wasm bundle.
+
+Tree-sitter-only declarations live at the metadata root:
+
+```json
+{
+  "version": 2,
+  "externals": ["APPLICATION_WS"],
+  "extras": [{ "kind": "rule", "name": "whitespace" }],
+  "word": "identifier",
+  "supertypes": ["expression"],
+  "conflicts": [["expression", "application"]],
+  "inline": ["hidden_name"],
+  "rules": {
+    "application": {
+      "wrap": { "kind": "prec.left", "value": 4 },
+      "paths": {
+        "function": { "alias_ref": "function_name" }
+      }
+    },
+    "hidden_name": {
+      "paths": { "": { "hidden_path": true } }
+    }
+  }
+}
+```
+
+`conflicts` is Tree-sitter's named rule-group declaration; it is distinct from
+the stable conflict IDs under `parser.conflicts`. Baba token `priority` becomes
+Tree-sitter lexical precedence. Rule `wrap` and path `wrap` accept `prec`,
+`prec.left`, and `prec.right`. Path selectors use field names from the Baba
+grammar and can add a field, alias a reference, create a named alias node,
+inline a referenced rule, or hide it. An empty path selects the rule root;
+root-level `hidden_path` emits that rule through Tree-sitter's `inline` list.
+
+`externals` is the deliberate escape hatch for scanner-specific behavior. Baba
+declares those symbols in `grammar.js` but does not generate or overwrite the
+scanner implementation. Keep the implementation in the conventional
+`src/scanner.c` or `src/scanner.cc` and implement Tree-sitter's external scanner
+ABI there. This allows grammars such as Duck to retain scanner-owned whitespace
+application while the grammar structure remains generated.
 
 ## Compatibility
 

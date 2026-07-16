@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 5.1.0
+
+### Added
+
+- Added a `tree-sitter` generation target that emits `grammar.js` alongside
+  non-empty query fragments. `--target all` now emits both Wasm and Tree-sitter
+  artifacts.
+- Restored Tree-sitter metadata lowering for conflicts, lexical and parse
+  precedence, aliases, hidden/inline rules, extras, and user-owned external
+  scanners.
+
 ## 5.0.0
 
 ### Added

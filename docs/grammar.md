@@ -83,9 +83,10 @@ The Wasm runtime target does not support reachable external scanner tokens.
 Metadata that declares external scanner symbols produces a structured diagnostic
 when those symbols are reachable from the selected root.
 
-The public target is the generated Wasm bundle. Target-specific metadata that
-cannot lower into the generated parser plan should produce a structured
-diagnostic instead of changing runtime behavior silently.
+The Tree-sitter target accepts those symbols and emits them in the `externals`
+array in `grammar.js`. Scanner implementation remains user-owned at
+`src/scanner.c` or `src/scanner.cc`, following Tree-sitter's external scanner
+ABI. Target-specific metadata does not change Wasm runtime behavior silently.
 
 ## Diagnostics
 
