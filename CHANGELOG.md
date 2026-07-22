@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 6.1.0
+
+### Added
+
+- Restored the `tree-sitter` target for `grammar.js` generation and
+  Tree-sitter-specific metadata for extras, word selection, supertypes,
+  conflicts, inline rules, precedence, aliases, and hidden paths.
+
+### Changed
+
+- `--target all` emits both Wasm and Tree-sitter artifacts again. Unguarded
+  contextual tokens lower to Tree-sitter lexical rules; guarded contextual
+  tokens report a target-specific diagnostic.
+
 ## 6.0.0
 
 ### Added
@@ -15,22 +29,20 @@
 - Bumped the portable parser-plan format to version 2, runtime semantics to
   version 2, and the Wasm core-plan format to version 3. Existing generated
   plans must be regenerated.
-- Kept `grammar.js` generation as the `tree-sitter` target on the current
-  analyzed grammar. Unguarded contextual tokens lower to Tree-sitter lexical
-  rules; guarded contextual tokens report a target-specific diagnostic.
 
 ### Removed
 
 - Removed the unpublished legacy TypeScript `ParserKit` runtime. The generated
-  Wasm runtime and portable parser-plan version 2 are now Baba's only owned
-  runtime execution path.
+  Wasm runtime and portable parser-plan version 2 are now the only parser
+  execution path.
 - Removed the legacy EBNF object/parser entry path and test-only portable-plan
   compatibility modules. Public compilation now accepts grammar source or the
   canonical `GrammarDocument` returned by `parseGrammar()`.
 - Removed `metadata.externals`; external scanner callbacks are replaced by
   portable contextual tokens.
-- Removed the no-op portability mode. Target selection now determines whether
-  Wasm runtime planning, Tree-sitter grammar generation, or both run.
+- Removed ignored Tree-sitter grammar-generation metadata and the no-op
+  portability mode. Metadata now owns parser conflict policy and generated query
+  configuration only.
 - Removed duplicate deprecated `array` and `nullable` flags from v2 CST field
   plans. `cardinality` is the sole serialized field-shape contract.
 
