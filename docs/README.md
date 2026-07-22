@@ -7,8 +7,8 @@ maintain a Baba parser without reading historical design material first.
 ## Start Here
 
 - [Grammar](grammar.md): the grammar syntax accepted by the public CLI.
-- [Metadata](metadata.md): optional `baba.json` fields for root selection,
-  parser conflicts, and target behavior.
+- [Metadata](metadata.md): optional `baba.json` fields for parser conflicts,
+  `grammar.js` shaping, queries, and target behavior.
 - [Wasm Target](wasm.md): generated files and the TypeScript runtime API.
 - [Migrating to Baba 5](migrating-to-5.md): required import, parser creation,
   regeneration, option, and diagnostic changes from Baba 4.
@@ -31,6 +31,7 @@ Baba currently generates a Wasm-first parser bundle:
 ```text
 grammar.baba + baba.json -> generated/wasm/
                          -> generated/queries/
+                         -> generated/grammar.js with --target tree-sitter
 ```
 
 The generated `wasm/` directory contains:

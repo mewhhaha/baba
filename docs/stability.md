@@ -74,6 +74,18 @@ Generated modules import their loader from
 `@mewhhaha/baba/runtime/generated-wasm`. Low-level helper names and embedded
 byte-array layout are implementation details.
 
+## Generated Tree-sitter API
+
+The `tree-sitter` target emits `grammar.js` plus non-empty generated query
+fragments. Tree-sitter rule names, fields, aliases, precedence wrappers,
+supertypes, conflicts, inline rules, extras, and word-token selection are stable
+when declared through grammar source and metadata. Formatting and private helper
+expressions inside generated `grammar.js` are not stable.
+
+Contextual tokens without trailing lookahead emit as named Tree-sitter lexical
+rules. Guarded contextual tokens produce a structured target diagnostic because
+Tree-sitter's `grammar.js` regex surface cannot preserve Baba's trailing guards.
+
 ## Internal BRL
 
 The internal runtime language is private and unstable. Its syntax, IR, verifier,

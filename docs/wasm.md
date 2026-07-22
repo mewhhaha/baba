@@ -21,7 +21,8 @@ wasm/
 Only non-empty query fragments are emitted. Grammars with metadata-driven
 locals, folds, tags, textobjects, or injections also get corresponding
 `queries/generated-*.scm` files. These files restore the editor-highlighting
-contract without reintroducing `grammar.js` generation.
+contract. `grammar.js` is emitted separately when the `tree-sitter` target is
+selected.
 
 `parser.wasm` contains the generic lexer/parser lookup runtime. The engine is
 authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded

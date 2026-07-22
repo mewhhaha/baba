@@ -14,8 +14,20 @@ export interface SourceSpan {
 export interface BabaMetadata {
   /** Metadata schema version. Omit to use the current schema; when present, must be 2. */
   version?: 2;
+  /** Extra tokens or rules accepted between Tree-sitter tokens. */
+  extras?: TreeSitterExtra[];
+  /** Token used by Tree-sitter for keyword extraction. */
+  word?: string;
+  /** Rule names emitted as Tree-sitter supertypes. */
+  supertypes?: string[];
+  /** Tree-sitter conflict rule groups. */
+  conflicts?: string[][];
+  /** Rule names emitted in Tree-sitter's inline list. */
+  inline?: string[];
   /** Query generation metadata. */
   queries?: TreeSitterQueriesMetadata;
+  /** Per-rule Tree-sitter shaping metadata. */
+  rules?: Record<string, TreeSitterRuleMetadata>;
   /** Standalone parser runtime conflict policy. */
   parser?: ParserRuntimeMetadata;
 }
@@ -200,8 +212,8 @@ export interface GrammarExpressionOperator {
   span: SourceSpan;
 }
 
-/** Output target selected for a generation run. Baba currently generates Wasm only. */
-export type GenerateTarget = "wasm";
+/** Output target selected for a generation run. */
+export type GenerateTarget = "wasm" | "tree-sitter";
 
 /** Shared options for targets backed by the portable standalone runtime. */
 export interface PortableRuntimePlanningOptions {
@@ -441,4 +453,46 @@ export interface TreeSitterInjectionMetadata {
   node: string;
   /** Tree-sitter injection language name. */
   language: string;
+}
+
+/** A Tree-sitter extra token or rule. */
+export type TreeSitterExtra =
+  | { kind: "regex"; value: string }
+  | { kind: "rule"; name: string };
+
+/** Per-rule Tree-sitter shaping metadata. */
+export interface TreeSitterRuleMetadata {
+  /** Token wrapper for the rendered rule. */
+  token?: TreeSitterRuleToken;
+  /** Precedence wrapper for the rendered rule. */
+  wrap?: TreeSitterRuleWrap;
+  /** Root or named-field path rewrites. */
+  paths?: Record<string, TreeSitterPathMetadata>;
+}
+
+/** Tree-sitter token wrapper metadata. */
+export type TreeSitterRuleToken =
+  | { kind: "token" }
+  | { kind: "token.immediate" };
+
+/** Tree-sitter precedence wrapper metadata. */
+export type TreeSitterRuleWrap =
+  | { kind: "prec"; value: number }
+  | { kind: "prec.left"; value?: number }
+  | { kind: "prec.right"; value?: number };
+
+/** Tree-sitter metadata applied to an expression path. */
+export interface TreeSitterPathMetadata {
+  /** Field name to apply at this path. */
+  field?: string;
+  /** Precedence wrapper to apply at this path. */
+  wrap?: TreeSitterRuleWrap;
+  /** Alias this path as a reference to an existing rule. */
+  alias_ref?: string;
+  /** Alias this path as a new named node. */
+  alias_node?: string;
+  /** Render this path inline rather than as a node reference. */
+  inline_path?: boolean;
+  /** Hide the node produced at this path. */
+  hidden_path?: boolean;
 }

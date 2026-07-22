@@ -72,6 +72,11 @@ Lookahead is supported only at the end of a contextual regex. It does not enable
 callbacks, mutable scanner state, or arbitrary JavaScript regular-expression
 features.
 
+The Wasm target encodes these guards in its portable parser plan. The
+Tree-sitter target emits unguarded contextual tokens as named lexical rules, but
+reports `TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD` when a contextual token uses
+trailing lookahead because `grammar.js` cannot preserve that constraint.
+
 ## Rules
 
 Rules are named grammar expressions:
@@ -109,9 +114,10 @@ validation.
 External scanner callbacks are not part of the grammar or metadata contract. Use
 contextual tokens with portable trailing guards for syntax-sensitive lexing.
 
-The public target is the generated Wasm bundle. Target-specific metadata that
-cannot lower into the generated parser plan should produce a structured
-diagnostic instead of changing runtime behavior silently.
+The default target is the generated Wasm bundle. `--target tree-sitter` emits
+`grammar.js`, while `--target all` emits both targets. Target-specific metadata
+or token behavior that cannot be represented by the selected target produces a
+structured diagnostic instead of changing semantics silently.
 
 ## Diagnostics
 

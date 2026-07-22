@@ -7,22 +7,11 @@ import {
   parseMetadata,
 } from "./helpers.ts";
 
-Deno.test("metadata rejects removed grammar-generation declarations", () => {
-  const removedKeys = [
-    "externals",
-    "extras",
-    "word",
-    "supertypes",
-    "conflicts",
-    "inline",
-    "rules",
-  ];
-  for (const key of removedKeys) {
-    assertThrowsIncludes(
-      () => parseMetadata(JSON.stringify({ version: 2, [key]: [] })),
-      `Unknown metadata key '${key}'`,
-    );
-  }
+Deno.test("metadata rejects external scanner declarations", () => {
+  assertThrowsIncludes(
+    () => parseMetadata('{"version":2,"externals":["INDENT"]}'),
+    "Unknown metadata key 'externals'",
+  );
 });
 
 Deno.test("grammar diagnostics are stable and keep related spans", () => {

@@ -27,6 +27,7 @@ import {
   planPortableRuntime,
   type RuntimeParserPlanningOptions,
 } from "./targets/runtime/plan.ts";
+import { emitTreeSitterGrammarFile } from "./targets/tree_sitter_grammar.ts";
 import { emitTreeSitterQueryFiles } from "./targets/tree_sitter_queries.ts";
 export { applyBundle } from "./output.ts";
 
@@ -59,7 +60,7 @@ export function parseMetadata(source: string): BabaMetadata {
   }
 }
 
-/** Validates a grammar for the Wasm lexer/parser target. */
+/** Validates a grammar for the selected generation targets. */
 export function validateGrammar(
   grammar: GrammarDocument,
   options: ValidateOptions = {},
@@ -81,37 +82,47 @@ export function validateGrammar(
 
   const { analyzed, runtimeOptions, metadata } = analyzeForPlanning(
     prepared.grammar,
-    targets,
     selectedGrammarName(undefined, prepared.name),
     options,
   );
   diagnostics.push(...analyzed.diagnostics);
   if (hasErrors(diagnostics)) return diagnostics;
 
-  const runtimePlan = planPortableRuntime(
-    analyzed,
-    runtimeOptions,
-    metadata,
-  );
-  diagnostics.push(...runtimePlan.diagnostics);
-  try {
-    diagnostics.push(
-      ...planWasmTarget(
-        analyzed,
-        options.wasm,
-        metadata,
-        runtimePlan,
-      ).diagnostics,
+  if (targets.includes("wasm")) {
+    const runtimePlan = planPortableRuntime(
+      analyzed,
+      runtimeOptions,
+      metadata,
     );
-  } catch (error) {
-    diagnostics.push(
-      toBabaError(error, "WASM_TARGET_INTERNAL_ERROR").toDiagnostic(),
-    );
+    diagnostics.push(...runtimePlan.diagnostics);
+    try {
+      diagnostics.push(
+        ...planWasmTarget(
+          analyzed,
+          options.wasm,
+          metadata,
+          runtimePlan,
+        ).diagnostics,
+      );
+    } catch (error) {
+      diagnostics.push(
+        toBabaError(error, "WASM_TARGET_INTERNAL_ERROR").toDiagnostic(),
+      );
+    }
+  }
+  if (targets.includes("tree-sitter") && !hasErrors(diagnostics)) {
+    try {
+      emitTreeSitterGrammarFile(analyzed, metadata);
+    } catch (error) {
+      diagnostics.push(
+        toBabaError(error, "TREE_SITTER_TARGET_ERROR").toDiagnostic(),
+      );
+    }
   }
   return diagnostics;
 }
 
-/** Compiles a grammar into a Wasm lexer/parser bundle, returning diagnostics without throwing. */
+/** Compiles a grammar into generated target files, returning diagnostics without throwing. */
 export function compile(
   sourceOrGrammar: string | GrammarDocument,
   options: CompileOptions = {},
@@ -137,20 +148,22 @@ export function compile(
 
   const { analyzed, runtimeOptions, metadata } = analyzeForPlanning(
     prepared.grammar,
-    targets,
     selectedGrammarName(options.name, prepared.name),
     options,
   );
   diagnostics.push(...analyzed.diagnostics);
   let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
-  const runtimePlan = planPortableRuntime(
-    analyzed,
-    runtimeOptions,
-    metadata,
-  );
-  diagnostics.push(...runtimePlan.diagnostics);
+  let runtimePlan: ReturnType<typeof planPortableRuntime> | undefined;
+  if (targets.includes("wasm")) {
+    runtimePlan = planPortableRuntime(
+      analyzed,
+      runtimeOptions,
+      metadata,
+    );
+    diagnostics.push(...runtimePlan.diagnostics);
+  }
 
-  if (!hasErrors(diagnostics)) {
+  if (!hasErrors(diagnostics) && runtimePlan !== undefined) {
     try {
       wasmPlan = planWasmTarget(
         analyzed,
@@ -173,6 +186,9 @@ export function compile(
     const files: GeneratedFile[] = [];
     if (isWasmPlan(wasmPlan)) {
       files.push(...emitWasmTarget(wasmPlan, options.wasm));
+    }
+    if (targets.includes("tree-sitter")) {
+      files.push(emitTreeSitterGrammarFile(analyzed, metadata));
     }
     files.push(...emitTreeSitterQueryFiles(analyzed, metadata));
 
@@ -197,7 +213,7 @@ export function compile(
   }
 }
 
-/** Generates a deterministic Wasm lexer/parser bundle from grammar source or a parsed grammar. */
+/** Generates a deterministic target bundle from grammar source or a parsed grammar. */
 export function generate(
   sourceOrGrammar: string | GrammarDocument,
   options: GenerateOptions = {},
@@ -217,15 +233,8 @@ export function generate(
 export { BabaError, formatDiagnostic };
 
 function sharedRuntimePlanningOptions(
-  targets: readonly GenerateTarget[],
   options: CompileOptions | ValidateOptions,
 ): RuntimeParserPlanningOptions {
-  if (!targets.includes("wasm")) {
-    throw new BabaError({
-      code: "UNKNOWN_TARGET",
-      message: "Baba now generates Wasm parser/lexer artifacts only.",
-    });
-  }
   if (options.wasm !== undefined) {
     return wasmRuntimePlanningOptions(options.wasm);
   }
@@ -271,12 +280,12 @@ function normalizeTargets(
   if (!targets || targets.length === 0) return ["wasm"];
   const result: GenerateTarget[] = [];
   for (const target of targets) {
-    if (target !== "wasm") {
+    if (target !== "wasm" && target !== "tree-sitter") {
       throw new BabaError({
         code: "UNKNOWN_TARGET",
         message: `Unsupported generation target '${
           String(target)
-        }'. Baba now generates Wasm parser/lexer artifacts only.`,
+        }'. Expected 'wasm' or 'tree-sitter'.`,
       });
     }
     if (!result.includes(target)) result.push(target);
@@ -307,11 +316,10 @@ interface PlannedGrammar {
 /** Shared analyze-and-plan setup used by both validateGrammar and compile. */
 function analyzeForPlanning(
   grammar: GrammarDocument,
-  targets: readonly GenerateTarget[],
   name: string,
   options: CompileOptions | ValidateOptions,
 ): PlannedGrammar {
-  const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
+  const runtimeOptions = sharedRuntimePlanningOptions(options);
   const metadata = metadataOrEmpty(options.metadata);
   const analyzed = analyzeGrammarDocumentForWasm(grammar, {
     name,

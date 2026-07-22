@@ -44,6 +44,11 @@ export type {
   ParserRuntimeMetadata,
   PortableRuntimePlanningOptions,
   SourceSpan,
+  TreeSitterExtra,
+  TreeSitterPathMetadata,
+  TreeSitterRuleMetadata,
+  TreeSitterRuleToken,
+  TreeSitterRuleWrap,
   ValidateOptions,
   WasmTargetOptions,
 } from "./ast.ts";

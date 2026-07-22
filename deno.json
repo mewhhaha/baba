@@ -77,6 +77,7 @@
       "src/targets/runtime/wasm_engine_rs/Cargo.lock",
       "src/targets/runtime/wasm_engine_rs/Cargo.toml",
       "src/targets/runtime/wasm_engine_rs/src/lib.rs",
+      "src/targets/tree_sitter_grammar.ts",
       "src/targets/tree_sitter_queries.ts",
       "src/compiler/runtime_plan/bnf.ts",
       "src/compiler/runtime_plan/lr1.ts",

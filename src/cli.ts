@@ -1,5 +1,5 @@
 /**
- * Command-line entrypoint for compiling explicit grammar source to Wasm lexer/parser outputs.
+ * Command-line entrypoint for compiling grammar source to generated targets.
  *
  * @module
  */
@@ -325,7 +325,7 @@ function parseArgs(args: string[]): Options {
 }
 
 function helpText(): string {
-  return `baba - compile explicit grammar source to a Wasm lexer/parser
+  return `baba - compile explicit grammar source to generated parser artifacts
 
 Usage:
   baba <grammar.baba> --out generated
@@ -335,7 +335,7 @@ Usage:
 Options:
   --name        Grammar/target name. Defaults to grammar
   --root        Root grammar rule. Defaults to the first grammar rule
-  --target      Output target: wasm. "all" is accepted as an alias for wasm
+  --target      Output target: wasm, tree-sitter, or all
   --wasm-dir    Wasm target output directory. Defaults to wasm
   --preserve-trivia  Preserve skip matches as trivia tokens
   --discard-trivia   Omit skip matches from generated lexer output
@@ -353,7 +353,7 @@ Options:
   --wasm-generated-byte-limit  Maximum generated Wasm bytes
   --parser-stats  Emit Wasm runtime parser planning statistics
   --wasm-stats   Emit Wasm runtime parser planning statistics
-  --metadata    JSON metadata for parser conflict policy and token/runtime options
+  --metadata    JSON metadata for parser policy, Tree-sitter shaping, and queries
   --meta        Alias for --metadata
   --diagnostic-format  Diagnostic output format: text or json. Defaults to text
   --explain-targets  Print target support diagnostics
@@ -453,6 +453,7 @@ function explainTargets(
 ): TargetExplanation[] {
   const targets: Array<[GenerateTarget, string]> = [
     ["wasm", "Wasm"],
+    ["tree-sitter", "Tree-sitter"],
   ];
   return targets.map(([target, label]) => {
     const result = compile(grammar, {
@@ -497,14 +498,20 @@ function diagnosticFormatFromArgs(
 
 function addTarget(options: Options, target: string): void {
   let targets: GenerateTarget[] = [];
-  if (target === "all" || target === "wasm") {
+  if (target === "all") {
+    targets = ["wasm", "tree-sitter"];
+  }
+  if (target === "wasm") {
     targets = ["wasm"];
+  }
+  if (target === "tree-sitter") {
+    targets = ["tree-sitter"];
   }
   if (targets.length === 0) {
     throw new BabaError({
       code: "CLI_BAD_ARGS",
       message:
-        `Unknown target '${target}'. Baba generates the wasm target only.`,
+        `Unknown target '${target}'. Expected wasm, tree-sitter, or all.`,
     });
   }
   for (const value of targets) {

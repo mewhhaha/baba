@@ -1,16 +1,18 @@
 # baba
 
-Baba compiles explicit grammar source plus optional metadata into a usable Wasm
-lexer/parser bundle.
+Baba compiles explicit grammar source plus optional metadata into Wasm and
+Tree-sitter parser artifacts.
 
 The public flow is intentionally small:
 
 ```text
 grammar.baba + baba.json -> generated/wasm parser and lexer
                          -> generated/queries editor query fragments
+                         -> generated/grammar.js with --target tree-sitter
 ```
 
-Only the Wasm parser/lexer bundle is part of the public generation path. The
+The default target is Wasm. `--target tree-sitter` emits `grammar.js` and
+non-empty editor query fragments, while `--target all` emits both targets. The
 generated `parser.wasm` is a generic Rust-authored engine embedded in the Baba
 package; grammar generation only writes grammar-specific plan/types around that
 prebuilt engine.
@@ -118,10 +120,10 @@ queries/
   generated-injections.scm
 ```
 
-Only non-empty files are written. The generated paths deliberately use
+Only non-empty query files are written. The generated paths deliberately use
 `generated-*.scm` names so user-owned `queries/*.scm` files can coexist with
-Baba output. The current public target does not generate `grammar.js`; it emits
-query fragments and the Wasm parser artifacts.
+Baba output. Select `--target tree-sitter` to emit these files with
+`grammar.js`, or `--target all` to emit them with both parser targets.
 
 ## Grammar Reference
 
@@ -166,7 +168,8 @@ baba generate <grammar.baba> --out generated
 
 Useful options:
 
-- `--metadata baba.json` reads parser metadata.
+- `--metadata baba.json` reads parser and Tree-sitter metadata.
+- `--target wasm|tree-sitter|all` selects generated targets.
 - `--root module` selects the root rule.
 - `--name tiny` sets generated identity metadata.
 - `--wasm-dir parser` changes the output directory.
