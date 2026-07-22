@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 6.0.0
+
 ### Added
 
 - Added portable trailing lookahead guards for contextual tokens. Generated Wasm
@@ -29,6 +31,17 @@
   configuration only.
 - Removed duplicate deprecated `array` and `nullable` flags from v2 CST field
   plans. `cardinality` is the sole serialized field-shape contract.
+
+## 5.1.0
+
+### Added
+
+- Added a `tree-sitter` generation target that emits `grammar.js` alongside
+  non-empty query fragments. `--target all` emits both Wasm and Tree-sitter
+  artifacts.
+- Restored Tree-sitter metadata lowering for conflicts, lexical and parse
+  precedence, aliases, hidden/inline rules, extras, and user-owned external
+  scanners.
 
 ## 5.0.0
 
