@@ -2,8 +2,28 @@ import {
   analyzeGrammar,
   assert,
   assertEquals,
+  assertThrowsIncludes,
   parseGrammar,
+  parseMetadata,
 } from "./helpers.ts";
+
+Deno.test("metadata rejects removed grammar-generation declarations", () => {
+  const removedKeys = [
+    "externals",
+    "extras",
+    "word",
+    "supertypes",
+    "conflicts",
+    "inline",
+    "rules",
+  ];
+  for (const key of removedKeys) {
+    assertThrowsIncludes(
+      () => parseMetadata(JSON.stringify({ version: 2, [key]: [] })),
+      `Unknown metadata key '${key}'`,
+    );
+  }
+});
 
 Deno.test("grammar diagnostics are stable and keep related spans", () => {
   const source = `

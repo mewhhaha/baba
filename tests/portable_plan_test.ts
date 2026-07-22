@@ -1,28 +1,28 @@
-import { analyzeGrammar } from "../src/compiler/analyze.ts";
-import { buildPortableParserPlan } from "../src/compiler/portable_plan/build.ts";
+import { parseGrammar } from "../src/api.ts";
+import { analyzeGrammarDocumentForWasm } from "../src/compiler/grammar_wasm_analysis.ts";
 import {
+  parsePortableParserPlanJson,
+  type PortableParserPlan,
+  portablePlanStatistics,
   portablePlanToBnf,
   portablePlanToDfa,
   portablePlanToLrTable,
-} from "../src/compiler/portable_plan/adapters.ts";
-import {
-  parsePortableParserPlanJson,
   serializePortableParserPlanJson,
-} from "../src/compiler/portable_plan/serialize_json.ts";
-import { portablePlanStatistics } from "../src/compiler/portable_plan/statistics.ts";
-import { validatePortableParserPlan } from "../src/compiler/portable_plan/validate.ts";
-import type { PortableParserPlan } from "../src/compiler/portable_plan/plan.ts";
+  validatePortableParserPlan,
+} from "../src/targets/runtime/portable_plan.ts";
+import { planPortableRuntime } from "../src/targets/runtime/plan.ts";
 import { assert, assertEquals, assertIncludes } from "./helpers.ts";
-import { parseEbnf } from "../src/parser.ts";
 
 function portablePlanFor(source: string): PortableParserPlan {
-  const grammar = parseEbnf(source);
-  const analyzed = analyzeGrammar(grammar, { name: "portable_fixture" });
+  const grammar = parseGrammar(source);
+  const analyzed = analyzeGrammarDocumentForWasm(grammar, {
+    name: "portable_fixture",
+  });
   assertEquals(analyzed.diagnostics.length, 0);
-  const result = buildPortableParserPlan(analyzed);
+  const result = planPortableRuntime(analyzed);
   assertEquals(result.diagnostics.length, 0);
-  assert(result.runtime);
-  return result.runtime.portable;
+  assert("portable" in result);
+  return result.portable;
 }
 
 function portableFixturePlan(): PortableParserPlan {
@@ -42,6 +42,8 @@ Deno.test("portable parser plan serializes deterministically and round-trips", (
   const firstJson = serializePortableParserPlanJson(first);
   const secondJson = serializePortableParserPlanJson(second);
   assertEquals(firstJson, secondJson);
+  assertEquals(first.version, 2);
+  assertEquals(first.semantics, "baba-portable-v2");
   assertIncludes(firstJson, '"format": "baba-parser-plan"');
   assertIncludes(firstJson, '"stableId": "p_');
   assertIncludes(firstJson, '"reducers": [');
@@ -155,7 +157,7 @@ Deno.test("portable parser plan validation reports malformed untrusted plans", (
   const plan = portableFixturePlan();
   const cases: Array<[string, (plan: any) => void, string]> = [
     ["wrong format", (copy) => copy.format = "other", "$.format"],
-    ["wrong version", (copy) => copy.version = 2, "$.version"],
+    ["wrong version", (copy) => copy.version = 1, "$.version"],
     ["bad top-level root rule", (copy) => copy.rootRule = 999, "$.rootRule"],
     [
       "bad symbol root rule",

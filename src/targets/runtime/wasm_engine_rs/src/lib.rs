@@ -3,7 +3,7 @@
 use core::panic::PanicInfo;
 
 const WASM_ABI_VERSION: i32 = 7;
-const RUNTIME_IMPLEMENTATION_VERSION: i32 = 1;
+const RUNTIME_IMPLEMENTATION_VERSION: i32 = 2;
 const MAX_WASM_PAGES: i32 = 65_535;
 const SOURCE_ENCODING_UTF16: i32 = 1;
 const SPAN_UNIT_UTF16: i32 = 1;
@@ -11,13 +11,12 @@ const HOST_OWNERSHIP_CALLER_MANAGED: i32 = 1;
 const RESULT_LIFETIME_CALLER_BUFFER: i32 = 1;
 
 const PLAN_MAGIC: i32 = 0x3150_5742;
-const PLAN_FORMAT_VERSION: i32 = 2;
+const PLAN_FORMAT_VERSION: i32 = 3;
 const PLAN_HEADER_MAGIC: i32 = 0;
 const PLAN_HEADER_FORMAT_VERSION: i32 = 1;
 const PLAN_HEADER_PARSER_PLAN_VERSION: i32 = 2;
 const PLAN_HEADER_DFA_STATE_COUNT: i32 = 3;
 const PLAN_HEADER_PARSER_STATE_COUNT: i32 = 4;
-const PLAN_HEADER_ACCEPTS: i32 = 5;
 const PLAN_HEADER_ASCII_TRANSITIONS: i32 = 6;
 const PLAN_HEADER_TRANSITION_ROWS: i32 = 7;
 const PLAN_HEADER_TRANSITIONS: i32 = 8;
@@ -33,7 +32,20 @@ const PLAN_HEADER_ACCEPT_CANDIDATE_ROWS: i32 = 17;
 const PLAN_HEADER_ACCEPT_CANDIDATES: i32 = 18;
 const PLAN_HEADER_PRODUCTION_COUNT: i32 = 19;
 const PLAN_HEADER_PRODUCTIONS: i32 = 20;
-const PLAN_HEADER_BYTES: i32 = 21 * 4;
+const PLAN_HEADER_SPEC_FLAGS: i32 = 21;
+const PLAN_HEADER_SPEC_FOLLOW_STARTS: i32 = 22;
+const PLAN_HEADER_SPEC_NOT_FOLLOW_STARTS: i32 = 23;
+const PLAN_HEADER_GUARD_STATE_COUNT: i32 = 24;
+const PLAN_HEADER_GUARD_ACCEPTS: i32 = 25;
+const PLAN_HEADER_GUARD_TRANSITION_ROWS: i32 = 26;
+const PLAN_HEADER_GUARD_TRANSITIONS: i32 = 27;
+const PLAN_HEADER_SPEC_WORD_ROWS: i32 = 28;
+const PLAN_HEADER_WORD_ROWS: i32 = 29;
+const PLAN_HEADER_WORD_CODE_POINTS: i32 = 30;
+const PLAN_HEADER_BYTES: i32 = 31 * 4;
+const SPEC_FLAG_CONTEXTUAL: i32 = 1;
+const SPEC_FLAG_FOLLOW_EOF: i32 = 2;
+const SPEC_FLAG_HAS_FOLLOW: i32 = 4;
 const COMPACT_I16_OFFSET_TAG: i32 = 2;
 const COMPACT_U16_OFFSET_BASE: i32 = 0x4000_0000;
 
@@ -309,7 +321,7 @@ pub extern "C" fn lex_one(src: i32, len: i32, offset: i32, result: i32) -> i32 {
         }
         index += decoded.width;
         state = target;
-        let accept = header_table_value(PLAN_HEADER_ACCEPTS, state);
+        let accept = selected_global_spec(src, len, index, state);
         if accept >= 0 {
             best_spec = accept;
             best_end = index;
@@ -346,7 +358,7 @@ pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
             }
             index += decoded.width;
             state = target;
-            let accept = header_table_value(PLAN_HEADER_ACCEPTS, state);
+            let accept = selected_global_spec(src, len, index, state);
             if accept >= 0 {
                 best_spec = accept;
                 best_end = index;
@@ -431,6 +443,135 @@ fn transition(state: i32, code_point: i32) -> i32 {
         index += 1;
     }
     -1
+}
+
+fn selected_global_spec(src: i32, len: i32, end: i32, accepting_state: i32) -> i32 {
+    let rows = header(PLAN_HEADER_ACCEPT_CANDIDATE_ROWS);
+    let mut index = table_value(rows, accepting_state);
+    let stop = table_value(rows, accepting_state + 1);
+    while index < stop {
+        let spec = table_value(header(PLAN_HEADER_ACCEPT_CANDIDATES), index);
+        if spec_guard_matches(spec, src, len, end) {
+            return spec;
+        }
+        index += 1;
+    }
+    -1
+}
+
+fn spec_guard_matches(spec: i32, src: i32, len: i32, offset: i32) -> bool {
+    if spec < 0 || spec >= header(PLAN_HEADER_SPEC_COUNT) {
+        return false;
+    }
+    let flags = header_table_value(PLAN_HEADER_SPEC_FLAGS, spec);
+    let follow_start = header_table_value(PLAN_HEADER_SPEC_FOLLOW_STARTS, spec);
+    let not_follow_start = header_table_value(PLAN_HEADER_SPEC_NOT_FOLLOW_STARTS, spec);
+    let spec_word_rows = header(PLAN_HEADER_SPEC_WORD_ROWS);
+    let word_start = table_value(spec_word_rows, spec);
+    let word_end = table_value(spec_word_rows, spec + 1);
+    if src < 0 {
+        return flags & (SPEC_FLAG_HAS_FOLLOW | SPEC_FLAG_FOLLOW_EOF) == 0
+            && not_follow_start < 0
+            && word_start == word_end;
+    }
+    if flags & SPEC_FLAG_HAS_FOLLOW != 0 || flags & SPEC_FLAG_FOLLOW_EOF != 0 {
+        let followed = offset == len && flags & SPEC_FLAG_FOLLOW_EOF != 0
+            || guard_dfa_matches(follow_start, src, len, offset);
+        if !followed {
+            return false;
+        }
+    }
+    if not_follow_start >= 0 && guard_dfa_matches(not_follow_start, src, len, offset) {
+        return false;
+    }
+    !excluded_word_matches(spec, src, len, offset)
+}
+
+fn guard_dfa_matches(start: i32, src: i32, len: i32, offset: i32) -> bool {
+    if start < 0 || start >= header(PLAN_HEADER_GUARD_STATE_COUNT) {
+        return false;
+    }
+    let mut state = start;
+    if header_table_value(PLAN_HEADER_GUARD_ACCEPTS, state) != 0 {
+        return true;
+    }
+    let mut index = offset;
+    while index < len {
+        let decoded = decode_code_point(src, index, len);
+        state = guard_transition(state, decoded.code_point);
+        if state < 0 {
+            return false;
+        }
+        index += decoded.width;
+        if header_table_value(PLAN_HEADER_GUARD_ACCEPTS, state) != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+fn guard_transition(state: i32, code_point: i32) -> i32 {
+    if state < 0 || state >= header(PLAN_HEADER_GUARD_STATE_COUNT) {
+        return -1;
+    }
+    let rows = header(PLAN_HEADER_GUARD_TRANSITION_ROWS);
+    let mut index = table_value(rows, state);
+    let end = table_value(rows, state + 1);
+    while index < end {
+        let base = plan_addr(header(PLAN_HEADER_GUARD_TRANSITIONS)) + index * 12;
+        let start = unsafe { load_i32(base) };
+        let stop = unsafe { load_i32(base + 4) };
+        if code_point >= start && code_point <= stop {
+            return unsafe { load_i32(base + 8) };
+        }
+        index += 1;
+    }
+    -1
+}
+
+fn excluded_word_matches(spec: i32, src: i32, len: i32, offset: i32) -> bool {
+    let spec_rows = header(PLAN_HEADER_SPEC_WORD_ROWS);
+    let mut word = table_value(spec_rows, spec);
+    let word_end = table_value(spec_rows, spec + 1);
+    while word < word_end {
+        let rows = header(PLAN_HEADER_WORD_ROWS);
+        let mut character = table_value(rows, word);
+        let character_end = table_value(rows, word + 1);
+        let mut source_offset = offset;
+        let mut matches = true;
+        while character < character_end {
+            if source_offset >= len {
+                matches = false;
+                break;
+            }
+            let decoded = decode_code_point(src, source_offset, len);
+            let expected = table_value(header(PLAN_HEADER_WORD_CODE_POINTS), character);
+            if decoded.code_point != expected {
+                matches = false;
+                break;
+            }
+            source_offset += decoded.width;
+            character += 1;
+        }
+        if matches {
+            if source_offset >= len {
+                return true;
+            }
+            let next = decode_code_point(src, source_offset, len).code_point;
+            if !is_word_code_point(next) {
+                return true;
+            }
+        }
+        word += 1;
+    }
+    false
+}
+
+fn is_word_code_point(code_point: i32) -> bool {
+    (code_point >= 'A' as i32 && code_point <= 'Z' as i32)
+        || (code_point >= 'a' as i32 && code_point <= 'z' as i32)
+        || (code_point >= '0' as i32 && code_point <= '9' as i32)
+        || code_point == '_' as i32
 }
 
 #[no_mangle]
@@ -551,7 +692,7 @@ pub extern "C" fn parser_select_action(
         return -1;
     }
 
-    let selection = select_action(state, accepting_state, false);
+    let selection = select_action(state, accepting_state, false, -1, 0, 0);
     unsafe {
         store_i32(result, selection.checked_count);
     }
@@ -573,10 +714,17 @@ struct Selection {
     selected_terminal: i32,
     selected_action: i32,
     trivia_spec: i32,
-    main_candidate_count: i32,
+    ordinary_main_candidate_count: i32,
 }
 
-fn select_action(state: i32, accepting_state: i32, include_trivia: bool) -> Selection {
+fn select_action(
+    state: i32,
+    accepting_state: i32,
+    include_trivia: bool,
+    src: i32,
+    len: i32,
+    end_offset: i32,
+) -> Selection {
     let mut selection = Selection {
         checked_count: 0,
         choice_count: 0,
@@ -584,7 +732,7 @@ fn select_action(state: i32, accepting_state: i32, include_trivia: bool) -> Sele
         selected_terminal: -1,
         selected_action: 0,
         trivia_spec: -1,
-        main_candidate_count: 0,
+        ordinary_main_candidate_count: 0,
     };
 
     let rows = header(PLAN_HEADER_ACCEPT_CANDIDATE_ROWS);
@@ -594,13 +742,20 @@ fn select_action(state: i32, accepting_state: i32, include_trivia: bool) -> Sele
         let spec = table_value(header(PLAN_HEADER_ACCEPT_CANDIDATES), index);
         selection.checked_count += 1;
         if spec >= 0 && spec < header(PLAN_HEADER_SPEC_COUNT) {
+            if !spec_guard_matches(spec, src, len, end_offset) {
+                index += 1;
+                continue;
+            }
             let terminal = header_table_value(PLAN_HEADER_SPEC_TERMINALS, spec);
             if include_trivia && terminal < 0 {
                 if selection.trivia_spec < 0 {
                     selection.trivia_spec = spec;
                 }
             } else if terminal >= 0 {
-                selection.main_candidate_count += 1;
+                let flags = header_table_value(PLAN_HEADER_SPEC_FLAGS, spec);
+                if flags & SPEC_FLAG_CONTEXTUAL == 0 {
+                    selection.ordinary_main_candidate_count += 1;
+                }
                 let action = parser_action(state, terminal);
                 if action != 0 {
                     selection.choice_count += 1;
@@ -617,15 +772,23 @@ fn select_action(state: i32, accepting_state: i32, include_trivia: bool) -> Sele
     selection
 }
 
-fn select_trace_action(state: i32, accepting_state: i32, _fallback_spec: i32, result: i32) -> i32 {
+fn select_trace_action(
+    state: i32,
+    accepting_state: i32,
+    _fallback_spec: i32,
+    src: i32,
+    len: i32,
+    end_offset: i32,
+    result: i32,
+) -> i32 {
     if accepting_state < 0 || accepting_state >= header(PLAN_HEADER_DFA_STATE_COUNT) {
         return -1;
     }
-    let selection = select_action(state, accepting_state, true);
+    let selection = select_action(state, accepting_state, true, src, len, end_offset);
     unsafe {
         store_i32(result, selection.checked_count);
         store_i32(result + 16, selection.trivia_spec);
-        store_i32(result + 20, selection.main_candidate_count);
+        store_i32(result + 20, selection.ordinary_main_candidate_count);
     }
     if selection.choice_count == 0 {
         return 0;
@@ -732,7 +895,8 @@ pub extern "C" fn parse_trace(
                 );
             }
 
-            let status = select_trace_action(current_state, accepting_state, spec, result);
+            let status =
+                select_trace_action(current_state, accepting_state, spec, src, len, end, result);
             if status == 1 {
                 selected_spec = unsafe { load_i32(result + 4) };
                 action = unsafe { load_i32(result + 12) };
@@ -748,8 +912,8 @@ pub extern "C" fn parse_trace(
                 );
             } else if status == 0 {
                 let trivia_spec = unsafe { load_i32(result + 16) };
-                let main_candidate_count = unsafe { load_i32(result + 20) };
-                if main_candidate_count == 0 {
+                let ordinary_main_candidate_count = unsafe { load_i32(result + 20) };
+                if ordinary_main_candidate_count == 0 {
                     if trivia_spec >= 0 {
                         if preserve_trivia != 0 {
                             store_token_record(
@@ -1130,9 +1294,9 @@ pub extern "C" fn parse_cursor(
                 );
             }
 
-            let selection = select_action(current_state, accepting_state, true);
+            let selection = select_action(current_state, accepting_state, true, src, len, end);
             if selection.choice_count == 0 {
-                if selection.main_candidate_count == 0 {
+                if selection.ordinary_main_candidate_count == 0 {
                     if selection.trivia_spec >= 0 {
                         if preserve_trivia != 0 {
                             store_token_record(

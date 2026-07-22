@@ -4,12 +4,7 @@
  * @module
  */
 
-import type {
-  Diagnostic,
-  GenerateTarget,
-  PortabilityMode,
-  WasmTargetOptions,
-} from "./ast.ts";
+import type { Diagnostic, GenerateTarget, WasmTargetOptions } from "./ast.ts";
 import {
   applyBundle,
   BabaError,
@@ -27,7 +22,6 @@ interface Options {
   name: string;
   rootRule?: string;
   targets: GenerateTarget[];
-  portability?: PortabilityMode;
   wasm: WasmTargetOptions;
   listFiles: boolean;
   explainTargets: boolean;
@@ -92,7 +86,6 @@ export async function main(args: string[]): Promise<void> {
     rootRule: options.rootRule,
     metadata,
     targets: options.targets.length ? options.targets : undefined,
-    portability: options.portability,
     wasm: hasWasmOptions(options.wasm) ? options.wasm : undefined,
   });
   if (hasErrors(result.diagnostics)) {
@@ -277,21 +270,6 @@ function parseArgs(args: string[]): Options {
       case "--wasm-stats":
         options.wasm.reportParserStats = true;
         break;
-      case "--portability": {
-        const portability = args[++i];
-        if (
-          portability !== "strict" &&
-          portability !== "warn" &&
-          portability !== "off"
-        ) {
-          throw new BabaError({
-            code: "CLI_BAD_ARGS",
-            message: "Expected portability mode strict, warn, or off",
-          });
-        }
-        options.portability = portability;
-        break;
-      }
       case "--metadata":
       case "--meta": {
         const metadataPath = args[++i];
@@ -375,11 +353,10 @@ Options:
   --wasm-generated-byte-limit  Maximum generated Wasm bytes
   --parser-stats  Emit Wasm runtime parser planning statistics
   --wasm-stats   Emit Wasm runtime parser planning statistics
-  --portability  Cross-target portability mode: strict, warn, or off
   --metadata    JSON metadata for parser conflict policy and token/runtime options
   --meta        Alias for --metadata
   --diagnostic-format  Diagnostic output format: text or json. Defaults to text
-  --explain-targets  Print target support and portability diagnostics
+  --explain-targets  Print target support diagnostics
   --list-files  Print generated file paths without writing output files`;
 }
 
@@ -448,14 +425,14 @@ function emitTargetExplanation(
   console.log("Portable guarantees and limitations:");
   if (reports.every((report) => !hasErrors(report.diagnostics))) {
     console.log(
-      "  ✓ generated Wasm parser and lexer use portable parser plan v1 and Baba regex/DFA semantics",
+      "  ✓ generated Wasm parser and lexer use portable parser plan v2 and Baba regex/DFA semantics",
     );
   }
   console.log(
-    "  - External tokens are not supported by the Wasm parser/lexer target",
+    "  - External scanner callbacks are not supported; use portable contextual tokens",
   );
   console.log(
-    "  - Contextual token overlap status is reported through target capability diagnostics",
+    "  ✓ Contextual token guards and parser-state promotion are encoded in the parser plan",
   );
   if (targetDiagnostics.length === 0) {
     console.log("  ✓ no target capability diagnostics");
@@ -483,7 +460,6 @@ function explainTargets(
       rootRule: options.rootRule,
       metadata,
       targets: [target],
-      portability: options.portability,
       wasm: hasWasmOptions(options.wasm) ? options.wasm : undefined,
     });
     return { target, label, diagnostics: result.diagnostics };

@@ -42,7 +42,6 @@ export type {
   ParserConflictDeclarationMetadata,
   ParserConflictResolutionMetadata,
   ParserRuntimeMetadata,
-  PortabilityMode,
   PortableRuntimePlanningOptions,
   SourceSpan,
   ValidateOptions,

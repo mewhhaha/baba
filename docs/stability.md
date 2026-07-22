@@ -37,14 +37,14 @@ release.
 ## Parser-Plan Format
 
 `PortableParserPlan` is a versioned runtime data contract, not a package
-implementation detail. Plan version `1` is stable for its current serialized
+implementation detail. Plan version `2` is stable for its current serialized
 fields, canonical ordering, reducer opcodes, diagnostic schema, and validation
 rules. Breaking changes require a new plan version or a separately versioned
 subsection.
 
 Generated `parser.plan` files currently use runtime metadata subsection version
-`2`. Metadata version `1` is not accepted by Baba 5 loaders; regenerate those
-plans with Baba 5. The portable parser-plan version remains `1`.
+`2` and portable parser-plan version `2`. The loader accepts only this current
+contract; regenerate plans produced by earlier Baba releases.
 
 ## Generated Wasm API
 

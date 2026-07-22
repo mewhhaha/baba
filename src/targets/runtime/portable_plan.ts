@@ -28,23 +28,23 @@ import {
 } from "../../compiler/portable_plan_shared.ts";
 
 const PORTABLE_PLAN_FORMAT = "baba-parser-plan";
-const PORTABLE_PLAN_VERSION = 1;
-const PORTABLE_PLAN_SEMANTICS = "baba-portable-v1";
+const PORTABLE_PLAN_VERSION = 2;
+const PORTABLE_PLAN_SEMANTICS = "baba-portable-v2";
 const PORTABLE_REDUCER_SEMANTICS = "baba-reducer-v1";
 const PORTABLE_DIAGNOSTIC_SEMANTICS = "baba-runtime-diagnostics-v1";
 const PORTABLE_SOURCE_SPAN_UNIT = "utf16-code-units";
 const PORTABLE_UNICODE_SEMANTICS = "unicode-code-point-v1";
 
 /**
- * Portable parser-plan v1 is a runtime data contract, not a package-versioned
+ * Portable parser-plan v2 is a runtime data contract, not a package-versioned
  * implementation detail. New runtime semantics require a new plan version or a
  * separately versioned subsection; additive debug-only metadata may be ignored
  * by older tools after validation succeeds.
  */
 export interface PortableParserPlan {
   readonly format: "baba-parser-plan";
-  readonly version: 1;
-  readonly semantics: "baba-portable-v1";
+  readonly version: 2;
+  readonly semantics: "baba-portable-v2";
   readonly rootRule: number;
   readonly symbols: SymbolPlan;
   readonly lexer: LexerPlan;
@@ -77,7 +77,7 @@ export interface SymbolPlan {
 export interface TokenPlan {
   readonly id: number;
   readonly name: string;
-  readonly kind: "token" | "skip";
+  readonly kind: "token" | "skip" | "contextual";
   readonly channel: "main" | "trivia";
   readonly patternSource: string;
   readonly nullable: boolean;
@@ -133,6 +133,8 @@ export type LexerSpecificationPlan =
     readonly priority: number;
     readonly order: number;
     readonly literal: false;
+    readonly contextual: boolean;
+    readonly trailingContext: ContextualTrailingContextPlan | undefined;
   }
   | {
     readonly id: number;
@@ -143,7 +145,16 @@ export type LexerSpecificationPlan =
     readonly priority: number;
     readonly order: number;
     readonly literal: true;
+    readonly contextual: false;
+    readonly trailingContext: undefined;
   };
+
+export interface ContextualTrailingContextPlan {
+  readonly followedBy: Dfa | undefined;
+  readonly followedByEof: boolean;
+  readonly notFollowedBy: Dfa | undefined;
+  readonly excludedWords: readonly string[];
+}
 
 export interface LexerStatePlan {
   readonly id: number;
@@ -273,10 +284,6 @@ export interface CstFieldPlan {
   readonly type: string;
   readonly cardinality: "required" | "nullable" | "array";
   readonly valueKind: "node" | "token" | "unknown";
-  /** @deprecated Use cardinality. */
-  readonly array: boolean;
-  /** @deprecated Use cardinality. */
-  readonly nullable: boolean;
 }
 
 export interface PortableDiagnosticPlan {
@@ -310,11 +317,15 @@ export interface PortablePlanStatistics {
   readonly serializedJsonBytes: number;
 }
 
-export function createPortableParserPlanV1(
+export function createPortableParserPlan(
   analyzed: AnalyzedGrammar,
   bnf: BnfGrammar,
   lr: LrTable,
   dfa: Dfa,
+  trailingContextByTokenId: ReadonlyMap<
+    number,
+    ContextualTrailingContextPlan
+  > = new Map(),
 ): PortableParserPlan {
   const rootRule = analyzed.rules[analyzed.rootRule];
   const cstRules = collectRuleFieldSchemas(analyzed);
@@ -368,7 +379,11 @@ export function createPortableParserPlanV1(
     lexer: {
       unicodeSemantics: PORTABLE_UNICODE_SEMANTICS,
       startState: dfa.start,
-      specifications: lexerSpecifications(analyzed, bnf),
+      specifications: lexerSpecifications(
+        analyzed,
+        bnf,
+        trailingContextByTokenId,
+      ),
       states: dfa.states.map((state) => ({
         id: state.id,
         transitions: state.transitions.map((transition) => ({
@@ -408,15 +423,20 @@ export function createPortableParserPlanV1(
         ruleId: rule.ruleId,
         ruleName: rule.ruleName,
         nodeType: rule.nodeType,
-        fields: rule.fields.map((field) => ({
-          ...field,
-          cardinality: field.array
-            ? "array" as const
-            : field.nullable
-            ? "nullable" as const
-            : "required" as const,
-          valueKind: "unknown" as const,
-        })),
+        fields: rule.fields.map((field) => {
+          let cardinality: CstFieldPlan["cardinality"] = "required";
+          if (field.array) {
+            cardinality = "array";
+          } else if (field.nullable) {
+            cardinality = "nullable";
+          }
+          return {
+            name: field.name,
+            type: field.type,
+            cardinality,
+            valueKind: "unknown",
+          };
+        }),
       })),
     },
     diagnostics: {
@@ -454,26 +474,41 @@ export function portableParserPlanMetadata(
 function lexerSpecifications(
   analyzed: AnalyzedGrammar,
   bnf: BnfGrammar,
+  trailingContextByTokenId: ReadonlyMap<
+    number,
+    ContextualTrailingContextPlan
+  >,
 ): LexerSpecificationPlan[] {
   const specs: LexerSpecificationPlan[] = [];
   for (const token of analyzed.tokens) {
     if (
       token.kind !== "skip" &&
-      !(token.kind === "token" && analyzed.reachableTokens.has(token.id))
+      !analyzed.reachableTokens.has(token.id)
     ) {
       continue;
+    }
+    let trailingContext: ContextualTrailingContextPlan | undefined;
+    if (token.trailingContext !== undefined) {
+      trailingContext = trailingContextByTokenId.get(token.id);
+      if (trailingContext === undefined) {
+        throw new Error(
+          `Missing compiled trailing context for token '${token.name}' (${token.id}).`,
+        );
+      }
     }
     specs.push({
       id: specs.length,
       type: "named",
       tokenId: token.id,
-      terminalId: token.kind === "token"
+      terminalId: token.kind !== "skip"
         ? terminalIdForToken(bnf, token.id)
         : null,
       channel: token.kind === "skip" ? "trivia" : "main",
       priority: token.priority,
       order: token.declarationOrder,
       literal: false,
+      contextual: token.kind === "contextual",
+      trailingContext,
     });
   }
   for (const literal of analyzed.literals) {
@@ -487,6 +522,8 @@ function lexerSpecifications(
       priority: 0,
       order: literal.sourceOrder,
       literal: true,
+      contextual: false,
+      trailingContext: undefined,
     });
   }
   return specs;
@@ -913,6 +950,32 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
     validateSequentialIds(terminals, "$.symbols.terminals", fail);
     validateSequentialIds(nonterminals, "$.symbols.nonterminals", fail);
     validateSequentialIds(fields, "$.symbols.fields", fail);
+    for (const [index, token] of tokens.entries()) {
+      if (!isRecord(token)) {
+        continue;
+      }
+      if (
+        token.kind !== "token" && token.kind !== "skip" &&
+        token.kind !== "contextual"
+      ) {
+        fail(`$.symbols.tokens[${index}].kind`, "unknown token kind.");
+      }
+      if (token.channel !== "main" && token.channel !== "trivia") {
+        fail(`$.symbols.tokens[${index}].channel`, "unknown token channel.");
+      }
+      if (token.kind === "skip" && token.channel !== "trivia") {
+        fail(
+          `$.symbols.tokens[${index}].channel`,
+          "skip tokens must use the trivia channel.",
+        );
+      }
+      if (token.kind !== "skip" && token.channel !== "main") {
+        fail(
+          `$.symbols.tokens[${index}].channel`,
+          "parser tokens must use the main channel.",
+        );
+      }
+    }
     const rootRule = integerProperty(
       symbols,
       "rootRule",
@@ -947,6 +1010,7 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
         );
         continue;
       }
+      let expectedContextual = false;
       if (spec.type === "named") {
         const tokenId = integerProperty(
           spec,
@@ -959,6 +1023,11 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
             `$.lexer.specifications[${index}].tokenId`,
             "must refer to a token.",
           );
+        } else {
+          const token = tokens[tokenId];
+          if (isRecord(token) && token.kind === "contextual") {
+            expectedContextual = true;
+          }
         }
       } else if (spec.type === "literal") {
         const literalId = integerProperty(
@@ -978,6 +1047,38 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
           `$.lexer.specifications[${index}].type`,
           "unknown lexer specification type.",
         );
+      }
+      if (typeof spec.contextual !== "boolean") {
+        fail(
+          `$.lexer.specifications[${index}].contextual`,
+          "must be a boolean.",
+        );
+      } else if (spec.contextual !== expectedContextual) {
+        fail(
+          `$.lexer.specifications[${index}].contextual`,
+          "must match the referenced token kind.",
+        );
+      }
+      const trailingContext = spec.trailingContext;
+      if (trailingContext !== undefined) {
+        if (!isRecord(trailingContext)) {
+          fail(
+            `$.lexer.specifications[${index}].trailingContext`,
+            "must be an object when present.",
+          );
+        } else {
+          validateContextualTrailingContext(
+            trailingContext,
+            `$.lexer.specifications[${index}].trailingContext`,
+            fail,
+          );
+        }
+        if (spec.contextual !== true) {
+          fail(
+            `$.lexer.specifications[${index}].trailingContext`,
+            "is allowed only on contextual lexer specifications.",
+          );
+        }
       }
       if (spec.terminalId !== null && spec.terminalId !== undefined) {
         const terminalId = integerProperty(
@@ -1292,6 +1393,116 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
     );
   }
   return diagnostics;
+}
+
+function validateContextualTrailingContext(
+  trailingContext: Record<string, unknown>,
+  path: string,
+  fail: (path: string, message: string) => void,
+): void {
+  if (typeof trailingContext.followedByEof !== "boolean") {
+    fail(`${path}.followedByEof`, "must be a boolean.");
+  }
+  if (trailingContext.followedBy !== undefined) {
+    validateContextualGuardDfa(
+      trailingContext.followedBy,
+      `${path}.followedBy`,
+      fail,
+    );
+  }
+  if (trailingContext.notFollowedBy !== undefined) {
+    validateContextualGuardDfa(
+      trailingContext.notFollowedBy,
+      `${path}.notFollowedBy`,
+      fail,
+    );
+  }
+  if (!Array.isArray(trailingContext.excludedWords)) {
+    fail(`${path}.excludedWords`, "must be an array.");
+    return;
+  }
+  for (const [index, word] of trailingContext.excludedWords.entries()) {
+    if (typeof word !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(word)) {
+      fail(
+        `${path}.excludedWords[${index}]`,
+        "must be an ASCII identifier.",
+      );
+    }
+  }
+}
+
+function validateContextualGuardDfa(
+  value: unknown,
+  path: string,
+  fail: (path: string, message: string) => void,
+): void {
+  if (!isRecord(value)) {
+    fail(path, "must be a DFA object.");
+    return;
+  }
+  const states = value.states;
+  if (!Array.isArray(states) || states.length === 0) {
+    fail(`${path}.states`, "must be a nonempty array.");
+    return;
+  }
+  validateSequentialIds(states, `${path}.states`, fail);
+  const start = integerProperty(value, "start", `${path}.start`, fail);
+  if (start === undefined || !hasId(states, start)) {
+    fail(`${path}.start`, "must refer to a guard state.");
+  }
+  for (const [stateIndex, state] of states.entries()) {
+    if (!isRecord(state)) {
+      continue;
+    }
+    const transitions = state.transitions;
+    if (!Array.isArray(transitions)) {
+      fail(`${path}.states[${stateIndex}].transitions`, "must be an array.");
+      continue;
+    }
+    let previousEnd = -1;
+    for (const [transitionIndex, transition] of transitions.entries()) {
+      const transitionPath =
+        `${path}.states[${stateIndex}].transitions[${transitionIndex}]`;
+      if (!isRecord(transition)) {
+        fail(transitionPath, "must be an object.");
+        continue;
+      }
+      const rangeStart = integerProperty(
+        transition,
+        "start",
+        `${transitionPath}.start`,
+        fail,
+      );
+      const rangeEnd = integerProperty(
+        transition,
+        "end",
+        `${transitionPath}.end`,
+        fail,
+      );
+      const target = integerProperty(
+        transition,
+        "target",
+        `${transitionPath}.target`,
+        fail,
+      );
+      if (
+        rangeStart === undefined || rangeEnd === undefined ||
+        target === undefined
+      ) {
+        continue;
+      }
+      if (
+        !isUnicodeScalar(rangeStart) || !isUnicodeScalar(rangeEnd) ||
+        rangeStart > rangeEnd || rangeStart <= previousEnd
+      ) {
+        fail(transitionPath, "range must be sorted Unicode scalar values.");
+      }
+      if (!hasId(states, target)) {
+        fail(`${transitionPath}.target`, "must refer to a guard state.");
+      }
+      previousEnd = rangeEnd;
+    }
+  }
 }
 
 function hashPortableParserPlan(plan: PortableParserPlan): string {

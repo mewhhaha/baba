@@ -18,7 +18,6 @@ interface TreeSitterQueryPlan {
   readonly reachableRules: ReadonlySet<string>;
   readonly reachableTokens: ReadonlySet<string>;
   readonly reachableLiterals: ReadonlySet<string>;
-  readonly externals: readonly string[];
 }
 
 interface TreeSitterQueryRulePlan {
@@ -29,7 +28,7 @@ interface TreeSitterQueryRulePlan {
 
 interface TreeSitterQueryTokenPlan {
   readonly name: string;
-  readonly kind: "token" | "skip";
+  readonly kind: "token" | "skip" | "contextual";
   readonly span: SourceSpan;
 }
 
@@ -162,7 +161,6 @@ function createAnalyzedQueryPlan(
     reachableRules,
     reachableTokens,
     reachableLiterals,
-    externals: analyzed.externals.map((external) => external.name),
   };
 }
 
@@ -647,19 +645,12 @@ function inferNamedHighlightEntries(
     }
   }
 
-  for (const external of plan.externals) {
-    const capture = inferNamedNodeHighlightCapture(external, "token");
-    if (capture !== undefined) {
-      pushNode(external, capture);
-    }
-  }
-
   return entries;
 }
 
 function inferNamedNodeHighlightCapture(
   name: string,
-  kind: "rule" | "token" | "skip",
+  kind: "rule" | "token" | "skip" | "contextual",
 ): string | undefined {
   const parts = nameParts(name);
   if (parts.includes("comment")) {

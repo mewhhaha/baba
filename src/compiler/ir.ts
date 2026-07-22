@@ -12,11 +12,9 @@ export interface AnalyzedGrammar {
   rules: readonly AnalyzedRule[];
   tokens: readonly AnalyzedToken[];
   literals: readonly AnalyzedLiteral[];
-  externals: readonly AnalyzedExternalToken[];
   reachableRules: ReadonlySet<RuleId>;
   reachableTokens: ReadonlySet<TokenId>;
   reachableLiterals: ReadonlySet<LiteralId>;
-  reachableExternals: ReadonlySet<string>;
   diagnostics: readonly Diagnostic[];
 }
 
@@ -30,13 +28,21 @@ export interface AnalyzedRule {
 export interface AnalyzedToken {
   id: TokenId;
   name: string;
-  kind: "token" | "skip";
+  kind: "token" | "skip" | "contextual";
   patternSource: string;
   pattern: RegexAst;
   nullable: boolean;
   priority: number;
   declarationOrder: number;
+  trailingContext?: AnalyzedTrailingContext;
   span: SourceSpan;
+}
+
+export interface AnalyzedTrailingContext {
+  readonly followedBy: RegexAst | undefined;
+  readonly followedByEof: boolean;
+  readonly notFollowedBy: RegexAst | undefined;
+  readonly excludedWords: readonly string[];
 }
 
 export interface AnalyzedLiteral {
@@ -46,15 +52,10 @@ export interface AnalyzedLiteral {
   span: SourceSpan;
 }
 
-export interface AnalyzedExternalToken {
-  name: string;
-}
-
 export type ResolvedReference =
   | { kind: "rule"; ruleId: RuleId }
   | { kind: "token"; tokenId: TokenId }
   | { kind: "skip"; tokenId: TokenId }
-  | { kind: "external"; name: string }
   | { kind: "unknown"; name: string };
 
 export type AnalyzedExpression =

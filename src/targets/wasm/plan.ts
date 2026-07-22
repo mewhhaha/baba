@@ -2,7 +2,6 @@ import type {
   BabaMetadata,
   Diagnostic,
   GeneratedFile,
-  PortabilityMode,
   WasmTargetOptions,
 } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
@@ -129,7 +128,6 @@ export function planWasmTarget(
   analyzed: AnalyzedGrammar,
   options: WasmTargetOptions = {},
   metadata: BabaMetadata = {},
-  portability: PortabilityMode = "warn",
   runtimePlanInput?: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
 ): WasmPlan | { diagnostics: readonly Diagnostic[] } {
   const diagnostics = [...wasmOptionsDiagnostics(options)];
@@ -138,7 +136,6 @@ export function planWasmTarget(
       analyzed,
       runtimePlanningOptions(options),
       metadata,
-      portability,
     );
   if (!runtimePlanInput) diagnostics.push(...runtimePlan.diagnostics);
   if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
@@ -270,9 +267,9 @@ function wasmRuntimeManifestSource(): string {
         abiVersion: WASM_ABI_VERSION,
         parserPlan: {
           format: "baba-parser-plan",
-          version: 1,
+          version: 2,
           runtimeMetadataVersion: parserPlanRuntimeMetadataVersion,
-          semantics: "baba-portable-v1",
+          semantics: "baba-portable-v2",
           storage: "external-binary",
           moduleExport: "load_plan",
           path: "parser.plan",
@@ -299,9 +296,9 @@ function wasmAbiDescriptor(): unknown {
     targetKind: WASM_TARGET_KIND,
     parserPlan: {
       format: "baba-parser-plan",
-      version: 1,
+      version: 2,
       runtimeMetadataVersion: parserPlanRuntimeMetadataVersion,
-      semantics: "baba-portable-v1",
+      semantics: "baba-portable-v2",
       storage: "external-binary",
     },
     runtimeImplementation: {
@@ -618,8 +615,8 @@ function wasmAbiDescriptor(): unknown {
 function wasmModSource(): string {
   return `${
     generatedSourceBanner({
-      parserPlanVersion: 1,
-      parserPlanSemantics: "baba-portable-v1",
+      parserPlanVersion: 2,
+      parserPlanSemantics: "baba-portable-v2",
     })
   }
 import type { CursorParseResult, LexOptions, LexTapeResult, ParseOptions, RootCursor, ValidateParseResult } from "./syntax.ts";
@@ -765,6 +762,14 @@ function createWasmRuntimeMetadata(
         return left - right;
       }
       let literalOrder = 0;
+      let contextualOrder = 0;
+      if (leftSpec.contextual !== rightSpec.contextual) {
+        if (leftSpec.contextual) {
+          contextualOrder = 1;
+        } else {
+          contextualOrder = -1;
+        }
+      }
       if (leftSpec.literal !== rightSpec.literal) {
         if (leftSpec.literal) {
           literalOrder = -1;
@@ -772,7 +777,8 @@ function createWasmRuntimeMetadata(
           literalOrder = 1;
         }
       }
-      return rightSpec.priority - leftSpec.priority ||
+      return contextualOrder ||
+        rightSpec.priority - leftSpec.priority ||
         literalOrder ||
         leftSpec.order - rightSpec.order ||
         left - right;
@@ -882,6 +888,13 @@ function wasmCoreRuntimeMetadata(
   readonly eofTerminal: number;
   readonly terminalBySpec: readonly number[];
   readonly acceptCandidates: readonly (readonly number[])[];
+  readonly specs: readonly {
+    readonly contextual: boolean;
+    readonly followedBy: Dfa | undefined;
+    readonly followedByEof: boolean;
+    readonly notFollowedBy: Dfa | undefined;
+    readonly excludedWords: readonly string[];
+  }[];
   readonly productions: readonly {
     readonly lhs: number;
     readonly rhsLength: number;
@@ -956,6 +969,14 @@ function wasmCoreRuntimeMetadata(
         return left - right;
       }
       let literalOrder = 0;
+      let contextualOrder = 0;
+      if (leftSpec.contextual !== rightSpec.contextual) {
+        if (leftSpec.contextual) {
+          contextualOrder = 1;
+        } else {
+          contextualOrder = -1;
+        }
+      }
       if (leftSpec.literal !== rightSpec.literal) {
         if (leftSpec.literal) {
           literalOrder = -1;
@@ -963,7 +984,8 @@ function wasmCoreRuntimeMetadata(
           literalOrder = 1;
         }
       }
-      return rightSpec.priority - leftSpec.priority ||
+      return contextualOrder ||
+        rightSpec.priority - leftSpec.priority ||
         literalOrder ||
         leftSpec.order - rightSpec.order ||
         left - right;
@@ -1045,6 +1067,25 @@ function wasmCoreRuntimeMetadata(
     eofTerminal: runtime.bnf.eofTerminal,
     terminalBySpec,
     acceptCandidates,
+    specs: runtime.portable.lexer.specifications.map((spec) => {
+      const trailingContext = spec.trailingContext;
+      if (trailingContext === undefined) {
+        return {
+          contextual: spec.contextual,
+          followedBy: undefined,
+          followedByEof: false,
+          notFollowedBy: undefined,
+          excludedWords: [],
+        };
+      }
+      return {
+        contextual: spec.contextual,
+        followedBy: trailingContext.followedBy,
+        followedByEof: trailingContext.followedByEof,
+        notFollowedBy: trailingContext.notFollowedBy,
+        excludedWords: trailingContext.excludedWords,
+      };
+    }),
     productions,
   };
 }

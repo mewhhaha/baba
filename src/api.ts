@@ -3,26 +3,20 @@ import type {
   CompileOptions,
   CompileResult,
   Diagnostic,
-  EbnfGrammar,
   GeneratedBundle,
   GeneratedFile,
   GenerateOptions,
   GenerateTarget,
   GrammarDocument,
-  PortabilityMode,
   ValidateOptions,
 } from "./ast.ts";
 import { parseMetadata as parseBabaMetadata } from "./metadata.ts";
 import { BabaError, formatDiagnostic, toBabaError } from "./errors.ts";
 import { parseGrammarSource } from "./grammar.ts";
 import { generatedBundle } from "./bundle.ts";
-import { analyzeGrammar } from "./compiler/analyze.ts";
 import { analyzeGrammarDocumentForWasm } from "./compiler/grammar_wasm_analysis.ts";
 import type { AnalyzedGrammar } from "./compiler/ir.ts";
-import {
-  DEFAULT_REGEX_NESTING_LIMIT,
-  type RegexCompilerLimits,
-} from "./compiler/regex/limits.ts";
+import { DEFAULT_REGEX_NESTING_LIMIT } from "./compiler/regex/limits.ts";
 import {
   emitWasmTarget,
   planWasmTarget,
@@ -36,10 +30,8 @@ import {
 import { emitTreeSitterQueryFiles } from "./targets/tree_sitter_queries.ts";
 export { applyBundle } from "./output.ts";
 
-type GrammarObject = EbnfGrammar | GrammarDocument;
-
 interface PreparedGrammar {
-  readonly grammar?: GrammarObject;
+  readonly grammar?: GrammarDocument;
   readonly diagnostics: readonly Diagnostic[];
   readonly name?: string;
 }
@@ -69,10 +61,10 @@ export function parseMetadata(source: string): BabaMetadata {
 
 /** Validates a grammar for the Wasm lexer/parser target. */
 export function validateGrammar(
-  grammar: GrammarObject,
+  grammar: GrammarDocument,
   options: ValidateOptions = {},
 ): Diagnostic[] {
-  const prepared = prepareGrammarObject(grammar);
+  const prepared = prepareGrammarDocument(grammar);
   const diagnostics: Diagnostic[] = [...prepared.diagnostics];
   if (hasErrors(diagnostics)) return diagnostics;
   if (prepared.grammar === undefined) {
@@ -87,13 +79,12 @@ export function validateGrammar(
     return [toBabaError(error, "VALIDATION_ERROR").toDiagnostic()];
   }
 
-  const { analyzed, runtimeOptions, metadata, portability } =
-    analyzeForPlanning(
-      prepared.grammar,
-      targets,
-      selectedGrammarName(undefined, prepared.name),
-      options,
-    );
+  const { analyzed, runtimeOptions, metadata } = analyzeForPlanning(
+    prepared.grammar,
+    targets,
+    selectedGrammarName(undefined, prepared.name),
+    options,
+  );
   diagnostics.push(...analyzed.diagnostics);
   if (hasErrors(diagnostics)) return diagnostics;
 
@@ -101,7 +92,6 @@ export function validateGrammar(
     analyzed,
     runtimeOptions,
     metadata,
-    portability,
   );
   diagnostics.push(...runtimePlan.diagnostics);
   try {
@@ -110,7 +100,6 @@ export function validateGrammar(
         analyzed,
         options.wasm,
         metadata,
-        portability,
         runtimePlan,
       ).diagnostics,
     );
@@ -124,7 +113,7 @@ export function validateGrammar(
 
 /** Compiles a grammar into a Wasm lexer/parser bundle, returning diagnostics without throwing. */
 export function compile(
-  sourceOrGrammar: string | GrammarObject,
+  sourceOrGrammar: string | GrammarDocument,
   options: CompileOptions = {},
 ): CompileResult {
   const prepared = prepareGrammarInput(sourceOrGrammar);
@@ -146,20 +135,18 @@ export function compile(
     };
   }
 
-  const { analyzed, runtimeOptions, metadata, portability } =
-    analyzeForPlanning(
-      prepared.grammar,
-      targets,
-      selectedGrammarName(options.name, prepared.name),
-      options,
-    );
+  const { analyzed, runtimeOptions, metadata } = analyzeForPlanning(
+    prepared.grammar,
+    targets,
+    selectedGrammarName(options.name, prepared.name),
+    options,
+  );
   diagnostics.push(...analyzed.diagnostics);
   let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
   const runtimePlan = planPortableRuntime(
     analyzed,
     runtimeOptions,
     metadata,
-    portability,
   );
   diagnostics.push(...runtimePlan.diagnostics);
 
@@ -169,7 +156,6 @@ export function compile(
         analyzed,
         options.wasm,
         metadata,
-        portability,
         runtimePlan,
       );
     } catch (error) {
@@ -213,7 +199,7 @@ export function compile(
 
 /** Generates a deterministic Wasm lexer/parser bundle from grammar source or a parsed grammar. */
 export function generate(
-  sourceOrGrammar: string | GrammarObject,
+  sourceOrGrammar: string | GrammarDocument,
   options: GenerateOptions = {},
 ): GeneratedBundle {
   const result = compile(sourceOrGrammar, options);
@@ -247,7 +233,7 @@ function sharedRuntimePlanningOptions(
 }
 
 function prepareGrammarInput(
-  sourceOrGrammar: string | GrammarObject,
+  sourceOrGrammar: string | GrammarDocument,
 ): PreparedGrammar {
   if (typeof sourceOrGrammar === "string") {
     const parsed = parseGrammarSource(sourceOrGrammar);
@@ -268,21 +254,14 @@ function prepareGrammarInput(
     };
   }
 
-  return prepareGrammarObject(sourceOrGrammar);
+  return prepareGrammarDocument(sourceOrGrammar);
 }
 
-function prepareGrammarObject(grammar: GrammarObject): PreparedGrammar {
-  if (isGrammarDocument(grammar)) {
-    return {
-      grammar,
-      diagnostics: [],
-      name: grammar.name,
-    };
-  }
-
+function prepareGrammarDocument(grammar: GrammarDocument): PreparedGrammar {
   return {
     grammar,
     diagnostics: [],
+    name: grammar.name,
   };
 }
 
@@ -305,19 +284,6 @@ function normalizeTargets(
   return result;
 }
 
-function normalizePortability(
-  portability: PortabilityMode | undefined,
-  targets: readonly GenerateTarget[],
-): PortabilityMode {
-  if (
-    portability === "strict" || portability === "warn" || portability === "off"
-  ) {
-    return portability;
-  }
-  if (targets.length > 1) return "strict";
-  return "warn";
-}
-
 function metadataOrEmpty(metadata: BabaMetadata | undefined): BabaMetadata {
   if (metadata !== undefined) return metadata;
   return {};
@@ -336,46 +302,27 @@ interface PlannedGrammar {
   readonly analyzed: AnalyzedGrammar;
   readonly runtimeOptions: RuntimeParserPlanningOptions;
   readonly metadata: BabaMetadata;
-  readonly portability: PortabilityMode;
 }
 
 /** Shared analyze-and-plan setup used by both validateGrammar and compile. */
 function analyzeForPlanning(
-  grammar: GrammarObject,
+  grammar: GrammarDocument,
   targets: readonly GenerateTarget[],
   name: string,
   options: CompileOptions | ValidateOptions,
 ): PlannedGrammar {
-  const portability = normalizePortability(options.portability, targets);
   const runtimeOptions = sharedRuntimePlanningOptions(targets, options);
   const metadata = metadataOrEmpty(options.metadata);
-  const analyzed = analyzePreparedGrammar(grammar, {
+  const analyzed = analyzeGrammarDocumentForWasm(grammar, {
     name,
     rootRule: options.rootRule,
-    metadata,
     regexLimits: {
       sourceLengthLimit: runtimeOptions.regexSourceLengthLimit,
       nestingLimit: regexNestingLimit(runtimeOptions),
     },
     grammarExpressionDepthLimit: runtimeOptions.grammarExpressionDepthLimit,
   });
-  return { analyzed, runtimeOptions, metadata, portability };
-}
-
-function analyzePreparedGrammar(
-  grammar: GrammarObject,
-  options: {
-    readonly name?: string;
-    readonly rootRule?: string;
-    readonly metadata?: BabaMetadata;
-    readonly regexLimits?: RegexCompilerLimits;
-    readonly grammarExpressionDepthLimit?: number;
-  },
-): AnalyzedGrammar {
-  if (isGrammarDocument(grammar)) {
-    return analyzeGrammarDocumentForWasm(grammar, options);
-  }
-  return analyzeGrammar(grammar, options);
+  return { analyzed, runtimeOptions, metadata };
 }
 
 function regexNestingLimit(
@@ -404,12 +351,6 @@ function isWasmPlan(
     | undefined,
 ): value is WasmPlan {
   return !!value && "wasm" in value;
-}
-
-function isGrammarDocument(
-  value: GrammarObject,
-): value is GrammarDocument {
-  return "declarations" in value;
 }
 
 function publicGrammarDiagnostics(

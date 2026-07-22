@@ -6,9 +6,9 @@ import type { PortableParserPlan } from "../../targets/runtime/portable_plan.ts"
 export function emitSyntax(analyzed: AnalyzedGrammar): string {
   const namedTokens = analyzed.tokens.filter((token) =>
     token.kind === "skip" ||
-    (token.kind === "token" && analyzed.reachableTokens.has(token.id))
+    analyzed.reachableTokens.has(token.id)
   );
-  const mainTokens = namedTokens.filter((token) => token.kind === "token");
+  const mainTokens = namedTokens.filter((token) => token.kind !== "skip");
   const triviaTokens = namedTokens.filter((token) => token.kind === "skip");
   const literals = analyzed.literals.filter((literal) =>
     analyzed.reachableLiterals.has(literal.id)
@@ -30,7 +30,23 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
     triviaTokenKinds: triviaTokens.map((token) => token.name),
     literalKinds: literals.map((literal) => literal.value),
     ruleNames: rules.map((rule) => rule.name),
-    fieldSchemas,
+    fieldSchemas: fieldSchemas.map((schema) => ({
+      ruleName: schema.ruleName,
+      nodeType: schema.nodeType,
+      fields: schema.fields.map((field) => {
+        let cardinality: "required" | "nullable" | "array" = "required";
+        if (field.array) {
+          cardinality = "array";
+        } else if (field.nullable) {
+          cardinality = "nullable";
+        }
+        return {
+          name: field.name,
+          type: field.type,
+          cardinality,
+        };
+      }),
+    })),
     rootNodeType: rootSchema.nodeType,
     parserPlanVersion: undefined,
     parserPlanSemantics: undefined,
@@ -41,7 +57,7 @@ export function emitSyntaxFromPortablePlan(
   plan: PortableParserPlan,
 ): string {
   const namedTokens = plan.symbols.tokens.filter((token) => token.reachable);
-  const mainTokens = namedTokens.filter((token) => token.kind === "token");
+  const mainTokens = namedTokens.filter((token) => token.kind !== "skip");
   const triviaTokens = namedTokens.filter((token) => token.kind === "skip");
   const literals = plan.symbols.literals.filter((literal) => literal.reachable);
   return emitSyntaxModel({
@@ -67,7 +83,7 @@ function emitSyntaxModel(model: {
     readonly fields: readonly {
       readonly name: string;
       readonly type: string;
-      readonly array?: boolean;
+      readonly cardinality: "required" | "nullable" | "array";
     }[];
   }[];
   rootNodeType: string;
@@ -84,7 +100,7 @@ function emitSyntaxModel(model: {
     fields: schema.fields.map((field) => ({
       ...field,
       cursorType: cursorFieldType(field.type, cursorTypeByNodeType),
-      array: fieldIsArray(field),
+      array: field.cardinality === "array",
     })),
   }));
   const rootCursorTypeValue = cursorTypeByNodeType.get(model.rootNodeType);
@@ -438,15 +454,6 @@ function cursorFieldType(
     result = result.replace(pattern, cursorType);
   }
   return result;
-}
-
-function fieldIsArray(
-  field: { readonly type: string; readonly array?: boolean },
-): boolean {
-  if (field.array !== undefined) {
-    return field.array;
-  }
-  return field.type.startsWith("ReadonlyArray<");
 }
 
 function escapeRegExp(value: string): string {

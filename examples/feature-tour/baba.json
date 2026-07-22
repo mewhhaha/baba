@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "word": "IDENT",
   "parser": {
     "resolutions": [
       { "conflict": "c_e376f2f933bca747", "prefer": "shift" }

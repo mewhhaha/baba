@@ -10,9 +10,9 @@ language-specific scanner behavior stay outside the generated parser plan.
 
 The grammar syntax also includes contextual tokens, lexer modes, layout rules,
 module imports/extensions, sync recovery annotations, AST constructors, and
-Pratt expression islands. The parser accepts that syntax, but Wasm generation
-reports structured diagnostics for features that are not yet encoded by the
-shared runtime plan. AST constructors are accepted with a warning because
+Pratt expression islands. Contextual tokens are supported by the Wasm target;
+the remaining features report structured diagnostics when they cannot be encoded
+by the shared runtime plan. AST constructors are accepted with a warning because
 generated Wasm bundles still expose cursor-shaped parse results.
 
 ## Tokens And Skips
@@ -44,6 +44,33 @@ parser rules should describe significant syntax.
 Literal strings in rules are terminals too. If a literal and a named token can
 both match the same source text, Baba uses parser context during `parse()` when
 the grammar and metadata make the choice deterministic.
+
+## Contextual Tokens
+
+Declare syntax-sensitive tokens with `contextual`. A contextual token remains an
+LR terminal, but standalone `lex()` prefers an overlapping ordinary token or
+skip. During `parse()`, the runtime promotes the contextual candidate only when
+the current parser state accepts it.
+
+Contextual regexes may end with one positive lookahead and one negative
+lookahead. These assertions inspect the source after the token without consuming
+it:
+
+```baba
+skip whitespace = /[ \t\r\n]+/ ;
+contextual application_space = /[ \t]+(?=[A-Za-z_])(?!(if|in)\b)/ ;
+contextual type_application_space = /[ \t]+(?=[A-Za-z_#&]|\(|\[)/ ;
+contextual break_value_space = /[ \t]+(?=[^\r\n;}])/ ;
+contextual break_terminator_space = /[ \t]+(?=$|[\r\n;}])/ ;
+contextual extension_terminator = /[\r\n]/ ;
+```
+
+Positive lookahead uses Baba's portable regex subset and may include `$` as a
+top-level end-of-input alternative. Negative lookahead accepts the same subset;
+the `(word|words)\b` form is encoded as an ASCII identifier-boundary exclusion.
+Lookahead is supported only at the end of a contextual regex. It does not enable
+callbacks, mutable scanner state, or arbitrary JavaScript regular-expression
+features.
 
 ## Rules
 
@@ -79,9 +106,8 @@ validation.
 
 ## Portability
 
-The Wasm runtime target does not support reachable external scanner tokens.
-Metadata that declares external scanner symbols produces a structured diagnostic
-when those symbols are reachable from the selected root.
+External scanner callbacks are not part of the grammar or metadata contract. Use
+contextual tokens with portable trailing guards for syntax-sensitive lexing.
 
 The public target is the generated Wasm bundle. Target-specific metadata that
 cannot lower into the generated parser plan should produce a structured

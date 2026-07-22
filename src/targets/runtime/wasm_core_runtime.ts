@@ -34,6 +34,15 @@ interface PlanDataLayout {
   acceptCandidateRows: number;
   acceptCandidates: number;
   productions: number;
+  specFlags: number;
+  specFollowStarts: number;
+  specNotFollowStarts: number;
+  guardAccepts: number;
+  guardTransitionRows: number;
+  guardTransitions: number;
+  specWordRows: number;
+  wordRows: number;
+  wordCodePoints: number;
   inputBase: number;
   bytes: Uint8Array;
 }
@@ -42,6 +51,7 @@ export interface WasmCoreRuntimeMetadata {
   readonly eofTerminal: number;
   readonly terminalBySpec: readonly number[];
   readonly acceptCandidates: readonly (readonly number[])[];
+  readonly specs: readonly WasmCoreLexerSpecMetadata[];
   readonly productions: readonly {
     readonly lhs: number;
     readonly rhsLength: number;
@@ -50,9 +60,17 @@ export interface WasmCoreRuntimeMetadata {
   }[];
 }
 
+export interface WasmCoreLexerSpecMetadata {
+  readonly contextual: boolean;
+  readonly followedBy: Dfa | undefined;
+  readonly followedByEof: boolean;
+  readonly notFollowedBy: Dfa | undefined;
+  readonly excludedWords: readonly string[];
+}
+
 const PLAN_MAGIC = 0x31505742;
-const PLAN_FORMAT_VERSION = 2;
-const PLAN_HEADER_I32_COUNT = 21;
+const PLAN_FORMAT_VERSION = 3;
+const PLAN_HEADER_I32_COUNT = 31;
 const PLAN_HEADER_BYTES = PLAN_HEADER_I32_COUNT * 4;
 const COMPACT_I16_OFFSET_TAG = 2;
 const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
@@ -60,11 +78,12 @@ const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 export function emitWasmModule(
   dfa: Dfa,
   lr: LrTable,
-  parserPlanVersion = 1,
+  parserPlanVersion = 2,
   metadata: WasmCoreRuntimeMetadata = {
     eofTerminal: -1,
     terminalBySpec: [],
     acceptCandidates: [],
+    specs: [],
     productions: [],
   },
 ): WasmModuleImage {
@@ -94,6 +113,11 @@ function buildPlanDataLayout(
   parserPlanVersion: number,
   metadata: WasmCoreRuntimeMetadata,
 ): PlanDataLayout {
+  if (metadata.specs.length !== metadata.terminalBySpec.length) {
+    throw new Error(
+      `Wasm core metadata has ${metadata.specs.length} lexer specs for ${metadata.terminalBySpec.length} terminal mappings.`,
+    );
+  }
   const data = new Array(PLAN_HEADER_BYTES).fill(0);
   const appendI32s = (values: readonly number[]): number => {
     const offset = data.length;
@@ -252,6 +276,86 @@ function buildPlanDataLayout(
   }
   const productionsOffset = appendI32s(productionPairs);
 
+  const specFlags: number[] = [];
+  const specFollowStarts: number[] = [];
+  const specNotFollowStarts: number[] = [];
+  const guardAccepts: number[] = [];
+  const guardTransitionRows: number[] = [];
+  const guardTransitions: number[] = [];
+  const appendGuardDfa = (guard: Dfa | undefined): number => {
+    if (guard === undefined) {
+      return -1;
+    }
+    const stateBase = guardAccepts.length;
+    for (const state of guard.states) {
+      let accepts = 1;
+      if (state.selectedAccept === null) {
+        accepts = 0;
+      }
+      guardAccepts.push(accepts);
+      guardTransitionRows.push(guardTransitions.length / 3);
+      for (const transition of state.transitions) {
+        guardTransitions.push(
+          transition.start,
+          transition.end,
+          stateBase + transition.target,
+        );
+      }
+    }
+    return stateBase + guard.start;
+  };
+  const specWordRows: number[] = [];
+  const wordRows: number[] = [];
+  const wordCodePoints: number[] = [];
+  for (
+    let specIndex = 0;
+    specIndex < metadata.terminalBySpec.length;
+    specIndex++
+  ) {
+    const spec = metadata.specs[specIndex];
+    if (spec === undefined) {
+      throw new Error(`Wasm core metadata lexer spec ${specIndex} is missing.`);
+    }
+    let flags = 0;
+    if (spec.contextual) {
+      flags |= 1;
+    }
+    if (spec.followedByEof) {
+      flags |= 2;
+    }
+    if (spec.followedBy !== undefined) {
+      flags |= 4;
+    }
+    specFlags.push(flags);
+    specFollowStarts.push(appendGuardDfa(spec.followedBy));
+    specNotFollowStarts.push(appendGuardDfa(spec.notFollowedBy));
+    specWordRows.push(wordRows.length);
+    for (const word of spec.excludedWords) {
+      wordRows.push(wordCodePoints.length);
+      for (const character of word) {
+        const codePoint = character.codePointAt(0);
+        if (codePoint === undefined) {
+          throw new Error(
+            `Missing code point in excluded word ${JSON.stringify(word)}.`,
+          );
+        }
+        wordCodePoints.push(codePoint);
+      }
+    }
+  }
+  guardTransitionRows.push(guardTransitions.length / 3);
+  specWordRows.push(wordRows.length);
+  wordRows.push(wordCodePoints.length);
+  const specFlagsOffset = appendI32s(specFlags);
+  const specFollowStartsOffset = appendI32s(specFollowStarts);
+  const specNotFollowStartsOffset = appendI32s(specNotFollowStarts);
+  const guardAcceptsOffset = appendI32s(guardAccepts);
+  const guardTransitionRowsOffset = appendI32s(guardTransitionRows);
+  const guardTransitionsOffset = appendI32s(guardTransitions);
+  const specWordRowsOffset = appendI32s(specWordRows);
+  const wordRowsOffset = appendI32s(wordRows);
+  const wordCodePointsOffset = appendI32s(wordCodePoints);
+
   const bytes = Uint8Array.from(data);
   const header = [
     PLAN_MAGIC,
@@ -275,6 +379,16 @@ function buildPlanDataLayout(
     acceptCandidatesOffset,
     metadata.productions.length,
     productionsOffset,
+    specFlagsOffset,
+    specFollowStartsOffset,
+    specNotFollowStartsOffset,
+    guardAccepts.length,
+    guardAcceptsOffset,
+    guardTransitionRowsOffset,
+    guardTransitionsOffset,
+    specWordRowsOffset,
+    wordRowsOffset,
+    wordCodePointsOffset,
   ];
   writeHeader(bytes, header);
 
@@ -291,6 +405,15 @@ function buildPlanDataLayout(
     acceptCandidateRows: acceptCandidateRowsOffset,
     acceptCandidates: acceptCandidatesOffset,
     productions: productionsOffset,
+    specFlags: specFlagsOffset,
+    specFollowStarts: specFollowStartsOffset,
+    specNotFollowStarts: specNotFollowStartsOffset,
+    guardAccepts: guardAcceptsOffset,
+    guardTransitionRows: guardTransitionRowsOffset,
+    guardTransitions: guardTransitionsOffset,
+    specWordRows: specWordRowsOffset,
+    wordRows: wordRowsOffset,
+    wordCodePoints: wordCodePointsOffset,
     inputBase: align(bytes.length, 8),
     bytes,
   };

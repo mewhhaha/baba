@@ -500,10 +500,6 @@ Deno.test("combined parser plans round-trip runtime metadata v2 with exact secti
     () => validateCombinedWasmParserPlan(versionOne),
     "runtime metadata version 1",
   );
-  assertThrowsIncludes(
-    () => validateCombinedWasmParserPlan(versionOne),
-    "Regenerate the parser plan with Baba 5",
-  );
 
   const malformedMagic = new Uint8Array(file.content);
   malformedMagic[validated.runtimeMetadataHeaderOffset] = 0;
@@ -854,6 +850,90 @@ Deno.test("shared Wasm adapter resolves contextual token candidates from Wasm le
     assertCursorToken(cursorValue, "if");
     assertEquals(cursorValue.text, "if");
     parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm parser promotes guarded contextual trivia by parser state", async () => {
+  const grammar = `
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    token INT = /[0-9]+/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    contextual APPLICATION_SPACE = /[ \\t]+(?=[A-Za-z_])(?!(if|in)\\b)/ ;
+    contextual TYPE_APPLICATION_SPACE = /[ \\t]+(?=[A-Za-z_#&]|\\(|\\[)/ ;
+    contextual BREAK_VALUE_SPACE = /[ \\t]+(?=[^\\r\\n;}])/ ;
+    contextual BREAK_TERMINATOR_SPACE = /[ \\t]+(?=$|[\\r\\n;}])/ ;
+    contextual EXTENSION_TERMINATOR = /[\\r\\n]/ ;
+    contextual NON_SEMICOLON_SPACE = /[ \\t]+(?!;)/ ;
+
+    module = application_case | type_case | break_case | extension_case | negative_case ;
+    application_case = "app:" first:application "if" second:application ;
+    application = head:IDENT (APPLICATION_SPACE arguments:IDENT)* ;
+    type_case = "type:" constructor:IDENT TYPE_APPLICATION_SPACE argument:IDENT ;
+    break_case = "break:" statement:break_statement trailing:INT? ;
+    break_statement = "break" (
+      BREAK_TERMINATOR_SPACE
+    | BREAK_VALUE_SPACE value:INT
+    )? ;
+    extension_case = "ext:" first:IDENT EXTENSION_TERMINATOR second:IDENT ;
+    negative_case = "neg:" first:IDENT NON_SEMICOLON_SPACE second:IDENT ";" ;
+  `;
+  const { dir, mod, bytes, plan } = await materialize(grammar);
+  try {
+    const parser = mod.createParser({ bytes, plan });
+
+    const lexed = parser.lex("app:f x if y z");
+    assertEquals(lexed.diagnostics.length, 0);
+    assertEquals(lexed.tokenTape.token(2)?.kind, "WS");
+
+    const applied = parser.parse("app:f x if y z");
+    assertEquals(applied.ok, true);
+    assert(applied.cursor);
+    const applicationCase = applied.cursor.child(0);
+    assertCursorRule(applicationCase, "application_case");
+    const firstApplication = applicationCase.field("first");
+    assertCursorRule(firstApplication, "application");
+    assertEquals(firstApplication.fieldArray("arguments").length, 1);
+    const secondApplication = applicationCase.field("second");
+    assertCursorRule(secondApplication, "application");
+    assertEquals(secondApplication.fieldArray("arguments").length, 1);
+
+    const stopKeyword = parser.parse("app:f if y");
+    assertEquals(stopKeyword.ok, true);
+
+    assertEquals(parser.parse("type:Option Value").ok, true);
+
+    const breakValue = parser.parse("break:break 42");
+    assertEquals(breakValue.ok, true);
+    assert(breakValue.cursor);
+    const breakCase = breakValue.cursor.child(0);
+    assertCursorRule(breakCase, "break_case");
+    const breakStatement = breakCase.field("statement");
+    assertCursorRule(breakStatement, "break_statement");
+    const value = breakStatement.field("value");
+    assertCursorToken(value, "INT");
+    assertEquals(value.text, "42");
+    assertEquals(breakCase.field("trailing"), null);
+
+    assertEquals(parser.parse("break:break   ").ok, true);
+    assertEquals(parser.parse("ext:first\nsecond").ok, true);
+    assertEquals(parser.parse("neg:first second;").ok, true);
+    assertEquals(parser.parse("neg:first ;").ok, false);
+    parser.dispose();
+
+    const corruptGuard = new Uint8Array(plan);
+    const corruptGuardView = new DataView(
+      corruptGuard.buffer,
+      corruptGuard.byteOffset,
+      corruptGuard.byteLength,
+    );
+    const positiveGuardStartsOffset = corruptGuardView.getInt32(22 * 4, true);
+    corruptGuardView.setInt32(positiveGuardStartsOffset, 0x7fff_ffff, true);
+    assertThrowsIncludes(
+      () => mod.createParser({ bytes, plan: corruptGuard }),
+      "invalid guard state",
+    );
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

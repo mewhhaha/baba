@@ -1,8 +1,8 @@
-import type { BabaMetadata, Diagnostic, PortabilityMode } from "../../ast.ts";
+import type { BabaMetadata, Diagnostic } from "../../ast.ts";
 import {
   type GrammarAnalysisStatistics,
   grammarAnalysisStatistics,
-} from "../../compiler/analyze.ts";
+} from "../../compiler/analyzed_grammar.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import { countRegexAstNodes, type RegexAst } from "../../compiler/regex/ast.ts";
 import { buildDfa, type Dfa } from "../../compiler/regex/dfa.ts";
@@ -31,7 +31,8 @@ import {
   type LrTable,
 } from "../../compiler/runtime_plan/lr1.ts";
 import {
-  createPortableParserPlanV1,
+  type ContextualTrailingContextPlan,
+  createPortableParserPlan,
   type PortableParserPlan,
   type PortableParserPlanMetadata,
   portableParserPlanMetadata,
@@ -106,6 +107,7 @@ interface RuntimeRegexAnalysis {
   diagnostics: readonly Diagnostic[];
   astByTokenId: ReadonlyMap<number, RegexAst>;
   dfaByTokenId: ReadonlyMap<number, Dfa>;
+  trailingContextByTokenId: ReadonlyMap<number, ContextualTrailingContextPlan>;
   stats: Pick<
     RuntimeParserAnalysisStatistics,
     | "regexAstNodes"
@@ -128,14 +130,12 @@ export function planPortableRuntime(
   analyzed: AnalyzedGrammar,
   options: RuntimeParserPlanningOptions = {},
   metadata: BabaMetadata = {},
-  portability: PortabilityMode = "warn",
 ): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } {
   portableRuntimePlanInvocationCountForTesting++;
   return planRuntimeParserTarget(
     analyzed,
     options,
     metadata,
-    portability,
     PORTABLE_RUNTIME_TARGET_CONFIG,
   );
 }
@@ -152,7 +152,6 @@ export function planRuntimeParserTarget(
   analyzed: AnalyzedGrammar,
   options: RuntimeParserPlanningOptions = {},
   metadata: BabaMetadata = {},
-  portability: PortabilityMode = "warn",
   config: RuntimeParserTargetConfig,
 ): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } {
   const optionDiagnostics = runtimeOptionsDiagnostics(options, config);
@@ -171,7 +170,6 @@ export function planRuntimeParserTarget(
   const diagnostics: Diagnostic[] = [
     ...optionDiagnostics,
     ...regexAnalysis.diagnostics,
-    ...runtimeCapabilityDiagnostics(analyzed, metadata, portability, config),
     ...runtimeLiteralDiagnostics(analyzed, config),
     ...literalOverlapAnalysis.diagnostics,
   ];
@@ -245,11 +243,12 @@ export function planRuntimeParserTarget(
     return { diagnostics: capDiagnostics(diagnostics, options, config) };
   }
 
-  const portable = createPortableParserPlanV1(
+  const portable = createPortableParserPlan(
     analyzed,
     bnf,
     lr,
     dfaAnalysis.dfa,
+    regexAnalysis.trailingContextByTokenId,
   );
 
   const cappedDiagnostics = capDiagnostics(diagnostics, options, config);
@@ -300,7 +299,7 @@ export function runtimeLexerSpecs(
   for (const token of analyzed.tokens) {
     if (
       token.kind !== "skip" &&
-      !(token.kind === "token" && analyzed.reachableTokens.has(token.id))
+      !analyzed.reachableTokens.has(token.id)
     ) {
       continue;
     }
@@ -311,6 +310,7 @@ export function runtimeLexerSpecs(
       type: "named",
       priority: token.priority,
       order: token.declarationOrder,
+      contextual: token.kind === "contextual",
     });
   }
   for (const literal of analyzed.literals) {
@@ -320,69 +320,10 @@ export function runtimeLexerSpecs(
       type: "literal",
       priority: 0,
       order: literal.sourceOrder,
+      contextual: false,
     });
   }
   return specs;
-}
-
-function runtimeCapabilityDiagnostics(
-  analyzed: AnalyzedGrammar,
-  metadata: BabaMetadata,
-  portability: PortabilityMode,
-  config: RuntimeParserTargetConfig,
-): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  for (const external of analyzed.reachableExternals) {
-    diagnostics.push(targetDiagnostic(
-      config,
-      "EXTERNAL_TOKENS_UNSUPPORTED",
-      "error",
-      `The ${config.label} target cannot generate scanner behavior for external token '${external}'. External scanner metadata is accepted only for compatibility with older Tree-sitter grammar generation; replace the external token with an explicit portable token for Wasm output.`,
-    ));
-  }
-
-  for (const [ruleName, ruleMeta] of Object.entries(metadata.rules ?? {})) {
-    if (ruleMeta.token?.kind === "token.immediate") {
-      diagnostics.push(targetDiagnostic(
-        config,
-        "TOKEN_IMMEDIATE_UNSUPPORTED",
-        "error",
-        `The ${config.label} target does not support token.immediate metadata on rule '${ruleName}' because it may alter accepted whitespace.`,
-      ));
-    }
-    if (
-      portability !== "off" &&
-      (ruleMeta.paths || ruleMeta.wrap)
-    ) {
-      diagnostics.push({
-        code: "PORTABILITY_TREE_SHAPE_DIFFERS",
-        severity: "warning",
-        backend: config.backend,
-        message:
-          `Legacy Tree-sitter grammar-shaping metadata on rule '${ruleName}' is ignored by the ${config.label} CST target. Baba now emits query fragments, not grammar.js.`,
-      });
-    }
-  }
-
-  const skipNames = new Set(
-    analyzed.tokens.filter((token) => token.kind === "skip").map((token) =>
-      token.name
-    ),
-  );
-  for (const extra of metadata.extras ?? []) {
-    if (extra.kind !== "rule" || !skipNames.has(extra.name)) {
-      if (portability === "off") continue;
-      diagnostics.push({
-        code: "PORTABILITY_TREE_SITTER_EXTRA",
-        severity: portability === "strict" ? "error" : "warning",
-        backend: config.backend,
-        message:
-          `Legacy Tree-sitter extras that are not grammar skip declarations are ignored by the ${config.label} target. Baba now emits query fragments, not grammar.js.`,
-      });
-    }
-  }
-
-  return diagnostics;
 }
 
 function analyzeRuntimeRegexes(
@@ -393,24 +334,65 @@ function analyzeRuntimeRegexes(
   const diagnostics: Diagnostic[] = [];
   const astByTokenId = new Map<number, RegexAst>();
   const dfaByTokenId = new Map<number, Dfa>();
+  const trailingContextByTokenId = new Map<
+    number,
+    ContextualTrailingContextPlan
+  >();
   let regexAstNodes = 0;
   let regexNfaStates = 0;
   let regexDfaStates = 0;
   let regexDfaTransitions = 0;
   for (const token of analyzed.tokens) {
-    if (token.kind === "token" && !analyzed.reachableTokens.has(token.id)) {
+    if (token.kind !== "skip" && !analyzed.reachableTokens.has(token.id)) {
       continue;
     }
     astByTokenId.set(token.id, token.pattern);
     try {
-      enforceRegexAstNodeLimit(token.pattern, limits);
-      regexAstNodes += countRegexAstNodes(token.pattern);
-      const nfa = buildRegexNfa(token.pattern, 0, limits);
-      regexNfaStates += nfa.states.length;
-      const dfa = buildDfa(nfa, undefined, limits);
-      regexDfaStates += dfa.states.length;
-      regexDfaTransitions += countDfaTransitions(dfa);
-      dfaByTokenId.set(token.id, dfa);
+      const patterns: {
+        readonly role: "token" | "followedBy" | "notFollowedBy";
+        readonly ast: RegexAst;
+      }[] = [{ role: "token", ast: token.pattern }];
+      const trailingContext = token.trailingContext;
+      if (trailingContext !== undefined) {
+        if (trailingContext.followedBy !== undefined) {
+          patterns.push({
+            role: "followedBy",
+            ast: trailingContext.followedBy,
+          });
+        }
+        if (trailingContext.notFollowedBy !== undefined) {
+          patterns.push({
+            role: "notFollowedBy",
+            ast: trailingContext.notFollowedBy,
+          });
+        }
+      }
+      let followedBy: Dfa | undefined;
+      let notFollowedBy: Dfa | undefined;
+      for (const pattern of patterns) {
+        enforceRegexAstNodeLimit(pattern.ast, limits);
+        regexAstNodes += countRegexAstNodes(pattern.ast);
+        const nfa = buildRegexNfa(pattern.ast, 0, limits);
+        regexNfaStates += nfa.states.length;
+        const dfa = buildDfa(nfa, undefined, limits);
+        regexDfaStates += dfa.states.length;
+        regexDfaTransitions += countDfaTransitions(dfa);
+        if (pattern.role === "token") {
+          dfaByTokenId.set(token.id, dfa);
+        } else if (pattern.role === "followedBy") {
+          followedBy = dfa;
+        } else {
+          notFollowedBy = dfa;
+        }
+      }
+      if (trailingContext !== undefined) {
+        trailingContextByTokenId.set(token.id, {
+          followedBy,
+          followedByEof: trailingContext.followedByEof,
+          notFollowedBy,
+          excludedWords: trailingContext.excludedWords,
+        });
+      }
     } catch (error) {
       const diagnostic = regexLimitDiagnostic(error, config, token.span);
       if (diagnostic) {
@@ -424,6 +406,7 @@ function analyzeRuntimeRegexes(
     diagnostics,
     astByTokenId,
     dfaByTokenId,
+    trailingContextByTokenId,
     stats: {
       regexAstNodes,
       regexNfaStates,
@@ -444,7 +427,7 @@ function runtimeTokenOverlapDiagnostics(
 ): { diagnostics: Diagnostic[]; pairsCompared: number } {
   const tokens = analyzed.tokens.filter((token) =>
     token.kind === "skip" ||
-    (token.kind === "token" && analyzed.reachableTokens.has(token.id))
+    analyzed.reachableTokens.has(token.id)
   );
   const diagnostics: Diagnostic[] = [];
   const overlapBudget = createOverlapPairBudget(options, config);
@@ -478,10 +461,13 @@ function runtimeTokenOverlapDiagnostics(
         throw error;
       }
       if (!witness) continue;
+      if (left.kind === "contextual" || right.kind === "contextual") {
+        continue;
+      }
       const selected = selectNamedToken(left, right);
       const shadowed = selected === left ? right : left;
       const skipOnly = left.kind === "skip" && right.kind === "skip";
-      const mainTokenOnly = left.kind === "token" && right.kind === "token";
+      const mainTokenOnly = left.kind !== "skip" && right.kind !== "skip";
       const tokenContext = mainTokenOnly
         ? tokenOverlapContext(left, right, bnf, lr)
         : { distinguishable: false };
@@ -552,7 +538,9 @@ function runtimeTokenOverlapDiagnostics(
         continue;
       }
       let severity: "error" | "warning";
-      if (skipOnly || (mainTokenOnly && tokenContext.distinguishable)) {
+      if (
+        skipOnly || (mainTokenOnly && tokenContext.distinguishable)
+      ) {
         severity = "warning";
       } else {
         severity = "error";
@@ -599,7 +587,10 @@ function runtimeShadowedTokenDiagnostics(
   const literalDfas = buildReachableLiteralDfas(analyzed, limits, config);
   diagnostics.push(...literalDfas.diagnostics);
   for (const token of analyzed.tokens) {
-    if (token.kind !== "token" || !analyzed.reachableTokens.has(token.id)) {
+    if (
+      token.kind === "skip" || token.kind === "contextual" ||
+      !analyzed.reachableTokens.has(token.id)
+    ) {
       continue;
     }
     const tokenDfa = dfaByTokenId.get(token.id);
@@ -703,7 +694,7 @@ function coveringCandidatesForToken(
     if (other.id === token.id) continue;
     if (
       other.kind !== "skip" &&
-      !(other.kind === "token" && analyzed.reachableTokens.has(other.id))
+      !analyzed.reachableTokens.has(other.id)
     ) {
       continue;
     }
@@ -713,7 +704,7 @@ function coveringCandidatesForToken(
     candidates.push({
       label: tokenLabel(other),
       dfa,
-      terminalId: other.kind === "token"
+      terminalId: other.kind !== "skip"
         ? terminalIdForToken(bnf, other.id)
         : null,
       span: other.span,
@@ -872,8 +863,8 @@ function runtimeLiteralOverlapDiagnostics(
   const diagnostics: Diagnostic[] = [];
   const tokens = analyzed.tokens.filter((token) =>
     token.kind === "skip" ||
-    (token.priority > 0 &&
-      (token.kind === "token" && analyzed.reachableTokens.has(token.id)))
+    (token.kind === "token" && token.priority > 0 &&
+      analyzed.reachableTokens.has(token.id))
   );
   const literals = analyzed.literals.filter((literal) =>
     analyzed.reachableLiterals.has(literal.id)
@@ -1289,17 +1280,38 @@ function selectNamedToken(
   left: AnalyzedGrammar["tokens"][number],
   right: AnalyzedGrammar["tokens"][number],
 ): AnalyzedGrammar["tokens"][number] {
-  if (left.priority !== right.priority) {
-    return left.priority > right.priority ? left : right;
+  if (left.kind === "contextual" && right.kind !== "contextual") {
+    return right;
   }
-  return left.declarationOrder < right.declarationOrder ? left : right;
+  if (right.kind === "contextual" && left.kind !== "contextual") {
+    return left;
+  }
+  if (left.priority !== right.priority) {
+    if (left.priority > right.priority) {
+      return left;
+    }
+    return right;
+  }
+  if (left.declarationOrder < right.declarationOrder) {
+    return left;
+  }
+  return right;
 }
 
 function compareNamedTokenToToken(
   candidate: AnalyzedGrammar["tokens"][number],
   token: AnalyzedGrammar["tokens"][number],
 ): number {
-  return token.priority - candidate.priority ||
+  let contextualOrder = 0;
+  if (candidate.kind !== token.kind) {
+    if (candidate.kind === "contextual") {
+      contextualOrder = 1;
+    } else if (token.kind === "contextual") {
+      contextualOrder = -1;
+    }
+  }
+  return contextualOrder ||
+    token.priority - candidate.priority ||
     candidate.declarationOrder - token.declarationOrder;
 }
 

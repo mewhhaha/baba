@@ -3,6 +3,7 @@ import { buildDfa } from "../src/compiler/regex/dfa.ts";
 import { dfaIntersectionWitness } from "../src/compiler/regex/intersect.ts";
 import { buildRegexNfa } from "../src/compiler/regex/nfa.ts";
 import { regexCanMatchEmpty } from "../src/compiler/regex/nullable.ts";
+import { parseContextualRegex } from "../src/compiler/regex/contextual.ts";
 import { parsePortableRegex } from "../src/compiler/regex/parser.ts";
 
 Deno.test("portable regex parser rejects nonportable constructs", () => {
@@ -12,6 +13,25 @@ Deno.test("portable regex parser rejects nonportable constructs", () => {
       "outside Baba's portable regex subset",
     );
   }
+});
+
+Deno.test("contextual regex parser separates terminal lookahead guards", () => {
+  const contextual = parseContextualRegex(
+    "[ \\t]+(?=$|[\\r\\n;}])(?!(if|in)\\b)",
+  );
+
+  assertEquals(contextual.patternSource, "[ \\t]+");
+  assertEquals(contextual.trailingContext?.followedByEof, true);
+  assert(contextual.trailingContext?.followedBy);
+  assertEquals(contextual.trailingContext.excludedWords.join(","), "if,in");
+  assertEquals(contextual.trailingContext.notFollowedBy, undefined);
+});
+
+Deno.test("contextual regex parser rejects lookahead inside consumed text", () => {
+  assertThrowsIncludes(
+    () => parseContextualRegex("a(?=b)c"),
+    "Only terminal lookahead assertions",
+  );
 });
 
 Deno.test("regex nullable analysis uses the shared AST", () => {

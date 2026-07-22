@@ -1,5 +1,4 @@
 import type {
-  BabaMetadata,
   Diagnostic,
   GrammarDeclaration,
   GrammarDocument,
@@ -14,7 +13,7 @@ import {
   DEFAULT_GRAMMAR_EXPRESSION_DEPTH_LIMIT,
   parseTokenRegex,
   visitAnalyzedExpression,
-} from "./analyze.ts";
+} from "./analyzed_grammar.ts";
 import { analyzeGrammar } from "./grammar_analysis.ts";
 import type {
   AnalyzedGrammar as AnalyzedSourceGrammar,
@@ -25,7 +24,6 @@ import type {
 } from "./grammar_ir.ts";
 import type {
   AnalyzedExpression,
-  AnalyzedExternalToken,
   AnalyzedGrammar,
   AnalyzedLiteral,
   AnalyzedRule,
@@ -35,12 +33,15 @@ import type {
   RuleId,
   TokenId,
 } from "./ir.ts";
-import type { RegexCompilerLimits } from "./regex/limits.ts";
+import { parseContextualRegex } from "./regex/contextual.ts";
+import {
+  type RegexCompilerLimits,
+  RegexResourceLimitError,
+} from "./regex/limits.ts";
 
 export interface AnalyzeGrammarDocumentForWasmOptions {
   readonly name?: string;
   readonly rootRule?: string;
-  readonly metadata?: BabaMetadata;
   readonly regexLimits?: RegexCompilerLimits;
   readonly grammarExpressionDepthLimit?: number;
 }
@@ -48,7 +49,6 @@ export interface AnalyzeGrammarDocumentForWasmOptions {
 interface ConversionContext {
   readonly source: AnalyzedSourceGrammar;
   readonly diagnostics: Diagnostic[];
-  readonly externalNames: ReadonlySet<string>;
   readonly literals: AnalyzedLiteral[];
   readonly literalIdsByValue: Map<string, LiteralId>;
   readonly regexLimits: RegexCompilerLimits | undefined;
@@ -61,11 +61,8 @@ export function analyzeGrammarDocumentForWasm(
   options: AnalyzeGrammarDocumentForWasmOptions = {},
 ): AnalyzedGrammar {
   const source = analyzeGrammar(document, { rootRule: options.rootRule });
-  const externalNames = metadataExternalNames(options.metadata);
   const diagnostics: Diagnostic[] = [];
-  diagnostics.push(
-    ...publicSourceDiagnostics(source.diagnostics, externalNames),
-  );
+  diagnostics.push(...publicSourceDiagnostics(source.diagnostics));
   collectWasmSubsetDiagnostics(document, source, diagnostics);
 
   const literals: AnalyzedLiteral[] = source.literals.map((literal) => ({
@@ -85,7 +82,6 @@ export function analyzeGrammarDocumentForWasm(
   const context: ConversionContext = {
     source,
     diagnostics,
-    externalNames,
     literals,
     literalIdsByValue,
     regexLimits: options.regexLimits,
@@ -99,7 +95,6 @@ export function analyzeGrammarDocumentForWasm(
   const reachableRules = collectReachableRules(rules, rootRule);
   const reachableTokens = new Set<TokenId>();
   const reachableLiterals = new Set<LiteralId>();
-  const reachableExternals = new Set<string>();
   for (const rule of rules) {
     if (!reachableRules.has(rule.id)) {
       continue;
@@ -114,10 +109,6 @@ export function analyzeGrammarDocumentForWasm(
       }
       if (expression.reference.kind === "token") {
         reachableTokens.add(expression.reference.tokenId);
-        return;
-      }
-      if (expression.reference.kind === "external") {
-        reachableExternals.add(expression.reference.name);
       }
     });
   }
@@ -134,11 +125,9 @@ export function analyzeGrammarDocumentForWasm(
     rules,
     tokens,
     literals: context.literals,
-    externals: analyzedExternals(externalNames),
     reachableRules,
     reachableTokens,
     reachableLiterals,
-    reachableExternals,
     diagnostics,
   };
 }
@@ -148,16 +137,56 @@ function convertToken(
   token: AnalyzedSourceGrammarToken,
 ): AnalyzedToken {
   const patternSource = terminalPatternSource(token.pattern);
-  const regex = parseTokenRegex(
-    patternSource,
-    token.name,
-    token.pattern.span,
-    context.regexLimits,
-  );
+  let consumedPatternSource = patternSource;
+  let trailingContext;
+  let contextualPatternFailed = false;
+  if (token.kind === "contextual" && token.pattern.kind === "regex") {
+    try {
+      const contextual = parseContextualRegex(
+        patternSource,
+        context.regexLimits,
+      );
+      trailingContext = contextual.trailingContext;
+      consumedPatternSource = contextual.patternSource;
+    } catch (error) {
+      let code = "INVALID_TOKEN_REGEX";
+      if (error instanceof RegexResourceLimitError) {
+        code = `PORTABLE_${error.code}`;
+      }
+      let message = String(error);
+      if (error instanceof Error) {
+        message = error.message;
+      }
+      context.diagnostics.push({
+        code,
+        severity: "error",
+        message: `Invalid regex for token '${token.name}': ${message}`,
+        span: token.pattern.span,
+      });
+      contextualPatternFailed = true;
+    }
+  }
+  let regex: ReturnType<typeof parseTokenRegex>;
+  if (contextualPatternFailed) {
+    regex = {
+      pattern: { kind: "empty" },
+      nullable: true,
+      diagnostics: [],
+    };
+  } else {
+    regex = parseTokenRegex(
+      consumedPatternSource,
+      token.name,
+      token.pattern.span,
+      context.regexLimits,
+    );
+  }
   context.diagnostics.push(...regex.diagnostics);
-  let kind: "token" | "skip" = "token";
+  let kind: "token" | "skip" | "contextual" = "token";
   if (token.kind === "skip") {
     kind = "skip";
+  } else if (token.kind === "contextual") {
+    kind = "contextual";
   }
   return {
     id: token.id,
@@ -168,6 +197,7 @@ function convertToken(
     nullable: regex.nullable,
     priority: token.priority,
     declarationOrder: token.id,
+    trailingContext,
     span: token.span,
   };
 }
@@ -330,9 +360,6 @@ function convertReference(
     });
     return { kind: "unknown", name: expression.name };
   }
-  if (context.externalNames.has(expression.name)) {
-    return { kind: "external", name: expression.name };
-  }
   return { kind: "unknown", name: expression.name };
 }
 
@@ -442,15 +469,6 @@ function collectTokenSubsetDiagnostics(
   defaultModeId: number | undefined,
   diagnostics: Diagnostic[],
 ): void {
-  if (token.kind === "contextual") {
-    diagnostics.push({
-      code: "GRAMMAR_UNSUPPORTED_CONTEXTUAL_TOKEN",
-      severity: "error",
-      message:
-        `Contextual token '${token.name}' cannot be encoded in the current Wasm parser plan.`,
-      span: token.span,
-    });
-  }
   if (token.channel !== undefined) {
     diagnostics.push({
       code: "GRAMMAR_UNSUPPORTED_TOKEN_CHANNEL",
@@ -536,15 +554,10 @@ function collectExpressionSubsetDiagnostics(
 
 function publicSourceDiagnostics(
   diagnostics: readonly Diagnostic[],
-  externalNames: ReadonlySet<string>,
 ): Diagnostic[] {
   const result: Diagnostic[] = [];
   for (const diagnostic of diagnostics) {
     if (isWasmPlannerDiagnostic(diagnostic.code)) {
-      continue;
-    }
-    const externalName = unknownReferenceName(diagnostic);
-    if (externalName !== undefined && externalNames.has(externalName)) {
       continue;
     }
     result.push(diagnostic);
@@ -562,17 +575,6 @@ function isWasmPlannerDiagnostic(code: string): boolean {
     code === "GRAMMAR_TOKEN_OVERLAP" ||
     code === "GRAMMAR_TOKEN_SHADOW_LIMIT" ||
     code === "GRAMMAR_TOKEN_SHADOWED";
-}
-
-function unknownReferenceName(diagnostic: Diagnostic): string | undefined {
-  if (diagnostic.code !== "GRAMMAR_UNKNOWN_REFERENCE") {
-    return undefined;
-  }
-  const match = /^Unknown reference '([^']+)'\.$/.exec(diagnostic.message);
-  if (match === null) {
-    return undefined;
-  }
-  return match[1];
 }
 
 function selectedRootRule(
@@ -682,25 +684,6 @@ function selectedExpressionDepthLimit(limit: number | undefined): number {
     return limit;
   }
   return DEFAULT_GRAMMAR_EXPRESSION_DEPTH_LIMIT;
-}
-
-function metadataExternalNames(
-  metadata: BabaMetadata | undefined,
-): ReadonlySet<string> {
-  if (metadata === undefined || metadata.externals === undefined) {
-    return new Set();
-  }
-  return new Set(metadata.externals);
-}
-
-function analyzedExternals(
-  names: ReadonlySet<string>,
-): AnalyzedExternalToken[] {
-  const externals: AnalyzedExternalToken[] = [];
-  for (const name of names) {
-    externals.push({ name });
-  }
-  return externals;
 }
 
 function selectedGrammarName(

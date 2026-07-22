@@ -67,18 +67,20 @@ function formatDiagnosticPrefix(diagnostic: Diagnostic): string {
 /** Converts unknown thrown values into a BabaError. */
 export function toBabaError(error: unknown, code = "BABA_ERROR"): BabaError {
   if (error instanceof BabaError) return error;
-  const message = error instanceof Error ? error.message : String(error);
-  const maybeEbnf = error as {
+  let message = String(error);
+  if (error instanceof Error) {
+    message = error.message;
+  }
+  const structuredError = error as {
     span?: SourceSpan;
     sourceLine?: string;
-    name?: string;
   };
   return new BabaError(
     {
-      code: maybeEbnf.name === "EbnfError" ? "EBNF_PARSE_ERROR" : code,
+      code,
       message,
-      span: maybeEbnf.span,
-      sourceLine: maybeEbnf.sourceLine,
+      span: structuredError.span,
+      sourceLine: structuredError.sourceLine,
     },
     { cause: error },
   );

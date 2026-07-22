@@ -26,13 +26,14 @@ contract without reintroducing `grammar.js` generation.
 `parser.wasm` contains the generic lexer/parser lookup runtime. The engine is
 authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded
 in the Baba package; grammar generation does not invoke Cargo or require Rust on
-the user's machine. `parser.plan` contains the generated DFA/LR core data plus
-runtime metadata version 2 used for runtime identity, token and literal names,
-trivia policy, expected-token displays, and cursor field schemas. DFA
-transitions, LR tables, productions, and reducers remain solely in the core
-section. `mod.ts` is a thin wrapper around
-`@mewhhaha/baba/runtime/generated-wasm`; `syntax.ts` is the typed token/cursor
-surface and does not contain runtime tables.
+the user's machine. `parser.plan` contains the generated DFA/LR core data,
+contextual trailing-guard DFAs and excluded-word tables, plus runtime metadata
+version 2 used for runtime identity, token and literal names, trivia policy,
+expected-token displays, and cursor field schemas. DFA transitions, LR tables,
+productions, reducers, and contextual guards remain solely in the core section.
+`mod.ts` is a thin wrapper around `@mewhhaha/baba/runtime/generated-wasm`;
+`syntax.ts` is the typed token/cursor surface and does not contain runtime
+tables.
 
 The Rust grammar frontend lives under `src/compiler/grammar_rs` and is embedded
 as `src/grammar_parser_wasm_bytes.ts`. It is checked with

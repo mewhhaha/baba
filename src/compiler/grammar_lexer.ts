@@ -113,6 +113,7 @@ export function buildGrammarLexerPlan(
           type: "literal",
           priority: token.priority,
           order: token.id,
+          contextual: token.kind === "contextual",
         });
       } else {
         try {
@@ -121,6 +122,7 @@ export function buildGrammarLexerPlan(
             type: "named",
             priority: token.priority,
             order: token.id,
+            contextual: token.kind === "contextual",
           });
         } catch (error) {
           diagnostics.push(patternDiagnostic(token, error));

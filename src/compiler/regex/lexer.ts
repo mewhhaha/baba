@@ -8,6 +8,7 @@ export interface LexerRegexSpec {
   type: "named" | "literal";
   priority: number;
   order: number;
+  contextual: boolean;
 }
 
 export function buildLexerDfa(
@@ -38,7 +39,24 @@ function chooseAccept(
 }
 
 function compareSpecs(left: LexerRegexSpec, right: LexerRegexSpec): number {
-  return right.priority - left.priority ||
-    (left.type === right.type ? 0 : left.type === "literal" ? -1 : 1) ||
+  let contextualOrder = 0;
+  if (left.contextual !== right.contextual) {
+    if (left.contextual === true) {
+      contextualOrder = 1;
+    } else {
+      contextualOrder = -1;
+    }
+  }
+  let typeOrder = 0;
+  if (left.type !== right.type) {
+    if (left.type === "literal") {
+      typeOrder = -1;
+    } else {
+      typeOrder = 1;
+    }
+  }
+  return contextualOrder ||
+    right.priority - left.priority ||
+    typeOrder ||
     left.order - right.order;
 }

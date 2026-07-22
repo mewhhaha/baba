@@ -6,17 +6,17 @@ export interface RuntimeImplementationSourceMetadata {
 
 export interface RuntimeImplementationMetadata {
   readonly format: "baba-runtime-implementation";
-  readonly version: 1;
-  readonly semantics: "baba-runtime-portable-v1";
+  readonly version: 2;
+  readonly semantics: "baba-runtime-portable-v2";
   readonly hash: string;
   readonly sources: readonly RuntimeImplementationSourceMetadata[];
 }
 
 export const RUNTIME_IMPLEMENTATION_FORMAT =
   "baba-runtime-implementation" as const;
-export const RUNTIME_IMPLEMENTATION_VERSION = 1 as const;
+export const RUNTIME_IMPLEMENTATION_VERSION = 2 as const;
 export const RUNTIME_IMPLEMENTATION_SEMANTICS =
-  "baba-runtime-portable-v1" as const;
+  "baba-runtime-portable-v2" as const;
 
 export const RUNTIME_IMPLEMENTATION_SOURCES:
   readonly RuntimeImplementationSourceMetadata[] = [
@@ -28,12 +28,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/runtime/wasm_plan.ts",
       role: "combined-wasm-parser-plan-format",
-      hash: "fnv1a64:15c7e0052862f724",
+      hash: "fnv1a64:4ab959a6fb5216b4",
     },
     {
       path: "src/runtime/generated_wasm.ts",
       role: "generated-wasm-parser-loader",
-      hash: "fnv1a64:93f92739043bf498",
+      hash: "fnv1a64:12ac54ab2ff2ba76",
     },
     {
       path: "src/targets/runtime/diagnostic_codes.ts",
@@ -48,7 +48,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_core_runtime.ts",
       role: "wasm-core-runtime",
-      hash: "fnv1a64:15a62d388132b2b6",
+      hash: "fnv1a64:fa9c34ca46de619f",
     },
     {
       path: "scripts/build_wasm_engine.ts",
@@ -73,12 +73,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_engine_rs/src/lib.rs",
       role: "wasm-core-runtime-rust-source",
-      hash: "fnv1a64:879bddf162ac019d",
+      hash: "fnv1a64:7739b8c583953e3f",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime_bytes.ts",
       role: "wasm-core-runtime-embedded-bytes",
-      hash: "fnv1a64:03e9676c5b43e6e8",
+      hash: "fnv1a64:f7925d672cd3584d",
     },
     {
       path: "src/targets/runtime/provenance.ts",
@@ -87,7 +87,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:9b25cc0c8ab36db3" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:5d8263ffaea17d6c" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

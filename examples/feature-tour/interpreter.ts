@@ -40,7 +40,7 @@ try {
 
   assertEquals(wasm.parserPlanFormat, "baba-parser-plan");
   assertEquals(wasm.parserPlanVersion, 1);
-  assertEquals(wasm.parserPlanSemantics, "baba-portable-v1");
+  assertEquals(wasm.parserPlanSemantics, "baba-portable-v2");
   assertEquals(wasm.wasmAbiVersion, 7);
 
   const abi = JSON.parse(

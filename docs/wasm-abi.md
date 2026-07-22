@@ -61,7 +61,7 @@ ABI version 7 core modules export:
 | `lex_all`                | function | Writes token records and returns the token count.                                |
 | `parser_action`          | function | Returns the first encoded LR action for deterministic callers.                   |
 | `parser_actions`         | function | Writes all encoded LR actions for a state/terminal pair and returns their count. |
-| `parser_select_action`   | function | Selects a contextual token/action pair for a parser state.                       |
+| `parser_select_action`   | function | Selects an unguarded contextual token/action pair for a parser state.            |
 | `parse_trace`            | function | Parses to an action trace for validation and cursor replay.                      |
 | `parse_cursor`           | function | Parses directly into cursor tapes.                                               |
 | `parser_goto`            | function | Returns a parser state, or `-1` when absent.                                     |
@@ -79,6 +79,10 @@ ABI version 7 core modules export:
 | `token_record_i32_count` | function | Returns the width of a token record.                                             |
 | `host_ownership_model`   | function | Returns the input/result ownership enum.                                         |
 | `result_lifetime_model`  | function | Returns the raw result lifetime enum.                                            |
+
+`parser_select_action` has no source pointer, so it does not select tokens with
+trailing guards. `parse_trace` and `parse_cursor` evaluate those guards against
+the source text.
 
 All numeric parameters and results use WebAssembly `i32`. Linear-memory byte
 offsets and lengths are non-negative 32-bit values. Multi-byte fields use

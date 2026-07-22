@@ -32,6 +32,7 @@ import type {
   GrammarTokenId,
 } from "./grammar_ir.ts";
 import type { RegexAst } from "./regex/ast.ts";
+import { parseContextualRegex } from "./regex/contextual.ts";
 import type { Dfa } from "./regex/dfa.ts";
 import { parsePortableRegex } from "./regex/parser.ts";
 import {
@@ -722,6 +723,9 @@ function tokenPatternAst(
     return literalAst(token.pattern.value);
   }
   try {
+    if (token.kind === "contextual") {
+      return parseContextualRegex(token.pattern.pattern).pattern;
+    }
     return parsePortableRegex(token.pattern.pattern);
   } catch (error) {
     diagnostic(

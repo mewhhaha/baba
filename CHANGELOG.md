@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Added
+
+- Added portable trailing lookahead guards for contextual tokens. Generated Wasm
+  parsers can promote guarded whitespace and terminator tokens according to
+  parser state without external scanner callbacks.
+
+### Changed
+
+- Bumped the portable parser-plan format to version 2, runtime semantics to
+  version 2, and the Wasm core-plan format to version 3. Existing generated
+  plans must be regenerated.
+
+### Removed
+
+- Removed the unpublished legacy TypeScript `ParserKit` runtime. The generated
+  Wasm runtime and portable parser-plan version 2 are now the only parser
+  execution path.
+- Removed the legacy EBNF object/parser entry path and test-only portable-plan
+  compatibility modules. Public compilation now accepts grammar source or the
+  canonical `GrammarDocument` returned by `parseGrammar()`.
+- Removed `metadata.externals`; external scanner callbacks are replaced by
+  portable contextual tokens.
+- Removed ignored Tree-sitter grammar-generation metadata and the no-op
+  portability mode. Metadata now owns parser conflict policy and generated query
+  configuration only.
+- Removed duplicate deprecated `array` and `nullable` flags from v2 CST field
+  plans. `cardinality` is the sole serialized field-shape contract.
+
 ## 5.0.0
 
 ### Added

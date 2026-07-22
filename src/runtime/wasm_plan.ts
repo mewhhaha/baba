@@ -4,9 +4,9 @@ import {
 } from "./compact_plan_binary.ts";
 
 const CORE_PLAN_MAGIC = 0x31505742;
-const CORE_PLAN_FORMAT_VERSION = 2;
-const CORE_PLAN_VERSION = 1;
-const CORE_PLAN_HEADER_I32_COUNT = 21;
+const CORE_PLAN_FORMAT_VERSION = 3;
+const CORE_PLAN_VERSION = 2;
+const CORE_PLAN_HEADER_I32_COUNT = 31;
 const CORE_PLAN_HEADER_BYTES = CORE_PLAN_HEADER_I32_COUNT * 4;
 const CORE_HEADER_MAGIC = 0;
 const CORE_HEADER_FORMAT_VERSION = 1;
@@ -29,6 +29,16 @@ const CORE_HEADER_ACCEPT_CANDIDATE_ROWS = 17;
 const CORE_HEADER_ACCEPT_CANDIDATES = 18;
 const CORE_HEADER_PRODUCTION_COUNT = 19;
 const CORE_HEADER_PRODUCTIONS = 20;
+const CORE_HEADER_SPEC_FLAGS = 21;
+const CORE_HEADER_SPEC_FOLLOW_STARTS = 22;
+const CORE_HEADER_SPEC_NOT_FOLLOW_STARTS = 23;
+const CORE_HEADER_GUARD_STATE_COUNT = 24;
+const CORE_HEADER_GUARD_ACCEPTS = 25;
+const CORE_HEADER_GUARD_TRANSITION_ROWS = 26;
+const CORE_HEADER_GUARD_TRANSITIONS = 27;
+const CORE_HEADER_SPEC_WORD_ROWS = 28;
+const CORE_HEADER_WORD_ROWS = 29;
+const CORE_HEADER_WORD_CODE_POINTS = 30;
 const I32_BYTES = 4;
 const COMPACT_I16_OFFSET_TAG = 2;
 const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
@@ -156,11 +166,6 @@ export function validateCombinedWasmParserPlan(
   const sectionVersion = readU32(planBytes, offset);
   offset += I32_BYTES;
   if (sectionVersion !== parserPlanRuntimeMetadataVersion) {
-    if (sectionVersion === 1) {
-      throw new Error(
-        "Unsupported Wasm parser plan runtime metadata version 1. Regenerate the parser plan with Baba 5.",
-      );
-    }
     throw new Error(
       `Unsupported Wasm parser plan runtime metadata version ${sectionVersion}.`,
     );
@@ -340,6 +345,35 @@ function validateCorePlan(planBytes: Uint8Array): {
     "production count",
   );
   const productions = readI32(planBytes, CORE_HEADER_PRODUCTIONS);
+  const specFlags = readI32(planBytes, CORE_HEADER_SPEC_FLAGS);
+  const specFollowStarts = readI32(planBytes, CORE_HEADER_SPEC_FOLLOW_STARTS);
+  const specNotFollowStarts = readI32(
+    planBytes,
+    CORE_HEADER_SPEC_NOT_FOLLOW_STARTS,
+  );
+  const guardStateCount = readNonNegativeI32(
+    planBytes,
+    CORE_HEADER_GUARD_STATE_COUNT,
+    "contextual guard state count",
+  );
+  const guardAccepts = readI32(planBytes, CORE_HEADER_GUARD_ACCEPTS);
+  const guardTransitionRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_GUARD_TRANSITION_ROWS),
+    "contextual guard transition rows",
+  );
+  const guardTransitions = readI32(
+    planBytes,
+    CORE_HEADER_GUARD_TRANSITIONS,
+  );
+  const specWordRows = decodeCompactOffset(
+    readI32(planBytes, CORE_HEADER_SPEC_WORD_ROWS),
+    "contextual excluded-word spec rows",
+  );
+  const wordRows = readI32(planBytes, CORE_HEADER_WORD_ROWS);
+  const wordCodePoints = readI32(
+    planBytes,
+    CORE_HEADER_WORD_CODE_POINTS,
+  );
 
   validateSection(
     "accepts",
@@ -424,6 +458,63 @@ function validateCorePlan(planBytes: Uint8Array): {
     ),
     coreByteLength,
   );
+  validateSection(
+    "lexer spec flags",
+    specFlags,
+    checkedMul(specCount, I32_BYTES, "lexer spec flag byte length"),
+    coreByteLength,
+  );
+  validateSection(
+    "lexer spec positive guards",
+    specFollowStarts,
+    checkedMul(specCount, I32_BYTES, "lexer spec positive guard byte length"),
+    coreByteLength,
+  );
+  validateSection(
+    "lexer spec negative guards",
+    specNotFollowStarts,
+    checkedMul(specCount, I32_BYTES, "lexer spec negative guard byte length"),
+    coreByteLength,
+  );
+  validateSection(
+    "contextual guard accepts",
+    guardAccepts,
+    checkedMul(guardStateCount, I32_BYTES, "guard accept byte length"),
+    coreByteLength,
+  );
+  validateSection(
+    "contextual guard transition rows",
+    guardTransitionRows.offset,
+    checkedMul(
+      guardStateCount + 1,
+      guardTransitionRows.cellBytes,
+      "guard transition row byte length",
+    ),
+    coreByteLength,
+  );
+  validateSection(
+    "contextual guard transitions",
+    guardTransitions,
+    0,
+    coreByteLength,
+  );
+  validateSection(
+    "contextual excluded-word spec rows",
+    specWordRows.offset,
+    checkedMul(
+      specCount + 1,
+      specWordRows.cellBytes,
+      "excluded-word spec row byte length",
+    ),
+    coreByteLength,
+  );
+  validateSection("contextual excluded-word rows", wordRows, 0, coreByteLength);
+  validateSection(
+    "contextual excluded-word code points",
+    wordCodePoints,
+    0,
+    coreByteLength,
+  );
   validateMonotonicRows(
     planBytes,
     transitionRows,
@@ -448,6 +539,202 @@ function validateCorePlan(planBytes: Uint8Array): {
     dfaStateCount + 1,
     "lexer accept candidate rows",
   );
+  validateMonotonicRows(
+    planBytes,
+    guardTransitionRows,
+    guardStateCount + 1,
+    "contextual guard transition rows",
+  );
+  validateMonotonicRows(
+    planBytes,
+    specWordRows,
+    specCount + 1,
+    "contextual excluded-word spec rows",
+  );
+  const acceptCandidateCount = readRowValue(
+    planBytes,
+    acceptCandidateRows,
+    dfaStateCount,
+  );
+  validateSection(
+    "lexer accept candidates",
+    acceptCandidates,
+    checkedMul(
+      acceptCandidateCount,
+      I32_BYTES,
+      "lexer accept candidate byte length",
+    ),
+    coreByteLength,
+  );
+  for (let index = 0; index < acceptCandidateCount; index++) {
+    const candidate = readI32AtByteOffset(
+      planBytes,
+      acceptCandidates + index * I32_BYTES,
+    );
+    if (candidate < 0 || candidate >= specCount) {
+      throw new Error(
+        `Wasm parser plan lexer accept candidate ${candidate} is invalid.`,
+      );
+    }
+  }
+  const guardTransitionCount = readRowValue(
+    planBytes,
+    guardTransitionRows,
+    guardStateCount,
+  );
+  validateSection(
+    "contextual guard transitions",
+    guardTransitions,
+    checkedMul(
+      guardTransitionCount,
+      3 * I32_BYTES,
+      "contextual guard transition byte length",
+    ),
+    coreByteLength,
+  );
+  for (let spec = 0; spec < specCount; spec++) {
+    const flags = readI32AtByteOffset(
+      planBytes,
+      specFlags + spec * I32_BYTES,
+    );
+    if (flags < 0 || flags > 7) {
+      throw new Error(
+        `Wasm parser plan lexer spec ${spec} has invalid contextual flags ${flags}.`,
+      );
+    }
+    const followStart = readI32AtByteOffset(
+      planBytes,
+      specFollowStarts + spec * I32_BYTES,
+    );
+    const notFollowStart = readI32AtByteOffset(
+      planBytes,
+      specNotFollowStarts + spec * I32_BYTES,
+    );
+    for (const guardStart of [followStart, notFollowStart]) {
+      if (guardStart >= -1 && guardStart < guardStateCount) {
+        continue;
+      }
+      throw new Error(
+        `Wasm parser plan lexer spec ${spec} has invalid guard state ${guardStart}.`,
+      );
+    }
+    const hasPositiveGuard = flags & 4;
+    if (hasPositiveGuard !== 0 && followStart < 0) {
+      throw new Error(
+        `Wasm parser plan lexer spec ${spec} is missing its positive guard.`,
+      );
+    }
+    if (hasPositiveGuard === 0 && followStart >= 0) {
+      throw new Error(
+        `Wasm parser plan lexer spec ${spec} has an unflagged positive guard.`,
+      );
+    }
+    const contextual = flags & 1;
+    if (contextual === 0) {
+      if ((flags & 6) !== 0 || notFollowStart >= 0) {
+        throw new Error(
+          `Wasm parser plan ordinary lexer spec ${spec} has contextual guards.`,
+        );
+      }
+    }
+  }
+  for (let index = 0; index < guardTransitionCount; index++) {
+    const transitionOffset = guardTransitions + index * 3 * I32_BYTES;
+    const start = readI32AtByteOffset(planBytes, transitionOffset);
+    const end = readI32AtByteOffset(planBytes, transitionOffset + I32_BYTES);
+    const target = readI32AtByteOffset(
+      planBytes,
+      transitionOffset + 2 * I32_BYTES,
+    );
+    const startIsScalar = start >= 0 && start <= 0x10ffff &&
+      !(start >= 0xd800 && start <= 0xdfff);
+    const endIsScalar = end >= 0 && end <= 0x10ffff &&
+      !(end >= 0xd800 && end <= 0xdfff);
+    if (!startIsScalar || !endIsScalar || start > end) {
+      throw new Error(
+        `Wasm parser plan contextual guard transition ${index} has an invalid range.`,
+      );
+    }
+    if (target < 0 || target >= guardStateCount) {
+      throw new Error(
+        `Wasm parser plan contextual guard transition ${index} has invalid target ${target}.`,
+      );
+    }
+  }
+  const wordCount = readRowValue(planBytes, specWordRows, specCount);
+  for (let spec = 0; spec < specCount; spec++) {
+    const start = readRowValue(planBytes, specWordRows, spec);
+    const end = readRowValue(planBytes, specWordRows, spec + 1);
+    const flags = readI32AtByteOffset(
+      planBytes,
+      specFlags + spec * I32_BYTES,
+    );
+    if (start !== end && (flags & 1) === 0) {
+      throw new Error(
+        `Wasm parser plan ordinary lexer spec ${spec} has excluded words.`,
+      );
+    }
+  }
+  validateSection(
+    "contextual excluded-word rows",
+    wordRows,
+    checkedMul(wordCount + 1, I32_BYTES, "excluded-word row byte length"),
+    coreByteLength,
+  );
+  const decodedWordRows = { offset: wordRows, cellBytes: 4 as const };
+  validateMonotonicRows(
+    planBytes,
+    decodedWordRows,
+    wordCount + 1,
+    "contextual excluded-word rows",
+  );
+  const wordCodePointCount = readRowValue(
+    planBytes,
+    decodedWordRows,
+    wordCount,
+  );
+  validateSection(
+    "contextual excluded-word code points",
+    wordCodePoints,
+    checkedMul(
+      wordCodePointCount,
+      I32_BYTES,
+      "excluded-word code point byte length",
+    ),
+    coreByteLength,
+  );
+  for (let word = 0; word < wordCount; word++) {
+    const start = readRowValue(planBytes, decodedWordRows, word);
+    const end = readRowValue(planBytes, decodedWordRows, word + 1);
+    if (start === end) {
+      throw new Error(`Wasm parser plan excluded word ${word} is empty.`);
+    }
+    const first = readI32AtByteOffset(
+      planBytes,
+      wordCodePoints + start * I32_BYTES,
+    );
+    const validFirst = first >= 65 && first <= 90 ||
+      first >= 97 && first <= 122 || first === 95;
+    if (!validFirst) {
+      throw new Error(
+        `Wasm parser plan excluded word ${word} has an invalid first code point.`,
+      );
+    }
+  }
+  for (let index = 0; index < wordCodePointCount; index++) {
+    const codePoint = readI32AtByteOffset(
+      planBytes,
+      wordCodePoints + index * I32_BYTES,
+    );
+    const validCodePoint = codePoint >= 65 && codePoint <= 90 ||
+      codePoint >= 97 && codePoint <= 122 ||
+      codePoint >= 48 && codePoint <= 57 || codePoint === 95;
+    if (!validCodePoint) {
+      throw new Error(
+        `Wasm parser plan excluded-word code point ${codePoint} is invalid.`,
+      );
+    }
+  }
   return { coreByteLength, parserPlanVersion };
 }
 

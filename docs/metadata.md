@@ -24,14 +24,14 @@ default changes need a new schema version or a documented breaking release.
 ## Portable Runtime Metadata
 
 The Wasm target consumes the portable parser plan. Metadata that affects parser
-semantics must lower into that plan deterministically. Metadata that requires
-external scanner behavior should produce a structured diagnostic rather than
-silently changing runtime semantics.
+semantics must lower into that plan deterministically. External scanner metadata
+is rejected at the metadata boundary rather than silently changing runtime
+semantics.
 
-Legacy Tree-sitter grammar-generation fields such as `word`, `extras`,
-`externals`, and rule-shaping metadata may still parse for compatibility with
-older metadata files, but Baba no longer generates `grammar.js`. The current
-Tree-sitter-related output is query fragments under `queries/generated-*.scm`.
+Tree-sitter grammar-generation metadata is no longer accepted because Baba does
+not generate `grammar.js`. Use contextual tokens for portable syntax-sensitive
+lexing. Tree-sitter-related metadata now controls only query fragments emitted
+under `queries/generated-*.scm`.
 
 ### Parser Conflict Policy
 

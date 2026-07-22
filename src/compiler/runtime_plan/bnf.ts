@@ -3,7 +3,7 @@ import {
   computeNullableRules,
   isExpressionNullable,
   visitAnalyzedExpression,
-} from "../analyze.ts";
+} from "../analyzed_grammar.ts";
 import type {
   AnalyzedExpression,
   AnalyzedGrammar,
@@ -104,7 +104,7 @@ export function lowerToBnf(analyzed: AnalyzedGrammar): BnfGrammar {
   };
 
   for (const token of analyzed.tokens) {
-    if (token.kind !== "token" || !analyzed.reachableTokens.has(token.id)) {
+    if (token.kind === "skip" || !analyzed.reachableTokens.has(token.id)) {
       continue;
     }
     addTerminal({

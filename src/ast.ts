@@ -1,13 +1,3 @@
-/** Legacy compatibility grammar used by the current runtime planner. */
-export interface EbnfGrammar {
-  /** Explicit token and skip declarations from the grammar header. */
-  tokens: EbnfTokenDeclaration[];
-  /** Named parser rules in source order. */
-  rules: EbnfRule[];
-  /** Source span covering the complete grammar. */
-  span: SourceSpan;
-}
-
 /** A source location range with zero-based offsets and one-based line/column. */
 export interface SourceSpan {
   /** Zero-based inclusive source offset. */
@@ -20,72 +10,12 @@ export interface SourceSpan {
   column: number;
 }
 
-/** A top-level terminal declaration. */
-export interface EbnfTokenDeclaration {
-  /** Whether the declaration emits a token or skips matched input. */
-  kind: "token" | "skip";
-  /** Token name used by grammar references and generated token kinds. */
-  name: string;
-  /** JavaScript regular expression source without surrounding slashes. */
-  pattern: string;
-  /** Explicit lexical priority. Higher values win equal-length matches. */
-  priority?: number;
-  /** Source span for the full declaration. */
-  span: SourceSpan;
-}
-
-/** A named grammar rule. */
-export interface EbnfRule {
-  /** Rule name. */
-  name: string;
-  /** Rule expression. */
-  expression: EbnfExpression;
-  /** Source span for the full rule. */
-  span: SourceSpan;
-}
-
-/** Legacy compatibility expression node used by the current runtime planner. */
-export type EbnfExpression =
-  | {
-    kind: "field";
-    name: string;
-    expression: EbnfExpression;
-    span: SourceSpan;
-  }
-  | { kind: "ref"; name: string; span: SourceSpan }
-  | { kind: "literal"; value: string; span: SourceSpan }
-  | { kind: "sequence"; items: EbnfExpression[]; span: SourceSpan }
-  | { kind: "choice"; options: EbnfExpression[]; span: SourceSpan }
-  | { kind: "optional"; expression: EbnfExpression; span: SourceSpan }
-  | { kind: "repeat"; expression: EbnfExpression; span: SourceSpan }
-  | { kind: "repeat1"; expression: EbnfExpression; span: SourceSpan }
-  | {
-    kind: "separated";
-    item: EbnfExpression;
-    separator: EbnfExpression;
-    span: SourceSpan;
-  };
-
 /** Optional metadata for generation, query emission, and parser conflict policy. */
 export interface BabaMetadata {
   /** Metadata schema version. Omit to use the current schema; when present, must be 2. */
   version?: 2;
-  /** External token names supplied by a user-owned Tree-sitter scanner. */
-  externals?: string[];
-  /** Extra tokens or rules allowed between tree-sitter tokens. */
-  extras?: TreeSitterExtra[];
-  /** Word rule used by tree-sitter. */
-  word?: string;
-  /** Supertype rule names. */
-  supertypes?: string[];
-  /** Conflict rule groups. */
-  conflicts?: string[][];
-  /** Rule names to inline. */
-  inline?: string[];
   /** Query generation metadata. */
   queries?: TreeSitterQueriesMetadata;
-  /** Per-rule tree-sitter shaping metadata. */
-  rules?: Record<string, TreeSitterRuleMetadata>;
   /** Standalone parser runtime conflict policy. */
   parser?: ParserRuntimeMetadata;
 }
@@ -273,9 +203,6 @@ export interface GrammarExpressionOperator {
 /** Output target selected for a generation run. Baba currently generates Wasm only. */
 export type GenerateTarget = "wasm";
 
-/** Cross-target portability diagnostic policy. */
-export type PortabilityMode = "strict" | "warn" | "off";
-
 /** Shared options for targets backed by the portable standalone runtime. */
 export interface PortableRuntimePlanningOptions {
   /** Preserve skip-token matches as trivia tokens. Defaults to true. */
@@ -356,8 +283,6 @@ export interface GenerateOptions {
   metadata?: BabaMetadata;
   /** Output targets. Defaults to ["wasm"]. */
   targets?: readonly GenerateTarget[];
-  /** Portability diagnostic policy. Defaults to warn. */
-  portability?: PortabilityMode;
   /** Standalone Wasm target options. */
   wasm?: WasmTargetOptions;
 }
@@ -381,8 +306,6 @@ export interface ValidateOptions {
   metadata?: BabaMetadata;
   /** Output targets to validate. Defaults to ["wasm"]. */
   targets?: readonly GenerateTarget[];
-  /** Portability diagnostic policy. Defaults to warn. */
-  portability?: PortabilityMode;
   /** Standalone Wasm target options. */
   wasm?: WasmTargetOptions;
 }
@@ -518,46 +441,4 @@ export interface TreeSitterInjectionMetadata {
   node: string;
   /** Tree-sitter injection language name. */
   language: string;
-}
-
-/** A tree-sitter extra token or rule. */
-export type TreeSitterExtra =
-  | { kind: "regex"; value: string }
-  | { kind: "rule"; name: string };
-
-/** Per-rule tree-sitter shaping metadata. */
-export interface TreeSitterRuleMetadata {
-  /** Token wrapper for the rendered rule. */
-  token?: TreeSitterRuleToken;
-  /** Precedence wrapper for the rendered rule. */
-  wrap?: TreeSitterRuleWrap;
-  /** Root or named-field path rewrites. */
-  paths?: Record<string, TreeSitterPathMetadata>;
-}
-
-/** Tree-sitter token wrapper metadata. */
-export type TreeSitterRuleToken =
-  | { kind: "token" }
-  | { kind: "token.immediate" };
-
-/** Tree-sitter precedence wrapper metadata. */
-export type TreeSitterRuleWrap =
-  | { kind: "prec"; value: number }
-  | { kind: "prec.left"; value?: number }
-  | { kind: "prec.right"; value?: number };
-
-/** Tree-sitter metadata applied to an expression path. */
-export interface TreeSitterPathMetadata {
-  /** Field name to apply at this path. */
-  field?: string;
-  /** Precedence wrapper to apply at this path. */
-  wrap?: TreeSitterRuleWrap;
-  /** Alias this path as a reference to an existing rule. */
-  alias_ref?: string;
-  /** Alias this path as a new named node. */
-  alias_node?: string;
-  /** Render this path inline rather than as a node reference. */
-  inline_path?: boolean;
-  /** Hide the node produced at this path. */
-  hidden_path?: boolean;
 }

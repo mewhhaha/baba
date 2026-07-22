@@ -8,14 +8,13 @@ matching English message text.
 
 ## Compiler Diagnostics
 
-Compiler diagnostics cover grammar parsing, metadata validation, portability,
-target support, planning limits, output packaging, and generated-size checks.
-Target-neutral planning diagnostics use portable codes. Target-specific
-packaging diagnostics remain owned by their target.
+Compiler diagnostics cover grammar parsing, metadata validation, target support,
+planning limits, output packaging, and generated-size checks. Target-neutral
+planning diagnostics use portable codes. Target-specific packaging diagnostics
+remain owned by their target.
 
 Examples include:
 
-- `PORTABLE_EXTERNAL_TOKENS_UNSUPPORTED`;
 - `PORTABLE_LEXER_TOKEN_OVERLAP`;
 - `PORTABLE_LEXER_STATE_LIMIT`;
 - `PORTABLE_PARSER_STATE_LIMIT`;

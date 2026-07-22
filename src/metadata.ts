@@ -6,14 +6,9 @@ import type {
   TreeSitterCaptureQueryEntry,
   TreeSitterCaptureQueryMetadata,
   TreeSitterCaptureSelectorMetadata,
-  TreeSitterExtra,
   TreeSitterInjectionMetadata,
   TreeSitterInjectionQueryEntry,
-  TreeSitterPathMetadata,
   TreeSitterRainbowsMetadata,
-  TreeSitterRuleMetadata,
-  TreeSitterRuleToken,
-  TreeSitterRuleWrap,
 } from "./ast.ts";
 import { BabaError } from "./errors.ts";
 
@@ -45,14 +40,7 @@ function parseMetadataObject(
   const object = expectObject(value, path);
   assertKnownKeys(object, path, [
     "version",
-    "externals",
-    "extras",
-    "word",
-    "supertypes",
-    "conflicts",
-    "inline",
     "queries",
-    "rules",
     "parser",
   ]);
 
@@ -64,49 +52,8 @@ function parseMetadataObject(
     }
     metadata.version = 2;
   }
-  if (hasKey(object, "externals")) {
-    metadata.externals = expectStringArray(
-      object.externals,
-      `${path}.externals`,
-    );
-  }
-  if (hasKey(object, "extras")) {
-    metadata.extras = expectArray(object.extras, `${path}.extras`).map((
-      extra,
-      index,
-    ) => parseTreeSitterExtra(extra, `${path}.extras[${index}]`));
-  }
-  if (hasKey(object, "word")) {
-    metadata.word = expectString(object.word, `${path}.word`);
-  }
-  if (hasKey(object, "supertypes")) {
-    metadata.supertypes = expectStringArray(
-      object.supertypes,
-      `${path}.supertypes`,
-    );
-  }
-  if (hasKey(object, "conflicts")) {
-    metadata.conflicts = expectArray(object.conflicts, `${path}.conflicts`).map(
-      (conflict, index) =>
-        expectStringArray(conflict, `${path}.conflicts[${index}]`),
-    );
-  }
-  if (hasKey(object, "inline")) {
-    metadata.inline = expectStringArray(object.inline, `${path}.inline`);
-  }
   if (hasKey(object, "queries")) {
     metadata.queries = parseQueriesMetadata(object.queries, `${path}.queries`);
-  }
-  if (hasKey(object, "rules")) {
-    const rulesObject = expectObject(object.rules, `${path}.rules`);
-    const rules: Record<string, TreeSitterRuleMetadata> = {};
-    for (const [ruleName, ruleValue] of Object.entries(rulesObject)) {
-      rules[ruleName] = parseRuleMetadataShape(
-        ruleValue,
-        `${path}.rules.${ruleName}`,
-      );
-    }
-    metadata.rules = rules;
   }
   if (hasKey(object, "parser")) {
     metadata.parser = parseParserRuntimeMetadata(
@@ -177,20 +124,6 @@ function parseParserConflictResolution(
     resolution.reduce = expectString(object.reduce, `${path}.reduce`);
   }
   return resolution;
-}
-
-function parseTreeSitterExtra(value: unknown, path: string): TreeSitterExtra {
-  const object = expectObject(value, path);
-  const kind = expectString(object.kind, `${path}.kind`);
-  if (kind === "regex") {
-    assertKnownKeys(object, path, ["kind", "value"]);
-    return { kind, value: parseRegexPattern(object.value, `${path}.value`) };
-  }
-  if (kind === "rule") {
-    assertKnownKeys(object, path, ["kind", "name"]);
-    return { kind, name: expectString(object.name, `${path}.name`) };
-  }
-  throwMetadataShape(`Invalid ${path}.kind '${kind}'`);
 }
 
 function parseQueriesMetadata(
@@ -513,98 +446,6 @@ function parseInjectionMetadata(
   };
 }
 
-function parseRuleMetadataShape(
-  value: unknown,
-  path: string,
-): TreeSitterRuleMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["token", "wrap", "paths"]);
-
-  const metadata: TreeSitterRuleMetadata = {};
-  if (hasKey(object, "token")) {
-    metadata.token = parseRuleToken(object.token, `${path}.token`);
-  }
-  if (hasKey(object, "wrap")) {
-    metadata.wrap = parseRuleWrap(object.wrap, `${path}.wrap`);
-  }
-  if (hasKey(object, "paths")) {
-    const pathsObject = expectObject(object.paths, `${path}.paths`);
-    const paths: Record<string, TreeSitterPathMetadata> = {};
-    for (const [pathKey, pathValue] of Object.entries(pathsObject)) {
-      paths[pathKey] = parsePathMetadataShape(
-        pathValue,
-        `${path}.paths.${pathKey}`,
-      );
-    }
-    metadata.paths = paths;
-  }
-  return metadata;
-}
-
-function parseRuleToken(value: unknown, path: string): TreeSitterRuleToken {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["kind"]);
-  const kind = expectString(object.kind, `${path}.kind`);
-  if (kind === "token" || kind === "token.immediate") return { kind };
-  throwMetadataShape(`Invalid ${path}.kind '${kind}'`);
-}
-
-function parseRuleWrap(value: unknown, path: string): TreeSitterRuleWrap {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["kind", "value"]);
-  const kind = expectString(object.kind, `${path}.kind`);
-  if (kind === "prec") {
-    return { kind, value: expectInteger(object.value, `${path}.value`) };
-  }
-  if (kind === "prec.left" || kind === "prec.right") {
-    if (!hasKey(object, "value")) return { kind };
-    return { kind, value: expectInteger(object.value, `${path}.value`) };
-  }
-  throwMetadataShape(`Invalid ${path}.kind '${kind}'`);
-}
-
-function parsePathMetadataShape(
-  value: unknown,
-  path: string,
-): TreeSitterPathMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, [
-    "field",
-    "wrap",
-    "alias_ref",
-    "alias_node",
-    "inline_path",
-    "hidden_path",
-  ]);
-
-  const metadata: TreeSitterPathMetadata = {};
-  if (hasKey(object, "field")) {
-    metadata.field = expectString(object.field, `${path}.field`);
-  }
-  if (hasKey(object, "wrap")) {
-    metadata.wrap = parseRuleWrap(object.wrap, `${path}.wrap`);
-  }
-  if (hasKey(object, "alias_ref")) {
-    metadata.alias_ref = expectString(object.alias_ref, `${path}.alias_ref`);
-  }
-  if (hasKey(object, "alias_node")) {
-    metadata.alias_node = expectString(object.alias_node, `${path}.alias_node`);
-  }
-  if (hasKey(object, "inline_path")) {
-    metadata.inline_path = expectBoolean(
-      object.inline_path,
-      `${path}.inline_path`,
-    );
-  }
-  if (hasKey(object, "hidden_path")) {
-    metadata.hidden_path = expectBoolean(
-      object.hidden_path,
-      `${path}.hidden_path`,
-    );
-  }
-  return metadata;
-}
-
 function expectObject(value: unknown, path: string): UnknownRecord {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as UnknownRecord;
@@ -622,11 +463,6 @@ function expectString(value: unknown, path: string): string {
   throwMetadataShape(`Expected ${path} to be string`);
 }
 
-function expectBoolean(value: unknown, path: string): boolean {
-  if (typeof value === "boolean") return value;
-  throwMetadataShape(`Expected ${path} to be boolean`);
-}
-
 function expectInteger(value: unknown, path: string): number {
   if (typeof value === "number" && Number.isInteger(value)) return value;
   throwMetadataShape(`Expected ${path} to be integer`);
@@ -636,20 +472,6 @@ function expectStringArray(value: unknown, path: string): string[] {
   return expectArray(value, path).map((item, index) =>
     expectString(item, `${path}[${index}]`)
   );
-}
-
-function parseRegexPattern(value: unknown, path: string): string {
-  const pattern = expectString(value, path);
-  if (pattern.includes("\n") || pattern.includes("\r")) {
-    throwMetadataShape(`Expected ${path} to stay on one line`);
-  }
-  try {
-    new RegExp(pattern);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throwMetadataShape(`Invalid ${path}: ${message}`);
-  }
-  return pattern;
 }
 
 function normalizeCaptureName(value: string, path: string): string {

@@ -304,9 +304,9 @@ export const wasmTokenRecordI32Count = WASM_TOKEN_RECORD_I32_COUNT;
 export const wasmHostOwnershipModel = WASM_HOST_OWNERSHIP_CALLER_MANAGED;
 export const wasmResultLifetimeModel = WASM_RESULT_LIFETIME_CALLER_BUFFER;
 export const parserPlanFormat = "baba-parser-plan" as const;
-export const parserPlanVersion = 1;
+export const parserPlanVersion = 2;
 export { parserPlanRuntimeMetadataVersion };
-export const parserPlanSemantics = "baba-portable-v1" as const;
+export const parserPlanSemantics = "baba-portable-v2" as const;
 export const runtimeImplementationFormat = RUNTIME_IMPLEMENTATION_METADATA
   .format;
 export const runtimeImplementationVersion = RUNTIME_IMPLEMENTATION_METADATA
@@ -583,7 +583,7 @@ function decodeExternalRuntimeMetadata(
   );
   if (metadataVersion !== parserPlanRuntimeMetadataVersion) {
     throw new Error(
-      `Unsupported Wasm parser plan runtime metadata version ${metadataVersion}. Regenerate the parser plan with Baba 5.`,
+      `Unsupported Wasm parser plan runtime metadata version ${metadataVersion}. Regenerate the parser plan with the current Baba release.`,
     );
   }
   const parserPlanVersion = expectNumber(identity[2], "parser plan version");
