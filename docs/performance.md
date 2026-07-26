@@ -50,3 +50,137 @@ Inspect a generated binary parser plan with:
 ```sh
 deno task inspect-plan generated/wasm/parser.plan
 ```
+
+## Engine Table Lookups
+
+All numbers below were measured on one workstation (RTX 4080 SUPER, Deno 2.9.4,
+rustc 1.94.0) with both engine builds instantiated in the same process and
+alternating iteration by iteration, reporting the p25 of per-iteration times.
+They are recorded so the questions are not re-opened without new evidence.
+
+### ASCII transitions are authoritative (implemented)
+
+`fn transition` consults the plan's dense ASCII table first and now returns `-1`
+immediately when the table misses, instead of falling through to the sparse CSR
+range scan. The fall-through was reachable on 29-43% of all `transition` calls -
+one wasted scan per token, the maximal-munch failure step - and it could never
+succeed, because `buildAsciiTransitions` materialises every ASCII code point of
+every transition, so a negative cell already means "no transition".
+
+Raw `lex_all` on 200,000 code units, before vs after, two trials:
+
+| grammar                       |        before |         after |          delta |
+| ----------------------------- | ------------: | ------------: | -------------: |
+| examples/thunkwasm            | 4.151 / 4.427 | 3.718 / 4.039 | -10.4% / -8.8% |
+| examples/brainfuck            | 4.557 / 5.034 | 4.235 / 4.616 |  -7.1% / -8.3% |
+| examples/funcfuck             | 4.145 / 4.282 | 3.856 / 3.916 |  -7.0% / -8.5% |
+| fixtures/perf/large-runtime   | 3.763 / 4.009 | 3.426 / 3.664 |  -8.9% / -8.6% |
+| fixtures/perf/parser/tiny-dsl | 3.849 / 4.218 | 3.574 / 3.810 |  -7.1% / -9.7% |
+
+Cost: +9 bytes of Wasm. Token tapes are byte-identical on every grammar above,
+and a differential over 20 grammars x 84 corpus inputs (1680 record-tape
+comparisons, including lone surrogates and astral code points) found no
+difference. The equivalence the early return depends on is pinned by
+`tests/wasm_lexer_ascii_table_test.ts`, which compares the dense table against
+the sparse rows for every ASCII code point of every DFA state.
+
+### Binary search in the table scans (rejected)
+
+Replacing the linear scans in `fn transition` and `fn table_lookup` with binary
+search was measured and rejected at both call sites.
+
+- Lexer CSR rows average 1.5-3.2 entries (p95 <= 8 on every shipped grammar),
+  and on ASCII input the sparse scan succeeded 0.00% of the time. There is
+  nothing to bisect; the work is better removed than reordered, which is what
+  the change above does.
+- In `fn table_lookup` binary search did cut probe counts substantially on the
+  long-GOTO grammars (thunkwasm GOTO 18.13 -> 4.56 steps per lookup, total 4.13M
+  -> 1.39M), and was still 3-7% SLOWER on `parse_cursor` for five of six
+  grammars. The linear scan is a predictable sequential walk over 2-byte pairs;
+  binary search is a dependent-load chain with a mispredicted branch per probe.
+- The one context that looked like a win (`parse_trace`, -29% on thunkwasm) was
+  reproduced _better_ by a control variant that differs from the baseline only
+  by three never-taken comparisons: base 25.34 ms, dead-padding control 17.14
+  ms, binary search 18.06 ms. The effect is code layout, not algorithm.
+
+That last control also means the engine sits on a ~30% `parse_trace` codegen
+cliff on thunkwasm-shaped grammars. That is real time, but it is
+compiler-version-dependent and must not be chased with dead code.
+
+## Lexer Backtracking Worst Case
+
+`fn lex_all` is O(n^2) in the worst case, and the shape is reachable from a
+grammar that compiles with no diagnostics. This is **not fixed**.
+
+`fixtures/perf/error-heavy/grammar.baba` declares the ordinary string-literal
+regex `/"([^"\\]|\\.)*"/`. On the input `"\` repeated, every `"` is consumed as
+the escaped character of the preceding `\`, so the string never closes: each
+scan runs to end of input, finds no accepting configuration, emits a one-unit
+error token, and restarts one unit along.
+
+Measured on the unmodified fixture, median of 3, `ms/MiB` normalised by UTF-16
+bytes:
+
+| chars | tokens |  lex ms |  ms/MiB | vs prev |
+| ----: | -----: | ------: | ------: | ------: |
+|  1024 |   1024 |    2.69 |  1375.7 |       - |
+|  2048 |   2048 |    8.84 |  2261.8 |   1.64x |
+|  4096 |   4096 |   34.72 |  4444.5 |   1.97x |
+|  8192 |   8192 |  141.95 |  9084.8 |   2.04x |
+| 16384 |  16384 |  573.01 | 18336.4 |   2.02x |
+| 32768 |  32768 | 2308.46 | 36935.3 |   2.01x |
+
+Cost per byte doubles with every doubling of the input. Two controls on the same
+grammar stay flat: `""` repeated holds ~8.7 ms/MiB and ordinary source ~11.4
+ms/MiB across a 64x size range. At 32,768 code units the pathological input is
+about 3,300x the linear floor.
+
+`tests/wasm_lexer_backtracking_test.ts` pins the emitted token tape for this
+input. A fix must leave it byte-identical.
+
+### What does not fix it
+
+- **A dead-state early exit does nothing.** `if target < 0 { break }` in
+  `lex_all` already is that exit, and it never fires here: the parked states all
+  have outgoing edges covering the input character, and the scan stops only at
+  end of input. A stronger "can this state still reach an accepting state" prune
+  also fails, because a single `"` from the parked state reaches an accept.
+- **Binary search does not help.** The cost is the number of scan steps, not the
+  cost of each step.
+
+### The fix, and why it is not here yet
+
+The fix is a per-position failure memo: one `i32` per source position recording
+"from this DFA state at this position, no accepting configuration is reached",
+checked on the hot loop and written only for positions visited after the last
+accept. The predicate is a pure function of the input because the DFA is
+deterministic, a collision degrades to today's behaviour rather than corrupting
+output, and on ordinary source the memo is never written or read - measured 1.00
+DFA steps per character with zero past-accept steps.
+
+It is not implemented because it needs O(n) scratch memory that `lex_all` has no
+way to obtain today. The engine has no allocator, the host owns the memory
+layout, and growing memory inside the engine would detach the caller's views. So
+it requires a change to the `lex_all` memory contract, which is a versioned ABI
+surface - see `docs/wasm-abi.md` and `docs/stability.md` - and it should be
+landed on its own rather than folded into an unrelated change.
+
+### A compile-time warning was considered and rejected
+
+Reporting non-accepting DFA states that lie on a cycle - the flex "backing up"
+report - is cheap and needs no format change, but it is not specific enough to
+ship as a default warning. Measured against minimal probe grammars:
+
+| probe grammar                     | non-accepting states on a cycle | would warn |
+| --------------------------------- | ------------------------------: | ---------- |
+| the standard string literal alone |                               3 | yes        |
+| an ordinary block comment alone   |                               3 | yes        |
+| a line comment alone              |                               0 | no         |
+| identifiers and integers alone    |                               0 | no         |
+
+A grammar containing nothing but `/"([^"\\]|\\.)*"/` already trips it, as does
+one containing nothing but `/\*...\*/`. Almost every practical grammar has a
+string literal or a block comment, so the warning would fire almost everywhere,
+and the remedy it implies - rewrite your string regex - is the wrong advice for
+what is a lexer implementation limit. It fires on 5 of the 20 grammars in this
+repo only because most fixtures here are small and carry neither construct.

@@ -28,8 +28,10 @@ import type {
 import {
   WASM_ABI_VERSION,
   WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
+  WASM_CURSOR_CHILD_RECORD_I32_COUNT,
   WASM_CURSOR_FIELD_RECORD_I32_COUNT,
   WASM_CURSOR_RULE_RECORD_I32_COUNT,
+  WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
   WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_I32_BYTES,
@@ -396,7 +398,7 @@ function wasmAbiDescriptor(): unknown {
             "end",
             "tokenStart",
             "tokenEnd",
-            "childStart",
+            "childHead",
             "childCount",
             "fieldStart",
             "fieldCount",
@@ -410,7 +412,17 @@ function wasmAbiDescriptor(): unknown {
         cursorValueRecord: {
           i32Count: WASM_CURSOR_VALUE_RECORD_I32_COUNT,
           bytes: WASM_CURSOR_VALUE_RECORD_I32_COUNT * WASM_I32_BYTES,
-          fields: ["kind", "number", "itemStart", "itemCount"],
+          fields: ["kind", "numberOrItemTail", "itemHead", "itemCount"],
+        },
+        cursorChildRecord: {
+          i32Count: WASM_CURSOR_CHILD_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_CHILD_RECORD_I32_COUNT * WASM_I32_BYTES,
+          fields: ["reference", "nextNode"],
+        },
+        cursorValueItemRecord: {
+          i32Count: WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT * WASM_I32_BYTES,
+          fields: ["valueId", "nextNode"],
         },
       },
       exports: [
@@ -601,6 +613,7 @@ function wasmAbiDescriptor(): unknown {
       internalError: PARSER_DIAGNOSTIC_CODES.internalError,
       traceLimit: PARSER_DIAGNOSTIC_CODES.traceLimit,
       ambiguousParse: PARSER_DIAGNOSTIC_CODES.ambiguousParse,
+      inputTooLarge: PARSER_DIAGNOSTIC_CODES.inputTooLarge,
     },
     parserDiagnostics: {
       detailKinds: PARSER_DIAGNOSTIC_DETAIL_KINDS,

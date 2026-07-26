@@ -29,14 +29,14 @@ The generated descriptor has:
     "runtimeMetadataVersion": 2
   },
   "core": {
-    "abiVersion": 7
+    "abiVersion": 8
   }
 }
 ```
 
 The core module exports `load_plan(planPtr, planLength) -> i32`,
 `plan_buffer_base() -> i32`, `input_base() -> i32`, `abi_version() -> i32`,
-`plan_version() -> i32`, and `semantics_version() -> i32`. For ABI version 7,
+`plan_version() -> i32`, and `semantics_version() -> i32`. For ABI version 8,
 the generated adapter writes `parser.plan` into linear memory at or after
 `plan_buffer_base()`, calls `load_plan`, and then checks that the descriptor and
 core exports agree before the adapter uses the module.
@@ -52,7 +52,7 @@ The descriptor also records:
 
 ## Core Exports
 
-ABI version 7 core modules export:
+ABI version 8 core modules export:
 
 | Export                   | Kind     | Contract                                                                         |
 | ------------------------ | -------- | -------------------------------------------------------------------------------- |
@@ -92,7 +92,7 @@ each exported function.
 
 ## External Plan
 
-ABI version 7 keeps grammar-specific DFA and LR table data outside
+ABI version 8 keeps grammar-specific DFA and LR table data outside
 `parser.wasm`. The generated `parser.plan` starts with the core table section
 expected by `load_plan`, followed by shared runtime metadata used by the
 TypeScript adapter. The host calls `plan_buffer_base()`, writes `parser.plan`
@@ -101,7 +101,7 @@ adapter treats any result other than `1` as an invalid plan. After a successful
 load, `input_base()` returns the first byte offset after the loaded core table
 section, aligned for caller-managed input.
 
-The current core table section uses format version 2. It keeps section offsets
+The current core table section uses format version 3. It keeps section offsets
 in the header and may store dense DFA/LR helper sections as compact `i16` or
 `u16` cells when all generated values fit. This compact encoding is an internal
 core-plan detail; hosts should validate the plan with `wasm/abi.json` and
@@ -121,7 +121,7 @@ the combined plan layout.
 
 ## Source And Spans
 
-ABI version 7 uses source encoding enum value `1`, meaning UTF-16 code units.
+ABI version 8 uses source encoding enum value `1`, meaning UTF-16 code units.
 The host writes the source into linear memory as contiguous unsigned 16-bit code
 units. `sourceLength` is a count of UTF-16 code units, not bytes.
 
@@ -174,13 +174,40 @@ characters therefore occupy two units in public spans.
 | `errorState`       | `i32` |   `32` |
 | `tokenReadCount`   | `i32` |   `36` |
 
-Cursor rule records contain rule id, source span, token range, child slice, and
-field slice. Cursor field records contain field id and value id. Cursor value
-records encode null, element references, and array slices.
+Cursor rule records contain rule id, source span, token range, the head of the
+rule's child-edge list plus its length, and its field slice. Cursor field
+records contain field id and value id. Cursor value records encode null, element
+references, and arrays.
+
+Child edges and array items are singly linked node arenas, not contiguous
+slices. `childRefCount` and `valueItemCount` in the cursor result record are
+node watermarks for those arenas, not the length of any one list.
+
+Cursor child records:
+
+| Field       | Type  | Offset | Meaning                                  |
+| ----------- | ----- | -----: | ---------------------------------------- |
+| `reference` | `i32` |    `0` | Child rule or token reference.           |
+| `nextNode`  | `i32` |    `4` | Next node index, or `-1` at a list tail. |
+
+Cursor value-item records:
+
+| Field      | Type  | Offset | Meaning                                  |
+| ---------- | ----- | -----: | ---------------------------------------- |
+| `valueId`  | `i32` |    `0` | Value record index of the array element. |
+| `nextNode` | `i32` |    `4` | Next node index, or `-1` at a list tail. |
+
+A rule reads its children by walking `childCount` nodes from `childHead`. An
+array value reads its items by walking `itemCount` nodes from `itemHead`. Lists
+may share a suffix of nodes with a list captured earlier; a reader that walks
+exactly `count` nodes never observes the difference. This representation is what
+makes appending to a repetition accumulator constant time instead of copying the
+whole accumulated list on every element.
 
 The descriptor exposes these widths under `core.layouts`, including `lexResult`,
 `tokenRecord`, `parseTraceResult`, `parseCursorResult`, `cursorRuleRecord`,
-`cursorFieldRecord`, and `cursorValueRecord`.
+`cursorFieldRecord`, `cursorValueRecord`, `cursorChildRecord`, and
+`cursorValueItemRecord`.
 
 ## Memory Ownership And Lifetime
 
@@ -205,7 +232,7 @@ growth.
 handles. It does not promise to shrink linear memory; repeated parses may reuse
 the previous high-water allocation.
 
-ABI version 7 has instance-owned core memory. Generated adapters expose
+ABI version 8 has instance-owned core memory. Generated adapters expose
 `createParser()` and `createParserAsync()` as the public lifecycle API. Each
 parser instance owns its `WebAssembly.Instance`, memory, loaded plan, and
 disposed state. `reset()` on a parser instance clears reusable core state.
@@ -223,7 +250,7 @@ where the host permits workers.
 
 ## Limits And Overflow
 
-ABI version 7 uses 65,536-byte WebAssembly pages and a configured maximum of
+ABI version 8 uses 65,536-byte WebAssembly pages and a configured maximum of
 65,535 pages. Adapter-side offset arithmetic checks multiplication, addition,
 alignment, and page-count growth against the 32-bit Wasm address space before
 calling `memory.grow()`.
@@ -232,6 +259,10 @@ The generated public parse API exposes `maxTraceActions`. `PARSER_TRACE_LIMIT`
 reports action-trace exhaustion. Branch-limit numeric IDs remain reserved
 internally but are not part of the source-only generated API.
 
+An input whose buffers cannot fit in the 65,535-page address space is reported
+as the structured `PARSER_INPUT_TOO_LARGE` diagnostic, naming the requested byte
+count, the limit, and the source size. It is not thrown. See `docs/limits.md`.
+
 The descriptor's `traceStatuses` table maps low-level trace status numbers to
 the generated adapter constants.
 
@@ -239,9 +270,10 @@ the generated adapter constants.
 
 Expected parse failures are reported as structured parser diagnostics, whose
 numeric low-level codes and public schemas are listed in `wasm/abi.json`.
-Malformed adapter inputs, stale capabilities, uninitialized external modules,
-and impossible memory requests throw JavaScript `TypeError`, `RangeError`, or
-`Error` from the generated adapter.
+Malformed adapter inputs, stale capabilities, and uninitialized external modules
+throw JavaScript `TypeError`, `RangeError`, or `Error` from the generated
+adapter. An input too large for the address space is a structured diagnostic,
+not a throw.
 
 The core module assumes the host respects pointer, length, alignment, and
 capacity contracts. Direct core callers are responsible for validating their own

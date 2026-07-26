@@ -1,5 +1,5 @@
 export const WASM_TARGET_KIND = "javascript-hosted-core-wasm";
-export const WASM_ABI_VERSION = 7;
+export const WASM_ABI_VERSION = 8;
 export const WASM_PAGE_BYTES = 65_536;
 export const WASM_MAX_BYTES = 0xffff_ffff;
 export const WASM_MAX_PAGES = 65_535;
@@ -17,6 +17,9 @@ export const WASM_PARSE_CURSOR_RESULT_I32_COUNT = 10;
 export const WASM_CURSOR_RULE_RECORD_I32_COUNT = 9;
 export const WASM_CURSOR_FIELD_RECORD_I32_COUNT = 2;
 export const WASM_CURSOR_VALUE_RECORD_I32_COUNT = 4;
+export const WASM_CURSOR_CHILD_RECORD_I32_COUNT = 2;
+export const WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT = 2;
+export const WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT = 10;
 export const WASM_ACTION_SHIFT = 0x01_00_00_00;
 export const WASM_ACTION_REDUCE = 0x02_00_00_00;
 export const WASM_ACTION_ACCEPT = 0x03_00_00_00;

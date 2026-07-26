@@ -6,6 +6,7 @@ export const PARSER_DIAGNOSTIC_CODE_INTERNAL_ERROR = 5;
 export const PARSER_DIAGNOSTIC_CODE_BRANCH_LIMIT = 6;
 export const PARSER_DIAGNOSTIC_CODE_TRACE_LIMIT = 7;
 export const PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE = 8;
+export const PARSER_DIAGNOSTIC_CODE_INPUT_TOO_LARGE = 9;
 
 export const PARSER_DIAGNOSTIC_CODES = {
   parseLexicalError: PARSER_DIAGNOSTIC_CODE_PARSE_LEXICAL_ERROR,
@@ -16,6 +17,7 @@ export const PARSER_DIAGNOSTIC_CODES = {
   branchLimit: PARSER_DIAGNOSTIC_CODE_BRANCH_LIMIT,
   traceLimit: PARSER_DIAGNOSTIC_CODE_TRACE_LIMIT,
   ambiguousParse: PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE,
+  inputTooLarge: PARSER_DIAGNOSTIC_CODE_INPUT_TOO_LARGE,
 } as const;
 
 export const PARSER_DIAGNOSTIC_DETAIL_NONE = 0;
@@ -87,6 +89,14 @@ export const PARSER_DIAGNOSTIC_SCHEMAS = [
     name: "ambiguousParse",
     publicCode: "PARSER_AMBIGUOUS_PARSE",
     runtimeCode: PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE,
+    detailKind: "none",
+    detailKindId: PARSER_DIAGNOSTIC_DETAIL_NONE,
+    payloadFields: [],
+  },
+  {
+    name: "inputTooLarge",
+    publicCode: "PARSER_INPUT_TOO_LARGE",
+    runtimeCode: PARSER_DIAGNOSTIC_CODE_INPUT_TOO_LARGE,
     detailKind: "none",
     detailKindId: PARSER_DIAGNOSTIC_DETAIL_NONE,
     payloadFields: [],

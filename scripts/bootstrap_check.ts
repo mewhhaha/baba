@@ -179,10 +179,65 @@ async function checkExample(example: ExampleConfig): Promise<void> {
     const tempGenerated = `${tempDir}/generated`;
     await applyBundle(bundle, { root: tempGenerated });
     await validateGeneratedExample(tempGenerated);
+    await compareGeneratedExample(example, tempGenerated);
     console.log(`verified regenerated ${example.dir}/generated`);
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
+}
+
+/**
+ * `examples/*` /`generated` is gitignored, so a fresh clone has none and there
+ * is nothing to compare. When it does exist it is what `deno task test` inside
+ * the example actually loads, so it has to match what the compiler produces
+ * now. Without this, a regenerated engine leaves every example loading a
+ * `parser.wasm` whose runtime identity the shipped loader rejects, and no gate
+ * notices.
+ */
+async function compareGeneratedExample(
+  example: ExampleConfig,
+  freshRoot: string,
+): Promise<void> {
+  const localRoot = `${example.dir}/generated`;
+  const localStat = await Deno.stat(localRoot).catch(() => null);
+  if (localStat === null) {
+    console.log(
+      `no local ${localRoot}; run \`deno task bootstrap\` to create it`,
+    );
+    return;
+  }
+  if (!localStat.isDirectory) {
+    throw new Error(`${localRoot} exists but is not a directory.`);
+  }
+  const freshFiles = await manifestOwnedFiles(freshRoot);
+  const localFiles = await manifestOwnedFiles(localRoot);
+  if (freshFiles.join("\n") !== localFiles.join("\n")) {
+    throw new Error(
+      [
+        `${localRoot} is stale: its manifest lists different files.`,
+        `on disk: ${localFiles.join(", ")}`,
+        `regenerated: ${freshFiles.join(", ")}`,
+        "Run `deno task bootstrap`.",
+      ].join("\n"),
+    );
+  }
+  for (const relative of freshFiles) {
+    const fresh = await Deno.readFile(`${freshRoot}/${relative}`);
+    const local = await Deno.readFile(`${localRoot}/${relative}`);
+    if (!equalBytes(fresh, local)) {
+      throw new Error(
+        `${localRoot}/${relative} is stale (${local.byteLength} bytes on disk, ${fresh.byteLength} bytes regenerated). Run \`deno task bootstrap\`.`,
+      );
+    }
+  }
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index++) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
 }
 
 async function compileExample(example: ExampleConfig) {

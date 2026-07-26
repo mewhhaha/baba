@@ -2,7 +2,7 @@
 
 use core::panic::PanicInfo;
 
-const WASM_ABI_VERSION: i32 = 7;
+const WASM_ABI_VERSION: i32 = 8;
 const RUNTIME_IMPLEMENTATION_VERSION: i32 = 2;
 const MAX_WASM_PAGES: i32 = 65_535;
 const SOURCE_ENCODING_UTF16: i32 = 1;
@@ -55,6 +55,8 @@ const PARSE_CURSOR_RESULT_I32_COUNT: i32 = 10;
 const CURSOR_RULE_RECORD_I32_COUNT: i32 = 9;
 const CURSOR_FIELD_RECORD_I32_COUNT: i32 = 2;
 const CURSOR_VALUE_RECORD_I32_COUNT: i32 = 4;
+const CURSOR_CHILD_RECORD_I32_COUNT: i32 = 2;
+const CURSOR_VALUE_ITEM_RECORD_I32_COUNT: i32 = 2;
 
 const ACTION_SHIFT: i32 = 0x0100_0000;
 const ACTION_REDUCE: i32 = 0x0200_0000;
@@ -109,7 +111,8 @@ const FRAGMENT_SPAN_START: i32 = 5;
 const FRAGMENT_SPAN_END: i32 = 6;
 const FRAGMENT_TOKEN_START: i32 = 7;
 const FRAGMENT_TOKEN_END: i32 = 8;
-const FRAGMENT_I32_COUNT: i32 = 9;
+const FRAGMENT_CHILD_TAIL: i32 = 9;
+const FRAGMENT_I32_COUNT: i32 = 10;
 
 extern "C" {
     static __heap_base: u8;
@@ -412,6 +415,18 @@ fn transition(state: i32, code_point: i32) -> i32 {
         return -1;
     }
 
+    // INVARIANT: when the plan carries a dense ASCII transition table it is
+    // COMPLETE and AUTHORITATIVE for code points 0..127, so a negative cell
+    // means "no transition" and the sparse CSR rows cannot add an answer.
+    // `buildAsciiTransitions` (src/targets/runtime/wasm_core_runtime.ts)
+    // materialises every ASCII code point of every transition of every state,
+    // so an unset cell is exactly the range scan's own -1. Returning early here
+    // skips a scan that provably cannot succeed; it is one wasted scan per
+    // token on ASCII input (the maximal-munch failure step) and is worth
+    // 6-11% of lex time. If that table is ever made partial while keeping this
+    // header field, this early return silently produces wrong tokens - the
+    // equivalence is pinned by "dense ASCII transitions agree with the sparse
+    // CSR rows" in tests/wasm_lexer_ascii_table_test.ts.
     if code_point >= 0 && code_point < 128 {
         let ascii_offset = header(PLAN_HEADER_ASCII_TRANSITIONS);
         if ascii_offset >= 0 {
@@ -419,6 +434,7 @@ fn transition(state: i32, code_point: i32) -> i32 {
             if value >= 0 {
                 return value;
             }
+            return -1;
         }
         if is_compact_i16_offset(ascii_offset) {
             let compact_offset = compact_i16_offset(ascii_offset);
@@ -427,6 +443,7 @@ fn transition(state: i32, code_point: i32) -> i32 {
             if value >= 0 {
                 return value;
             }
+            return -1;
         }
     }
 
@@ -1507,6 +1524,33 @@ pub extern "C" fn parse_cursor(
     }
 }
 
+/// A singly linked run of child edges or array items.
+///
+/// `head` and `tail` are node indices in the matching arena, `count` is the
+/// number of nodes reachable from `head` that belong to this run. A `count`
+/// below zero marks an exhausted arena. Runs may share a prefix: consumers only
+/// ever walk `count` nodes, and a run is only extended in place when its tail
+/// still has no successor, so a shared prefix can never be observed as longer
+/// than it was when it was captured.
+#[derive(Clone, Copy)]
+struct CursorList {
+    head: i32,
+    tail: i32,
+    count: i32,
+}
+
+const EMPTY_CURSOR_LIST: CursorList = CursorList {
+    head: -1,
+    tail: -1,
+    count: 0,
+};
+
+const EXHAUSTED_CURSOR_LIST: CursorList = CursorList {
+    head: -1,
+    tail: -1,
+    count: -1,
+};
+
 struct CursorCtx {
     token_ptr: i32,
     token_capacity: i32,
@@ -1563,27 +1607,87 @@ impl CursorCtx {
         value_count
     }
 
+    #[inline]
+    fn child_node_address(&self, node: i32) -> i32 {
+        self.child_ptr + node * CURSOR_CHILD_RECORD_I32_COUNT * 4
+    }
+
     fn append_child(&self, reference: i32) -> i32 {
         let count = self.result_value(CURSOR_RESULT_CHILD_COUNT);
         if count >= self.child_capacity {
             return -1;
         }
-        unsafe { store_i32(self.child_ptr + count * 4, reference) };
+        let record = self.child_node_address(count);
+        unsafe {
+            store_i32(record, reference);
+            store_i32(record + 4, -1);
+        }
         self.store_result(CURSOR_RESULT_CHILD_COUNT, count + 1);
         count
     }
 
-    fn copy_children(&self, source_start: i32, source_count: i32) -> i32 {
-        let output_start = self.result_value(CURSOR_RESULT_CHILD_COUNT);
+    fn single_child_list(&self, reference: i32) -> CursorList {
+        let node = self.append_child(reference);
+        if node < 0 {
+            return EXHAUSTED_CURSOR_LIST;
+        }
+        CursorList {
+            head: node,
+            tail: node,
+            count: 1,
+        }
+    }
+
+    fn copy_child_list(&self, list: CursorList) -> CursorList {
+        let mut copied = EMPTY_CURSOR_LIST;
+        let mut node = list.head;
         let mut index = 0;
-        while index < source_count {
-            let reference = unsafe { load_i32(self.child_ptr + (source_start + index) * 4) };
-            if self.append_child(reference) < 0 {
-                return -1;
+        while index < list.count {
+            if node < 0 {
+                return EXHAUSTED_CURSOR_LIST;
             }
+            let reference = unsafe { load_i32(self.child_node_address(node)) };
+            let next = unsafe { load_i32(self.child_node_address(node) + 4) };
+            let appended = self.append_child(reference);
+            if appended < 0 {
+                return EXHAUSTED_CURSOR_LIST;
+            }
+            if copied.count == 0 {
+                copied.head = appended;
+            } else {
+                unsafe { store_i32(self.child_node_address(copied.tail) + 4, appended) };
+            }
+            copied.tail = appended;
+            copied.count += 1;
+            node = next;
             index += 1;
         }
-        output_start
+        copied
+    }
+
+    fn concat_child_lists(&self, left: CursorList, right: CursorList) -> CursorList {
+        if left.count < 0 || right.count < 0 {
+            return EXHAUSTED_CURSOR_LIST;
+        }
+        if right.count == 0 {
+            return left;
+        }
+        if left.count == 0 {
+            return right;
+        }
+        let mut prefix = left;
+        if unsafe { load_i32(self.child_node_address(left.tail) + 4) } != -1 {
+            prefix = self.copy_child_list(left);
+            if prefix.count < 0 {
+                return EXHAUSTED_CURSOR_LIST;
+            }
+        }
+        unsafe { store_i32(self.child_node_address(prefix.tail) + 4, right.head) };
+        CursorList {
+            head: prefix.head,
+            tail: right.tail,
+            count: prefix.count + right.count,
+        }
     }
 
     fn append_field(&self, field_id: i32, value_id: i32) -> i32 {
@@ -1615,74 +1719,130 @@ impl CursorCtx {
         output_start
     }
 
+    #[inline]
+    fn value_item_node_address(&self, node: i32) -> i32 {
+        self.value_item_ptr + node * CURSOR_VALUE_ITEM_RECORD_I32_COUNT * 4
+    }
+
     fn append_value_item(&self, value_id: i32) -> i32 {
         let count = self.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT);
         if count >= self.value_item_capacity {
             return -1;
         }
-        unsafe { store_i32(self.value_item_ptr + count * 4, value_id) };
+        let record = self.value_item_node_address(count);
+        unsafe {
+            store_i32(record, value_id);
+            store_i32(record + 4, -1);
+        }
         self.store_result(CURSOR_RESULT_VALUE_ITEM_COUNT, count + 1);
         count
     }
 
-    fn append_array_copy_plus(&self, old_value_id: i32, add_value_id: i32, flatten: i32) -> i32 {
-        let old_record = cursor_value_record_address(self.value_ptr, old_value_id);
-        let old_kind = unsafe { load_i32(old_record) };
-        if old_kind != CURSOR_VALUE_ARRAY {
-            return -2;
-        }
-        let old_start = unsafe { load_i32(old_record + 8) };
-        let old_count = unsafe { load_i32(old_record + 12) };
-        let item_start = self.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT);
-        let mut item_count = 0;
+    fn copy_value_item_list(&self, list: CursorList) -> CursorList {
+        let mut copied = EMPTY_CURSOR_LIST;
+        let mut node = list.head;
         let mut index = 0;
-        while index < old_count {
-            let item_value = unsafe { load_i32(self.value_item_ptr + (old_start + index) * 4) };
-            if self.append_value_item(item_value) < 0 {
-                return -1;
+        while index < list.count {
+            if node < 0 {
+                return EXHAUSTED_CURSOR_LIST;
             }
-            item_count += 1;
+            let value_id = unsafe { load_i32(self.value_item_node_address(node)) };
+            let next = unsafe { load_i32(self.value_item_node_address(node) + 4) };
+            let appended = self.append_value_item(value_id);
+            if appended < 0 {
+                return EXHAUSTED_CURSOR_LIST;
+            }
+            if copied.count == 0 {
+                copied.head = appended;
+            } else {
+                unsafe { store_i32(self.value_item_node_address(copied.tail) + 4, appended) };
+            }
+            copied.tail = appended;
+            copied.count += 1;
+            node = next;
             index += 1;
         }
+        copied
+    }
 
-        if flatten != 0 {
-            let add_record = cursor_value_record_address(self.value_ptr, add_value_id);
-            let add_kind = unsafe { load_i32(add_record) };
-            if add_kind == CURSOR_VALUE_ARRAY {
-                let add_start = unsafe { load_i32(add_record + 8) };
-                let add_count = unsafe { load_i32(add_record + 12) };
-                let mut add_index = 0;
-                while add_index < add_count {
-                    let item_value =
-                        unsafe { load_i32(self.value_item_ptr + (add_start + add_index) * 4) };
-                    if self.append_value_item(item_value) < 0 {
-                        return -1;
-                    }
-                    item_count += 1;
-                    add_index += 1;
-                }
-            } else {
-                if self.append_value_item(add_value_id) < 0 {
-                    return -1;
-                }
-                item_count += 1;
+    fn concat_value_item_lists(&self, left: CursorList, right: CursorList) -> CursorList {
+        if left.count < 0 || right.count < 0 {
+            return EXHAUSTED_CURSOR_LIST;
+        }
+        if right.count == 0 {
+            return left;
+        }
+        if left.count == 0 {
+            return right;
+        }
+        let mut prefix = left;
+        if unsafe { load_i32(self.value_item_node_address(left.tail) + 4) } != -1 {
+            prefix = self.copy_value_item_list(left);
+            if prefix.count < 0 {
+                return EXHAUSTED_CURSOR_LIST;
             }
-        } else {
-            if self.append_value_item(add_value_id) < 0 {
+        }
+        unsafe { store_i32(self.value_item_node_address(prefix.tail) + 4, right.head) };
+        CursorList {
+            head: prefix.head,
+            tail: right.tail,
+            count: prefix.count + right.count,
+        }
+    }
+
+    fn array_value_list(&self, value_id: i32) -> CursorList {
+        let record = cursor_value_record_address(self.value_ptr, value_id);
+        if unsafe { load_i32(record) } != CURSOR_VALUE_ARRAY {
+            return EXHAUSTED_CURSOR_LIST;
+        }
+        CursorList {
+            head: unsafe { load_i32(record + 8) },
+            tail: unsafe { load_i32(record + 4) },
+            count: unsafe { load_i32(record + 12) },
+        }
+    }
+
+    fn append_array_value(&self, list: CursorList) -> i32 {
+        self.append_value(CURSOR_VALUE_ARRAY, list.tail, list.head, list.count)
+    }
+
+    fn append_array_copy_plus(&self, old_value_id: i32, add_value_id: i32, flatten: i32) -> i32 {
+        let old_list = self.array_value_list(old_value_id);
+        if old_list.count < 0 {
+            return -2;
+        }
+        let mut addition = EXHAUSTED_CURSOR_LIST;
+        if flatten != 0 {
+            addition = self.array_value_list(add_value_id);
+        }
+        if addition.count < 0 {
+            let node = self.append_value_item(add_value_id);
+            if node < 0 {
                 return -1;
             }
-            item_count += 1;
+            addition = CursorList {
+                head: node,
+                tail: node,
+                count: 1,
+            };
         }
-
-        self.append_value(CURSOR_VALUE_ARRAY, -1, item_start, item_count)
+        let combined = self.concat_value_item_lists(old_list, addition);
+        if combined.count < 0 {
+            return -1;
+        }
+        self.append_array_value(combined)
     }
 
     fn create_single_value_array(&self, item_value: i32) -> i32 {
-        let item_start = self.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT);
-        if self.append_value_item(item_value) < 0 {
+        let node = self.append_value_item(item_value);
+        if node < 0 {
             return -1;
         }
-        self.append_value(CURSOR_VALUE_ARRAY, -1, item_start, 1)
+        self.append_array_value(CursorList {
+            head: node,
+            tail: node,
+            count: 1,
+        })
     }
 
     fn append_repeated_fields(
@@ -1813,12 +1973,20 @@ fn store_fragment_field(ctx: &CursorCtx, index: i32, field: i32, value: i32) {
     unsafe { store_i32(fragment_address(ctx, index) + field * 4, value) }
 }
 
+#[inline]
+fn fragment_child_list(ctx: &CursorCtx, index: i32) -> CursorList {
+    CursorList {
+        head: fragment_field(ctx, index, FRAGMENT_CHILD_START),
+        tail: fragment_field(ctx, index, FRAGMENT_CHILD_TAIL),
+        count: fragment_field(ctx, index, FRAGMENT_CHILD_COUNT),
+    }
+}
+
 fn store_result_fragment(
     ctx: &CursorCtx,
     index: i32,
     value: i32,
-    child_start: i32,
-    child_count: i32,
+    children: CursorList,
     field_start: i32,
     field_count: i32,
     span_start: i32,
@@ -1827,8 +1995,9 @@ fn store_result_fragment(
     token_end: i32,
 ) {
     store_fragment_field(ctx, index, FRAGMENT_VALUE, value);
-    store_fragment_field(ctx, index, FRAGMENT_CHILD_START, child_start);
-    store_fragment_field(ctx, index, FRAGMENT_CHILD_COUNT, child_count);
+    store_fragment_field(ctx, index, FRAGMENT_CHILD_START, children.head);
+    store_fragment_field(ctx, index, FRAGMENT_CHILD_TAIL, children.tail);
+    store_fragment_field(ctx, index, FRAGMENT_CHILD_COUNT, children.count);
     store_fragment_field(ctx, index, FRAGMENT_FIELD_START, field_start);
     store_fragment_field(ctx, index, FRAGMENT_FIELD_COUNT, field_count);
     store_fragment_field(ctx, index, FRAGMENT_SPAN_START, span_start);
@@ -1863,8 +2032,8 @@ fn append_shift_cursor_fragment(
     if value < 0 {
         return PARSE_CURSOR_STATUS_CAPACITY;
     }
-    let child_start = ctx.append_child(token_ref);
-    if child_start < 0 {
+    let children = ctx.single_child_list(token_ref);
+    if children.count < 0 {
         return PARSE_CURSOR_STATUS_CAPACITY;
     }
     let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
@@ -1872,8 +2041,7 @@ fn append_shift_cursor_fragment(
         ctx,
         fragment_count,
         value,
-        child_start,
-        1,
+        children,
         field_start,
         0,
         start,
@@ -1967,8 +2135,7 @@ fn reduce_cursor_rule(
     let span_end = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_END);
     let token_start = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_START);
     let token_end = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_END);
-    let source_child_start = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_START);
-    let source_child_count = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_COUNT);
+    let source_children = fragment_child_list(ctx, rhs_start);
     let source_field_start = fragment_field(ctx, rhs_start, FRAGMENT_FIELD_START);
     let source_field_count = fragment_field(ctx, rhs_start, FRAGMENT_FIELD_COUNT);
     let rule_ref = ctx.append_rule(
@@ -1977,8 +2144,8 @@ fn reduce_cursor_rule(
         span_end,
         token_start,
         token_end,
-        source_child_start,
-        source_child_count,
+        source_children.head,
+        source_children.count,
         source_field_start,
         source_field_count,
     );
@@ -1989,8 +2156,8 @@ fn reduce_cursor_rule(
     if value < 0 {
         return capacity_result(rhs_start);
     }
-    let child_start = ctx.append_child(rule_ref);
-    if child_start < 0 {
+    let children = ctx.single_child_list(rule_ref);
+    if children.count < 0 {
         return capacity_result(rhs_start);
     }
     let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
@@ -1998,8 +2165,7 @@ fn reduce_cursor_rule(
         ctx,
         rhs_start,
         value,
-        child_start,
-        1,
+        children,
         field_start,
         0,
         span_start,
@@ -2019,24 +2185,16 @@ fn reduce_cursor_empty(
     token_write: i32,
     token_read: i32,
 ) -> ReduceResult {
-    let item_start;
-    if value_kind == CURSOR_VALUE_ARRAY {
-        item_start = ctx.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT);
-    } else {
-        item_start = -1;
-    }
-    let value = ctx.append_value(value_kind, -1, item_start, 0);
+    let value = ctx.append_value(value_kind, -1, -1, 0);
     if value < 0 {
         return capacity_result(rhs_start);
     }
-    let child_start = ctx.result_value(CURSOR_RESULT_CHILD_COUNT);
     let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
     store_result_fragment(
         ctx,
         rhs_start,
         value,
-        child_start,
-        0,
+        EMPTY_CURSOR_LIST,
         field_start,
         0,
         offset,
@@ -2056,12 +2214,7 @@ fn reduce_cursor_sequence(
     token_write: i32,
     token_read: i32,
 ) -> ReduceResult {
-    let mut value = ctx.append_value(
-        CURSOR_VALUE_ARRAY,
-        -1,
-        ctx.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT),
-        0,
-    );
+    let mut value = ctx.append_value(CURSOR_VALUE_ARRAY, -1, -1, 0);
     if value < 0 {
         return capacity_result(rhs_start);
     }
@@ -2076,13 +2229,12 @@ fn reduce_cursor_sequence(
         index += 1;
     }
 
-    let child_start = ctx.result_value(CURSOR_RESULT_CHILD_COUNT);
+    let mut children = EMPTY_CURSOR_LIST;
     let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
     index = 0;
     while index < rhs_length {
-        let source_child_start = fragment_field(ctx, rhs_start + index, FRAGMENT_CHILD_START);
-        let source_child_count = fragment_field(ctx, rhs_start + index, FRAGMENT_CHILD_COUNT);
-        if ctx.copy_children(source_child_start, source_child_count) < 0 {
+        children = ctx.concat_child_lists(children, fragment_child_list(ctx, rhs_start + index));
+        if children.count < 0 {
             return capacity_result(rhs_start);
         }
         let source_field_start = fragment_field(ctx, rhs_start + index, FRAGMENT_FIELD_START);
@@ -2092,7 +2244,6 @@ fn reduce_cursor_sequence(
         }
         index += 1;
     }
-    let child_count = ctx.result_value(CURSOR_RESULT_CHILD_COUNT) - child_start;
     let field_count = ctx.result_value(CURSOR_RESULT_FIELD_COUNT) - field_start;
 
     let span_start;
@@ -2115,8 +2266,7 @@ fn reduce_cursor_sequence(
         ctx,
         rhs_start,
         value,
-        child_start,
-        child_count,
+        children,
         field_start,
         field_count,
         span_start,
@@ -2136,8 +2286,7 @@ fn reduce_cursor_first_repeated(
     token_read: i32,
 ) -> ReduceResult {
     let item_value = fragment_field(ctx, rhs_start, FRAGMENT_VALUE);
-    let item_child_start = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_START);
-    let item_child_count = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_COUNT);
+    let item_children = fragment_child_list(ctx, rhs_start);
     let item_field_start = fragment_field(ctx, rhs_start, FRAGMENT_FIELD_START);
     let item_field_count = fragment_field(ctx, rhs_start, FRAGMENT_FIELD_COUNT);
     let item_span_start = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_START);
@@ -2145,12 +2294,7 @@ fn reduce_cursor_first_repeated(
     let item_token_start = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_START);
     let item_token_end = fragment_field(ctx, rhs_start, FRAGMENT_TOKEN_END);
 
-    let mut value = ctx.append_value(
-        CURSOR_VALUE_ARRAY,
-        -1,
-        ctx.result_value(CURSOR_RESULT_VALUE_ITEM_COUNT),
-        0,
-    );
+    let mut value = ctx.append_value(CURSOR_VALUE_ARRAY, -1, -1, 0);
     if value < 0 {
         return capacity_result(rhs_start);
     }
@@ -2168,8 +2312,7 @@ fn reduce_cursor_first_repeated(
         ctx,
         rhs_start,
         value,
-        item_child_start,
-        item_child_count,
+        item_children,
         field_start,
         field_count,
         item_span_start,
@@ -2197,26 +2340,31 @@ fn reduce_cursor_append(
         return capacity_result(rhs_start);
     }
 
-    let child_start = ctx.result_value(CURSOR_RESULT_CHILD_COUNT);
+    let mut children = fragment_child_list(ctx, rhs_start);
     let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
-    if copy_fragment_children(ctx, rhs_start, 0) < 0 {
-        return capacity_result(rhs_start);
-    }
     if copy_fragment_fields(ctx, rhs_start, 0) < 0 {
         return capacity_result(rhs_start);
     }
     if separated == 1 {
-        if copy_fragment_children_and_repeated_fields(ctx, rhs_start, 1, field_start) < 0 {
+        children = ctx.concat_child_lists(children, fragment_child_list(ctx, rhs_start + 1));
+        if children.count < 0 {
+            return capacity_result(rhs_start);
+        }
+        if append_fragment_repeated_fields(ctx, rhs_start, 1, field_start) < 0 {
             return capacity_result(rhs_start);
         }
     }
-    if copy_fragment_children_and_repeated_fields(ctx, rhs_start, item_index_offset, field_start)
-        < 0
-    {
+    children = ctx.concat_child_lists(
+        children,
+        fragment_child_list(ctx, rhs_start + item_index_offset),
+    );
+    if children.count < 0 {
+        return capacity_result(rhs_start);
+    }
+    if append_fragment_repeated_fields(ctx, rhs_start, item_index_offset, field_start) < 0 {
         return capacity_result(rhs_start);
     }
 
-    let child_count = ctx.result_value(CURSOR_RESULT_CHILD_COUNT) - child_start;
     let field_count = ctx.result_value(CURSOR_RESULT_FIELD_COUNT) - field_start;
     let span_start = fragment_field(ctx, rhs_start, FRAGMENT_SPAN_START);
     let span_end = fragment_field(ctx, rhs_start + item_index_offset, FRAGMENT_SPAN_END);
@@ -2226,8 +2374,7 @@ fn reduce_cursor_append(
         ctx,
         rhs_start,
         value,
-        child_start,
-        child_count,
+        children,
         field_start,
         field_count,
         span_start,
@@ -2248,8 +2395,7 @@ fn reduce_cursor_field(
     token_read: i32,
 ) -> ReduceResult {
     let value = fragment_field(ctx, rhs_start, FRAGMENT_VALUE);
-    let child_start = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_START);
-    let child_count = fragment_field(ctx, rhs_start, FRAGMENT_CHILD_COUNT);
+    let children = fragment_child_list(ctx, rhs_start);
     let field_start = ctx.result_value(CURSOR_RESULT_FIELD_COUNT);
     if ctx.append_field(field_id, value) < 0 {
         return capacity_result(rhs_start);
@@ -2262,8 +2408,7 @@ fn reduce_cursor_field(
         ctx,
         rhs_start,
         value,
-        child_start,
-        child_count,
+        children,
         field_start,
         1,
         span_start,
@@ -2275,27 +2420,18 @@ fn reduce_cursor_field(
     ok_result(rhs_start + 1)
 }
 
-fn copy_fragment_children(ctx: &CursorCtx, rhs_start: i32, offset: i32) -> i32 {
-    let source_child_start = fragment_field(ctx, rhs_start + offset, FRAGMENT_CHILD_START);
-    let source_child_count = fragment_field(ctx, rhs_start + offset, FRAGMENT_CHILD_COUNT);
-    ctx.copy_children(source_child_start, source_child_count)
-}
-
 fn copy_fragment_fields(ctx: &CursorCtx, rhs_start: i32, offset: i32) -> i32 {
     let source_field_start = fragment_field(ctx, rhs_start + offset, FRAGMENT_FIELD_START);
     let source_field_count = fragment_field(ctx, rhs_start + offset, FRAGMENT_FIELD_COUNT);
     ctx.copy_fields(source_field_start, source_field_count)
 }
 
-fn copy_fragment_children_and_repeated_fields(
+fn append_fragment_repeated_fields(
     ctx: &CursorCtx,
     rhs_start: i32,
     offset: i32,
     field_start: i32,
 ) -> i32 {
-    if copy_fragment_children(ctx, rhs_start, offset) < 0 {
-        return -1;
-    }
     let source_field_start = fragment_field(ctx, rhs_start + offset, FRAGMENT_FIELD_START);
     let source_field_count = fragment_field(ctx, rhs_start + offset, FRAGMENT_FIELD_COUNT);
     ctx.append_repeated_fields(field_start, source_field_start, source_field_count)

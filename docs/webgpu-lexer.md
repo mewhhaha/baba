@@ -191,11 +191,12 @@ measured.
 source, three 67 MB per-position arrays, up to 268 MB of records, and a
 same-sized staging buffer.
 
-**`parse()` fails below the sizes this backend targets.** `parser.parse()`
-throws above roughly 750 KiB of source, which is almost exactly the crossover.
-`parser.lex()` and `parser.validate()` are fine at multi-MiB sizes. Feeding
-multi-MiB inputs to a faster lexer is of limited use until that is resolved; it
-is a pre-existing limitation, unrelated to this backend.
+**`parse()` no longer fails below the sizes this backend targets.** It used to
+throw above roughly 8 KiB of repetition-heavy source, misrecorded here as
+"roughly 750 KiB". Cursor materialization is now linear in the token count and
+`examples/brainfuck`, the densest possible shape, parses 6 MiB; an input that
+still does not fit reports `PARSER_INPUT_TOO_LARGE` rather than throwing. See
+`docs/limits.md`.
 
 ## Correctness
 

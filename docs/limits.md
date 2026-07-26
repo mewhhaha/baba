@@ -41,6 +41,51 @@ buffers as needed within WebAssembly memory limits. Invalid option values throw
 JavaScript errors at the adapter boundary. Expected parse exhaustion returns a
 parse result with diagnostics.
 
+## Parse Memory Ceiling
+
+`parse()` is bounded by the wasm32 address space. A core module declares 65,535
+WebAssembly pages of 65,536 bytes, so all parser buffers for one call must fit
+in 4,294,901,760 bytes. This ceiling is intrinsic: 65,536 pages is the wasm32
+`memory32` maximum, so raising the page count buys 64 KiB and nothing more.
+Removing it needs `memory64`, not a larger constant. **The ceiling remains.**
+
+What changed is how fast a source approaches it. The cursor arenas now grow
+linearly in the token count. Every arena is measured flat per token across a 32x
+size range:
+
+| grammar                 | rule | child | field | value | value item |
+| ----------------------- | ---: | ----: | ----: | ----: | ---------: |
+| `examples/brainfuck`    | 2.00 |  3.00 |  2.00 |  8.00 |       3.00 |
+| `examples/feature-tour` | 0.80 |  1.80 |  1.20 |  3.60 |       1.40 |
+
+Child edges and array items are stored as singly linked nodes so that appending
+one element to a repetition accumulator is constant time. Before that change the
+child and value-item arenas grew as `items^2 / 2`, which capped every
+repetition-heavy grammar at roughly 8,000-9,000 list elements regardless of file
+size.
+
+A source that still does not fit reports the structured `PARSER_INPUT_TOO_LARGE`
+diagnostic, naming the byte count the call would need, the address-space limit,
+and the source size. It is returned from `parse()`, `validate()` and `lex()`,
+never thrown. Split oversized inputs and process them separately.
+
+Note that `maxTraceActions` (default 1,000,000) usually binds first on a large
+source and reports `PARSER_TRACE_LIMIT`; raise it explicitly when parsing
+multi-megabyte inputs. `validate()` sizes its trace buffer as `maxTraceActions`
+i32 values, so raising it far enough makes the trace buffer the term that
+exceeds the address space even for a short source. When that happens
+`PARSER_INPUT_TOO_LARGE` names `maxTraceActions` and asks for a lower value
+instead of asking for a smaller input.
+
+## Cursor Traversal Cost
+
+Cursor child edges are linked nodes, so `RuleCursor.child(index)` resolves an
+index by walking. Sequential access costs one link step per child. The first
+non-monotonic access materializes a child-node index for that rule once, one i32
+per child, after which reverse and random access are direct lookups. Both orders
+are therefore linear in the child count in total; only the extra index array is
+paid, and only for rules actually traversed out of order.
+
 ## Size Budgets
 
 `deno task size:report` measures repository bytes, publish payload bytes, the

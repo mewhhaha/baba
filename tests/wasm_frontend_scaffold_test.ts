@@ -56,6 +56,12 @@ interface GeneratedAbiDescriptor {
       readonly cursorValueRecord: {
         readonly i32Count: number;
       };
+      readonly cursorChildRecord: {
+        readonly i32Count: number;
+      };
+      readonly cursorValueItemRecord: {
+        readonly i32Count: number;
+      };
     };
     readonly exports: readonly {
       readonly name: string;
@@ -65,7 +71,7 @@ interface GeneratedAbiDescriptor {
 
 Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.abiName, "baba-wasm-abi");
-  assertEquals(babaWasmFrontendRequirements.abiVersion, 7);
+  assertEquals(babaWasmFrontendRequirements.abiVersion, 8);
   assertEquals(
     babaWasmFrontendRequirements.targetKind,
     "javascript-hosted-core-wasm",
@@ -85,6 +91,9 @@ Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.cursorRuleRecordI32Count, 9);
   assertEquals(babaWasmFrontendRequirements.cursorFieldRecordI32Count, 2);
   assertEquals(babaWasmFrontendRequirements.cursorValueRecordI32Count, 4);
+  assertEquals(babaWasmFrontendRequirements.cursorChildRecordI32Count, 2);
+  assertEquals(babaWasmFrontendRequirements.cursorValueItemRecordI32Count, 2);
+  assertEquals(babaWasmFrontendRequirements.cursorFragmentRecordI32Count, 10);
   assertEquals(
     babaWasmFrontendRequirements.requiredExports.join(","),
     "memory,lex_one,parser_action,parser_actions,parser_select_action,parse_trace,parse_cursor,parser_goto,lex_all,load_plan,abi_version,plan_version,semantics_version,reset,plan_buffer_base,input_base,max_pages,source_encoding,span_unit,lex_result_i32_count,token_record_i32_count,host_ownership_model,result_lifetime_model",
@@ -269,6 +278,14 @@ Deno.test("Wasm frontend scaffold stays aligned with generated artifacts", () =>
   assertEquals(
     abi.core.layouts.cursorValueRecord.i32Count,
     babaWasmFrontendRequirements.cursorValueRecordI32Count,
+  );
+  assertEquals(
+    abi.core.layouts.cursorChildRecord.i32Count,
+    babaWasmFrontendRequirements.cursorChildRecordI32Count,
+  );
+  assertEquals(
+    abi.core.layouts.cursorValueItemRecord.i32Count,
+    babaWasmFrontendRequirements.cursorValueItemRecordI32Count,
   );
   assertEquals(
     abi.core.exports.map((entry) => entry.name).join(","),

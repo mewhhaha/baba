@@ -10,6 +10,7 @@ import {
 } from "./wasm_plan.ts";
 import {
   PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE as parserDiagnosticCodeAmbiguousParse,
+  PARSER_DIAGNOSTIC_CODE_INPUT_TOO_LARGE as parserDiagnosticCodeInputTooLarge,
   PARSER_DIAGNOSTIC_CODE_INTERNAL_ERROR as parserDiagnosticCodeInternalError,
   PARSER_DIAGNOSTIC_CODE_PARSE_LEXICAL_ERROR
     as parserDiagnosticCodeParseLexicalError,
@@ -25,8 +26,11 @@ import {
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../targets/runtime/implementation.ts";
 import {
   WASM_ABI_VERSION,
+  WASM_CURSOR_CHILD_RECORD_I32_COUNT,
   WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+  WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT,
   WASM_CURSOR_RULE_RECORD_I32_COUNT,
+  WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
   WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_I32_BYTES,
@@ -145,7 +149,7 @@ export type Token =
   | EofToken;
 
 export interface LexDiagnostic {
-  readonly code: "LEX_UNEXPECTED_CHARACTER";
+  readonly code: "LEX_UNEXPECTED_CHARACTER" | "PARSER_INPUT_TOO_LARGE";
   readonly message: string;
   readonly span: Span;
 }
@@ -157,7 +161,8 @@ export interface ParseDiagnostic {
     | "PARSE_TRAILING_INPUT"
     | "PARSER_TRACE_LIMIT"
     | "PARSER_AMBIGUOUS_PARSE"
-    | "PARSER_INTERNAL_ERROR";
+    | "PARSER_INTERNAL_ERROR"
+    | "PARSER_INPUT_TOO_LARGE";
   readonly message: string;
   readonly span: Span;
   readonly runtimeCode: number;
@@ -1104,13 +1109,19 @@ interface ExternalTokenRecord {
  * Raw lexer output: `count` records of `WASM_TOKEN_RECORD_I32_COUNT` i32 each,
  * already copied out of Wasm linear memory.
  */
-interface ExternalLexRecordTape {
-  readonly records: Int32Array;
-  readonly count: number;
-}
+type ExternalLexRecordTape =
+  | {
+    readonly ok: true;
+    readonly records: Int32Array;
+    readonly count: number;
+  }
+  | {
+    readonly ok: false;
+    readonly requiredBytes: number;
+  };
 
 interface ExternalLexDiagnostic {
-  readonly code: "LEX_UNEXPECTED_CHARACTER";
+  readonly code: "LEX_UNEXPECTED_CHARACTER" | "PARSER_INPUT_TOO_LARGE";
   readonly message: string;
   readonly span: { readonly start: number; readonly end: number };
 }
@@ -1122,7 +1133,8 @@ type ExternalParseDiagnostic = {
     | "PARSE_TRAILING_INPUT"
     | "PARSER_TRACE_LIMIT"
     | "PARSER_AMBIGUOUS_PARSE"
-    | "PARSER_INTERNAL_ERROR";
+    | "PARSER_INTERNAL_ERROR"
+    | "PARSER_INPUT_TOO_LARGE";
   readonly message: string;
   readonly span: { readonly start: number; readonly end: number };
   readonly runtimeCode: number;
@@ -1233,6 +1245,24 @@ function lexExternalWasmTape(
     preserveTrivia = options.preserveTrivia;
   }
   const lexed = lexExternalRecords(wasm, planByteLength, source);
+  if (!lexed.ok) {
+    // The token arena for this source cannot fit in the wasm32 address space.
+    // `parse` and `validate` report that as a diagnostic, so `lex` does too
+    // rather than throwing a `RangeError` past the caller.
+    return {
+      source,
+      tokenTape: new ExternalTokenTape(
+        metadata,
+        source,
+        new Int32Array(0),
+        null,
+        0,
+      ),
+      diagnostics: [
+        externalOversizedLexInputDiagnostic(source, lexed.requiredBytes),
+      ],
+    };
+  }
   const records = lexed.records;
   const recordCount = lexed.count;
   const specIsTrivia = metadata.specIsTrivia;
@@ -1365,10 +1395,11 @@ function lexExternalRecords(
   const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
   const tokenPtr = align(sourcePtr + sourceByteLength, WASM_I32_BYTES);
   const recordBytes = WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES;
-  ensureExternalWasmCapacity(
-    wasm.memory,
-    tokenPtr + maxRecords * recordBytes,
-  );
+  const requiredBytes = tokenPtr + maxRecords * recordBytes;
+  if (!externalWasmCapacityFits(requiredBytes)) {
+    return { ok: false, requiredBytes };
+  }
+  ensureExternalWasmCapacity(wasm.memory, requiredBytes);
   const view = new DataView(wasm.memory.buffer);
   for (let index = 0; index < source.length; index++) {
     view.setUint16(
@@ -1385,6 +1416,7 @@ function lexExternalRecords(
   // view must not escape here: the next `lex`/`parse` call reuses this region
   // and `memory.grow` detaches every view onto the old buffer.
   return {
+    ok: true,
     records: copyI32Tape(
       view,
       tokenPtr,
@@ -1442,10 +1474,27 @@ function validateExternalWasmTrace(
   const stackByteLength = stackCapacity * WASM_I32_BYTES;
   const resultPtr = align(stackPtr + stackByteLength, WASM_I32_BYTES);
   const resultByteLength = WASM_PARSE_TRACE_RESULT_I32_COUNT * WASM_I32_BYTES;
-  ensureExternalWasmCapacity(
-    wasm.memory,
-    resultPtr + resultByteLength,
-  );
+  const requiredBytes = resultPtr + resultByteLength;
+  if (!externalWasmCapacityFits(requiredBytes)) {
+    // The trace arena is sized purely by `maxTraceActions`, so it can be the
+    // dominant term even for a source of a few characters. Telling the caller
+    // to split the input would be actively wrong advice in that case.
+    let remedy = externalOversizedSplitRemedy;
+    if (traceByteLength > requiredBytes - traceByteLength) {
+      remedy =
+        `The trace buffer alone needs ${traceByteLength} bytes because ` +
+        `maxTraceActions is ${maxTraceActions}. Lower maxTraceActions, or ` +
+        `split the input into smaller units and validate them separately.`;
+    }
+    return {
+      ok: false,
+      source,
+      diagnostics: [
+        externalOversizedInputDiagnostic(source, requiredBytes, remedy),
+      ],
+    };
+  }
+  ensureExternalWasmCapacity(wasm.memory, requiredBytes);
   let view = new DataView(wasm.memory.buffer);
   for (let index = 0; index < source.length; index++) {
     view.setUint16(
@@ -1517,21 +1566,20 @@ function parseExternalCursorWithWasm(
   if (tokenCapacity < 1) {
     tokenCapacity = 1;
   }
-  let structuralCapacity = (source.length + 2) * 32;
-  if (structuralCapacity < 64) {
-    structuralCapacity = 64;
-  }
-  if (structuralCapacity < 1) {
-    structuralCapacity = 1;
-  }
+  // The cursor arenas are consumed per token, not per source character: the
+  // engine appends a bounded number of rule, child, field, value and value-item
+  // records for every shifted token. The multipliers below are the measured
+  // worst case across the bundled example grammars with a safety factor; the
+  // retry loop below doubles them when a grammar needs more.
+  let structuralCapacity = tokenCapacity + 32;
 
   while (true) {
-    const ruleCapacity = structuralCapacity;
-    const childCapacity = structuralCapacity * 4;
+    const ruleCapacity = structuralCapacity * 4;
+    const childCapacity = structuralCapacity * 6;
     const fieldCapacity = structuralCapacity * 4;
-    const valueCapacity = structuralCapacity * 8;
-    const valueItemCapacity = structuralCapacity * 8;
-    const fragmentCapacity = structuralCapacity;
+    const valueCapacity = structuralCapacity * 16;
+    const valueItemCapacity = structuralCapacity * 6;
+    const fragmentCapacity = structuralCapacity * 2;
 
     const sourcePtr = align(planByteLength, 8);
     const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
@@ -1547,8 +1595,10 @@ function parseExternalCursorWithWasm(
       rulePtr + ruleCapacity * ruleRecordBytes,
       WASM_I32_BYTES,
     );
+    const childRecordBytes = WASM_CURSOR_CHILD_RECORD_I32_COUNT *
+      WASM_I32_BYTES;
     const fieldPtr = align(
-      childPtr + childCapacity * WASM_I32_BYTES,
+      childPtr + childCapacity * childRecordBytes,
       WASM_I32_BYTES,
     );
     const fieldRecordBytes = WASM_CURSOR_FIELD_RECORD_I32_COUNT *
@@ -1563,8 +1613,10 @@ function parseExternalCursorWithWasm(
       valuePtr + valueCapacity * valueRecordBytes,
       WASM_I32_BYTES,
     );
+    const valueItemRecordBytes = WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT *
+      WASM_I32_BYTES;
     const resultPtr = align(
-      valueItemPtr + valueItemCapacity * WASM_I32_BYTES,
+      valueItemPtr + valueItemCapacity * valueItemRecordBytes,
       WASM_I32_BYTES,
     );
     const resultByteLength = WASM_PARSE_CURSOR_RESULT_I32_COUNT *
@@ -1574,11 +1626,19 @@ function parseExternalCursorWithWasm(
       stackPtr + fragmentCapacity * WASM_I32_BYTES,
       WASM_I32_BYTES,
     );
-    const fragmentRecordBytes = 9 * WASM_I32_BYTES;
-    ensureExternalWasmCapacity(
-      wasm.memory,
-      fragmentPtr + fragmentCapacity * fragmentRecordBytes,
-    );
+    const fragmentRecordBytes = WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT *
+      WASM_I32_BYTES;
+    const requiredBytes = fragmentPtr + fragmentCapacity * fragmentRecordBytes;
+    if (!externalWasmCapacityFits(requiredBytes)) {
+      return externalFailedCursorParseResult(source, [
+        externalOversizedInputDiagnostic(
+          source,
+          requiredBytes,
+          externalOversizedSplitRemedy,
+        ),
+      ]);
+    }
+    ensureExternalWasmCapacity(wasm.memory, requiredBytes);
 
     let view = new DataView(wasm.memory.buffer);
     for (let index = 0; index < source.length; index++) {
@@ -1690,7 +1750,11 @@ function parseExternalCursorWithWasm(
         rulePtr,
         ruleCount * WASM_CURSOR_RULE_RECORD_I32_COUNT,
       ),
-      copyI32Tape(view, childPtr, childCount),
+      copyI32Tape(
+        view,
+        childPtr,
+        childCount * WASM_CURSOR_CHILD_RECORD_I32_COUNT,
+      ),
       copyI32Tape(
         view,
         fieldPtr,
@@ -1701,7 +1765,11 @@ function parseExternalCursorWithWasm(
         valuePtr,
         valueCount * WASM_CURSOR_VALUE_RECORD_I32_COUNT,
       ),
-      copyI32Tape(view, valueItemPtr, valueItemCount),
+      copyI32Tape(
+        view,
+        valueItemPtr,
+        valueItemCount * WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
+      ),
     );
     try {
       return {
@@ -2085,6 +2153,15 @@ class ExternalCursorTapeView {
       throw new Error("Cursor rule record is incomplete.");
     }
     let childrenCache: readonly SyntaxCursor[] | undefined;
+    // Child edges form a singly linked node list in the Wasm arena, so a child
+    // index has to be resolved by walking. Sequential access keeps a walk
+    // cursor and costs one link step per child. The first non-monotonic access
+    // materializes the whole node list once (one i32 per child) and every
+    // access after that is a direct index, so reverse and random traversal of
+    // a long child list stay linear in total instead of quadratic.
+    let childNodes: Int32Array | undefined;
+    let walkIndex = 0;
+    let walkNode = childStart;
     const cursor: RuleCursor = {
       type: "rule",
       name,
@@ -2094,7 +2171,33 @@ class ExternalCursorTapeView {
       child: (index: number): SyntaxCursor | undefined => {
         if (!Number.isInteger(index) || index < 0) return undefined;
         if (index >= childCount) return undefined;
-        const ref = this.childRefs[childStart + index];
+        if (childNodes === undefined && index < walkIndex) {
+          const nodes = new Int32Array(childCount);
+          let node = childStart;
+          for (let position = 0; position < childCount; position++) {
+            nodes[position] = node;
+            if (position + 1 < childCount) {
+              node = this.childEdgeNext(node);
+            }
+          }
+          childNodes = nodes;
+        }
+        let childNode: number;
+        if (childNodes !== undefined) {
+          const indexed = childNodes[index];
+          if (indexed === undefined) {
+            throw new Error("Cursor child edge is missing.");
+          }
+          childNode = indexed;
+        } else {
+          while (walkIndex < index) {
+            walkNode = this.childEdgeNext(walkNode);
+            walkIndex++;
+          }
+          childNode = walkNode;
+        }
+        const ref =
+          this.childRefs[childNode * WASM_CURSOR_CHILD_RECORD_I32_COUNT];
         if (ref === undefined) {
           throw new Error("Cursor child edge is missing.");
         }
@@ -2149,11 +2252,7 @@ class ExternalCursorTapeView {
               if (start === undefined || count === undefined) {
                 throw new Error("Cursor field array value is incomplete.");
               }
-              for (let item = 0; item < count; item++) {
-                const itemId = this.valueItems[start + item];
-                if (itemId === undefined) {
-                  throw new Error("Cursor field array item is missing.");
-                }
+              for (const itemId of this.arrayItemIds(start, count)) {
                 values.push(this.valueForId(itemId));
               }
             } else {
@@ -2250,6 +2349,34 @@ class ExternalCursorTapeView {
     return this.ruleCursor(externalCursorRefIndex(ref));
   }
 
+  private childEdgeNext(node: number): number {
+    const next = this.childRefs[node * WASM_CURSOR_CHILD_RECORD_I32_COUNT + 1];
+    if (next === undefined || next < 0) {
+      throw new Error("Cursor child edge is missing.");
+    }
+    return next;
+  }
+
+  private arrayItemIds(head: number, count: number): number[] {
+    const items: number[] = [];
+    let node = head;
+    for (let index = 0; index < count; index++) {
+      if (node < 0) {
+        throw new Error("Cursor field array item is missing.");
+      }
+      const itemId =
+        this.valueItems[node * WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT];
+      const next =
+        this.valueItems[node * WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT + 1];
+      if (itemId === undefined || next === undefined) {
+        throw new Error("Cursor field array item is missing.");
+      }
+      items.push(itemId);
+      node = next;
+    }
+    return items;
+  }
+
   private valueKind(valueId: number): number {
     const kind =
       this.valueRecords[valueId * WASM_CURSOR_VALUE_RECORD_I32_COUNT];
@@ -2277,11 +2404,7 @@ class ExternalCursorTapeView {
         throw new Error("Cursor field array value is incomplete.");
       }
       const values: CursorFieldValue[] = [];
-      for (let index = 0; index < count; index++) {
-        const itemId = this.valueItems[start + index];
-        if (itemId === undefined) {
-          throw new Error("Cursor field array item is missing.");
-        }
+      for (const itemId of this.arrayItemIds(start, count)) {
         values.push(this.valueForId(itemId));
       }
       return values;
@@ -2328,6 +2451,47 @@ function externalCursorUnexpectedTokenDiagnostic(
     ),
     expected,
     found,
+  };
+}
+
+const externalOversizedSplitRemedy =
+  "Split the input into smaller units and parse them separately.";
+
+function externalOversizedInputMessage(
+  sourceLength: number,
+  requiredBytes: number,
+  remedy: string,
+): string {
+  const limitBytes = WASM_MAX_PAGES * WASM_PAGE_BYTES;
+  return `Parsing ${sourceLength} source units needs ${requiredBytes} bytes ` +
+    `of WebAssembly memory, which exceeds the ${limitBytes} byte wasm32 ` +
+    `address-space limit (${WASM_MAX_PAGES} pages). ${remedy}`;
+}
+
+function externalOversizedInputDiagnostic(
+  source: string,
+  requiredBytes: number,
+  remedy: string,
+): ExternalParseDiagnostic {
+  return externalParseDiagnostic(
+    "PARSER_INPUT_TOO_LARGE",
+    externalOversizedInputMessage(source.length, requiredBytes, remedy),
+    { start: source.length, end: source.length },
+  );
+}
+
+function externalOversizedLexInputDiagnostic(
+  source: string,
+  requiredBytes: number,
+): ExternalLexDiagnostic {
+  return {
+    code: "PARSER_INPUT_TOO_LARGE",
+    message: externalOversizedInputMessage(
+      source.length,
+      requiredBytes,
+      "Split the input into smaller units and lex them separately.",
+    ),
+    span: { start: source.length, end: source.length },
   };
 }
 
@@ -2378,6 +2542,8 @@ function externalDiagnosticCodeId(
       return parserDiagnosticCodeTraceLimit;
     case "PARSER_AMBIGUOUS_PARSE":
       return parserDiagnosticCodeAmbiguousParse;
+    case "PARSER_INPUT_TOO_LARGE":
+      return parserDiagnosticCodeInputTooLarge;
   }
 }
 
@@ -2617,6 +2783,13 @@ function validateLoadedExternalWasmAbi(
     throw new Error("Wasm input base overlaps the loaded core plan.");
   }
   return inputBase;
+}
+
+function externalWasmCapacityFits(requiredBytes: number): boolean {
+  if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 0) {
+    return false;
+  }
+  return Math.ceil(requiredBytes / WASM_PAGE_BYTES) <= WASM_MAX_PAGES;
 }
 
 function ensureExternalWasmCapacity(

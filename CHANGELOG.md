@@ -4,6 +4,7 @@
 
 ### Added
 
+- `PARSER_INPUT_TOO_LARGE` parse diagnostic (runtime code `9`).
 - Experimental `@mewhhaha/baba/runtime/webgpu-lexer` export: a WebGPU execution
   backend for the generated tokenizer. It consumes an existing `parser.plan`
   unchanged and produces byte-exact `lex_all` token records. It is async, so it
@@ -27,6 +28,12 @@
 
 ### Changed
 
+- Wasm core ABI version 7 -> 8. Cursor child edges and array items are linked
+  node records of two `i32` each rather than contiguous `i32` slices, and the
+  internal fragment record widened from 9 to 10 `i32`. `wasm/abi.json` gains
+  `core.layouts.cursorChildRecord` and `core.layouts.cursorValueItemRecord`.
+  `PortableParserPlan` is untouched: plan version 2 and core plan format version
+  3 are unchanged. Regenerate `parser.wasm` alongside the adapter.
 - `parser.lex()` is roughly 3x faster and no longer degrades with input size. It
   built two throwaway JavaScript objects per token before returning; the token
   tape now holds the raw records as a single `Int32Array` and materializes a
@@ -43,6 +50,61 @@
 
 ### Fixed
 
+- `parser.parse()` no longer runs out of WebAssembly memory on ordinary inputs.
+  The cursor engine materialized every repetition list by copying the whole
+  accumulated list on each element, so the child and value-item arenas grew as
+  `items^2 / 2`. That capped repetition-heavy grammars at roughly 8,000-9,000
+  list elements whatever the file size: `examples/brainfuck` threw at 8,186
+  characters of `+`, and `examples/feature-tour` threw at 238,560 bytes of its
+  own repeated sample program. Child edges and array items are now singly linked
+  node arenas, so appending one element is constant time and every cursor arena
+  is linear in the token count. `examples/brainfuck` now parses 6 MiB, measured
+  flat at 2.00 rule / 3.00 child / 2.00 field / 8.00 value / 3.00 value-item
+  records per token across a 32x size range, and the `examples/feature-tour`
+  source that used to throw now parses, as does one 11x larger. Cursor result
+  shapes are unchanged.
+- An input that genuinely exceeds the wasm32 address space now returns the
+  structured `PARSER_INPUT_TOO_LARGE` diagnostic from `parse()`, `validate()`
+  and `lex()` instead of throwing `RangeError`. The message names the byte count
+  the call would need, the 4,294,901,760 byte limit, and the source size. The
+  ceiling itself is intrinsic to wasm32 and remains; `docs/limits.md` documents
+  it. On `lex()` the diagnostic accompanies a tape holding only the synthetic
+  end-of-file token, so `LexDiagnostic.code` is now a union of
+  `LEX_UNEXPECTED_CHARACTER` and `PARSER_INPUT_TOO_LARGE` in both the adapter
+  and generated `syntax.ts`.
+- `PARSER_INPUT_TOO_LARGE` from `validate()` no longer advises splitting an
+  input that is not the problem. The trace buffer is sized as `maxTraceActions`
+  i32 values, so a large enough `maxTraceActions` exceeded the address space for
+  a ten-character source while the message still said to split the input. It now
+  names the trace byte count and the `maxTraceActions` value and asks for a
+  lower one.
+- `RuleCursor.child(index)` is constant time again for reverse and random
+  access. Linked child edges made every backward step restart the walk at the
+  head of the list, which is quadratic: reverse traversal of a 40,000-child
+  repetition measured 2,106 ms against 13 ms forward, and shuffled access 1,402
+  ms. The first non-monotonic access now materializes a child-node index for
+  that rule once, one `i32` per child; the same traversals measure 8 ms and 10
+  ms. Purely sequential traversal is unchanged and allocates nothing.
+- The Rust `fn transition` no longer does provably dead work on ASCII input. It
+  consulted the plan's dense ASCII table and then, on a negative cell, still
+  fell through to the sparse CSR range scan. `buildAsciiTransitions` writes
+  every ASCII code point of every transition of every state, so the scan could
+  only ever reach the same answer. Token tapes are byte-identical, the engine
+  grew 9 bytes, and `tests/wasm_lexer_ascii_table_test.ts` pins the
+  dense-versus-sparse equivalence the early return depends on. Regenerate
+  `parser.wasm`.
+
+  On the isolated lexer loop this measured -7% to -10% (p25 of 80 paired
+  interleaved iterations over 200k code units: `thunkwasm` -10.4%, `brainfuck`
+  -7.1%, `funcfuck` -7.0%, `fixtures/perf/large-runtime` -8.9%,
+  `fixtures/perf/parser/tiny-dsl` -7.1%). It does **not** reliably show up in
+  end-to-end `parser.lex()` throughput, which measured flat against the previous
+  release on a median-of-9 run at 47 KiB, 752 KiB and 3 MiB. Treat this as an
+  engine-loop improvement and a removal of dead code, not as a user-visible
+  throughput claim.
+- The adapter sized its cursor arenas from the source character count, at 9,106
+  bytes of linear memory per character. They are now sized from the token count
+  with measured per-token multipliers.
 - Grammar source containing non-ASCII characters is no longer misread. The
   grammar scanner accumulated token text one UTF-8 byte at a time, widening each
   byte to the code point of its own numeric value, so `À` (U+00C0, encoded

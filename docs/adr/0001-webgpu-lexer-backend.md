@@ -562,6 +562,17 @@ inputs to a faster lexer is of limited use until that is resolved. This is a
 pre-existing limitation, unrelated to this work, and needs resolving in parallel
 rather than as part of it.
 
+> **Superseded.** The "roughly 750 KiB" figure recorded above was never right,
+> and the limitation is now fixed. The real cause was quadratic repetition-list
+> materialization in the cursor engine, which capped repetition-heavy grammars
+> at about 8,000-9,000 list elements regardless of file size; the structure-free
+> estimate ceiling was 460 KiB, not 768 KiB. Child edges and array items are now
+> linked node arenas, every cursor arena is linear in the token count, and
+> `examples/brainfuck` (one repetition element per source character, the densest
+> possible shape) parses 6 MiB. An input that genuinely does not fit reports the
+> structured `PARSER_INPUT_TOO_LARGE` diagnostic instead of throwing. See
+> `docs/limits.md`.
+
 **There is no incremental machinery to conflict with or to lean on.**
 `src/compiler/grammar_incremental.ts` is a full reparse behind an incremental
 API - it reports a `reparsedRange`, but the work is not incremental. A GPU lexer

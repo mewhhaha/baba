@@ -67,6 +67,15 @@ Generated `parser.plan` files currently use runtime metadata subsection version
 `2` and portable parser-plan version `2`. The loader accepts only this current
 contract; regenerate plans produced by earlier Baba releases.
 
+The binary core table section that `load_plan` reads carries its own format
+version, currently `3`. It is an internal encoding, not part of the
+`PortableParserPlan` contract: hosts are expected to validate a plan through
+`wasm/abi.json` and `load_plan` rather than to decode the tables themselves.
+Adding, removing, or reordering a header slot or a section changes that version,
+and the loader rejects any other value outright rather than guessing at a
+layout. A reader that does not understand the current core format version must
+regenerate the plan; there is no forward-compatible partial read.
+
 ## Generated Wasm API
 
 Generated Wasm parser modules expose a stable ergonomic API:
@@ -85,7 +94,7 @@ runtime helper internals.
 ## Wasm ABI
 
 The generated Wasm core ABI is versioned separately from package and parser-plan
-versions. ABI version `7` is documented in `docs/wasm-abi.md` and described by
+versions. ABI version `8` is documented in `docs/wasm-abi.md` and described by
 each generated `wasm/abi.json`. Changes to exported core functions, record
 layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.

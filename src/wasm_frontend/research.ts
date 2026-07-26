@@ -1,7 +1,10 @@
 import {
   WASM_ABI_VERSION,
+  WASM_CURSOR_CHILD_RECORD_I32_COUNT,
   WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+  WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT,
   WASM_CURSOR_RULE_RECORD_I32_COUNT,
+  WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
   WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_LEX_RESULT_I32_COUNT,
@@ -64,6 +67,9 @@ export interface WasmFrontendRequirements {
   readonly cursorRuleRecordI32Count: number;
   readonly cursorFieldRecordI32Count: number;
   readonly cursorValueRecordI32Count: number;
+  readonly cursorChildRecordI32Count: number;
+  readonly cursorValueItemRecordI32Count: number;
+  readonly cursorFragmentRecordI32Count: number;
   readonly requiredExports: readonly string[];
   readonly forbiddenDefaultDependencies: readonly string[];
 }
@@ -112,6 +118,9 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
   cursorRuleRecordI32Count: WASM_CURSOR_RULE_RECORD_I32_COUNT,
   cursorFieldRecordI32Count: WASM_CURSOR_FIELD_RECORD_I32_COUNT,
   cursorValueRecordI32Count: WASM_CURSOR_VALUE_RECORD_I32_COUNT,
+  cursorChildRecordI32Count: WASM_CURSOR_CHILD_RECORD_I32_COUNT,
+  cursorValueItemRecordI32Count: WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
+  cursorFragmentRecordI32Count: WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT,
   requiredExports: [
     "memory",
     "lex_one",
