@@ -22,7 +22,6 @@
       "docs/grammar.md",
       "docs/limits.md",
       "docs/metadata.md",
-      "docs/migrating-to-5.md",
       "docs/performance.md",
       "docs/release-checklist.md",
       "docs/release-note-template.md",
@@ -90,7 +89,6 @@
       "src/compiler/runtime_plan/bnf.ts",
       "src/compiler/runtime_plan/lr1.ts",
       "src/compiler/runtime_plan/syntax_emit.ts",
-      "src/targets/wasm/module_emit.ts",
       "src/targets/wasm/plan.ts"
     ]
   },

@@ -60,7 +60,10 @@ import {
   type RuntimeParserPlanningOptions,
 } from "../runtime/plan.ts";
 import { generatedSourceBanner } from "../runtime/provenance.ts";
-import { emitWasmModule, type WasmModuleImage } from "./module_emit.ts";
+import {
+  emitWasmModule,
+  type WasmModuleImage,
+} from "../runtime/wasm_core_runtime.ts";
 import {
   encodeCombinedWasmParserPlan,
   parserPlanRuntimeMetadataVersion,
