@@ -504,6 +504,9 @@ interface ExternalRuntimeMetadata {
   readonly parserStateCount: number;
   readonly conflictProfile: "deterministic" | "branching";
   readonly specs: readonly ExternalLexerSpec[];
+  /** 1 when the lexer spec at that index produces a trivia-channel token. */
+  readonly specIsTrivia: Uint8Array;
+  readonly hasTriviaSpecs: boolean;
   readonly namedById: ReadonlyMap<number, ExternalNamedToken>;
   readonly literalById: ReadonlyMap<number, ExternalLiteralToken>;
   readonly terminalByNamedTokenId: ReadonlyMap<number, number>;
@@ -680,6 +683,27 @@ function decodeExternalRuntimeMetadata(
     }
     throw new Error(`Unsupported lexer specification kind ${kind}.`);
   }
+  const specIsTrivia = new Uint8Array(specs.length);
+  let hasTriviaSpecs = false;
+  for (let specIndex = 0; specIndex < specs.length; specIndex++) {
+    const spec = specs[specIndex];
+    if (spec === undefined) {
+      throw new Error(`Lexer specification ${specIndex} is missing.`);
+    }
+    if (spec.type !== "named") {
+      continue;
+    }
+    const named = namedById.get(spec.tokenId);
+    if (named === undefined) {
+      throw new Error(
+        `Lexer specification references named token ${spec.tokenId}.`,
+      );
+    }
+    if (named.channel === "trivia") {
+      specIsTrivia[specIndex] = 1;
+      hasTriviaSpecs = true;
+    }
+  }
   const acceptCandidatesByState = expectArray(
     lexer[1],
     "lexer accept candidates",
@@ -789,6 +813,8 @@ function decodeExternalRuntimeMetadata(
     parserStateCount,
     conflictProfile,
     specs,
+    specIsTrivia,
+    hasTriviaSpecs,
     namedById,
     literalById,
     terminalByNamedTokenId,
@@ -1074,6 +1100,15 @@ interface ExternalTokenRecord {
   readonly acceptingState: number;
 }
 
+/**
+ * Raw lexer output: `count` records of `WASM_TOKEN_RECORD_I32_COUNT` i32 each,
+ * already copied out of Wasm linear memory.
+ */
+interface ExternalLexRecordTape {
+  readonly records: Int32Array;
+  readonly count: number;
+}
+
 interface ExternalLexDiagnostic {
   readonly code: "LEX_UNEXPECTED_CHARACTER";
   readonly message: string;
@@ -1122,51 +1157,66 @@ interface ExternalCursorTokenData {
   readonly tokenIndex: number;
 }
 
-type ExternalTokenTapeEntry =
-  | { readonly kind: "record"; readonly record: ExternalTokenRecord }
-  | { readonly kind: "eof"; readonly offset: number };
-
+/**
+ * Token tape backed by the raw Wasm lexer records.
+ *
+ * `records` is a detached copy of the Wasm token record buffer, four i32 per
+ * record: spec index, start, end, accepting state. `keptRecordIndices` maps
+ * tape positions onto record indices when trivia was dropped; it is `null`
+ * when every record is kept and the mapping is the identity. The tape holds
+ * `keptCount` real tokens followed by a synthetic EOF token.
+ */
 class ExternalTokenTape implements TokenTape {
-  private readonly cache: (Token | undefined)[];
+  #cache: (Token | undefined)[] | undefined;
 
   constructor(
     private readonly metadata: ExternalRuntimeMetadata,
     private readonly source: string,
-    private readonly entries: readonly ExternalTokenTapeEntry[],
-  ) {
-    this.cache = new Array(entries.length);
-  }
+    private readonly records: Int32Array,
+    private readonly keptRecordIndices: Int32Array | null,
+    private readonly keptCount: number,
+  ) {}
 
   get length(): number {
-    return this.entries.length;
+    return this.keptCount + 1;
   }
 
   token(index: number): Token | undefined {
     if (!Number.isInteger(index)) {
       return undefined;
     }
-    if (index < 0 || index >= this.entries.length) {
+    if (index < 0 || index > this.keptCount) {
       return undefined;
     }
-    const cached = this.cache[index];
+    let cache = this.#cache;
+    if (cache === undefined) {
+      cache = new Array(this.keptCount + 1);
+      this.#cache = cache;
+    }
+    const cached = cache[index];
     if (cached !== undefined) {
       return cached;
     }
-    const entry = this.entries[index];
-    if (entry === undefined) {
-      throw new Error("Token tape entry is missing.");
-    }
     let token: Token;
-    if (entry.kind === "eof") {
-      token = externalEofToken(entry.offset);
+    if (index === this.keptCount) {
+      token = externalEofToken(this.source.length);
     } else {
+      let recordIndex = index;
+      if (this.keptRecordIndices !== null) {
+        const mapped = this.keptRecordIndices[index];
+        if (mapped === undefined) {
+          throw new Error("Token tape entry is missing.");
+        }
+        recordIndex = mapped;
+      }
       token = materializeExternalTokenRecordValue(
         this.metadata,
         this.source,
-        entry.record,
+        this.records,
+        recordIndex,
       );
     }
-    this.cache[index] = token;
+    cache[index] = token;
     return token;
   }
 }
@@ -1182,37 +1232,87 @@ function lexExternalWasmTape(
   if (options.preserveTrivia !== undefined) {
     preserveTrivia = options.preserveTrivia;
   }
-  const records = lexExternalRecords(wasm, planByteLength, source);
-  const entries: ExternalTokenTapeEntry[] = [];
+  const lexed = lexExternalRecords(wasm, planByteLength, source);
+  const records = lexed.records;
+  const recordCount = lexed.count;
+  const specIsTrivia = metadata.specIsTrivia;
+  const specCount = metadata.specs.length;
   const diagnostics: ExternalLexDiagnostic[] = [];
-  for (const record of records) {
-    if (record.specIndex < 0) {
-      entries.push({ kind: "record", record });
-      diagnostics.push(
-        externalUnexpectedCharacterSpan(source, record.start, record.end),
-      );
-      continue;
-    }
-    const spec = metadata.specs[record.specIndex];
-    if (spec === undefined) {
-      throw new Error("Wasm lexer emitted an unknown token spec.");
-    }
-    if (spec.type === "named") {
-      const named = metadata.namedById.get(spec.tokenId);
-      if (named === undefined) {
-        throw new Error("Wasm lexer emitted an unknown named token spec.");
+  let dropTrivia = false;
+  if (!preserveTrivia && metadata.hasTriviaSpecs) {
+    dropTrivia = true;
+  }
+  if (!dropTrivia) {
+    // Nothing can be filtered out, so the tape indexes the records directly
+    // and only the error records need a diagnostic scan.
+    for (let index = 0; index < recordCount; index++) {
+      const base = index * WASM_TOKEN_RECORD_I32_COUNT;
+      const specIndex = records[base];
+      if (specIndex === undefined) {
+        throw new Error("Wasm lexer token record is incomplete.");
       }
-      if (named.channel === "trivia" && !preserveTrivia) {
+      if (specIndex >= specCount) {
+        throw new Error("Wasm lexer emitted an unknown token spec.");
+      }
+      if (specIndex >= 0) {
         continue;
       }
+      const start = records[base + 1];
+      const end = records[base + 2];
+      if (start === undefined || end === undefined) {
+        throw new Error("Wasm lexer token record is incomplete.");
+      }
+      diagnostics.push(externalUnexpectedCharacterSpan(source, start, end));
     }
-    entries.push({ kind: "record", record });
+    return {
+      source,
+      tokenTape: new ExternalTokenTape(
+        metadata,
+        source,
+        records,
+        null,
+        recordCount,
+      ),
+      diagnostics,
+    };
   }
-  entries.push({ kind: "eof", offset: source.length });
-  const tokenTape = new ExternalTokenTape(metadata, source, entries);
+  const keptRecordIndices = new Int32Array(recordCount);
+  let keptCount = 0;
+  for (let index = 0; index < recordCount; index++) {
+    const base = index * WASM_TOKEN_RECORD_I32_COUNT;
+    const specIndex = records[base];
+    if (specIndex === undefined) {
+      throw new Error("Wasm lexer token record is incomplete.");
+    }
+    if (specIndex >= specCount) {
+      throw new Error("Wasm lexer emitted an unknown token spec.");
+    }
+    if (specIndex < 0) {
+      const start = records[base + 1];
+      const end = records[base + 2];
+      if (start === undefined || end === undefined) {
+        throw new Error("Wasm lexer token record is incomplete.");
+      }
+      diagnostics.push(externalUnexpectedCharacterSpan(source, start, end));
+      keptRecordIndices[keptCount] = index;
+      keptCount++;
+      continue;
+    }
+    if (specIsTrivia[specIndex] === 1) {
+      continue;
+    }
+    keptRecordIndices[keptCount] = index;
+    keptCount++;
+  }
   return {
     source,
-    tokenTape,
+    tokenTape: new ExternalTokenTape(
+      metadata,
+      source,
+      records,
+      keptRecordIndices,
+      keptCount,
+    ),
     diagnostics,
   };
 }
@@ -1256,7 +1356,7 @@ function lexExternalRecords(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
   source: string,
-): readonly ExternalTokenRecord[] {
+): ExternalLexRecordTape {
   let maxRecords = source.length;
   if (maxRecords < 1) {
     maxRecords = 1;
@@ -1281,17 +1381,17 @@ function lexExternalRecords(
   if (count < 0 || count > maxRecords) {
     throw new Error("Wasm lexer returned an invalid token count.");
   }
-  const records: ExternalTokenRecord[] = [];
-  for (let index = 0; index < count; index++) {
-    const offset = tokenPtr + index * recordBytes;
-    records.push({
-      specIndex: view.getInt32(offset, true),
-      start: view.getInt32(offset + WASM_I32_BYTES, true),
-      end: view.getInt32(offset + WASM_I32_BYTES * 2, true),
-      acceptingState: view.getInt32(offset + WASM_I32_BYTES * 3, true),
-    });
-  }
-  return records;
+  // `copyI32Tape` slices the records out of Wasm linear memory. A zero-copy
+  // view must not escape here: the next `lex`/`parse` call reuses this region
+  // and `memory.grow` detaches every view onto the old buffer.
+  return {
+    records: copyI32Tape(
+      view,
+      tokenPtr,
+      count * WASM_TOKEN_RECORD_I32_COUNT,
+    ),
+    count,
+  };
 }
 
 function validateExternalWasmTrace(
@@ -1881,12 +1981,20 @@ function externalCursorErrorToken(
 function materializeExternalTokenRecordValue(
   metadata: ExternalRuntimeMetadata,
   source: string,
-  record: ExternalTokenRecord,
+  records: Int32Array,
+  recordIndex: number,
 ): Token {
-  if (record.specIndex < 0) {
-    return externalErrorToken(source, record.start, record.end);
+  const base = recordIndex * WASM_TOKEN_RECORD_I32_COUNT;
+  const specIndex = records[base];
+  const start = records[base + 1];
+  const end = records[base + 2];
+  if (specIndex === undefined || start === undefined || end === undefined) {
+    throw new Error("Wasm lexer token record is incomplete.");
   }
-  const spec = metadata.specs[record.specIndex];
+  if (specIndex < 0) {
+    return externalErrorToken(source, start, end);
+  }
+  const spec = metadata.specs[specIndex];
   if (spec === undefined) {
     throw new Error("Wasm lexer emitted an unknown token spec.");
   }
@@ -1899,7 +2007,7 @@ function materializeExternalTokenRecordValue(
       type: "literal",
       literal: literal.value,
       text: literal.value,
-      span: { start: record.start, end: record.end },
+      span: { start, end },
       channel: "main",
     };
   }
@@ -1910,8 +2018,8 @@ function materializeExternalTokenRecordValue(
   return externalNamedToken(
     named.name,
     source,
-    record.start,
-    record.end,
+    start,
+    end,
     named.channel,
   );
 }

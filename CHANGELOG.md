@@ -27,10 +27,31 @@
 
 ### Changed
 
+- `parser.lex()` is roughly 3x faster and no longer degrades with input size. It
+  built two throwaway JavaScript objects per token before returning; the token
+  tape now holds the raw records as a single `Int32Array` and materializes a
+  `Token` only when `token()` asks for one, which it already did lazily.
+  Measured on `funcfuck`: 12.1 -> 35.7 MiB/s at 47 KiB and 11.1 -> 34.8 MiB/s at
+  3 MiB, with retained heap dropping from about 113 to 16 bytes per token.
+  Trivia filtering uses an index array instead of wrapper objects and is skipped
+  entirely when nothing can be dropped. The `LexTapeResult`, `TokenTape` and
+  `Token` shapes are unchanged.
 - Tree-sitter generation reports `TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD` only
   when its forward-only scanner cannot preserve a guard's longest-match
   behavior, including negative-only, nullable-positive, and overlapping-positive
   guards.
+
+### Fixed
+
+- Grammar source containing non-ASCII characters is no longer misread. The
+  grammar scanner accumulated token text one UTF-8 byte at a time, widening each
+  byte to the code point of its own numeric value, so `À` (U+00C0, encoded
+  `C3 80`) became the two code points U+00C3 and U+0080. A class written
+  `/[À-ɏ]+/` therefore compiled to a DFA cutting at the UTF-8 lead bytes and
+  rejected most of the characters it names, and a literal terminal such as `"→"`
+  could not match itself. Both the regex-literal and string-literal scanners now
+  read whole characters. Grammars containing only ASCII are unaffected, and
+  their generated artifacts are unchanged.
 
 ## 6.1.0
 

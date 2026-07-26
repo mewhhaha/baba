@@ -41,6 +41,15 @@ const STATEMENT_GRAMMAR = `
   statement = "let" name:IDENT "=" value:INT ";" | "if" condition:IDENT ";" ;
 `;
 
+// No `skip` rule, so the lexer plan carries no trivia spec at all and the lex
+// tape can index the raw records without a filter pass.
+const NO_TRIVIA_GRAMMAR = `
+  token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+
+  module = items:item+ ;
+  item = name:IDENT ";" ;
+`;
+
 interface TokenLike {
   type: string;
   text: string;
@@ -697,6 +706,113 @@ Deno.test("shared Wasm adapter preserves lexer and parser behavior", async () =>
     const missingFinalTokenValidate = parser.validate("let x = 42 ");
     assertEquals(missingFinalTokenValidate.ok, false);
     assertEquals(missingFinalTokenValidate.diagnostics[0].found, "EOF");
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("lex tapes stay correct across later lex calls", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan });
+    const first = parser.lex("let x = 42;");
+    const firstLength = first.tokenTape.length;
+
+    // Large enough that `ensureExternalWasmCapacity` has to call `memory.grow`,
+    // which detaches every view onto the previous buffer. Nothing from `first`
+    // has been materialized yet, so the tokens read below can only be right if
+    // the records were copied out of Wasm memory rather than viewed in place.
+    const large = "let y = 7;\n".repeat(200_000);
+    const second = parser.lex(large);
+    assert(
+      second.tokenTape.length > firstLength,
+      "Expected the second lex to produce more tokens.",
+    );
+
+    assertEquals(first.tokenTape.length, firstLength);
+    const letToken = first.tokenTape.token(0);
+    assert(letToken);
+    assertEquals(letToken.type, "literal");
+    assertEquals(letToken.text, "let");
+    const nameToken = first.tokenTape.token(2);
+    assert(nameToken);
+    assertEquals(nameToken.kind, "IDENT");
+    assertEquals(nameToken.text, "x");
+    assertEquals(nameToken.span.start, 4);
+    assertEquals(nameToken.span.end, 5);
+    assertEquals(first.tokenTape.token(firstLength - 1)?.type, "eof");
+
+    // A third, smaller lex reuses the same region again.
+    const third = parser.lex("if z;");
+    assertEquals(third.tokenTape.token(0)?.text, "if");
+    assertEquals(first.tokenTape.token(2)?.text, "x");
+    assertEquals(second.tokenTape.token(2)?.text, "y");
+    assertEquals(first.tokenTape.length, firstLength);
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("lex tape drops trivia and keeps error tokens", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan });
+    const preserved = parser.lex("let x = 42;", { preserveTrivia: true });
+    assertEquals(preserved.tokenTape.token(1)?.kind, "WS");
+    assertEquals(preserved.tokenTape.token(2)?.text, "x");
+
+    const dropped = parser.lex("let x = 42;", { preserveTrivia: false });
+    assertEquals(dropped.diagnostics.length, 0);
+    assertEquals(dropped.tokenTape.length, 6);
+    assertEquals(
+      [0, 1, 2, 3, 4].map((index) => dropped.tokenTape.token(index)?.text)
+        .join(" "),
+      "let x = 42 ;",
+    );
+    assertEquals(dropped.tokenTape.token(5)?.type, "eof");
+    assertEquals(dropped.tokenTape.token(6), undefined);
+    assertEquals(dropped.tokenTape.token(-1), undefined);
+
+    const withError = parser.lex("let # = 42;", { preserveTrivia: false });
+    assertEquals(withError.diagnostics.length, 1);
+    assertEquals(withError.diagnostics[0].code, "LEX_UNEXPECTED_CHARACTER");
+    assertEquals(withError.diagnostics[0].span?.start, 4);
+    assertEquals(withError.diagnostics[0].span?.end, 5);
+    assertEquals(withError.tokenTape.token(1)?.type, "error");
+    assertEquals(withError.tokenTape.token(1)?.text, "#");
+
+    // The dropped-trivia tape must still be intact after the later calls.
+    assertEquals(dropped.tokenTape.token(1)?.text, "x");
+    assertEquals(preserved.tokenTape.token(1)?.kind, "WS");
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("lex tape maps records directly when a grammar has no trivia", async () => {
+  const { dir, mod, bytes, plan } = await materialize(NO_TRIVIA_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan });
+    const lexed = parser.lex("a;bb;c;", { preserveTrivia: false });
+    assertEquals(lexed.diagnostics.length, 0);
+    assertEquals(lexed.tokenTape.length, 7);
+    assertEquals(
+      [0, 1, 2, 3, 4, 5].map((index) => lexed.tokenTape.token(index)?.text)
+        .join(" "),
+      "a ; bb ; c ;",
+    );
+    assertEquals(lexed.tokenTape.token(6)?.type, "eof");
+
+    const withError = parser.lex("a;#;", { preserveTrivia: false });
+    assertEquals(withError.diagnostics.length, 1);
+    assertEquals(withError.diagnostics[0].code, "LEX_UNEXPECTED_CHARACTER");
+    assertEquals(withError.diagnostics[0].span?.start, 2);
+    assertEquals(withError.diagnostics[0].span?.end, 3);
+    assertEquals(withError.tokenTape.token(2)?.type, "error");
+    assertEquals(lexed.tokenTape.token(2)?.text, "bb");
     parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });
