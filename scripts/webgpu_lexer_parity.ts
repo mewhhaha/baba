@@ -1,18 +1,31 @@
 /**
- * Parity gate: GPU records vs the shipping Wasm `lex_all` records, raw 4 x i32
- * against raw 4 x i32. Exits non-zero on the first mismatch.
+ * Multi-grammar parity runner: GPU records vs the shipping Wasm `lex_all`
+ * records, raw 4 x i32 against raw 4 x i32. Exits non-zero on the first
+ * mismatch.
  *
- *   deno run --unstable-webgpu --allow-read experiments/webgpu-lexer/parity.ts
- *   deno run --unstable-webgpu --allow-read experiments/webgpu-lexer/parity.ts --grammar thunkwasm
+ *   deno task parity:webgpu-lexer
+ *   deno task parity:webgpu-lexer --grammar thunkwasm
+ *
+ * This runs the four shipped example grammars against their real generated
+ * artifacts under `examples/<name>/generated/wasm/`, which is a gitignored local
+ * build output. Run `deno task bootstrap` first on a fresh clone.
+ *
+ * The enforced gate lives in `tests/webgpu_lexer_parity_test.ts`, which compiles
+ * its grammar inline and therefore needs nothing on disk. This script is the
+ * wider sweep: real shipped grammars, the 1 MiB and 4 MiB corpora, and the
+ * failure-mode guards. Neither runs in CI, because CI has no GPU.
  */
 
-import { CpuReferenceLexer, toUtf16 } from "./cpu_reference.ts";
-import { GpuLexerCapacityError, WebGpuLexer } from "./gpu_lexer.ts";
+import { CpuReferenceLexer, toUtf16 } from "./webgpu_lexer_cpu_reference.ts";
+import {
+  GpuLexerCapacityError,
+  WebGpuLexer,
+} from "../src/runtime/webgpu/lexer.ts";
 import {
   buildAlphabetTables,
   verifyAlphabetAgainstSparse,
-} from "./alphabet.ts";
-import { decodeLexerPlanTables } from "./plan_tables.ts";
+} from "../src/runtime/webgpu/alphabet.ts";
+import { decodeLexerPlanTables } from "../src/runtime/webgpu/plan_tables.ts";
 import {
   adversarialInputs,
   exampleGrammar,
@@ -20,7 +33,9 @@ import {
   randomizedFuncfuckSource,
   readExamplePrograms,
   repeatToSize,
-} from "./corpus.ts";
+  segmentBoundaryInputs,
+} from "./webgpu_lexer_corpus.ts";
+import { SEG_SIZE } from "../src/runtime/webgpu/kernel_wgsl.ts";
 
 interface Mismatch {
   readonly kind: "count" | "field";
@@ -114,6 +129,12 @@ async function main(): Promise<number> {
     console.error(
       "REFUSED: dense alphabet table disagrees with the plan CSR table.",
     );
+    const first = check.firstMismatch;
+    if (first !== null) {
+      console.error(
+        `  first: codePoint=${first.codePoint} class=${first.classId} state=${first.state} sparse=${first.sparseTarget} dense=${first.denseTarget}`,
+      );
+    }
     return 2;
   }
 
@@ -125,6 +146,11 @@ async function main(): Promise<number> {
 
   const cases: NamedInput[] = [];
   for (const input of adversarialInputs()) {
+    cases.push(input);
+  }
+  // pass_x's segment boundaries are a second, independent grid from pass_b's
+  // chunk boundaries, and they are not covered by anything above.
+  for (const input of segmentBoundaryInputs(SEG_SIZE)) {
     cases.push(input);
   }
   const programs = await readExamplePrograms(grammar);

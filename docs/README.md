@@ -18,6 +18,8 @@ maintain a Baba parser without reading historical design material first.
 - [Limits](limits.md): compiler, runtime, memory, and size limits.
 - [Examples](examples.md): how example projects are generated and checked.
 - [Performance](performance.md): runtime benchmarks and plan inspection.
+- [WebGPU Lexer](webgpu-lexer.md): experimental GPU tokenizer backend, what it
+  costs, and where it loses to the CPU.
 - [Stability](stability.md): compatibility policy for public surfaces.
 - [Contributing](contributing.md): local checks and generated-output policy.
 - [Runtime Maintenance](runtime-maintenance.md): ownership boundaries for

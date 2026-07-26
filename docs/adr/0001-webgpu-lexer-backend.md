@@ -1,13 +1,29 @@
 # ADR 0001: WebGPU Lexer Runtime Backend
 
-Status: proposed. Not implemented in `src/`. Blocked on the Phase 0 gate below.
+Status: accepted. The backend is implemented in `src/runtime/webgpu/` and
+exported as the experimental module `@mewhhaha/baba/runtime/webgpu-lexer`. It is
+opt-in, nothing selects it automatically, and Phase 4 integration remains
+blocked on the Phase 0 gate below.
 
-Date: 2026-07-26.
+Date: 2026-07-26. Revised 2026-07-26 after the Phase 2 kernel change: the
+quadratic `pass_a` stage was replaced by `pass_x` / `pass_y` / `pass_z`, so the
+throughput table, the per-stage breakdown, the parity counts, the state-count
+argument and the Phase 2 section all changed. Numbers predating that change are
+labelled as such wherever they are retained for comparison.
 
 Supersedes: nothing. Superseded by: nothing.
 
-Evidence: `experiments/webgpu-lexer/` (proof of concept, parity gate, benchmark,
-`results.json`, `results_crossover.json`, `results_thunkwasm.json`).
+Evidence: `experiments/webgpu-lexer/README.md` plus `results.json`,
+`results_crossover.json` and `results_thunkwasm.json` in the same directory.
+Those four files are the record of the proof of concept and every measurement
+quoted below; they are retained unchanged.
+
+The code they describe now lives in `src/runtime/webgpu/` (backend),
+`tests/webgpu_lexer_parity_test.ts` (the parity gate, which compiles its grammar
+inline and skips when no GPU adapter exists), and
+`scripts/webgpu_lexer_parity.ts`, `scripts/webgpu_lexer_bench.ts` and
+`scripts/webgpu_lexer_pathological.ts` (multi-grammar sweep and benchmarks).
+User-facing documentation is `docs/webgpu-lexer.md`.
 
 ## Context
 
@@ -117,15 +133,16 @@ synchronization.
 | `await onSubmittedWorkDone()` or `mapAsync()` | ~11.3 ms, any payload size |
 | 8 compute passes batched into one submit      | still ~11.3 ms total       |
 
-Measured `submit+sync` at 16 KiB in the final benchmark is 11.75 ms, against a
-total GPU wall time of 12.01 ms.
+Measured `submit+sync` at 16 KiB in the current benchmark is 12.58 ms, against a
+total GPU wall time of 12.86 ms - so at the smallest measured size, 98% of the
+wall clock is synchronization.
 
 This is per-sync, not per-dispatch and not per-byte. It forces a hard
 architectural constraint: **the whole pipeline must be one command encoder, one
 `queue.submit()`, and one `mapAsync()`.** No intermediate readback, no
 CPU-in-the-loop fixup pass. Every stage - chunk scan, pointer doubling, chunk
 entry resolution, counting, prefix sum, emission - stays on device. The proof of
-concept is seven dispatches under that constraint.
+concept is nine dispatches under that constraint.
 
 ### Throughput
 
@@ -135,23 +152,34 @@ with owned records - the same configuration the parity gate runs.
 
 | size    | tokens  | cpu `lex_all` | gpu total | speedup |
 | ------- | ------- | ------------- | --------- | ------- |
-| 16 KiB  | 6505    | 0.39 ms       | 12.01 ms  | 0.03x   |
-| 32 KiB  | 12826   | 0.77 ms       | 12.13 ms  | 0.06x   |
-| 64 KiB  | 25764   | 1.47 ms       | 12.09 ms  | 0.12x   |
-| 128 KiB | 51671   | 3.17 ms       | 12.44 ms  | 0.26x   |
-| 256 KiB | 103243  | 5.65 ms       | 13.90 ms  | 0.41x   |
-| 512 KiB | 206362  | 10.58 ms      | 14.01 ms  | 0.76x   |
-| 1 MiB   | 413140  | 21.40 ms      | 17.39 ms  | 1.23x   |
-| 4 MiB   | 1651674 | 84.30 ms      | 31.29 ms  | 2.69x   |
-| 16 MiB  | 6605769 | 338.42 ms     | 110.16 ms | 3.07x   |
+| 16 KiB  | 6505    | 0.45 ms       | 12.85 ms  | 0.04x   |
+| 32 KiB  | 12826   | 0.89 ms       | 13.03 ms  | 0.07x   |
+| 64 KiB  | 25764   | 1.57 ms       | 12.96 ms  | 0.12x   |
+| 128 KiB | 51671   | 2.82 ms       | 13.21 ms  | 0.21x   |
+| 256 KiB | 103243  | 5.53 ms       | 13.58 ms  | 0.41x   |
+| 512 KiB | 206362  | 10.75 ms      | 16.24 ms  | 0.66x   |
+| 1 MiB   | 413140  | 20.93 ms      | 16.45 ms  | 1.27x   |
+| 4 MiB   | 1651674 | 82.56 ms      | 35.99 ms  | 2.29x   |
+| 16 MiB  | 6605769 | 333.62 ms     | 133.87 ms | 2.49x   |
 
-**Crossover is 768 KiB of source**, confirmed by two independent finer sweeps
-(0.72x/0.73x at 512 KiB, 0.92x/0.88x at 640 KiB, 1.08x/1.04x at 768 KiB). On the
-stricter test of worst GPU sample against best CPU sample the crossover is 896
-KiB.
+These are the `pass_x`/`pass_y`/`pass_z` kernel. The peak figure moved down when
+the quadratic stage was removed: the same 16 MiB row read 110.16 ms and 3.07x
+under the old `pass_a`. Two independent runs of the current kernel on the same
+bytes produced 133.87 ms / 2.49x and 132.16 ms / 2.73x, so quote the range, not
+a single median. See "Measurement variance" under Risks.
+
+**Crossover is 768 KiB of source and did not move**, confirmed by a finer sweep
+after the kernel change (0.68x at 512 KiB, 0.77x at 640 KiB, 1.03x at 768 KiB,
+1.19x at 896 KiB). It does not move because the new stage's cost is proportional
+to `n`, so at the crossover it is well under a millisecond against a total still
+dominated by the synchronization floor. On the stricter test of worst GPU sample
+against best CPU sample the crossover is 1 MiB.
 
 Cross-check on `thunkwasm` (repeated example programs, periodic input): 1 MiB
-1.08x, 16 MiB 2.60x.
+0.94x, 16 MiB 2.05x - down from 1.08x and 2.60x. `thunkwasm` regressed harder
+than `funcfuck` despite having **fewer** DFA states (65 vs 81), because the
+per-state column read's LDS bank pattern is data-dependent. State count alone
+does not predict the cost.
 
 The CPU baseline here is `lex_all` records, ~40-48 MiB/s. It is deliberately not
 `parser.lex()`, which measures ~12 MiB/s because it also materializes the token
@@ -164,25 +192,44 @@ sides.
 
 | stage            | ms      |
 | ---------------- | ------- |
-| upload           | 1.676   |
-| encode           | 0.825   |
-| submit + sync    | 32.333  |
-| `getMappedRange` | 38.676  |
-| copy out (owned) | 37.966  |
-| **total**        | 110.162 |
+| upload           | 1.609   |
+| encode           | 0.778   |
+| submit + sync    | 51.831  |
+| `getMappedRange` | 38.817  |
+| copy out (owned) | 40.705  |
+| **total**        | 133.865 |
 
-Kernel time inside that submit totals 9.44 ms: `pass_a` 1.110, `pass_b` 0.927,
-`pass_c` 1.620, `pass_d` 0.963, `pass_e1` 0.004, `pass_e2` 0.005, `pass_f`
-4.326.
+Kernel time inside that submit totals 27.97 ms: `pass_x` 16.622, `pass_y` 2.659,
+`pass_z` 1.116, `pass_b` 0.930, `pass_c` 1.613, `pass_d` 0.935, `pass_e1` 0.005,
+`pass_e2` 0.005, `pass_f` 3.759.
 
-Actual DFA work is under 10% of wall time. The backend is bound by
-synchronization and by host-side buffer movement, not by compute.
+DFA work is now about 20% of wall time rather than under 10%, because the
+linear-time sweep costs `n * stateCount` by construction where the old pointwise
+scan cost `n * meanTokenLength`. The backend is still bound by synchronization
+and host-side buffer movement, not by compute: readback alone (`getMappedRange`
+plus copy out) is 79.5 ms, well over half the total.
+
+Two serial scans remain, both single-workgroup walks over the same 4096 elements
+and both wanting a two-level scan: `pass_c` (1.613 ms) and the newly added
+`pass_y` (2.659 ms). Neither was addressed.
+
+`pass_x` also carries a latency floor of roughly 0.8 ms at every size, because
+each workgroup walks its segment serially - a segment costs the same wall time
+whether the input has four segments or four thousand. That floor is invisible
+under the ~12 ms synchronization floor today. It would become the dominant small
+input cost if Phase 0 finds a host whose sync floor is ~1 ms.
 
 ### State count is a direct throughput multiplier
 
+This is now the single most important cost lever, and it became **more**
+important with the linear-time kernel, not less. `pass_x` runs one thread per
+DFA state per segment, so its cost is `n * stateCount` **by construction** -
+where the old `pass_a` cost `n * meanTokenLength` and only degenerated to
+`n * n` on long tokens. State count is no longer an incidental property of the
+speculative approach; it is a direct multiplier on every input.
+
 A prototype chunk-transition-map kernel sustained the following on 16 MiB of
-input as a function of DFA state count `S`, because the speculative approach
-runs one thread per possible start state:
+input as a function of DFA state count `S`:
 
 | S   | MiB/s of DFA work |
 | --- | ----------------- |
@@ -191,28 +238,45 @@ runs one thread per possible start state:
 | 128 | 1211              |
 | 241 | 613               |
 
-Cost scales roughly linearly with `S`. That is the direct argument for DFA
-minimization in Phase 1.
+Measured on the real `pass_x` sweep at 16 MiB, the added stage costs 5.38 ms at
+S=16, 8.45 ms at S=64, 9.50 ms at S=81 (`funcfuck`, real tables), 15.83 ms at
+S=128 and 31.86 ms at S=241.
+
+Two caveats. State count does not predict cost on its own - `thunkwasm` at S=65
+runs a slower `pass_x` than `funcfuck` at S=81, because the per-state column
+read's LDS bank pattern is data-dependent. And reachable-state pruning is not a
+way out: soundly narrowing the state set requires a forward set-valued scan
+whose update is itself proportional to the set size, which is circular.
+
+DFA minimization in Phase 1 is therefore the direct and only general lever.
 
 ### Parity
 
 Records-vs-records, every field, first mismatch reported with context, non-zero
 exit on failure.
 
-| grammar      | states | specs | classes | cases |
-| ------------ | ------ | ----- | ------- | ----- |
-| funcfuck     | 81     | 29    | 32      | 83/83 |
-| thunkwasm    | 65     | 31    | 32      | 58/58 |
-| brainfuck    | 16     | 13    | 13      | 58/58 |
-| feature-tour | 32     | 22    | 27      | 52/52 |
+| grammar      | states | specs | classes | cases   |
+| ------------ | ------ | ----- | ------- | ------- |
+| funcfuck     | 81     | 29    | 32      | 119/119 |
+| thunkwasm    | 65     | 31    | 32      | 94/94   |
+| brainfuck    | 16     | 13    | 13      | 94/94   |
+| feature-tour | 32     | 22    | 27      | 88/88   |
 
-Plus grid-stride reruns at artificially squeezed dispatch grids (240/171/171/153
-passed), floor-device simulation at `chunkSize = 2048` (80/57/57/51 passed), and
-7/7 failure-mode guards per grammar. Coverage includes the empty string, error
-tokens, lone and paired surrogates, above-ASCII BMP and U+2028/U+2029,
+Plus grid-stride reruns at artificially squeezed dispatch grids (348/279/279/261
+passed), floor-device simulation at `chunkSize = 2048` (116/93/93/87 passed),
+and 7/7 failure-mode guards per grammar. Coverage includes the empty string,
+error tokens, lone and paired surrogates, above-ASCII BMP and U+2028/U+2029,
 longest-match backtracking, unterminated constructs, 9000-unit single-token
 runs, chunk-boundary injection at every offset 4090..4102, and randomized 1 MiB
 and 4 MiB inputs. Negative controls confirm the comparison is not vacuous.
+
+The case counts grew with the kernel change (from 83/58/58/52) because the
+segment sweep introduced a boundary the old kernel did not have. The added cases
+cover an astral character at every offset from `SEG_SIZE - 6` to `SEG_SIZE + 6`
+in two shapes, an accept landing exactly on a segment boundary, and a live run
+spanning three, four and five segments. The pre-existing 4090..4102 sweep is
+ASCII-only and cannot reach a surrogate pair straddling a segment boundary,
+which is the subtlest failure mode in the new design.
 
 ### What was NOT measured
 
@@ -269,9 +333,12 @@ Three changes to the compiler and plan, all of which also benefit the CPU path.
 2. **Add DFA minimization (Hopcroft).** There is no minimization pass today. GPU
    cost scales roughly linearly with state count - 8792 MiB/s at S=16 against
    613 MiB/s at S=241 - so minimization is a direct throughput multiplier for
-   the GPU and a table-size and cache-footprint win for the CPU. It also
-   relieves the proof of concept's workgroup-storage ceiling, since `pass_a`
-   holds `stateCount * classCount` entries in shared memory.
+   the GPU and a table-size and cache-footprint win for the CPU. This became
+   more valuable with the linear-time kernel, whose cost is `n * stateCount` by
+   construction on every input rather than only on long tokens. It also relieves
+   the workgroup-storage ceiling, since `pass_x` holds `stateCount * classCount`
+   entries in shared memory plus four rotating per-state columns - a ceiling
+   that the kernel change tightened.
 3. **Add dense-table plan sections.** Store the dense `(states x classes)`
    transition table alongside the existing sparse CSR rows, so a backend can
    bind it directly.
@@ -291,29 +358,76 @@ grammars.
 
 ### Phase 2: the production kernel
 
-The proof of concept's central stage is asymptotically wrong and must be
-replaced, not patched. `pass_a` computes `next(p)` at every offset, and
-`next(p)` costs O(length of the token starting at p). On normal source (mean
-token length ~2.5 code units) that is effectively O(n); on a single long token
-it is O(n²). Measured on input that is one `funcfuck` whitespace token: 45.4x
-slower than `lex_all` at 512 KiB, 85.0x at 1 MiB, 169.4x at 2 MiB (5.43 s in one
-un-interruptible dispatch). Grammars with block comments or long string literals
-hit this. The fix is either chunked composition of
-`(finalState, lastAcceptOffset, lastAcceptState)` per candidate start state, or
-a cap-and-fixup pass; both bound per-thread work by chunk size.
+**The quadratic stage has been replaced. This item is done.**
 
-Also in scope: replace `pass_c`'s serial chunk walk (1.6 ms at 16 MiB, 4096
-dependent global loads in a single thread) with a second level of guarded
-doubling; a storage-buffer fallback for DFA tables that exceed workgroup
-storage; an output-sizing policy driven by a running tokens-per-code-unit
-estimate plus the existing overflow flag rather than always allocating the worst
-case.
+`pass_a` computed `next(p)` at every offset, and `next(p)` cost O(length of the
+token starting at p) - effectively O(n) on normal source, O(n²) on a single long
+token. It is deleted, and replaced by three dispatches:
+
+- `pass_x`, a **backward per-segment DFA-state sweep**: one workgroup per
+  4096-unit segment, one thread per DFA state, sweeping backward. It emits both
+  the per-offset result and the segment's composed element. Only four rotating
+  state columns live in workgroup storage, so its footprint is independent of
+  segment size.
+- `pass_y`, a suffix scan composing segment elements.
+- `pass_z`, which combines the two into `next(p)`.
+
+`next(p)` is restored as a pure function of position, so `pass_b` through
+`pass_f` are untouched. Still one command encoder, one `queue.submit()`, one
+`mapAsync()` - nine dispatches instead of seven.
+
+Measured on input that is one `funcfuck` whitespace token, with parity asserted
+at every row:
+
+| size    | before                 | after                                  |
+| ------- | ---------------------- | -------------------------------------- |
+| 512 KiB | 45.4x slower           | 12.75 ms vs 8.34 ms cpu                |
+| 1 MiB   | 85.0x slower           | 13.30 ms vs 16.21 ms cpu               |
+| 2 MiB   | 169.4x slower (5.43 s) | 14.56 ms vs 32.99 ms cpu - 2.3x faster |
+| 16 MiB  | not runnable           | 36.81 ms vs 256.51 ms cpu - 7x faster  |
+
+The linearity check is the cost-per-MiB column of the added stages: it settles
+at roughly 0.6 ms/MiB and stays there. The removed stage's equivalent column
+doubled row over row - 369, 699, 1368, 2708 ms/MiB at 0.25/0.5/1/2 MiB.
+
+This removed a hazard, not merely a cost. A 5.4-second un-interruptible dispatch
+is a GPU-hang and TDR risk; the largest `pass_x` dispatch at 16 MiB is 10.8 ms.
+
+The price is real and is recorded in the throughput table above: peak speedup at
+16 MiB fell from 3.07x to 2.49-2.73x on `funcfuck` and from 2.60x to 2.05x on
+`thunkwasm`, and `thunkwasm` at 1 MiB now loses to the CPU (0.94x) where it
+previously won (1.08x). The crossover did not move.
+
+Two options were evaluated and rejected, both with measurements:
+
+- **Capped scan with state-carrying continuations.** Associativity holds, but
+  pointer doubling indexes by position while the monoid's domain is
+  `position x state`, so `J[J[p]]` splices the wrong run. Repairing it needs one
+  slot per `(position, state)`: 10.8 GB at 16 MiB with S=81.
+- **Cap and decline.** A static token-length bound is computable and cheap, but
+  reports UNBOUNDED for all four shipped grammars - every one has a
+  Kleene-starred token class. And no cap value works: the break-even against the
+  linear design is L ~= 250, while the parity corpus contains 9000-unit tokens.
+
+Still in scope for this phase: replace `pass_c`'s serial chunk walk (1.613 ms at
+16 MiB) **and now also `pass_y`'s** (2.659 ms) with two-level scans; a
+storage-buffer fallback for DFA tables that exceed workgroup storage; an
+output-sizing policy driven by a running tokens-per-code-unit estimate plus the
+existing overflow flag rather than always allocating the worst case; and
+`pass_x`'s ~0.8 ms latency floor, which only matters if Phase 0 finds a ~1 ms
+sync floor.
 
 **Gate, non-negotiable:** byte-exact parity against `lex_all` across all
 fixtures, in the same spirit as the TypeScript/Wasm parity convention in
 `AGENTS.md`. Record count plus every field of every record. Including the
 long-single-token corpus, which must also stop being asymptotically worse than
 the CPU.
+
+Status of this gate: **met** for the kernel change. All four grammars pass
+byte-exact (119/94/94/88 cases, exit 0), including the grid-stride and
+floor-device reruns and the failure-mode guards, and the long-single-token
+corpus asserts parity at every size while measuring linear cost. The gate is not
+yet wired into `deno task test`; see Phase 4.
 
 ### Phase 3: guards
 
@@ -398,20 +512,37 @@ production backend needs error scopes around the entire per-lex path,
 buffers.
 
 **Measurement variance is large and unmodelled.** At 16 MiB the same work ranged
-107.78-208.03 ms across 7 runs, and kernel totals ranged 6.15-37.66 ms. The GPU
+107.78-208.03 ms across 7 runs under the old kernel, and kernel totals ranged
+6.15-37.66 ms. The current kernel is no better: two full runs over identical
+bytes put `pass_x` at 12.836 ms and 16.622 ms, a 29% swing, carrying total wall
+time from 132.16 ms to 133.87 ms and the headline speedup from 2.73x to 2.49x. A
+third measurement of the same stage in a sweep landed at 8.29 ms. The GPU
 concurrently drives the desktop; no clock pinning or GPU isolation was applied.
-Any performance gate must be stated with dispersion, not as a single median.
+Any performance gate must be stated with dispersion, not as a single median, and
+any single-number speedup claim in this document should be read as +/- 15%.
 
 **Memory footprint is roughly 10x the source.** At 16 MiB: 33.5 MB source, three
 67 MB per-position arrays, up to 268 MB of records, and a same-sized staging
 buffer.
 
-**Parity gaps the proof of concept could not close.** The long-single-token
-quadratic case is correct but asymptotically wrong and is not fixed (Phase 2).
-Guard-carrying grammars are refused rather than supported (Phase 3). The
-throughput corpus is short-token-only for `funcfuck` and strictly periodic for
-`thunkwasm`, so both generators are the kernel's fast case and never its known
-worst case.
+**Parity gaps the proof of concept could not close.** Guard-carrying grammars
+are refused rather than supported (Phase 3). The throughput corpus is
+short-token-only for `funcfuck` and strictly periodic for `thunkwasm`, so both
+generators exercise the kernel's fast case; the long-single-token case is now
+measured separately and is no longer a worst case, but the two corpora still do
+not represent real source.
+
+The long-single-token quadratic case is **fixed** (Phase 2) and is no longer a
+parity or performance gap.
+
+**The workgroup-storage envelope narrowed.** `pass_x` needs
+`(128 + S + S*C) * 4 + 32*S` bytes against `pass_a`'s `(128 + S + S*C) * 4`. All
+four shipped grammars still fit the WebGPU-guaranteed 16384 B floor (`funcfuck`
+is the largest at 13796 B), but on a floor device the largest supportable DFA at
+32 alphabet classes drops from about 120 states to about 96. That is a narrowing
+of an already-narrow window rather than a new class of failure - the backend
+already refuses a 241-state grammar on a floor device - but it raises the stakes
+on Phase 1 minimization.
 
 **Plan header constants are duplicated.** `src/runtime/wasm_plan.ts` exposes
 only table counts; `readI32`, `readRowValue`, `decodeCompactOffset` and the

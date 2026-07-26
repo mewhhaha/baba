@@ -10,9 +10,18 @@
  * reader `src/targets/runtime/wasm_engine_rs/src/lib.rs`. Because the copy can
  * rot, `inspectCombinedWasmParserPlan` is called first: it validates the magic,
  * the core format version and the parser plan version, and throws otherwise.
+ *
+ * The duplication is deliberate and must stay. `src/runtime/wasm_plan.ts` is one
+ * of the files hashed into the runtime-implementation manifest in
+ * `src/targets/runtime/implementation.ts`; widening its exports to share
+ * `readI32`, `readRowValue`, `decodeCompactOffset` or the `CORE_HEADER_*`
+ * constants would move the runtime-implementation hash and break
+ * `deno task bootstrap:check` and every generated manifest in the wild. An
+ * experimental backend is not a good enough reason to churn that hash, so the
+ * decoder is re-declared here and pinned by the version assertions below.
  */
 
-import { inspectCombinedWasmParserPlan } from "../../src/runtime/wasm_plan.ts";
+import { inspectCombinedWasmParserPlan } from "../wasm_plan.ts";
 
 const CORE_PLAN_HEADER_I32_COUNT = 31;
 const CORE_PLAN_HEADER_BYTES = CORE_PLAN_HEADER_I32_COUNT * 4;
@@ -70,15 +79,12 @@ export interface LexerPlanTables {
   readonly guardDiagnostics: readonly string[];
 }
 
-function view(bytes: Uint8Array): DataView {
-  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-}
-
 function headerI32(bytes: Uint8Array, headerIndex: number): number {
   if (headerIndex < 0 || headerIndex >= CORE_PLAN_HEADER_I32_COUNT) {
     throw new Error(`Plan header index ${headerIndex} is out of range.`);
   }
-  return view(bytes).getInt32(headerIndex * 4, true);
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    .getInt32(headerIndex * 4, true);
 }
 
 function decodeCompactOffset(encoded: number, name: string): CompactSection {
@@ -103,10 +109,11 @@ function readRowValue(
   if (byteOffset + section.cellBytes > bytes.byteLength) {
     throw new Error(`Plan row read at ${byteOffset} is out of bounds.`);
   }
+  const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (section.cellBytes === 2) {
-    return view(bytes).getUint16(byteOffset, true);
+    return data.getUint16(byteOffset, true);
   }
-  return view(bytes).getInt32(byteOffset, true);
+  return data.getInt32(byteOffset, true);
 }
 
 function readRows(
@@ -329,14 +336,24 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
   };
 }
 
-/** Reference sparse-CSR transition lookup, mirroring `fn transition` in lib.rs. */
+/**
+ * Reference sparse-CSR transition lookup, mirroring `fn transition` in lib.rs.
+ *
+ * `-1` is the plan's own "no transition from this state on this codepoint"
+ * value, so it is a fact rather than a default. A state id that is not in the
+ * plan at all is a different thing and throws: the Rust reader degrades it into
+ * "no transition" because it range-checks defensively on a hot path, but here it
+ * can only mean the caller built a state id the plan never described.
+ */
 export function sparseTransition(
   tables: LexerPlanTables,
   state: number,
   codePoint: number,
 ): number {
   if (state < 0 || state >= tables.stateCount) {
-    return -1;
+    throw new Error(
+      `Lexer DFA state ${state} is outside [0, ${tables.stateCount}).`,
+    );
   }
   const lo = tables.transitionRows[state];
   const hi = tables.transitionRows[state + 1];

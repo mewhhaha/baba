@@ -8,7 +8,8 @@ same promise as published user APIs.
 
 ## Public Library API
 
-The exported modules in `deno.json` are the stable public library surface:
+The exported modules in `deno.json` are the stable public library surface,
+except for the modules named under "Experimental Surfaces" below:
 
 - `@mewhhaha/baba`;
 - `@mewhhaha/baba/cli`;
@@ -18,6 +19,26 @@ Patch and minor releases may add options, result fields, diagnostics, helper
 exports, and target capabilities. Removing exports, changing accepted option
 meaning, or changing successful result shapes requires a documented breaking
 release.
+
+Being listed in `deno.json` `exports` is the mechanical test for this surface,
+with exactly one exception: a module that "Experimental Surfaces" names is
+exported so that it can be used, not because it carries these guarantees. That
+list is the complete set of exceptions. Any export not on it is stable.
+
+## Experimental Surfaces
+
+- `@mewhhaha/baba/runtime/webgpu-lexer`.
+
+This module does not carry the Public Library API guarantees above. Its option
+shapes and its result shapes may change in any minor release, and it may be
+removed entirely without a major release. It carries no performance guarantee of
+any kind: it is measurably slower than the shipping lexer below roughly 768 KiB
+of source, and its one-time setup cost is not repaid by a single document. It
+requires a WebGPU adapter and refuses to run without one.
+
+Token records it produces are held to byte-exact parity with `lex_all`, which is
+a correctness gate rather than a compatibility promise. See
+`docs/webgpu-lexer.md`.
 
 ## Grammar Syntax
 

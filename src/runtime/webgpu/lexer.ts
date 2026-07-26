@@ -16,22 +16,42 @@ import {
   MAX_WORKGROUP_INVOCATIONS,
   type PackedTables,
   packTables,
-  PASS_A_WORKGROUP,
+  PASS_Z_WORKGROUP,
+  passXWorkgroup,
   SCAN_WORKGROUP,
+  SEG_SIZE,
+  SEG_SUMMARY_U32_PER_STATE,
   STORAGE_BINDING_COUNT,
-} from "./kernel.wgsl.ts";
+} from "./kernel_wgsl.ts";
 
-const STAGE_NAMES = [
-  "pass_a_scan",
-  "pass_b_double",
-  "pass_c_entries",
-  "pass_d_counts",
-  "pass_e1_blockscan",
-  "pass_e2_blockoffsets",
-  "pass_f_emit",
-] as const;
+interface KernelStage {
+  /** Reporting name; the key used in `GpuLexTimings.stagesMs`. */
+  readonly label: string;
+  /** WGSL entry point in the generated kernel source. */
+  readonly entryPoint: string;
+}
 
-const TIMESTAMP_COUNT = STAGE_NAMES.length * 2;
+/**
+ * The dispatch order, one entry per `@compute` entry point.
+ *
+ * The entry point is written out rather than derived from the label by a regex.
+ * A regex that fails to match returns the subject unchanged, so a renamed label
+ * would silently ask the device for a pipeline named after the label and surface
+ * as a pipeline-creation failure instead of a wrong-table error here.
+ */
+const STAGES: readonly KernelStage[] = [
+  { label: "pass_x_sweep", entryPoint: "pass_x" },
+  { label: "pass_y_segscan", entryPoint: "pass_y" },
+  { label: "pass_z_finalize", entryPoint: "pass_z" },
+  { label: "pass_b_double", entryPoint: "pass_b" },
+  { label: "pass_c_entries", entryPoint: "pass_c" },
+  { label: "pass_d_counts", entryPoint: "pass_d" },
+  { label: "pass_e1_blockscan", entryPoint: "pass_e1" },
+  { label: "pass_e2_blockoffsets", entryPoint: "pass_e2" },
+  { label: "pass_f_emit", entryPoint: "pass_f" },
+];
+
+const TIMESTAMP_COUNT = STAGES.length * 2;
 const STAGING_META_BYTES = 16;
 const STAGING_TIMESTAMP_BYTES = TIMESTAMP_COUNT * 8;
 const STAGING_RECORDS_OFFSET = STAGING_META_BYTES + STAGING_TIMESTAMP_BYTES;
@@ -142,7 +162,8 @@ export interface GpuLexerOptions {
    * Return the records as a view straight into the mapped staging range instead
    * of copying them into an owned Int32Array. The view stays valid until the
    * next `lex()` call or `destroy()`. This is what a real backend integration
-   * would do; the copying default is the safe one and is what parity.ts uses.
+   * would do; the copying default is the safe one and is what the parity gate
+   * in `tests/webgpu_lexer_parity_test.ts` uses.
    */
   readonly borrowRecords?: boolean;
   /**
@@ -150,7 +171,7 @@ export interface GpuLexerOptions {
    * pass is a grid-stride loop so that a real over-limit input can never produce
    * an invalid dispatch, but on a device that reports 65535 no realistic input
    * reaches that grid size, so the stride path would otherwise never execute.
-   * parity.ts uses this to run the whole corpus through it.
+   * The parity gate uses this to run the whole corpus through it.
    */
   readonly debugMaxWorkgroupsPerDimension?: number;
 }
@@ -158,10 +179,6 @@ export interface GpuLexerOptions {
 interface SizedBuffer {
   buffer: GPUBuffer;
   size: number;
-}
-
-function ceilDiv(value: number, divisor: number): number {
-  return Math.ceil(value / divisor);
 }
 
 interface DeviceLostBox {
@@ -259,6 +276,16 @@ export class WebGpuLexer {
     const packed = packTables(plan, alphabet);
     const packEnd = performance.now();
 
+    // `navigator.gpu` is absent entirely on hosts without WebGPU (a Deno without
+    // --unstable-webgpu, an older runtime, a browser that does not implement
+    // it). Reading `.requestAdapter` off `undefined` would be a bare TypeError,
+    // which tells a caller nothing about what to do next.
+    if (navigator.gpu === undefined) {
+      throw new Error(
+        "This host exposes no WebGPU implementation (navigator.gpu is undefined). " +
+          "Deno needs --unstable-webgpu.",
+      );
+    }
     const adapterStart = performance.now();
     const adapter = await navigator.gpu.requestAdapter();
     const adapterEnd = performance.now();
@@ -321,12 +348,21 @@ export class WebGpuLexer {
         "The single bind group declares 2 read-only-storage and 5 storage buffers",
       );
     }
-    if (limits.maxComputeInvocationsPerWorkgroup < MAX_WORKGROUP_INVOCATIONS) {
+    // pass_x/pass_y declare one invocation per DFA state (rounded up to 32 and
+    // capped at MAX_WORKGROUP_INVOCATIONS), so the required invocation count is
+    // grammar-dependent and has to be recomputed rather than assumed to be 256.
+    const passXInvocations = passXWorkgroup(plan.stateCount);
+    const requiredInvocations = Math.max(
+      MAX_WORKGROUP_INVOCATIONS,
+      passXInvocations,
+    );
+    if (limits.maxComputeInvocationsPerWorkgroup < requiredInvocations) {
       throw new GpuLexerCapacityError(
         "maxComputeInvocationsPerWorkgroup",
-        MAX_WORKGROUP_INVOCATIONS,
+        requiredInvocations,
         limits.maxComputeInvocationsPerWorkgroup,
-        "pass_b/pass_d/pass_e1/pass_f declare @workgroup_size(256)",
+        `pass_b/pass_d/pass_e1/pass_f declare @workgroup_size(${MAX_WORKGROUP_INVOCATIONS}) ` +
+          `and pass_x/pass_y declare @workgroup_size(${passXInvocations}) for ${plan.stateCount} DFA states`,
       );
     }
     // wgpu does NOT validate workgroup storage at createComputePipeline (a
@@ -412,14 +448,13 @@ export class WebGpuLexer {
     });
 
     const pipelines = new Map<string, GPUComputePipeline>();
-    for (const stage of STAGE_NAMES) {
-      const entryPoint = stage.replace(/^(pass_[a-z0-9]+)_.*$/, "$1");
+    for (const stage of STAGES) {
       pipelines.set(
-        stage,
+        stage.label,
         device.createComputePipeline({
           layout: pipelineLayout,
-          compute: { module, entryPoint },
-          label: stage,
+          compute: { module, entryPoint: stage.entryPoint },
+          label: stage.label,
         }),
       );
     }
@@ -446,9 +481,9 @@ export class WebGpuLexer {
       packed.words.byteLength,
     );
 
-    // 10 u32 of Params, rounded up to the 16-byte struct alignment.
+    // 13 u32 of Params, rounded up to the 16-byte struct alignment.
     const paramsBuffer = device.createBuffer({
-      size: 48,
+      size: 64,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       label: "params",
     });
@@ -546,9 +581,23 @@ export class WebGpuLexer {
     );
     const byChunkDispatch = this.limits.maxComputeWorkgroupsPerDimension *
       SCAN_WORKGROUP * this.chunkSize;
+    // `aux` carries the per-segment summaries: numSeg * stateCount * 3 u32, i.e.
+    // stateCount * 12 / SEG_SIZE bytes per input unit. Far from the first wall
+    // at any realistic state count, but it is a real function of n.
+    const segSummaryBytesPerUnit =
+      (this.plan.stateCount * SEG_SUMMARY_U32_PER_STATE * 4) / SEG_SIZE;
+    const bySegSummary = Math.floor(
+      this.limits.maxStorageBufferBindingSize / segSummaryBytesPerUnit,
+    );
     return Math.max(
       0,
-      Math.min(byPositionArrays, byRecords, byStaging, byChunkDispatch),
+      Math.min(
+        byPositionArrays,
+        byRecords,
+        byStaging,
+        byChunkDispatch,
+        bySegSummary,
+      ),
     );
   }
 
@@ -569,7 +618,8 @@ export class WebGpuLexer {
       stagingBytes: number;
     },
     dispatches: {
-      passA: number;
+      passX: number;
+      passZ: number;
       passB: number;
       passDf: number;
       passE1: number;
@@ -609,12 +659,15 @@ export class WebGpuLexer {
         );
       }
     }
-    // pass_a/pass_b/pass_d/pass_f are grid-strided and clamped by the caller, so
-    // only pass_e1 can actually exceed the limit. It is one workgroup per 256
-    // chunks, so it only binds on inputs far past the storage-binding wall.
+    // pass_x/pass_z/pass_b/pass_d/pass_f are grid-strided and clamped by the
+    // caller, so only pass_e1 can actually exceed the limit. It is one workgroup
+    // per 256 chunks, so it only binds on inputs far past the storage-binding
+    // wall. The clamped grids are still checked: a clamping bug would otherwise
+    // surface as a dropped command buffer rather than an error.
     const perDimension = this.limits.maxComputeWorkgroupsPerDimension;
     const grids: readonly [string, number][] = [
-      ["pass_a", dispatches.passA],
+      ["pass_x", dispatches.passX],
+      ["pass_z", dispatches.passZ],
       ["pass_b", dispatches.passB],
       ["pass_d/pass_f", dispatches.passDf],
       ["pass_e1", dispatches.passE1],
@@ -648,10 +701,14 @@ export class WebGpuLexer {
     }
     const n = units.length;
     const chunkSize = this.chunkSize;
-    const numChunks = ceilDiv(n, chunkSize);
-    const numBlocks = ceilDiv(numChunks, SCAN_WORKGROUP);
+    const numChunks = Math.ceil(n / chunkSize);
+    const numBlocks = Math.ceil(numChunks / SCAN_WORKGROUP);
     const numChunksAlloc = Math.max(1, numChunks);
     const numBlocksAlloc = Math.max(1, numBlocks);
+    // pass_x segments are independent of pass_b chunks: their size is fixed by
+    // SEG_LOG2 rather than by the device's workgroup-storage limit.
+    const numSeg = Math.ceil(n / SEG_SIZE);
+    const numSegAlloc = Math.max(1, numSeg);
 
     let capacityRecords = n;
     if (options.capacityRecords !== undefined) {
@@ -659,9 +716,16 @@ export class WebGpuLexer {
     }
     capacityRecords = Math.max(1, capacityRecords);
 
-    const srcBytes = Math.max(4, ceilDiv(n, 2) * 4);
+    const srcBytes = Math.max(4, Math.ceil(n / 2) * 4);
     const posBytes = Math.max(4, n * 4);
-    const auxU32 = AUX_HEADER_U32 + 2 * numChunksAlloc + 2 * numBlocksAlloc;
+    // aux layout: header | entry[numChunks] | counts[numChunks] |
+    //             blockSums[numBlocks] | blockOffsets[numBlocks] |
+    //             segSummaries[numSeg * stateCount * 3]
+    // The segment summaries live here rather than in a buffer of their own so
+    // the bind group stays at STORAGE_BINDING_COUNT bindings.
+    const segSumOff = AUX_HEADER_U32 + 2 * numChunksAlloc + 2 * numBlocksAlloc;
+    const auxU32 = segSumOff +
+      numSegAlloc * this.plan.stateCount * SEG_SUMMARY_U32_PER_STATE;
     const recordBytes = capacityRecords * 16;
     const stagingBytes = STAGING_RECORDS_OFFSET + recordBytes;
 
@@ -672,14 +736,15 @@ export class WebGpuLexer {
         Math.min(perDimension, options.debugMaxWorkgroupsPerDimension),
       );
     }
-    const passAWorkgroups = Math.min(
+    const passXWorkgroups = Math.min(perDimension, Math.max(1, numSeg));
+    const passZWorkgroups = Math.min(
       perDimension,
-      Math.max(1, ceilDiv(n, PASS_A_WORKGROUP)),
+      Math.max(1, Math.ceil(n / PASS_Z_WORKGROUP)),
     );
     const passBWorkgroups = Math.min(perDimension, Math.max(1, numChunks));
     const passDfWorkgroups = Math.min(
       perDimension,
-      Math.max(1, ceilDiv(numChunks, SCAN_WORKGROUP)),
+      Math.max(1, Math.ceil(numChunks / SCAN_WORKGROUP)),
     );
     const passE1Workgroups = Math.max(1, numBlocks);
 
@@ -688,7 +753,8 @@ export class WebGpuLexer {
       capacityRecords,
       { srcBytes, posBytes, auxBytes: auxU32 * 4, recordBytes, stagingBytes },
       {
-        passA: passAWorkgroups,
+        passX: passXWorkgroups,
+        passZ: passZWorkgroups,
         passB: passBWorkgroups,
         passDf: passDfWorkgroups,
         passE1: passE1Workgroups,
@@ -798,7 +864,10 @@ export class WebGpuLexer {
       AUX_HEADER_U32,
       AUX_HEADER_U32 + numChunksAlloc,
       AUX_HEADER_U32 + 2 * numChunksAlloc,
-      passAWorkgroups * PASS_A_WORKGROUP,
+      numSeg,
+      segSumOff,
+      passXWorkgroups,
+      passZWorkgroups * PASS_Z_WORKGROUP,
       passBWorkgroups,
       passDfWorkgroups * SCAN_WORKGROUP,
     ]);
@@ -809,7 +878,9 @@ export class WebGpuLexer {
     const encodeStart = performance.now();
     const encoder = this.device.createCommandEncoder();
     const dispatches: readonly [string, number][] = [
-      ["pass_a_scan", passAWorkgroups],
+      ["pass_x_sweep", passXWorkgroups],
+      ["pass_y_segscan", 1],
+      ["pass_z_finalize", passZWorkgroups],
       ["pass_b_double", passBWorkgroups],
       ["pass_c_entries", 1],
       ["pass_d_counts", passDfWorkgroups],
@@ -936,9 +1007,9 @@ export class WebGpuLexer {
       );
       stagesMs = {};
       let sum = 0;
-      for (let index = 0; index < STAGE_NAMES.length; index += 1) {
+      for (let index = 0; index < STAGES.length; index += 1) {
         const delta = Number(stamps[index * 2 + 1] - stamps[index * 2]) / 1e6;
-        stagesMs[STAGE_NAMES[index]] = delta;
+        stagesMs[STAGES[index].label] = delta;
         sum += delta;
       }
       gpuStagesTotalMs = sum;

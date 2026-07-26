@@ -4,6 +4,21 @@
 
 ### Added
 
+- Experimental `@mewhhaha/baba/runtime/webgpu-lexer` export: a WebGPU execution
+  backend for the generated tokenizer. It consumes an existing `parser.plan`
+  unchanged and produces byte-exact `lex_all` token records. It is async, so it
+  cannot be hosted inside the synchronous generated `parser.lex()`; it supports
+  guard-free grammars only and refuses others with a structured diagnostic; it
+  requires a WebGPU adapter; and it is measurably slower than the shipping lexer
+  below roughly 768 KiB of source, with a one-time device setup that no single
+  document repays. `docs/webgpu-lexer.md` has the measured numbers and the
+  limits, and `docs/stability.md` records that the module carries no
+  compatibility or performance guarantee.
+- `tests/webgpu_lexer_parity_test.ts` asserts byte-exact parity against the Wasm
+  lexer across adversarial, surrogate, boundary and long-token inputs. It skips
+  when no WebGPU adapter is present, which is the case in CI.
+- `deno task bench:webgpu-lexer`, `deno task bench:webgpu-lexer:pathological`
+  and `deno task parity:webgpu-lexer`.
 - Generated Tree-sitter targets now lower guarded contextual tokens with
   positive trailing lookahead into named external tokens and a table-driven
   `src/scanner.c`. Positive and negative regex guards, end-of-input

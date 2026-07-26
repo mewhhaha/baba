@@ -234,15 +234,36 @@ export function classifyCodePoint(
   throw new Error(`Codepoint ${codePoint} is not covered by the range list.`);
 }
 
+export interface AlphabetMismatch {
+  readonly codePoint: number;
+  readonly classId: number;
+  readonly state: number;
+  /** Target state the plan's sparse CSR rows give. */
+  readonly sparseTarget: number;
+  /** Target state the dense (state x class) table gives. */
+  readonly denseTarget: number;
+}
+
+export interface AlphabetVerification {
+  readonly checked: number;
+  readonly mismatches: number;
+  /** The first disagreement, so a failure names a cell rather than a count. */
+  readonly firstMismatch: AlphabetMismatch | null;
+}
+
 /**
  * Exhaustive-ish verification that the dense class table agrees with the sparse
  * CSR table the shipping runtime uses. Checks every ASCII codepoint plus every
  * range boundary (and its neighbours) above ASCII, for every state.
+ *
+ * This returns a structured result rather than throwing because the caller is a
+ * gate that wants to report the cell, not a subsystem boundary that wants to
+ * abort.
  */
 export function verifyAlphabetAgainstSparse(
   tables: LexerPlanTables,
   alphabet: AlphabetTables,
-): { checked: number; mismatches: number } {
+): AlphabetVerification {
   const probes = new Set<number>();
   for (let codePoint = 0; codePoint < ASCII_LIMIT; codePoint += 1) {
     probes.add(codePoint);
@@ -267,19 +288,30 @@ export function verifyAlphabetAgainstSparse(
 
   let checked = 0;
   let mismatches = 0;
+  let firstMismatch: AlphabetMismatch | null = null;
   for (const codePoint of probes) {
     if (codePoint < 0 || codePoint >= CODE_POINT_LIMIT) {
       continue;
     }
     const classId = classifyCodePoint(alphabet, codePoint);
     for (let state = 0; state < tables.stateCount; state += 1) {
-      const expected = sparseTransition(tables, state, codePoint);
-      const actual = alphabet.dense[state * alphabet.classCount + classId];
+      const sparseTarget = sparseTransition(tables, state, codePoint);
+      const denseTarget = alphabet.dense[state * alphabet.classCount + classId];
       checked += 1;
-      if (expected !== actual) {
-        mismatches += 1;
+      if (sparseTarget === denseTarget) {
+        continue;
+      }
+      mismatches += 1;
+      if (firstMismatch === null) {
+        firstMismatch = {
+          codePoint,
+          classId,
+          state,
+          sparseTarget,
+          denseTarget,
+        };
       }
     }
   }
-  return { checked, mismatches };
+  return { checked, mismatches, firstMismatch };
 }
