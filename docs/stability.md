@@ -32,9 +32,11 @@ list is the complete set of exceptions. Any export not on it is stable.
 This module does not carry the Public Library API guarantees above. Its option
 shapes and its result shapes may change in any minor release, and it may be
 removed entirely without a major release. It carries no performance guarantee of
-any kind: it is measurably slower than the shipping lexer below roughly 768 KiB
-of source, and its one-time setup cost is not repaid by a single document. It
-requires a WebGPU adapter and refuses to run without one.
+any kind: it is measurably slower than the shipping lexer below roughly 896 KiB
+of source, and its one-time setup cost is not repaid by a single document. That
+threshold is not a promise either - it moves whenever the shipping lexer gets
+faster, and it has already moved once for that reason. It requires a WebGPU
+adapter and refuses to run without one.
 
 Token records it produces are held to byte-exact parity with `lex_all`, which is
 a correctness gate rather than a compatibility promise. See

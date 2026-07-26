@@ -48,8 +48,28 @@
   behavior, including negative-only, nullable-positive, and overlapping-positive
   guards.
 
+### Removed
+
+- `bench/ts_vs_wasm.ts`. It benchmarked the TypeScript runtime against the Wasm
+  one, and the TypeScript runtime was removed in 6.0.0. It has failed to type
+  check ever since (it still passes `targets: ["typescript", "wasm"]`), which
+  nothing caught because `bench/` is outside `deno task check`, `deno lint` and
+  the publish payload. No task, workflow, doc or test referenced it.
+- `experiments/webgpu-lexer/`. It held the WebGPU proof-of-concept writeup and
+  three `results*.json` files, which `docs/adr/0001` cited as its evidence. They
+  benchmark against a version of `lex_all` that no longer exists, so they now
+  understate the crossover. The ADR cites the benchmark tasks and the git commit
+  instead, and `docs/webgpu-lexer.md` carries the current numbers.
+
 ### Fixed
 
+- The WebGPU backend's documented crossover was stale. Removing the lexer's dead
+  ASCII fall-through made `lex_all` faster - about 48-50 MiB/s where it
+  previously measured 44-48 - so the point where the GPU backend starts winning
+  moved up from 768 KiB to **896 KiB** of source. At 768 KiB it now measures
+  0.90x and loses. `docs/webgpu-lexer.md`, `docs/stability.md` and
+  `docs/adr/0001` are corrected, and all three now say the threshold moves
+  whenever the CPU lexer gets faster.
 - `parser.parse()` no longer runs out of WebAssembly memory on ordinary inputs.
   The cursor engine materialized every repetition list by copying the whole
   accumulated list on each element, so the child and value-item arenas grew as

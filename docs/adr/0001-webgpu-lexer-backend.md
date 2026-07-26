@@ -13,10 +13,14 @@ labelled as such wherever they are retained for comparison.
 
 Supersedes: nothing. Superseded by: nothing.
 
-Evidence: `experiments/webgpu-lexer/README.md` plus `results.json`,
-`results_crossover.json` and `results_thunkwasm.json` in the same directory.
-Those four files are the record of the proof of concept and every measurement
-quoted below; they are retained unchanged.
+Evidence: the numbers below are reproducible with
+`deno task bench:webgpu-lexer`, `deno task bench:webgpu-lexer:pathological` and
+`deno task parity:webgpu-lexer`. The raw proof-of-concept record - a long README
+plus `results.json`, `results_crossover.json` and `results_thunkwasm.json` -
+lived in `experiments/webgpu-lexer/` and is retained in git history at commit
+`88684bb`. It was removed from the tree once it became misleading: it benchmarks
+against a version of `lex_all` that no longer exists, so its crossover figure
+reads low against the current engine.
 
 The code they describe now lives in `src/runtime/webgpu/` (backend),
 `tests/webgpu_lexer_parity_test.ts` (the parity gate, which compiles its grammar
@@ -41,7 +45,7 @@ whether that formulation is exact, and whether it is fast enough to matter.
 
 The proof of concept reaches byte-exact parity with `lex_all` on all four
 shipped example grammars and no excluded input class, but is slower than the CPU
-below 768 KiB of source on the one stack it was measured on.
+below 896 KiB of source on the one stack it was measured on.
 
 ## Decision
 
@@ -115,8 +119,9 @@ array rather than a semantic argument.
 
 ## Measured Evidence
 
-All numbers below are from `experiments/webgpu-lexer/`. Machine: NVIDIA GeForce
-RTX 4080 SUPER, Deno 2.9.4 / wgpu, Linux. Sizes are UTF-16 code units.
+Machine: NVIDIA GeForce RTX 4080 SUPER, Deno 2.9.4 / wgpu, Linux. Sizes are
+UTF-16 code units. Every figure is reproducible with the benchmark tasks named
+above; where a figure predates a later engine change it is labelled as such.
 
 Note on provenance: the initial recon reported an "AMD adapter" from vendor id
 4318. That is `0x10DE`, which is NVIDIA. All benchmark numbers are from the
@@ -168,12 +173,23 @@ under the old `pass_a`. Two independent runs of the current kernel on the same
 bytes produced 133.87 ms / 2.49x and 132.16 ms / 2.73x, so quote the range, not
 a single median. See "Measurement variance" under Risks.
 
-**Crossover is 768 KiB of source and did not move**, confirmed by a finer sweep
-after the kernel change (0.68x at 512 KiB, 0.77x at 640 KiB, 1.03x at 768 KiB,
-1.19x at 896 KiB). It does not move because the new stage's cost is proportional
-to `n`, so at the crossover it is well under a millisecond against a total still
-dominated by the synchronization floor. On the stricter test of worst GPU sample
-against best CPU sample the crossover is 1 MiB.
+**Crossover is 896 KiB of source.** The kernel change did not move it - a finer
+sweep at the time read 0.68x at 512 KiB, 0.77x at 640 KiB, 1.03x at 768 KiB and
+1.19x at 896 KiB - because that stage's cost is proportional to `n`, so at the
+crossover it is well under a millisecond against a total still dominated by the
+synchronization floor.
+
+What did move it was the **CPU** side. Removing the Rust lexer's dead
+fall-through from the dense ASCII table into the sparse range scan took
+`lex_all` from about 44-48 MiB/s to about 48-50 MiB/s, and the crossover with
+it: re-measured after that change, the sweep reads 0.90x at 768 KiB, 1.04x at
+896 KiB, 1.13x at 1 MiB and 1.34x at 1.25 MiB. On the stricter test of worst GPU
+sample against best CPU sample it is 1.25 MiB.
+
+That is the durable lesson, not the number. This backend's advantage is a factor
+the CPU lexer can erode, and it has already been eroded once by a one-line
+change. Any figure in this document is a reading against a specific engine, and
+the GPU column below still dates from before that change.
 
 Cross-check on `thunkwasm` (repeated example programs, periodic input): 1 MiB
 0.94x, 16 MiB 2.05x - down from 1.08x and 2.60x. `thunkwasm` regressed harder
@@ -310,7 +326,7 @@ Measure `queue.submit()` + `mapAsync()` round-trip latency as a function of
 payload size in Chrome/Dawn on a real GPU, and again in Firefox if available.
 
 **Gate for everything else.** If the floor is ~11 ms across implementations, the
-crossover stays near 768 KiB, no file in this repo comes close, and the backend
+crossover stays near 896 KiB, no file in this repo comes close, and the backend
 is a server/batch feature at best. If the floor is ~1 ms, the estimated
 crossover falls to roughly 100 KiB and the backend becomes interesting for
 editor workloads. Phases 1-4 are not justified until this number exists.
@@ -458,7 +474,7 @@ an acceptable outcome at any stage.
 ### Phase 4: integration
 
 - Auto-select the GPU backend only above the measured crossover, using the
-  number Phase 0 produces for the target host - not the 768 KiB measured here.
+  number Phase 0 produces for the target host - not the 896 KiB measured here.
 - Always fall back to Wasm: no adapter, no device, device lost, over-limit
   input, unsupported grammar, or any validation error. Fallback must be
   observable, not silent.
@@ -556,7 +572,7 @@ production backend should share the decoder rather than duplicate it.
 throws `RangeError("Wasm parser plan exceeds maximum memory pages.")`
 (`src/runtime/generated_wasm.ts:2526`) above roughly 750 KiB of source.
 `parser.lex()` and `parser.validate()` are fine at multi-MiB sizes. The
-crossover measured here is 768 KiB. Cursor materialization therefore fails at
+crossover measured here is 896 KiB. Cursor materialization therefore fails at
 almost exactly the size where GPU lexing starts to win, so feeding multi-MiB
 inputs to a faster lexer is of limited use until that is resolved. This is a
 pre-existing limitation, unrelated to this work, and needs resolving in parallel
@@ -607,11 +623,10 @@ own decision.
 
 ## References
 
-- `experiments/webgpu-lexer/README.md` - full proof-of-concept writeup, kernel
-  design, and the raw numbers quoted above.
-- `experiments/webgpu-lexer/results.json`, `results_crossover.json`,
-  `results_thunkwasm.json` - machine-readable benchmark output including every
-  per-run sample.
+- `deno task bench:webgpu-lexer`, `deno task bench:webgpu-lexer:pathological`,
+  `deno task parity:webgpu-lexer` - regenerate every measurement above.
+- Commit `88684bb` - the removed `experiments/webgpu-lexer/` proof-of-concept
+  writeup and its machine-readable `results*.json`, retained in history only.
 - `src/targets/runtime/wasm_engine_rs/src/lib.rs` - `lex_all` (~342),
   `decode_code_point` (~393), `spec_guard_matches` (~462), `select_action`
   (~720).

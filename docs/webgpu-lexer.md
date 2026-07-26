@@ -8,7 +8,7 @@ not a generate target**: it consumes a `parser.plan` that ships today, produces
 the identical token records, and emits no artifacts of its own.
 
 Read the numbers below before adopting it. On the one machine it has been
-measured on it is **slower than the CPU lexer for anything under about 768 KiB
+measured on it is **slower than the CPU lexer for anything under about 896 KiB
 of source**, and its one-time setup cost is never repaid by a single document.
 
 ## What It Is
@@ -23,8 +23,8 @@ change, and no semantic difference. Terminal identity is still resolved by the
 parser at parse time from `(acceptingState, LR state)`, exactly as before.
 
 The design and the measurements are recorded in
-[ADR 0001](adr/0001-webgpu-lexer-backend.md); the raw benchmark output is in
-`experiments/webgpu-lexer/`.
+[ADR 0001](adr/0001-webgpu-lexer-backend.md). Regenerate the numbers with
+`deno task bench:webgpu-lexer`.
 
 ## Using It
 
@@ -114,11 +114,20 @@ output capacity with owned records. Sizes are UTF-16 code units.
 | 4 MiB   | 1651674 | 82.56 ms      | 35.99 ms  | 2.29x   |
 | 16 MiB  | 6605769 | 333.62 ms     | 133.87 ms | 2.49x   |
 
-**Crossover is 768 KiB of source.** Below it the backend loses, and at the small
-end it loses by more than an order of magnitude. A finer sweep reads 0.68x at
-512 KiB, 0.77x at 640 KiB, 1.03x at 768 KiB and 1.19x at 896 KiB. On the
-stricter comparison of the worst observed GPU sample against the best observed
-CPU sample, the crossover is 1 MiB.
+**Crossover is 896 KiB of source.** Below it the backend loses, and at the small
+end it loses by more than an order of magnitude. A finer sweep reads 0.90x at
+768 KiB, 1.04x at 896 KiB, 1.13x at 1 MiB and 1.34x at 1.25 MiB. On the stricter
+comparison of the worst observed GPU sample against the best observed CPU
+sample, the crossover is 1.25 MiB.
+
+The crossover moved up from 768 KiB after the Rust lexer stopped falling through
+the dense ASCII table into the sparse range scan. That made `lex_all` faster -
+about 48-50 MiB/s where it previously measured 44-48 - so the CPU side of this
+comparison improved and the GPU had further to climb. The table above still
+carries the pre-change GPU column; only the crossover and the CPU rate were
+re-measured. Any future engine change moves this number again, which is the
+general point: this backend is only ever ahead by a factor that the CPU lexer
+can erode.
 
 The reason the small end is flat is that the dominant cost is neither compute
 nor bandwidth. It is host-device synchronization: `await mapAsync()` costs about
