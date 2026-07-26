@@ -79,6 +79,7 @@
       "src/targets/runtime/wasm_engine_rs/src/lib.rs",
       "src/targets/tree_sitter_grammar.ts",
       "src/targets/tree_sitter_queries.ts",
+      "src/targets/tree_sitter_scanner.ts",
       "src/compiler/runtime_plan/bnf.ts",
       "src/compiler/runtime_plan/lr1.ts",
       "src/compiler/runtime_plan/syntax_emit.ts",

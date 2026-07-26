@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- Generated Tree-sitter targets now lower guarded contextual tokens with
+  positive trailing lookahead into named external tokens and a table-driven
+  `src/scanner.c`. Positive and negative regex guards, end-of-input
+  alternatives, and excluded-word boundaries share the analyzed portable regex
+  plan with the Wasm target.
+
+### Changed
+
+- Tree-sitter generation reports `TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD` only
+  when its forward-only scanner cannot preserve a guard's longest-match
+  behavior, including negative-only, nullable-positive, and overlapping-positive
+  guards.
+
 ## 6.1.0
 
 ### Added

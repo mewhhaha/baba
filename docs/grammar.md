@@ -73,9 +73,17 @@ callbacks, mutable scanner state, or arbitrary JavaScript regular-expression
 features.
 
 The Wasm target encodes these guards in its portable parser plan. The
-Tree-sitter target emits unguarded contextual tokens as named lexical rules, but
-reports `TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD` when a contextual token uses
-trailing lookahead because `grammar.js` cannot preserve that constraint.
+Tree-sitter target emits unguarded contextual tokens as named lexical rules.
+When a contextual token has non-nullable positive lookahead that does not
+overlap a longer match of the consumed token, the target emits a named external
+token and a table-driven `src/scanner.c`. Negative regex and excluded-word
+guards on that same token are evaluated by the generated scanner.
+
+Tree-sitter's scanner API is forward-only, so it cannot preserve every guarded
+longest-match fallback. Negative-only guards, nullable positive guards, and
+positive guards that overlap a longer consumed match report
+`TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD` instead of changing tokenization
+semantics.
 
 ## Rules
 

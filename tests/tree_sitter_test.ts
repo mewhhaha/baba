@@ -88,10 +88,10 @@ Deno.test("Tree-sitter metadata renders conflicts precedence aliases and hidden 
   assertIncludes(grammar, "APPLICATION_WS: $ => token(/[ \\t]+/)");
 });
 
-Deno.test("Tree-sitter target rejects contextual lookahead guards", () => {
+Deno.test("Tree-sitter target emits guarded contextual tokens as externals", () => {
   const result = compile(
     `
-      contextual APPLICATION_WS = /[ \\t]+(?=[a-z])/ ;
+      contextual APPLICATION_WS = /[ \\t]+(?=[a-z])(?!(if|in)\\b)/ ;
       module = "f" APPLICATION_WS "x" ;
     `,
     {
@@ -100,10 +100,56 @@ Deno.test("Tree-sitter target rejects contextual lookahead guards", () => {
     },
   );
 
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+  assertEquals(
+    result.bundle.files.map((file) => file.path).join(","),
+    "grammar.js,queries/generated-highlights.scm,src/scanner.c",
+  );
+  const grammar = generatedText(result.bundle.files, "grammar.js");
+  assertIncludes(grammar, "externals: $ => [");
+  assertIncludes(grammar, "$.APPLICATION_WS");
+  assertIncludes(grammar, "$._baba_error_sentinel");
+  assertNotIncludes(grammar, "APPLICATION_WS: $ =>");
+  const scanner = generatedText(result.bundle.files, "src/scanner.c");
+  assertIncludes(
+    scanner,
+    "bool tree_sitter_duck_external_scanner_scan(",
+  );
+  assertIncludes(scanner, "BABA_WORD_CODE_POINTS");
+});
+
+Deno.test("Tree-sitter target rejects negative-only contextual guards", () => {
+  const result = compile(
+    `
+      contextual APPLICATION_WS = /[ \\t]+(?!;)/ ;
+      module = "f" APPLICATION_WS "x" ;
+    `,
+    { name: "duck", targets: ["tree-sitter"] },
+  );
+
   assertEquals(result.bundle, undefined);
   assert(
     result.diagnostics.some((diagnostic) =>
       diagnostic.code === "TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD"
+    ),
+  );
+});
+
+Deno.test("Tree-sitter target rejects guarded token fallback it cannot preserve", () => {
+  const result = compile(
+    `
+      contextual PREFIX = /a+(?=a)/ ;
+      module = PREFIX ;
+    `,
+    { name: "fallback", targets: ["tree-sitter"] },
+  );
+
+  assertEquals(result.bundle, undefined);
+  assert(
+    result.diagnostics.some((diagnostic) =>
+      diagnostic.code === "TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD" &&
+      diagnostic.message.includes("overlaps a longer guarded token match")
     ),
   );
 });
@@ -174,6 +220,87 @@ Deno.test("generated grammar.js builds and parses with Tree-sitter", async () =>
     await runTreeSitter(directory, ["build"]);
     const parsed = await runTreeSitter(directory, ["parse", "sample.tiny"]);
     assertIncludes(parsed, "(source_file");
+    assertNotIncludes(parsed, "ERROR");
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("generated Tree-sitter scanner enforces contextual guards", async () => {
+  const result = compile(
+    `
+      token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+      skip WS = /[ \\t\\r\\n]+/ ;
+      contextual APPLICATION_SPACE =
+        /[ \\t]+(?=[A-Za-z_])(?!(if|in)\\b)/ ;
+      contextual TYPE_APPLICATION_SPACE =
+        /[ \\t]+(?=[A-Za-z_#&]|\\(|\\[)/ ;
+      contextual TERMINATOR_SPACE =
+        /[ \\t]+(?=$|[\\r\\n;}])/ ;
+
+      document = application_case | type_case | terminator_case ;
+      application_case = "app:" first:application "if" second:application ;
+      application = head:IDENT (APPLICATION_SPACE arguments:IDENT)* ;
+      type_case =
+        "type:" constructor:IDENT TYPE_APPLICATION_SPACE argument:IDENT ;
+      terminator_case = "end:" value:IDENT TERMINATOR_SPACE ;
+    `,
+    { name: "guarded", targets: ["tree-sitter"] },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const directory = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: directory });
+    await Deno.writeTextFile(
+      `${directory}/application.guarded`,
+      "app:f x if y z",
+    );
+    await Deno.writeTextFile(
+      `${directory}/type.guarded`,
+      "type:Option Value",
+    );
+    await Deno.writeTextFile(
+      `${directory}/terminator.guarded`,
+      "end:value   ",
+    );
+    await runTreeSitter(directory, ["generate"]);
+    await runTreeSitter(directory, ["build"]);
+    const parsed = await runTreeSitter(directory, [
+      "parse",
+      "application.guarded",
+      "type.guarded",
+      "terminator.guarded",
+    ]);
+    assertNotIncludes(parsed, "ERROR");
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("generated Tree-sitter scanner resolves guarded alternatives together", async () => {
+  const result = compile(
+    `
+      token IDENT = /[a-z]+/ ;
+      skip WS = /[ \\t\\r\\n]+/ ;
+      contextual LONG priority 2 = /[ \\t]+(?=ab)/ ;
+      contextual SHORT priority 1 = /[ \\t]+(?=a)/ ;
+      module = "value:" (LONG | SHORT) IDENT ;
+    `,
+    { name: "alternatives", targets: ["tree-sitter"] },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assert(result.bundle);
+
+  const directory = await Deno.makeTempDir();
+  try {
+    await applyBundle(result.bundle, { root: directory });
+    await Deno.writeTextFile(`${directory}/sample.alt`, "value: ax");
+    await runTreeSitter(directory, ["generate"]);
+    await runTreeSitter(directory, ["build"]);
+    const parsed = await runTreeSitter(directory, ["parse", "sample.alt"]);
+    assertIncludes(parsed, "(SHORT ");
     assertNotIncludes(parsed, "ERROR");
   } finally {
     await Deno.remove(directory, { recursive: true });

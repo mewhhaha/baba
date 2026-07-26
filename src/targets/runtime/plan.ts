@@ -1200,7 +1200,7 @@ function validatePositiveIntegerOption(
   }
 }
 
-function runtimeRegexLimits(
+export function runtimeRegexLimits(
   options: RuntimeParserPlanningOptions,
 ): RegexCompilerLimits {
   return {

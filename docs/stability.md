@@ -83,8 +83,10 @@ when declared through grammar source and metadata. Formatting and private helper
 expressions inside generated `grammar.js` are not stable.
 
 Contextual tokens without trailing lookahead emit as named Tree-sitter lexical
-rules. Guarded contextual tokens produce a structured target diagnostic because
-Tree-sitter's `grammar.js` regex surface cannot preserve Baba's trailing guards.
+rules. Safely lowerable positive trailing guards emit named external tokens and
+a generated `src/scanner.c`; the portable analyzed regex remains the source of
+truth. Guard shapes that Tree-sitter's forward-only scanner cannot preserve
+produce `TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD`.
 
 ## Internal BRL
 

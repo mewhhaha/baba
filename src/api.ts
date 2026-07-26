@@ -26,8 +26,9 @@ import {
 import {
   planPortableRuntime,
   type RuntimeParserPlanningOptions,
+  runtimeRegexLimits,
 } from "./targets/runtime/plan.ts";
-import { emitTreeSitterGrammarFile } from "./targets/tree_sitter_grammar.ts";
+import { emitTreeSitterTarget } from "./targets/tree_sitter_grammar.ts";
 import { emitTreeSitterQueryFiles } from "./targets/tree_sitter_queries.ts";
 export { applyBundle } from "./output.ts";
 
@@ -112,7 +113,11 @@ export function validateGrammar(
   }
   if (targets.includes("tree-sitter") && !hasErrors(diagnostics)) {
     try {
-      emitTreeSitterGrammarFile(analyzed, metadata);
+      emitTreeSitterTarget(
+        analyzed,
+        metadata,
+        runtimeRegexLimits(runtimeOptions),
+      );
     } catch (error) {
       diagnostics.push(
         toBabaError(error, "TREE_SITTER_TARGET_ERROR").toDiagnostic(),
@@ -188,7 +193,13 @@ export function compile(
       files.push(...emitWasmTarget(wasmPlan, options.wasm));
     }
     if (targets.includes("tree-sitter")) {
-      files.push(emitTreeSitterGrammarFile(analyzed, metadata));
+      files.push(
+        ...emitTreeSitterTarget(
+          analyzed,
+          metadata,
+          runtimeRegexLimits(runtimeOptions),
+        ),
+      );
     }
     files.push(...emitTreeSitterQueryFiles(analyzed, metadata));
 

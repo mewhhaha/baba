@@ -8,7 +8,9 @@ import type {
   TreeSitterRuleWrap,
 } from "../ast.ts";
 import type { AnalyzedExpression, AnalyzedGrammar } from "../compiler/ir.ts";
+import type { RegexCompilerLimits } from "../compiler/regex/limits.ts";
 import { BabaError } from "../errors.ts";
+import { emitTreeSitterExternalScanner } from "./tree_sitter_scanner.ts";
 
 interface TreeSitterRulePlan {
   readonly name: string;
@@ -29,6 +31,7 @@ interface TreeSitterPlan {
   readonly tokens: readonly TreeSitterTokenPlan[];
   readonly reachableRules: ReadonlySet<string>;
   readonly reachableTokens: ReadonlySet<string>;
+  readonly externalTokenNames: ReadonlySet<string>;
 }
 
 interface NormalizedRuleMetadata {
@@ -42,22 +45,39 @@ interface RenderContext {
   readonly aliasRules: Map<string, string>;
 }
 
-export function emitTreeSitterGrammarFile(
+export function emitTreeSitterTarget(
   analyzed: AnalyzedGrammar,
   metadata: BabaMetadata,
-): GeneratedFile {
-  assertTreeSitterTokenSupport(analyzed);
-  const plan = createTreeSitterPlan(analyzed);
+  regexLimits: RegexCompilerLimits,
+): GeneratedFile[] {
+  const externalScanner = emitTreeSitterExternalScanner(
+    analyzed,
+    regexLimits,
+  );
+  const externalTokenNames = new Set<string>();
+  if (externalScanner !== undefined) {
+    for (const tokenName of externalScanner.tokenNames) {
+      externalTokenNames.add(tokenName);
+    }
+  }
+  const plan = createTreeSitterPlan(analyzed, externalTokenNames);
   validateTreeSitterMetadata(plan, metadata);
-  return {
+  const files: GeneratedFile[] = [{
     path: "grammar.js",
     content: renderTreeSitterGrammar(plan, metadata),
     kind: "source",
     encoding: "utf-8",
-  };
+  }];
+  if (externalScanner !== undefined) {
+    files.push(externalScanner.file);
+  }
+  return files;
 }
 
-function createTreeSitterPlan(analyzed: AnalyzedGrammar): TreeSitterPlan {
+function createTreeSitterPlan(
+  analyzed: AnalyzedGrammar,
+  externalTokenNames: ReadonlySet<string>,
+): TreeSitterPlan {
   const rootRule = analyzed.rules[analyzed.rootRule];
   if (rootRule === undefined) {
     throw new BabaError({
@@ -105,23 +125,8 @@ function createTreeSitterPlan(analyzed: AnalyzedGrammar): TreeSitterPlan {
     })),
     reachableRules,
     reachableTokens,
+    externalTokenNames,
   };
-}
-
-function assertTreeSitterTokenSupport(analyzed: AnalyzedGrammar): void {
-  for (const token of analyzed.tokens) {
-    if (token.kind !== "contextual" || token.trailingContext === undefined) {
-      continue;
-    }
-    throw new BabaError({
-      code: "TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD",
-      severity: "error",
-      backend: "tree-sitter",
-      message:
-        `Tree-sitter cannot encode trailing lookahead guards for contextual token '${token.name}'.`,
-      span: token.span,
-    });
-  }
 }
 
 function renderTreeSitterGrammar(
@@ -150,6 +155,14 @@ function renderTreeSitterGrammar(
     lines.push(`    ${renderExtra(extra)},`);
   }
   lines.push("  ],", "");
+
+  if (plan.externalTokenNames.size > 0) {
+    lines.push("  externals: $ => [");
+    for (const name of plan.externalTokenNames) {
+      lines.push(`    $.${name},`);
+    }
+    lines.push("    $._baba_error_sentinel,", "  ],", "");
+  }
 
   if (metadata.word !== undefined) {
     lines.push(`  word: $ => $.${metadata.word},`, "");
@@ -186,6 +199,9 @@ function renderTreeSitterGrammar(
     );
   }
   for (const token of plan.tokens) {
+    if (plan.externalTokenNames.has(token.name)) {
+      continue;
+    }
     if (token.kind !== "skip" && !plan.reachableTokens.has(token.name)) {
       continue;
     }
