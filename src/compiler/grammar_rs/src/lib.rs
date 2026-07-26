@@ -400,8 +400,9 @@ impl<'a> Lexer<'a> {
                     break;
                 }
             }
-            value.push(self.byte_at(self.index) as char);
-            self.index += 1;
+            let character = self.char_at(self.index);
+            value.push(character);
+            self.index += character.len_utf8();
         }
         if self.index >= self.source.len() {
             let span = span_at(&self.line_starts, start, self.index);
@@ -447,9 +448,10 @@ impl<'a> Lexer<'a> {
                 return;
             }
             if escaped {
-                pattern.push(current as char);
+                let character = self.char_at(self.index);
+                pattern.push(character);
                 escaped = false;
-                self.index += 1;
+                self.index += character.len_utf8();
                 continue;
             }
             if current == b'\\' {
@@ -479,8 +481,9 @@ impl<'a> Lexer<'a> {
                 });
                 return;
             }
-            pattern.push(current as char);
-            self.index += 1;
+            let character = self.char_at(self.index);
+            pattern.push(character);
+            self.index += character.len_utf8();
         }
 
         let span = span_at(&self.line_starts, start, self.index);
@@ -513,6 +516,27 @@ impl<'a> Lexer<'a> {
 
     fn byte_at(&self, index: usize) -> u8 {
         self.source.as_bytes()[index]
+    }
+
+    /// Reads the whole UTF-8 character starting at `index`.
+    ///
+    /// The scanner navigates by byte offset, which is correct for the ASCII
+    /// delimiters it looks for: every byte of a multi-byte UTF-8 sequence is
+    /// >= 0x80, so it can never be mistaken for `/`, `[`, `]`, `\` or a
+    /// newline. Token *text* is a different matter. Pushing `byte as char`
+    /// widens each byte to the code point of its own numeric value, so `À`
+    /// (U+00C0, encoded `C3 80`) becomes the two code points U+00C3 and
+    /// U+0080. Callers must push whole characters and advance by
+    /// `len_utf8()`.
+    ///
+    /// `index` is always on a character boundary because every caller advances
+    /// by a whole character or past a single ASCII byte.
+    fn char_at(&self, index: usize) -> char {
+        let mut characters = self.source[index..].chars();
+        match characters.next() {
+            Some(character) => character,
+            None => panic!("char_at called at or past the end of the source"),
+        }
     }
 
     fn byte_at_optional(&self, index: usize) -> Option<u8> {

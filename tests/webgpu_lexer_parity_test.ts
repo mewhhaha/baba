@@ -55,12 +55,6 @@ import { SEG_SIZE } from "../src/runtime/webgpu/kernel_wgsl.ts";
  * Every token is referenced by a rule on purpose: an unreferenced named token
  * is pruned out of the lexer DFA, and a pruned `MARK` would take the whole
  * above-ASCII partition with it.
- *
- * Note on `MARK`: Baba's grammar frontend currently re-reads non-ASCII grammar
- * source as individual UTF-8 bytes, so the codepoints this class actually
- * covers are not the ones it reads like. That does not weaken anything here -
- * the point is only that a non-trivial partition exists above U+007F, and both
- * lexers under comparison read the same plan either way.
  */
 const PARITY_GRAMMAR = `
   token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
