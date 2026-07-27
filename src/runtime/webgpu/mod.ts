@@ -14,7 +14,8 @@
  *   measured on, and the ~226 ms one-time device setup is never repaid by any
  *   single document;
  * - it supports **guard-free grammars only** and refuses others loudly;
- * - it requires a WebGPU adapter and has no fallback of its own.
+ * - it requires a hardware WebGPU adapter by default; software fallback
+ *   adapters require explicit `allowFallbackAdapter` opt-in.
  *
  * Stability: this module is listed as an experimental surface in
  * `docs/stability.md`. Option and result shapes may change in any minor release

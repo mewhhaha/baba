@@ -118,6 +118,8 @@ export interface GpuLexerLimits {
 }
 
 export interface WebGpuLexerCreateOptions {
+  /** Software fallback adapters are rejected unless explicitly enabled. */
+  readonly allowFallbackAdapter?: boolean;
   /**
    * Test hook: pretend `maxComputeWorkgroupStorageSize` is this small. The
    * WebGPU-guaranteed floor is 16384 B, which is half of what a 4096-unit
@@ -221,6 +223,7 @@ export class WebGpuLexer {
    */
   #bufferGeneration = 0;
   #pendingUnmap = false;
+  #lexInFlight = false;
   #destroyed = false;
 
   private constructor(
@@ -291,6 +294,16 @@ export class WebGpuLexer {
     const adapterEnd = performance.now();
     if (adapter === null) {
       throw new Error("No WebGPU adapter is available.");
+    }
+    const adapterInfo = adapter.info;
+    if (
+      adapterInfo.isFallbackAdapter === true &&
+      options.allowFallbackAdapter !== true
+    ) {
+      throw new Error(
+        `WebGPU selected the software fallback adapter "${adapterInfo.description}" ` +
+          `(vendor ${adapterInfo.vendor}). Set allowFallbackAdapter=true to opt in explicitly.`,
+      );
     }
     const wantsTimestamps = adapter.features.has("timestamp-query");
     const requiredFeatures: GPUFeatureName[] = [];
@@ -688,13 +701,30 @@ export class WebGpuLexer {
     units: Uint16Array,
     options: GpuLexerOptions = {},
   ): Promise<GpuLexResult> {
-    const totalStart = performance.now();
     if (this.#destroyed) {
       throw new Error("This WebGpuLexer has been destroyed.");
     }
     if (this.#deviceLost.reason !== null) {
       throw new Error(`WebGPU device was lost: ${this.#deviceLost.reason}`);
     }
+    if (this.#lexInFlight) {
+      throw new Error(
+        "WebGpuLexer.lex() does not support concurrent calls; await the previous lex() call.",
+      );
+    }
+    this.#lexInFlight = true;
+    try {
+      return await this.#lexInternal(units, options);
+    } finally {
+      this.#lexInFlight = false;
+    }
+  }
+
+  async #lexInternal(
+    units: Uint16Array,
+    options: GpuLexerOptions = {},
+  ): Promise<GpuLexResult> {
+    const totalStart = performance.now();
     if (this.#pendingUnmap && this.#staging !== null) {
       this.#staging.buffer.unmap();
       this.#pendingUnmap = false;
@@ -1065,6 +1095,9 @@ export class WebGpuLexer {
   destroy(): void {
     if (this.#destroyed) {
       return;
+    }
+    if (this.#lexInFlight) {
+      throw new Error("Cannot destroy WebGpuLexer while lex() is in flight.");
     }
     if (this.#pendingUnmap && this.#staging !== null) {
       this.#staging.buffer.unmap();

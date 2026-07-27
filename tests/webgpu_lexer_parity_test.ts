@@ -27,7 +27,13 @@
  * straight out of the returned `GeneratedFile[]`.
  */
 
-import { assert, assertEquals, compile } from "./helpers.ts";
+import {
+  assert,
+  assertEquals,
+  assertIncludes,
+  assertThrowsIncludes,
+  compile,
+} from "./helpers.ts";
 import {
   CpuReferenceLexer,
   toUtf16,
@@ -113,6 +119,22 @@ function binaryFile(
     throw new Error(`Generated file ${path} is ${file.encoding}, not binary.`);
   }
   return file.content as Uint8Array;
+}
+
+async function assertRejectsIncludes(
+  operation: () => Promise<unknown>,
+  expected: string,
+): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    assert(
+      String(error).includes(expected),
+      `Expected ${String(error)} to include ${expected}`,
+    );
+    return;
+  }
+  throw new Error(`Expected promise rejection containing ${expected}.`);
 }
 
 interface NamedInput {
@@ -439,7 +461,7 @@ Deno.test({
     );
 
     const cpu = CpuReferenceLexer.create(wasm, plan);
-    const gpu = await WebGpuLexer.create(plan);
+    const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
     try {
       const inputs = parityInputs(SEG_SIZE, gpu.chunkSize);
       assert(inputs.length > 80, "Expected a substantial parity corpus.");
@@ -499,6 +521,7 @@ Deno.test({
     // needs. wgpu does not validate workgroup storage at pipeline creation, so
     // without this hook the smaller-chunk fallback would ship untested.
     const gpu = await WebGpuLexer.create(plan, {
+      allowFallbackAdapter: true,
       simulateWorkgroupStorageLimit: 16384,
     });
     try {
@@ -534,7 +557,7 @@ Deno.test({
   fn: async () => {
     const { plan, wasm } = compileArtifacts(PARITY_GRAMMAR);
     const cpu = CpuReferenceLexer.create(wasm, plan);
-    const gpu = await WebGpuLexer.create(plan);
+    const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
     try {
       const units = toUtf16(repeatTo(SAMPLE, 8192));
       const full = cpu.lex(units).records.length / 4;
@@ -551,6 +574,61 @@ Deno.test({
     } finally {
       gpu.destroy();
     }
+  },
+});
+
+Deno.test({
+  name: "WebGPU lexer rejects fallback adapters unless explicitly enabled",
+  ignore: noWebGpu || adapter?.info.isFallbackAdapter !== true,
+  fn: async () => {
+    const { plan } = compileArtifacts(PARITY_GRAMMAR);
+    await assertRejectsIncludes(
+      () => WebGpuLexer.create(plan),
+      "software fallback adapter",
+    );
+  },
+});
+
+Deno.test({
+  name: "WebGPU lexer rejects overlapping lex calls before sharing buffers",
+  ignore: noWebGpu,
+  fn: async () => {
+    const { plan } = compileArtifacts(PARITY_GRAMMAR);
+    const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
+    try {
+      const first = gpu.lex(toUtf16("let x = 1;"));
+      const second = gpu.lex(toUtf16("let y = 2;"));
+      const results = await Promise.allSettled([first, second]);
+      assertEquals(results[0].status, "fulfilled");
+      assertEquals(results[1].status, "rejected");
+      const rejected = results.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      assertEquals(rejected.length, 1);
+      assertIncludes(String(rejected[0].reason), "concurrent calls");
+      const after = await gpu.lex(toUtf16("let z = 3;"));
+      assertEquals(after.overflow, false);
+      assertEquals(after.tokenCount > 0, true);
+    } finally {
+      gpu.destroy();
+    }
+  },
+});
+
+Deno.test({
+  name: "WebGPU lexer rejects destroy while lex is in flight",
+  ignore: noWebGpu,
+  fn: async () => {
+    const { plan } = compileArtifacts(PARITY_GRAMMAR);
+    const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
+    const pending = gpu.lex(toUtf16("let x = 1;"));
+    assertThrowsIncludes(
+      () => gpu.destroy(),
+      "while lex() is in flight",
+    );
+    await pending;
+    gpu.destroy();
   },
 });
 
