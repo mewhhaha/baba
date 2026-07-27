@@ -509,6 +509,34 @@ function wasmAbiDescriptor(): unknown {
             "cursorStatusZeroOkOneUnexpectedTwoInternalThreeCapacityFourTraceLimitFiveAmbiguous",
         },
         {
+          name: "parse_cursor_records",
+          params: [
+            "sourcePtr",
+            "sourceLength",
+            "tokenPtr",
+            "rawTokenCount",
+            "tokenCapacity",
+            "rulePtr",
+            "ruleCapacity",
+            "childPtr",
+            "childCapacity",
+            "fieldPtr",
+            "fieldCapacity",
+            "valuePtr",
+            "valueCapacity",
+            "valueItemPtr",
+            "valueItemCapacity",
+            "resultPtr",
+            "stateStackPtr",
+            "fragmentStackPtr",
+            "fragmentCapacity",
+            "preserveTrivia",
+            "maxTraceActions",
+          ],
+          result:
+            "cursorStatusZeroOkOneUnexpectedTwoInternalThreeCapacityFourTraceLimitFiveAmbiguous",
+        },
+        {
           name: "parser_goto",
           params: ["state", "nonterminal"],
           result: "stateOrMinusOne",
@@ -698,6 +726,11 @@ export type AsyncParserInstanceOptions = SharedAsyncParserInstanceOptions;
 export interface ParserInstance {
   lex(source: string, options?: LexOptions): LexTapeResult;
   parse(source: string, options?: ParseOptions): CursorParseResult<RootCursor>;
+  parseRecords(
+    source: string,
+    records: Int32Array,
+    options?: ParseOptions,
+  ): CursorParseResult<RootCursor>;
   validate(source: string, options?: ParseOptions): ValidateParseResult;
   reset(): void;
   dispose(): void;

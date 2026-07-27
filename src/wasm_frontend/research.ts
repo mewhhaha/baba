@@ -129,6 +129,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "parser_select_action",
     "parse_trace",
     "parse_cursor",
+    "parse_cursor_records",
     "parser_goto",
     "lex_all",
     "lex_memo_i32_per_position",

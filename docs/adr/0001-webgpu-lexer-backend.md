@@ -5,11 +5,21 @@ exported as the experimental module `@mewhhaha/baba/runtime/webgpu-lexer`. It is
 opt-in, nothing selects it automatically, and Phase 4 integration remains
 blocked on the Phase 0 gate below.
 
-Date: 2026-07-26. Revised 2026-07-26 after the Phase 2 kernel change: the
-quadratic `pass_a` stage was replaced by `pass_x` / `pass_y` / `pass_z`, so the
-throughput table, the per-stage breakdown, the parity counts, the state-count
-argument and the Phase 2 section all changed. Numbers predating that change are
-labelled as such wherever they are retained for comparison.
+Date: 2026-07-26.
+
+Revision 2026-07-27: current Wasm lexer optimization and benchmark hardening.
+The historical hardware measurements below remain useful for kernel shape and
+synchronization analysis, but their CPU rates and crossover are not current
+selection data. Benchmark output now identifies the default-selected adapter,
+marks explicit software-fallback runs as non-hardware, keeps wall-clock
+reporting available without `timestamp-query`, and records capacity-skipped rows
+rather than failing a sweep.
+
+Revision 2026-07-26: the Phase 2 kernel change replaced quadratic `pass_a` with
+`pass_x` / `pass_y` / `pass_z`; the throughput table, per-stage breakdown,
+parity counts, state-count argument and Phase 2 section changed. Numbers
+predating that change are labelled as such wherever they are retained for
+comparison.
 
 Supersedes: nothing. Superseded by: nothing.
 
@@ -44,8 +54,9 @@ a plausible data-parallel formulation. A proof of concept was built to find out
 whether that formulation is exact, and whether it is fast enough to matter.
 
 The proof of concept reaches byte-exact parity with `lex_all` on all four
-shipped example grammars and no excluded input class, but is slower than the CPU
-below 896 KiB of source on the one stack it was measured on.
+shipped example grammars and no excluded input class. Its historical Deno/wgpu
+hardware run was slower than the then-current CPU below 896 KiB of source; the
+current Wasm optimization invalidates that crossover as a selection threshold.
 
 ## Decision
 
@@ -119,9 +130,12 @@ array rather than a semantic argument.
 
 ## Measured Evidence
 
-Machine: NVIDIA GeForce RTX 4080 SUPER, Deno 2.9.4 / wgpu, Linux. Sizes are
-UTF-16 code units. Every figure is reproducible with the benchmark tasks named
-above; where a figure predates a later engine change it is labelled as such.
+Historical machine: NVIDIA GeForce RTX 4080 SUPER, Deno 2.9.4 / wgpu, Linux.
+Sizes are UTF-16 code units. These figures predate the current Wasm lexer
+optimization and compact-record transfer, so they must not be used as
+present-day CPU/GPU performance or a backend-selection threshold. The benchmark
+tasks named above emit the adapter identity, fallback flag, timestamp capability
+and timing scope needed for a new measurement.
 
 Note on provenance: the initial recon reported an "AMD adapter" from vendor id
 4318. That is `0x10DE`, which is NVIDIA. All benchmark numbers are from the
@@ -173,11 +187,11 @@ under the old `pass_a`. Two independent runs of the current kernel on the same
 bytes produced 133.87 ms / 2.49x and 132.16 ms / 2.73x, so quote the range, not
 a single median. See "Measurement variance" under Risks.
 
-**Crossover is 896 KiB of source.** The kernel change did not move it - a finer
-sweep at the time read 0.68x at 512 KiB, 0.77x at 640 KiB, 1.03x at 768 KiB and
-1.19x at 896 KiB - because that stage's cost is proportional to `n`, so at the
-crossover it is well under a millisecond against a total still dominated by the
-synchronization floor.
+**The historical crossover was 896 KiB of source.** The kernel change did not
+move it - a finer sweep at the time read 0.68x at 512 KiB, 0.77x at 640 KiB,
+1.03x at 768 KiB and 1.19x at 896 KiB - because that stage's cost is
+proportional to `n`, so at the crossover it is well under a millisecond against
+a total still dominated by the synchronization floor.
 
 What did move it was the **CPU** side. Removing the Rust lexer's dead
 fall-through from the dense ASCII table into the sparse range scan took
@@ -197,12 +211,12 @@ than `funcfuck` despite having **fewer** DFA states (65 vs 81), because the
 per-state column read's LDS bank pattern is data-dependent. State count alone
 does not predict the cost.
 
-The CPU baseline here is `lex_all` records, ~40-48 MiB/s. It is deliberately not
-`parser.lex()`, which measures ~12 MiB/s because it also materializes the token
-tape and `Token` objects. Using `parser.lex()` as the baseline would have made
-the GPU look roughly 4x better for free and moved the apparent crossover down
-about 10x. Any future comparison must keep the unit of work identical on both
-sides.
+The historical CPU baseline here is `lex_all` records, ~40-48 MiB/s. It is
+deliberately not `parser.lex()`, which measures different token-tape and object
+materialization work. The current benchmark compares raw-record end-to-end work:
+CPU source copy + `lex_all` + owned record copy, versus GPU upload + encode +
+submit/map + compact-record expansion. It retains raw `lex_all` as a diagnostic
+only. Any future comparison must keep the unit of work identical on both sides.
 
 ### Where the GPU time goes, at 16 MiB
 
@@ -326,10 +340,11 @@ Measure `queue.submit()` + `mapAsync()` round-trip latency as a function of
 payload size in Chrome/Dawn on a real GPU, and again in Firefox if available.
 
 **Gate for everything else.** If the floor is ~11 ms across implementations, the
-crossover stays near 896 KiB, no file in this repo comes close, and the backend
-is a server/batch feature at best. If the floor is ~1 ms, the estimated
-crossover falls to roughly 100 KiB and the backend becomes interesting for
-editor workloads. Phases 1-4 are not justified until this number exists.
+historical 896 KiB result suggests the backend is a server/batch feature at
+best; remeasure the current CPU before making that call. If the floor is ~1 ms,
+the historical model estimates a crossover near 100 KiB and the backend may
+become interesting for editor workloads. Phases 1-4 are not justified until this
+number exists.
 
 ### Phase 1: compiler prerequisites
 
@@ -473,8 +488,9 @@ an acceptable outcome at any stage.
 
 ### Phase 4: integration
 
-- Auto-select the GPU backend only above the measured crossover, using the
-  number Phase 0 produces for the target host - not the 896 KiB measured here.
+- Auto-select the GPU backend only above a newly measured current crossover,
+  using the number Phase 0 produces for the target host—not the historical 896
+  KiB result here.
 - Always fall back to Wasm: no adapter, no device, device lost, over-limit
   input, unsupported grammar, or any validation error. Fallback must be
   observable, not silent.
@@ -506,16 +522,17 @@ proof of concept, with values on this adapter against a spec-floor device:
 | `maxComputeWorkgroupStorageSize`   | 49 152            | 16 384      |
 | `maxComputeWorkgroupsPerDimension` | 65 535            | 65 535      |
 
-At worst-case output capacity the records binding is the first wall: 134 217 727
-code units here, 8 388 608 on a floor device. The 16 MiB benchmark row is
-therefore **not runnable on a spec-floor device at all**. Workgroup storage is
-the second: the proof of concept originally hardcoded 32 768 bytes of shared
-memory, twice the guaranteed 16 384, and now picks the largest chunk size that
-fits the granted limit (4096 here, 2048 on a floor device). wgpu does not
-validate workgroup storage at all - a 262 144-byte allocation was accepted - so
-this class of bug is invisible on the development stack and fatal on a
-conformant one. Any production backend must preflight every binding, buffer, and
-dispatch grid against `device.limits` and refuse loudly.
+At worst-case output capacity the compact-record binding is the first wall: 268
+435 455 code units here, 16 777 216 on a floor device. The 16 MiB benchmark row
+is capacity-feasible on a spec-floor device, although its throughput remains
+unmeasured there. Workgroup storage is the second: the proof of concept
+originally hardcoded 32 768 bytes of shared memory, twice the guaranteed 16 384,
+and now picks the largest chunk size that fits the granted limit (4096 here,
+2048 on a floor device). wgpu does not validate workgroup storage at all - a 262
+144-byte allocation was accepted - so this class of bug is invisible on the
+development stack and fatal on a conformant one. Any production backend must
+preflight every binding, buffer, and dispatch grid against `device.limits` and
+refuse loudly.
 
 **Errors are silent by default in WebGPU.** Without error scopes, a validation
 failure makes the whole command buffer a no-op while `mapAsync` still resolves,
@@ -537,9 +554,11 @@ concurrently drives the desktop; no clock pinning or GPU isolation was applied.
 Any performance gate must be stated with dispersion, not as a single median, and
 any single-number speedup claim in this document should be read as +/- 15%.
 
-**Memory footprint is roughly 10x the source.** At 16 MiB: 33.5 MB source, three
-67 MB per-position arrays, up to 268 MB of records, and a same-sized staging
-buffer.
+**Worst-case device allocation is roughly 15x the UTF-16 source bytes.** Each
+UTF-16 unit needs 2 B of source, 12 B across three per-position arrays, 8 B of
+compact records and 8 B of staging: about 30 B total. The owned public four-word
+host result adds another 16 B per emitted record, so a one-token-per-unit input
+reaches roughly 23x across device and host memory.
 
 **Parity gaps the proof of concept could not close.** Guard-carrying grammars
 are refused rather than supported (Phase 3). The throughput corpus is
@@ -572,11 +591,11 @@ production backend should share the decoder rather than duplicate it.
 throws `RangeError("Wasm parser plan exceeds maximum memory pages.")`
 (`src/runtime/generated_wasm.ts:2526`) above roughly 750 KiB of source.
 `parser.lex()` and `parser.validate()` are fine at multi-MiB sizes. The
-crossover measured here is 896 KiB. Cursor materialization therefore fails at
-almost exactly the size where GPU lexing starts to win, so feeding multi-MiB
-inputs to a faster lexer is of limited use until that is resolved. This is a
-pre-existing limitation, unrelated to this work, and needs resolving in parallel
-rather than as part of it.
+historical crossover measured here was 896 KiB. Cursor materialization therefore
+fails at almost exactly the size where GPU lexing starts to win, so feeding
+multi-MiB inputs to a faster lexer is of limited use until that is resolved.
+This is a pre-existing limitation, unrelated to this work, and needs resolving
+in parallel rather than as part of it.
 
 > **Superseded.** The "roughly 750 KiB" figure recorded above was never right,
 > and the limitation is now fixed. The real cause was quadratic repetition-list

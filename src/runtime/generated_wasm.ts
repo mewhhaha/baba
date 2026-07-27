@@ -85,6 +85,11 @@ export type AsyncParserInstanceOptions = AsyncWasmSource & AsyncPlanSource;
 export interface ParserInstance<Root extends RuleCursor = RuleCursor> {
   lex(source: string, options?: LexOptions): LexTapeResult;
   parse(source: string, options?: ParseOptions): CursorParseResult<Root>;
+  parseRecords(
+    source: string,
+    records: Int32Array,
+    options?: ParseOptions,
+  ): CursorParseResult<Root>;
   validate(source: string, options?: ParseOptions): ValidateParseResult;
   reset(): void;
   dispose(): void;
@@ -290,6 +295,29 @@ interface ExternalParserWasmExports {
     preserveTrivia: number,
     maxTraceActions: number,
   ): number;
+  parse_cursor_records(
+    sourcePtr: number,
+    sourceLength: number,
+    tokenPtr: number,
+    rawTokenCount: number,
+    tokenCapacity: number,
+    rulePtr: number,
+    ruleCapacity: number,
+    childPtr: number,
+    childCapacity: number,
+    fieldPtr: number,
+    fieldCapacity: number,
+    valuePtr: number,
+    valueCapacity: number,
+    valueItemPtr: number,
+    valueItemCapacity: number,
+    resultPtr: number,
+    stackPtr: number,
+    fragmentPtr: number,
+    fragmentCapacity: number,
+    preserveTrivia: number,
+    maxTraceActions: number,
+  ): number;
   load_plan(planPtr: number, planLength: number): number;
   abi_version(): number;
   plan_version(): number;
@@ -481,6 +509,96 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       source,
       options,
     );
+  }
+
+  parseRecords(
+    source: string,
+    records: Int32Array,
+    options?: ParseOptions,
+  ): CursorParseResult<Root> {
+    this.#assertLive();
+    const metadata = this.#loadMetadata();
+    if (!(records instanceof Int32Array)) {
+      throw new TypeError(
+        "Wasm parser external lexer records must be an Int32Array.",
+      );
+    }
+    if (records.length % WASM_TOKEN_RECORD_I32_COUNT !== 0) {
+      throw new Error(
+        `Wasm parser external lexer record length ${records.length} is not divisible by ${WASM_TOKEN_RECORD_I32_COUNT}.`,
+      );
+    }
+
+    let expectedStart = 0;
+    const recordCount = records.length / WASM_TOKEN_RECORD_I32_COUNT;
+    for (let index = 0; index < recordCount; index++) {
+      const base = index * WASM_TOKEN_RECORD_I32_COUNT;
+      const specIndex = records[base];
+      const start = records[base + 1];
+      const end = records[base + 2];
+      const acceptingState = records[base + 3];
+      if (
+        specIndex === undefined || start === undefined || end === undefined ||
+        acceptingState === undefined
+      ) {
+        throw new Error(
+          `Wasm parser external lexer record ${index} is incomplete.`,
+        );
+      }
+      if (start !== expectedStart) {
+        throw new Error(
+          `Wasm parser external lexer record ${index} starts at ${start}, expected ${expectedStart}.`,
+        );
+      }
+      if (end <= start || end > source.length) {
+        throw new Error(
+          `Wasm parser external lexer record ${index} has span [${start}, ${end}) outside source length ${source.length}.`,
+        );
+      }
+      if (specIndex < -1 || specIndex >= metadata.specs.length) {
+        throw new Error(
+          `Wasm parser external lexer record ${index} has unknown spec ${specIndex}.`,
+        );
+      }
+      if (specIndex < 0) {
+        if (acceptingState !== -1) {
+          throw new Error(
+            `Wasm parser external lexer error record ${index} has accepting state ${acceptingState}, expected -1.`,
+          );
+        }
+      } else {
+        const candidates = metadata.acceptCandidatesByState[acceptingState];
+        if (candidates === undefined) {
+          throw new Error(
+            `Wasm parser external lexer record ${index} has unknown accepting state ${acceptingState}.`,
+          );
+        }
+        if (!candidates.includes(specIndex)) {
+          throw new Error(
+            `Wasm parser external lexer record ${index} spec ${specIndex} is not accepted by state ${acceptingState}.`,
+          );
+        }
+      }
+      expectedStart = end;
+    }
+    if (expectedStart !== source.length) {
+      throw new Error(
+        `Wasm parser external lexer records end at ${expectedStart}, expected source length ${source.length}.`,
+      );
+    }
+    if (metadata.conflictProfile !== "deterministic") {
+      return externalUnsupportedBranchingCursorResult(
+        source,
+      ) as CursorParseResult<Root>;
+    }
+    return parseExternalCursorWithWasm(
+      metadata,
+      this.wasm,
+      this.inputBase,
+      source,
+      options,
+      records.slice(),
+    ) as CursorParseResult<Root>;
   }
 
   reset(): void {
@@ -1387,6 +1505,7 @@ function parseExternalCursorDefault(
     planByteLength,
     source,
     options,
+    undefined,
   );
 }
 
@@ -1574,6 +1693,7 @@ function parseExternalCursorWithWasm(
   planByteLength: number,
   source: string,
   options: ParseOptions | undefined,
+  externalRecords: Int32Array | undefined,
 ): CursorParseResult<RuleCursor> {
   let preserveTrivia = metadata.defaultPreserveTrivia;
   if (options !== undefined && options.preserveTrivia !== undefined) {
@@ -1585,6 +1705,9 @@ function parseExternalCursorWithWasm(
     1_000_000,
   );
   let tokenCapacity = source.length + 1;
+  if (externalRecords !== undefined) {
+    tokenCapacity = externalRecords.length / WASM_TOKEN_RECORD_I32_COUNT;
+  }
   if (tokenCapacity < 1) {
     tokenCapacity = 1;
   }
@@ -1654,7 +1777,11 @@ function parseExternalCursorWithWasm(
       fragmentPtr + fragmentCapacity * fragmentRecordBytes,
       WASM_I32_BYTES,
     );
-    const memoCapacity = (source.length + 1) * wasm.lex_memo_i32_per_position();
+    let memoCapacity = 0;
+    if (externalRecords === undefined) {
+      memoCapacity = (source.length + 1) *
+        wasm.lex_memo_i32_per_position();
+    }
     const requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
     if (!externalWasmCapacityFits(requiredBytes)) {
       return externalFailedCursorParseResult(source, [
@@ -1675,34 +1802,68 @@ function parseExternalCursorWithWasm(
         true,
       );
     }
+    if (externalRecords !== undefined) {
+      new Int32Array(
+        wasm.memory.buffer,
+        tokenPtr,
+        externalRecords.length,
+      ).set(externalRecords);
+    }
     let preserveTriviaFlag = 0;
     if (preserveTrivia) {
       preserveTriviaFlag = 1;
     }
-    const status = wasm.parse_cursor(
-      sourcePtr,
-      source.length,
-      tokenPtr,
-      tokenCapacity,
-      rulePtr,
-      ruleCapacity,
-      childPtr,
-      childCapacity,
-      fieldPtr,
-      fieldCapacity,
-      valuePtr,
-      valueCapacity,
-      valueItemPtr,
-      valueItemCapacity,
-      resultPtr,
-      stackPtr,
-      fragmentPtr,
-      fragmentCapacity,
-      memoPtr,
-      memoCapacity,
-      preserveTriviaFlag,
-      maxTraceActions,
-    );
+    let status: number;
+    if (externalRecords === undefined) {
+      status = wasm.parse_cursor(
+        sourcePtr,
+        source.length,
+        tokenPtr,
+        tokenCapacity,
+        rulePtr,
+        ruleCapacity,
+        childPtr,
+        childCapacity,
+        fieldPtr,
+        fieldCapacity,
+        valuePtr,
+        valueCapacity,
+        valueItemPtr,
+        valueItemCapacity,
+        resultPtr,
+        stackPtr,
+        fragmentPtr,
+        fragmentCapacity,
+        memoPtr,
+        memoCapacity,
+        preserveTriviaFlag,
+        maxTraceActions,
+      );
+    } else {
+      status = wasm.parse_cursor_records(
+        sourcePtr,
+        source.length,
+        tokenPtr,
+        externalRecords.length / WASM_TOKEN_RECORD_I32_COUNT,
+        tokenCapacity,
+        rulePtr,
+        ruleCapacity,
+        childPtr,
+        childCapacity,
+        fieldPtr,
+        fieldCapacity,
+        valuePtr,
+        valueCapacity,
+        valueItemPtr,
+        valueItemCapacity,
+        resultPtr,
+        stackPtr,
+        fragmentPtr,
+        fragmentCapacity,
+        preserveTriviaFlag,
+        maxTraceActions,
+      );
+    }
     view = new DataView(wasm.memory.buffer);
     const tokenCount = view.getInt32(resultPtr, true);
     const ruleCount = view.getInt32(resultPtr + WASM_I32_BYTES, true);
@@ -2742,6 +2903,11 @@ function externalWasmModule(
 function validateStaticExternalWasmAbi(wasm: ExternalParserWasmExports): void {
   if (wasm.abi_version() !== WASM_ABI_VERSION) {
     throw new Error("Wasm ABI version does not match shared adapter.");
+  }
+  if (typeof wasm.parse_cursor_records !== "function") {
+    throw new Error(
+      "Wasm ABI is missing the parse_cursor_records export.",
+    );
   }
   if (wasm.semantics_version() !== RUNTIME_IMPLEMENTATION_METADATA.version) {
     throw new Error(

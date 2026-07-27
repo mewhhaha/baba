@@ -324,7 +324,10 @@ async function main(): Promise<number> {
   // Over-limit input must raise GpuLexerCapacityError, not return zero tokens.
   // The check runs before any GPU allocation, so the only real cost is the
   // probe Uint16Array itself.
-  const recordsWall = Math.floor(gpu.limits.maxStorageBufferBindingSize / 16);
+  const compactRecordBytes = 2 * Uint32Array.BYTES_PER_ELEMENT;
+  const recordsWall = Math.floor(
+    gpu.limits.maxStorageBufferBindingSize / compactRecordBytes,
+  );
   if (recordsWall + 1 <= 300_000_000) {
     let capacityError: unknown = null;
     try {

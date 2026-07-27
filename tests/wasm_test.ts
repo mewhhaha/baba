@@ -118,6 +118,11 @@ interface GeneratedParser {
     source: string,
     options?: Record<string, unknown>,
   ): CursorParseResultLike;
+  parseRecords(
+    source: string,
+    records: Int32Array,
+    options?: Record<string, unknown>,
+  ): CursorParseResultLike;
   validate(
     source: string,
     options?: Record<string, unknown>,
@@ -130,6 +135,15 @@ interface RawCursorWasmExports {
   plan_buffer_base(): number;
   input_base(): number;
   load_plan(planPtr: number, planLength: number): number;
+  lex_all(
+    sourcePtr: number,
+    sourceLength: number,
+    mode: number,
+    tokenPtr: number,
+    tokenCapacity: number,
+    memoPtr: number,
+    memoCapacity: number,
+  ): number;
   parse_cursor(
     sourcePtr: number,
     sourceLength: number,
@@ -788,9 +802,13 @@ Deno.test("Wasm target emits typed cursor result surface", async () => {
           preserveTrivia: true,
           maxTraceActions: 1024,
         });
+        const records = new Int32Array();
+        const recordResult: CursorParseResult<RootCursor> =
+          parser.parseRecords("", records);
         parser.validate("let x = 42;", {
           maxTraceActions: 1024,
         });
+        recordResult;
         if (typedResult.ok) {
           const root: ModuleCursor = typedResult.cursor;
           const statements: ReadonlyArray<StatementCursor> =
@@ -1013,6 +1031,112 @@ Deno.test("lex tape maps records directly when a grammar has no trivia", async (
     assertEquals(withError.diagnostics[0].span?.end, 3);
     assertEquals(withError.tokenTape.token(2)?.type, "error");
     assertEquals(lexed.tokenTape.token(2)?.text, "bb");
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm parser consumes externally supplied lexer records", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan });
+    const instantiated = await WebAssembly.instantiate(
+      bytes,
+      {},
+    ) as unknown as {
+      instance: WebAssembly.Instance;
+    };
+    const wasm = instantiated.instance
+      .exports as unknown as RawCursorWasmExports;
+    const planPtr = wasm.plan_buffer_base();
+    if (wasm.memory.buffer.byteLength < planPtr + plan.byteLength) {
+      const missing = planPtr + plan.byteLength - wasm.memory.buffer.byteLength;
+      wasm.memory.grow(Math.ceil(missing / 65_536));
+    }
+    new Uint8Array(wasm.memory.buffer, planPtr, plan.byteLength).set(plan);
+    assertEquals(wasm.load_plan(planPtr, plan.byteLength), 1);
+
+    const source = "let x = 42;";
+    const sourcePtr = wasm.input_base();
+    const tokenPtr = alignTest(
+      sourcePtr + source.length * WASM_UTF16_UNIT_BYTES,
+      WASM_I32_BYTES,
+    );
+    const tokenCapacity = source.length;
+    const tokenBytes = tokenCapacity * WASM_TOKEN_RECORD_I32_COUNT *
+      WASM_I32_BYTES;
+    const memoPtr = alignTest(tokenPtr + tokenBytes, WASM_I32_BYTES);
+    const memoCapacity = (source.length + 1) *
+      wasm.lex_memo_i32_per_position();
+    const requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
+    if (wasm.memory.buffer.byteLength < requiredBytes) {
+      const missing = requiredBytes - wasm.memory.buffer.byteLength;
+      wasm.memory.grow(Math.ceil(missing / 65_536));
+    }
+    const view = new DataView(wasm.memory.buffer);
+    for (let index = 0; index < source.length; index++) {
+      view.setUint16(
+        sourcePtr + index * WASM_UTF16_UNIT_BYTES,
+        source.charCodeAt(index),
+        true,
+      );
+    }
+    const recordCount = wasm.lex_all(
+      sourcePtr,
+      source.length,
+      0,
+      tokenPtr,
+      tokenCapacity,
+      memoPtr,
+      memoCapacity,
+    );
+    assert(recordCount > 0, "Expected raw lexer records.");
+    const records = new Int32Array(
+      wasm.memory.buffer,
+      tokenPtr,
+      recordCount * WASM_TOKEN_RECORD_I32_COUNT,
+    ).slice();
+
+    const parsed = parser.parse(source, { preserveTrivia: false });
+    const parsedRecords = parser.parseRecords(source, records, {
+      preserveTrivia: false,
+    });
+    assertEquals(parsed.ok, true);
+    assertEquals(parsedRecords.ok, true);
+    assert(parsed.cursor);
+    assert(parsedRecords.cursor);
+    assertEquals(parsedRecords.cursor.name, parsed.cursor.name);
+    assertEquals(parsedRecords.cursor.span.start, parsed.cursor.span.start);
+    assertEquals(parsedRecords.cursor.span.end, parsed.cursor.span.end);
+    assertEquals(
+      parsedRecords.cursor.children().map(cursorLabel).join(","),
+      parsed.cursor.children().map(cursorLabel).join(","),
+    );
+    const statement = parsedRecords.cursor.child(0);
+    assertCursorRule(statement, "statement");
+    const name = statement.field("name");
+    assertCursorToken(name, "IDENT");
+    assertEquals(name.text, "x");
+
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm parser rejects malformed external lexer records", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan });
+    assertThrowsIncludes(
+      () => parser.parseRecords("", new Int32Array(3)),
+      "record length 3 is not divisible by 4",
+    );
+    assertThrowsIncludes(
+      () => parser.parseRecords("x", new Int32Array(0)),
+      "records end at 0, expected source length 1",
+    );
     parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });

@@ -578,6 +578,88 @@ Deno.test({
 });
 
 Deno.test({
+  name: "WebGPU lexer capacity accounting uses compact two-word GPU records",
+  ignore: noWebGpu,
+  fn: async () => {
+    const { plan } = compileArtifacts(PARITY_GRAMMAR);
+    const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
+    try {
+      const fourWordRecordLimit = Math.floor(
+        gpu.limits.maxStorageBufferBindingSize / 16,
+      );
+      assert(
+        gpu.maxInputUnits(1) > fourWordRecordLimit,
+        `Expected compact output capacity above the old four-word record limit ${fourWordRecordLimit}; got ${
+          gpu.maxInputUnits(1)
+        }.`,
+      );
+    } finally {
+      gpu.destroy();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "WebGPU lexer rejects borrowed records that cannot represent host-expanded output",
+  ignore: noWebGpu,
+  fn: async () => {
+    const { plan } = compileArtifacts(PARITY_GRAMMAR);
+    const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
+    try {
+      await assertRejectsIncludes(
+        () => gpu.lex(toUtf16("let x = 1;"), { borrowRecords: true }),
+        "borrowRecords",
+      );
+    } finally {
+      gpu.destroy();
+    }
+  },
+});
+
+Deno.test({
+  name: "WebGPU lexer rejects invalid numeric execution options",
+  ignore: noWebGpu,
+  fn: async () => {
+    const { plan } = compileArtifacts(PARITY_GRAMMAR);
+    const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
+    try {
+      const units = toUtf16("let x = 1;");
+      for (const capacityRecords of [0, -1, 1.5, Number.NaN, Infinity]) {
+        await assertRejectsIncludes(
+          () => gpu.lex(units, { capacityRecords }),
+          "capacityRecords must be a positive safe integer",
+        );
+      }
+      for (
+        const debugMaxWorkgroupsPerDimension of [
+          0,
+          -1,
+          1.5,
+          Number.NaN,
+          Infinity,
+        ]
+      ) {
+        await assertRejectsIncludes(
+          () => gpu.lex(units, { debugMaxWorkgroupsPerDimension }),
+          "debugMaxWorkgroupsPerDimension must be a positive safe integer",
+        );
+      }
+      assertThrowsIncludes(
+        () => gpu.maxInputUnits(0),
+        "recordsPerUnit must be finite and greater than zero",
+      );
+      assertThrowsIncludes(
+        () => gpu.maxInputUnits(Number.NaN),
+        "recordsPerUnit must be finite and greater than zero",
+      );
+    } finally {
+      gpu.destroy();
+    }
+  },
+});
+
+Deno.test({
   name: "WebGPU lexer rejects fallback adapters unless explicitly enabled",
   ignore: noWebGpu || adapter?.info.isFallbackAdapter !== true,
   fn: async () => {
@@ -633,6 +715,26 @@ Deno.test({
 });
 
 // --- these two run everywhere, including CI ---------------------------------
+
+Deno.test("WebGPU lexer validates create options before accessing WebGPU", async () => {
+  for (
+    const simulateWorkgroupStorageLimit of [
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Infinity,
+    ]
+  ) {
+    await assertRejectsIncludes(
+      () =>
+        WebGpuLexer.create(new Uint8Array(), {
+          simulateWorkgroupStorageLimit,
+        }),
+      "simulateWorkgroupStorageLimit must be a positive safe integer",
+    );
+  }
+});
 
 Deno.test("WebGPU lexer plan decoding builds a dense alphabet that agrees with the plan CSR tables", () => {
   const { plan } = compileArtifacts(PARITY_GRAMMAR);

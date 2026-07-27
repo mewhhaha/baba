@@ -7,9 +7,10 @@ generated parser's tokenizer that runs on the GPU. It is a **runtime backend,
 not a generate target**: it consumes a `parser.plan` that ships today, produces
 the identical token records, and emits no artifacts of its own.
 
-Read the numbers below before adopting it. On the one machine it has been
-measured on it is **slower than the CPU lexer for anything under about 896 KiB
-of source**, and its one-time setup cost is never repaid by a single document.
+Read the measurement rules below before adopting it. The only published hardware
+run predates the current Wasm lexer throughput optimization, so it is historical
+evidence about the kernel shape—not a current crossover threshold. Its one-time
+setup cost is still not repaid by a single document.
 
 ## What It Is
 
@@ -67,9 +68,10 @@ automatically fall back to the generated CPU lexer; catch setup errors and
 choose that path at the call site instead.
 
 `lex()` accepts `capacityRecords` (defaults to the worst case of one record per
-code unit, which can never overflow) and `borrowRecords` (returns a view into
-the mapped staging range instead of copying, valid until the next `lex()` or
-`destroy()`).
+code unit, which can never overflow). GPU records use a compact two-word layout
+for transfer, then expand into the public four-word `Int32Array`; every result
+is therefore owned. `borrowRecords` is rejected because a mapped compact record
+cannot satisfy the public layout without expansion.
 
 Overflow is always detected and reported. It is never silent. Calls on one lexer
 instance must be awaited serially. A second `lex()` call while the first is in
@@ -103,15 +105,19 @@ All four shipped example grammars are guard-free.
 **Device headroom.** Every binding, buffer and dispatch grid is preflighted
 against `device.limits` before anything is allocated, and an input that does not
 fit raises `GpuLexerCapacityError` naming the limit, the requirement and the
-device's value. At worst-case output capacity the records binding is the first
-wall: about 134 million code units on a generous adapter, about 8.4 million on a
-device at the WebGPU-guaranteed floor.
+device's value. The benchmark prints the actual worst-case capacity and skips
+unsupported sizes as explicit rows; it never converts a capacity error into a
+partial result. At the WebGPU-guaranteed floor, worst-case output capacity is
+about 16.8 million UTF-16 units.
 
-## Measured Performance
+## Historical Performance
 
-One machine: NVIDIA GeForce RTX 4080 SUPER, Deno 2.9.4 / wgpu, Linux. Grammar
-`funcfuck`, randomized source, medians of 7 runs after 2 warmups, worst-case
-output capacity with owned records. Sizes are UTF-16 code units.
+This historical run used NVIDIA GeForce RTX 4080 SUPER, Deno 2.9.4 / wgpu on
+Linux, grammar `funcfuck`, randomized source, medians of seven runs after two
+warmups, and worst-case output capacity with owned records. It predates the
+current Wasm lexer optimization and compact-record transfer, so it must not be
+used to select the backend or claim a current CPU/GPU speedup. Sizes are UTF-16
+code units.
 
 | size    | tokens  | cpu `lex_all` | gpu total | speedup |
 | ------- | ------- | ------------- | --------- | ------- |
@@ -125,22 +131,22 @@ output capacity with owned records. Sizes are UTF-16 code units.
 | 4 MiB   | 1651674 | 82.56 ms      | 35.99 ms  | 2.29x   |
 | 16 MiB  | 6605769 | 333.62 ms     | 133.87 ms | 2.49x   |
 
-**Crossover is 896 KiB of source.** Below it the backend loses, and at the small
-end it loses by more than an order of magnitude. A finer sweep reads 0.90x at
-768 KiB, 1.04x at 896 KiB, 1.13x at 1 MiB and 1.34x at 1.25 MiB. On the stricter
-comparison of the worst observed GPU sample against the best observed CPU
-sample, the crossover is 1.25 MiB.
+**The historical crossover was 896 KiB of source.** Below it the backend lost,
+and at the small end it loses by more than an order of magnitude. A finer sweep
+reads 0.90x at 768 KiB, 1.04x at 896 KiB, 1.13x at 1 MiB and 1.34x at 1.25 MiB.
+On the stricter comparison of the worst observed GPU sample against the best
+observed CPU sample, the crossover is 1.25 MiB.
 
-The crossover moved up from 768 KiB after the Rust lexer stopped falling through
-the dense ASCII table into the sparse range scan. That made `lex_all` faster -
-about 48-50 MiB/s where it previously measured 44-48 - so the CPU side of this
-comparison improved and the GPU had further to climb. The table above still
-carries the pre-change GPU column; only the crossover and the CPU rate were
-re-measured. Any future engine change moves this number again, which is the
-general point: this backend is only ever ahead by a factor that the CPU lexer
-can erode.
+That historical crossover moved up from 768 KiB after the Rust lexer stopped
+falling through the dense ASCII table into the sparse range scan. That made
+`lex_all` faster - about 48-50 MiB/s where it previously measured 44-48 - so the
+CPU side of this comparison improved and the GPU had further to climb. The table
+above still carries the pre-change GPU column; only the crossover and the CPU
+rate were re-measured. Any future engine change moves this number again, which
+is the general point: this backend is only ever ahead by a factor that the CPU
+lexer can erode.
 
-The reason the small end is flat is that the dominant cost is neither compute
+The reason the small end was flat is that the dominant cost was neither compute
 nor bandwidth. It is host-device synchronization: `await mapAsync()` costs about
 11.3 ms on this stack regardless of payload size. At 16 KiB, 98% of the wall
 clock is that one wait. The whole pipeline is therefore one command encoder, one
@@ -153,7 +159,7 @@ shared-memory bank pattern. **State count alone does not predict cost**, though
 it is a direct multiplier: the central pass costs `n * stateCount` by
 construction.
 
-### Setup Cost Is Never Repaid
+### Historical Setup Cost
 
 | step                                        | cost      |
 | ------------------------------------------- | --------- |
@@ -163,20 +169,22 @@ construction.
 | **total `WebGpuLexer.create`**              | 226.06 ms |
 | the Wasm engine's equivalent, for reference | 0.342 ms  |
 
-That is 660x the CPU engine's setup. The per-call saving at the crossover is
+That was 660x the CPU engine's setup. The per-call saving at the crossover was
 about 0 ms, and even the 16 MiB case saves only ~228 ms, which is roughly one
 device init. **No single document repays setup.** The backend is only defensible
 in a long-lived process that lexes repeatedly, and a device should be shared
 across every lexer that needs one.
 
-### The Baseline Matters
+### The Benchmark Baseline Matters
 
-The CPU column above is raw `lex_all` records, about 40-48 MiB/s. It is
-deliberately **not** `parser.lex()`, which measures about 12 MiB/s because it
-also materializes the token tape and `Token` objects. Using `parser.lex()` as
-the baseline would have made this backend look roughly 4x better for free and
-moved the apparent crossover down about 10x. Any comparison you run must keep
-the unit of work identical on both sides.
+The historical CPU column above is raw `lex_all` records, not `parser.lex()`,
+which also materializes the token tape and `Token` objects. The current
+benchmark makes the headline comparison stricter: CPU time is source copy +
+`lex_all` + owned raw-record copy, while GPU time is upload + encode +
+submit/map + compact-record expansion. It retains raw `lex_all` time only as a
+diagnostic. String-to-UTF-16 conversion is measured separately on both paths.
+Using `parser.lex()` would measure different work and artificially flatter the
+GPU result.
 
 ## Honest Reporting
 
@@ -199,17 +207,19 @@ measured.
   crossover. A host with a ~1 ms floor would move the crossover by roughly an
   order of magnitude, but that is an estimate by substitution, not a result;
 - floor-device throughput. Floor-device _behaviour_ is simulated and tested; its
-  _speed_ is unmeasured. The 16 MiB row above is not even runnable on a
-  spec-floor device;
+  _speed_ is unmeasured. Compact output makes the 16 MiB row capacity-feasible
+  at the spec floor, but it remains unmeasured there;
 - readback cost on a non-Deno host. Its per-byte cost is discontinuous in the
   Deno data, so the claim that it "disappears in a browser" is untested;
 - any real Baba source file at these sizes. The largest program in this
   repository is 224 bytes. All throughput input is synthetic and about three
   orders of magnitude below the crossover.
 
-**Memory footprint is roughly 10x the source.** At 16 MiB of input: 33.5 MB of
-source, three 67 MB per-position arrays, up to 268 MB of records, and a
-same-sized staging buffer.
+**Worst-case device allocation is roughly 15x the UTF-16 source bytes.** Per
+UTF-16 unit this is 2 B of source, 12 B across the three per-position arrays, 8
+B of compact records and 8 B of staging—about 30 B total. The owned public
+four-word host result adds up to another 16 B per emitted record, so a
+one-token-per-unit input reaches roughly 23x across device and host memory.
 
 **`parse()` no longer fails below the sizes this backend targets.** It used to
 throw above roughly 8 KiB of repetition-heavy source, misrecorded here as
@@ -241,12 +251,17 @@ example grammars, with multi-MiB corpora and failure-mode guards. It needs
 deno task bench:webgpu-lexer
 deno task bench:webgpu-lexer --grammar thunkwasm --runs 7 --json out.json
 deno task bench:webgpu-lexer:pathological
+# Explicit software-adapter experiment only; never report this as hardware data.
+deno task bench:webgpu-lexer --allow-fallback-adapter
 ```
 
 The benchmark re-verifies byte-exact parity at every size before timing it; a
 fast wrong kernel is worthless. Machine-readable output is opt-in via
-`--json PATH`. The pathological task measures the input class that used to be
-quadratic - one enormous token - and asserts parity at every size while printing
-cost per MiB, which is the linearity check.
+`--json PATH`, records adapter identity and fallback status, marks software runs
+as non-hardware, and reports timestamp-stage metrics as unavailable when
+`timestamp-query` is unsupported. The pathological task measures the input class
+that used to be quadratic - one enormous token - and asserts parity at every
+capacity-supported size while printing cost per MiB when timestamps are
+available.
 
 Both read `examples/<grammar>/generated/wasm/`, a gitignored local build output.

@@ -71,7 +71,7 @@ interface GeneratedAbiDescriptor {
 
 Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.abiName, "baba-wasm-abi");
-  assertEquals(babaWasmFrontendRequirements.abiVersion, 9);
+  assertEquals(babaWasmFrontendRequirements.abiVersion, 10);
   assertEquals(
     babaWasmFrontendRequirements.targetKind,
     "javascript-hosted-core-wasm",
@@ -96,7 +96,7 @@ Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.cursorFragmentRecordI32Count, 10);
   assertEquals(
     babaWasmFrontendRequirements.requiredExports.join(","),
-    "memory,lex_one,parser_action,parser_actions,parser_select_action,parse_trace,parse_cursor,parser_goto,lex_all,lex_memo_i32_per_position,load_plan,abi_version,plan_version,semantics_version,reset,plan_buffer_base,input_base,max_pages,source_encoding,span_unit,lex_result_i32_count,token_record_i32_count,host_ownership_model,result_lifetime_model",
+    "memory,lex_one,parser_action,parser_actions,parser_select_action,parse_trace,parse_cursor,parse_cursor_records,parser_goto,lex_all,lex_memo_i32_per_position,load_plan,abi_version,plan_version,semantics_version,reset,plan_buffer_base,input_base,max_pages,source_encoding,span_unit,lex_result_i32_count,token_record_i32_count,host_ownership_model,result_lifetime_model",
   );
   assertIncludes(
     babaWasmFrontendRequirements.forbiddenDefaultDependencies.join(","),

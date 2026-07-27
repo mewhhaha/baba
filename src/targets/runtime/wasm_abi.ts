@@ -1,5 +1,5 @@
 export const WASM_TARGET_KIND = "javascript-hosted-core-wasm";
-export const WASM_ABI_VERSION = 9;
+export const WASM_ABI_VERSION = 10;
 export const WASM_PAGE_BYTES = 65_536;
 export const WASM_MAX_BYTES = 0xffff_ffff;
 export const WASM_MAX_PAGES = 65_535;
