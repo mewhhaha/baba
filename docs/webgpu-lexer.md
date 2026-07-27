@@ -60,18 +60,29 @@ for (let index = 0; index < result.tokenCount; index += 1) {
 lexer.destroy();
 ```
 
+Software fallback adapters are rejected by default. For explicit testing or
+environments where a software adapter is intentional, opt in with
+`WebGpuLexer.create(plan, { allowFallbackAdapter: true })`. The backend does
+not automatically fall back to the generated CPU lexer; catch setup errors and
+choose that path at the call site instead.
+
 `lex()` accepts `capacityRecords` (defaults to the worst case of one record per
 code unit, which can never overflow) and `borrowRecords` (returns a view into
 the mapped staging range instead of copying, valid until the next `lex()` or
 `destroy()`).
 
 Overflow is always detected and reported. It is never silent.
+Calls on one lexer instance must be awaited serially. A second `lex()` call
+while the first is in flight, or `destroy()` during a lex, throws immediately
+so shared GPU buffers cannot be raced.
 
 ## Requirements
 
 **A WebGPU adapter.** `WebGpuLexer.create` throws when the host exposes no
-WebGPU implementation and when `requestAdapter()` returns null. There is no
-built-in fallback: if you want one, catch and use the generated `parser.lex()`.
+WebGPU implementation, when `requestAdapter()` returns null, and when it
+selects a software fallback adapter without explicit opt-in. There is no
+automatic CPU fallback: if you want one, catch setup errors and use the
+generated `parser.lex()`.
 
 **A guard-free grammar.** Contextual tokens with trailing lookahead make accept
 a function of position rather than of DFA state alone, which the kernel's design

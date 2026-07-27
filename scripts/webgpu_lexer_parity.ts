@@ -139,7 +139,9 @@ async function main(): Promise<number> {
   }
 
   const cpu = CpuReferenceLexer.create(wasmBytes, planBytes);
-  const gpu = await WebGpuLexer.create(planBytes);
+  const gpu = await WebGpuLexer.create(planBytes, {
+    allowFallbackAdapter: true,
+  });
   console.log(
     `wasm abi_version=${cpu.abiVersion} gpuTimestamps=${gpu.hasTimestamps}`,
   );
@@ -365,6 +367,7 @@ async function main(): Promise<number> {
   // what a 4096-unit pass_b chunk needs. Re-run the whole corpus with the chunk
   // size the floor forces, so that path is covered rather than assumed.
   const floorGpu = await WebGpuLexer.create(planBytes, {
+    allowFallbackAdapter: true,
     simulateWorkgroupStorageLimit: 16384,
   });
   console.log(
