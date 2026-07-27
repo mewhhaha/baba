@@ -205,3 +205,49 @@ Parser instances expose a Wasm-first runtime surface:
   for indexed access to token records.
 - `validate(source, options?)` runs the Wasm trace validator and returns
   diagnostics without building token objects or an object tree.
+
+## Experimental WebGPU Lexer and Parser Handoff
+
+For large, repeated inputs, the experimental WebGPU backend can lex an existing
+generated `parser.plan` and hand its records directly to the Wasm parser. It is
+asynchronous and does not replace the synchronous generated `parser.lex()`
+method. The CPU path is usually better for small or one-off inputs.
+
+```ts
+import {
+  WebGpuLexerContext,
+  WebGpuRuntime,
+} from "@mewhhaha/baba/runtime/webgpu-lexer";
+import { createParser } from "./generated/wasm/mod.ts";
+
+const wasm = await Deno.readFile("generated/wasm/parser.wasm");
+const plan = await Deno.readFile("generated/wasm/parser.plan");
+const parser = createParser({ bytes: wasm, plan });
+const runtime = await WebGpuRuntime.create({
+  powerPreference: "high-performance",
+});
+const lexer = await runtime.compile(plan);
+
+const source = await Deno.readTextFile("input.txt");
+const units = new Uint16Array(source.length);
+for (let index = 0; index < source.length; index += 1) {
+  units[index] = source.charCodeAt(index);
+}
+
+const lexed = await lexer.lex(units);
+if (lexed.overflow) {
+  throw new Error(`GPU lexer output overflowed at ${lexed.tokenCount} tokens`);
+}
+const parsed = parser.parseRecords(source, lexed.records);
+
+lexer.dispose();
+runtime.dispose();
+parser.dispose();
+```
+
+`WebGpuRuntime` owns one device and should be reused across calls. It rejects
+software fallback adapters by default; use
+`WebGpuRuntime.create({ allowFallbackAdapter: true })` only for explicit
+software testing. The backend currently supports guard-free grammars only. See
+[`docs/webgpu-lexer.md`](docs/webgpu-lexer.md) for capacity limits, adapter
+setup, benchmarking, and the standalone `WebGpuLexer` API.
