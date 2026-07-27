@@ -36,8 +36,11 @@ Generated parser options can bound trace work:
 
 Exhaustion reports the structured `PARSER_TRACE_LIMIT` diagnostic.
 
-The generated Wasm adapter grows its internal token, trace, stack, and cursor
-buffers as needed within WebAssembly memory limits. Invalid option values throw
+The generated Wasm adapter grows its internal token, trace, stack, cursor, and
+lexer-memo buffers as needed within WebAssembly memory limits. The lexer memo is
+`ceil(dfaStateCount / 32)` i32 per source position - 4 to 32 bytes per position
+across the grammars in this repo - and is the price of a lexer that stays linear
+on backtracking-heavy input (`docs/performance.md`). Invalid option values throw
 JavaScript errors at the adapter boundary. Expected parse exhaustion returns a
 parse result with diagnostics.
 

@@ -246,7 +246,11 @@ interface ExternalParserWasmExports {
     sourceLength: number,
     mode: number,
     tokenPtr: number,
+    tokenCapacity: number,
+    memoPtr: number,
+    memoCapacity: number,
   ): number;
+  lex_memo_i32_per_position(): number;
   parse_trace(
     sourcePtr: number,
     sourceLength: number,
@@ -257,6 +261,8 @@ interface ExternalParserWasmExports {
     resultPtr: number,
     stackPtr: number,
     stackCapacity: number,
+    memoPtr: number,
+    memoCapacity: number,
     preserveTrivia: number,
     maxTraceActions: number,
   ): number;
@@ -279,6 +285,8 @@ interface ExternalParserWasmExports {
     stackPtr: number,
     fragmentPtr: number,
     fragmentCapacity: number,
+    memoPtr: number,
+    memoCapacity: number,
     preserveTrivia: number,
     maxTraceActions: number,
   ): number;
@@ -1395,7 +1403,9 @@ function lexExternalRecords(
   const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
   const tokenPtr = align(sourcePtr + sourceByteLength, WASM_I32_BYTES);
   const recordBytes = WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES;
-  const requiredBytes = tokenPtr + maxRecords * recordBytes;
+  const memoPtr = align(tokenPtr + maxRecords * recordBytes, WASM_I32_BYTES);
+  const memoCapacity = (source.length + 1) * wasm.lex_memo_i32_per_position();
+  const requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
   if (!externalWasmCapacityFits(requiredBytes)) {
     return { ok: false, requiredBytes };
   }
@@ -1408,7 +1418,15 @@ function lexExternalRecords(
       true,
     );
   }
-  const count = wasm.lex_all(sourcePtr, source.length, 0, tokenPtr);
+  const count = wasm.lex_all(
+    sourcePtr,
+    source.length,
+    0,
+    tokenPtr,
+    maxRecords,
+    memoPtr,
+    memoCapacity,
+  );
   if (count < 0 || count > maxRecords) {
     throw new Error("Wasm lexer returned an invalid token count.");
   }
@@ -1474,7 +1492,9 @@ function validateExternalWasmTrace(
   const stackByteLength = stackCapacity * WASM_I32_BYTES;
   const resultPtr = align(stackPtr + stackByteLength, WASM_I32_BYTES);
   const resultByteLength = WASM_PARSE_TRACE_RESULT_I32_COUNT * WASM_I32_BYTES;
-  const requiredBytes = resultPtr + resultByteLength;
+  const memoPtr = align(resultPtr + resultByteLength, WASM_I32_BYTES);
+  const memoCapacity = (source.length + 1) * wasm.lex_memo_i32_per_position();
+  const requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
   if (!externalWasmCapacityFits(requiredBytes)) {
     // The trace arena is sized purely by `maxTraceActions`, so it can be the
     // dominant term even for a source of a few characters. Telling the caller
@@ -1517,6 +1537,8 @@ function validateExternalWasmTrace(
     resultPtr,
     stackPtr,
     stackCapacity,
+    memoPtr,
+    memoCapacity,
     preserveTriviaFlag,
     maxTraceActions,
   );
@@ -1628,7 +1650,12 @@ function parseExternalCursorWithWasm(
     );
     const fragmentRecordBytes = WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT *
       WASM_I32_BYTES;
-    const requiredBytes = fragmentPtr + fragmentCapacity * fragmentRecordBytes;
+    const memoPtr = align(
+      fragmentPtr + fragmentCapacity * fragmentRecordBytes,
+      WASM_I32_BYTES,
+    );
+    const memoCapacity = (source.length + 1) * wasm.lex_memo_i32_per_position();
+    const requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
     if (!externalWasmCapacityFits(requiredBytes)) {
       return externalFailedCursorParseResult(source, [
         externalOversizedInputDiagnostic(
@@ -1671,6 +1698,8 @@ function parseExternalCursorWithWasm(
       stackPtr,
       fragmentPtr,
       fragmentCapacity,
+      memoPtr,
+      memoCapacity,
       preserveTriviaFlag,
       maxTraceActions,
     );

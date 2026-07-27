@@ -109,103 +109,226 @@ compiler-version-dependent and must not be chased with dead code.
 
 ## Lexer Backtracking Worst Case
 
-`fn lex_all` used to be O(n^2), and the shape is reachable from a grammar that
-compiles with no diagnostics. It is **fixed** by a per-position failure memo.
+`fn lex_all` used to be O(n^2), and the shape is reachable from grammars that
+compile with no diagnostics. It is fixed by a **(position, state)** failure
+memo. An earlier attempt used a memo keyed by position alone; that one fixed a
+single shape and left the general case quadratic. Both are recorded here,
+because the difference is the whole point.
 
-`fixtures/perf/error-heavy/grammar.baba` declares the ordinary string-literal
-regex `/"([^"\\]|\\.)*"/`. On the input `"\` repeated, every `"` is consumed as
-the escaped character of the preceding `\`, so the string never closes: each
-scan ran to end of input, found no accepting configuration, emitted a one-unit
-error token, and restarted one unit along.
+### The shape
 
-Measured on the unmodified fixture, median of 3, `ms/MiB` normalised by UTF-16
-bytes, before and after:
+A token regex whose scan can run a long way past its last accepting position and
+then fail. Four reproducers, all from grammars that compile clean:
 
-| chars | tokens | before ms | before ms/MiB | vs prev | after ms | after ms/MiB |
-| ----: | -----: | --------: | ------------: | ------: | -------: | -----------: |
-|  1024 |   1024 |      1.66 |         848.5 |       - |     0.08 |         39.9 |
-|  2048 |   2048 |      6.59 |        1687.0 |   1.99x |     0.14 |         36.8 |
-|  4096 |   4096 |     26.56 |        3399.7 |   2.02x |     0.25 |         32.5 |
-|  8192 |   8192 |    105.13 |        6728.4 |   1.98x |     0.25 |         15.7 |
-| 16384 |  16384 |    388.03 |       12417.1 |   1.85x |     0.51 |         16.4 |
-| 32768 |  32768 |   1554.15 |       24866.4 |   2.00x |     0.93 |         14.8 |
+| id       | token regex               | input        |
+| -------- | ------------------------- | ------------ |
+| `ESCSTR` | `/"([^"\\]                | \\.)*"/`     |
+| `BYTES`  | `/([0-9a-f][0-9a-f])+;/`  | `a` repeated |
+| `B64`    | `/([A-Za-z0-9+\/]{4})+=/` | `A` repeated |
+| `T`      | `/(aa)*b/`                | `a` repeated |
 
-Before, cost per byte doubled with every doubling of the input; after, it is
-flat. Two controls on the same grammar were already flat and stay flat: `""`
-repeated holds ~7.4 ms/MiB and ordinary source ~9.6 ms/MiB across a 32x size
-range. At 32,768 code units the pathological input went from about 2,900x the
-linear floor to about 1.6x. At 131,072 units the same input goes from 25,473 ms
-to 3.80 ms.
+`ESCSTR` is `fixtures/perf/error-heavy/grammar.baba`: every `"` is consumed as
+the escaped character of the preceding `\`, so the string never closes. The
+other three are a repeated group that can only accept at a terminator the input
+never supplies - a hex run, a base64 run, a pair run. None of them is exotic,
+and the trigger is an unterminated instance, which is what a file looks like
+while it is being typed.
 
-`tests/wasm_lexer_backtracking_test.ts` pins the emitted token tape for this
-input and asserts the ratio against ordinary source of the same length. The
-records are byte-identical before and after, `acceptingState` included.
+Every scan runs from its start offset to end of input, finds no accepting
+configuration, emits a one-code-point error token and restarts one code point
+along: O(n^2) DFA steps.
+
+### Why a per-position memo does not fix it
+
+A memo that stores one DFA state per source position works only when a single
+scan phase exists. `ESCSTR` has one: odd-offset scans die immediately on the
+backslash. The repeated-group shapes have `k` phases, where `k` is the cycle
+length of the group - 2 for `/(aa)*b/`, 2 for the hex run, 4 for the base64 run.
+Scans starting in different phases reach the same position in DIFFERENT states,
+so each one overwrites the previous one's entry and no scan ever hits.
+
+Measured through the shipping engine with the per-position memo in place, one
+instance per shape, median of 3, on one workstation:
+
+|  units | `BYTES` ms | vs prev | `B64` ms | vs prev |   `T` ms | vs prev |
+| -----: | ---------: | ------: | -------: | ------: | -------: | ------: |
+|  8,192 |     356.11 |       - |   354.17 |       - |   368.43 |       - |
+| 16,384 |    1429.94 |   4.02x |  1426.67 |   4.03x |  1449.94 |   3.94x |
+| 32,768 |    5664.62 |   3.96x |  5692.30 |   3.99x |  5897.45 |   4.07x |
+| 65,536 |   22679.78 |   4.00x | 23139.71 |   4.07x | 23513.80 |   3.99x |
+
+4x per doubling is quadratic, at every size and for cycle lengths 2 and 4.
+`ESCSTR` over the same range is 0.25 / 0.43 / 0.95 / 2.18 ms - 2.0x per
+doubling, linear - which is exactly the trap: the shape the memo was derived
+from is the one shape it fixes.
+
+### The fix
+
+One bit per (source position, DFA state), set for the positions a scan visited
+AFTER its last accept. Arriving at the same position in the same state again is
+the same deterministic future over the same input - `fn transition` and
+`fn selected_global_spec` both depend only on `(src, len, position, state)` - so
+it cannot accept either and the scan stops.
+
+That bounds the work. Every step past a scan's last accept either lands on a
+(position, state) pair no scan in this call has visited before - there are at
+most `len * dfaStateCount` of them - or ends the scan. Total scan work is
+therefore `O(len * dfaStateCount)`: linear in the input with the automaton size
+as the constant. This is Reps' tabulated maximal-munch tokenizer.
+
+It is exact in the direction that matters: a set bit is a true fact about the
+input, so it can only stop a scan that was going to fail anyway, and a bit that
+is never set costs speed and never output. Emitted records are unchanged,
+`acceptingState` included, because the memo is consulted only strictly past
+`best_end`, which is after `best_spec`, `best_end` and `best_state` are settled
+for the token being cut. Verified i32 by i32 against the previous engine on 1
+MiB of source per example grammar and on every input in this section.
+
+Same harness, after:
+
+|   units | `BYTES` ms | vs prev | `B64` ms | vs prev | `T` ms | vs prev |
+| ------: | ---------: | ------: | -------: | ------: | -----: | ------: |
+|   8,192 |       1.02 |       - |     0.96 |       - |   0.41 |       - |
+|  16,384 |       1.19 |   1.17x |     1.99 |   2.07x |   0.81 |   1.95x |
+|  32,768 |       2.36 |   1.98x |     3.83 |   1.93x |   1.62 |   2.01x |
+|  65,536 |       4.70 |   1.99x |     7.64 |   2.00x |   3.24 |   2.00x |
+| 131,072 |       9.45 |   2.01x |    15.31 |   2.00x |   6.47 |   2.00x |
+| 262,144 |      18.87 |   2.00x |    30.58 |   2.00x |  12.98 |   2.01x |
+
+At 65,536 units `BYTES` goes from 22,680 ms to 4.70 ms. 2.0x per doubling is
+linear.
+
+`ESCSTR` stays linear and gets slower, because a one-phase shape is the best
+case for a per-position memo and the bitset does strictly more work per step.
+Both builds instantiated in one process and alternated, median of 3:
+
+|   units | before ms | after ms |
+| ------: | --------: | -------: |
+|   8,192 |      0.21 |     0.34 |
+|  16,384 |      0.42 |     0.67 |
+|  32,768 |      0.85 |     1.47 |
+|  65,536 |      1.98 |     3.07 |
+| 131,072 |      3.77 |     6.27 |
+| 262,144 |      8.48 |    11.44 |
+
+`B64` is the slowest of the four for the same reason in reverse: its group is
+four code points long, so four phases have to be memoised before scans start
+hitting. It is still 2.0x per doubling.
+
+### What the memo costs when it is not needed
+
+Nothing, because it is switched on lazily. `lex_all` counts the DFA steps it
+throws away - the distance from a scan's last accept to where the scan stopped -
+and only zeroes the bitset and starts using it once that total passes the source
+length. Until then the scan loop reads and writes no memo at all. The pre-memo
+phase can therefore cost at most about `2 * len` wasted steps, which keeps the
+overall bound linear either way.
+
+The threshold has room. Measured over 1 MiB of source per example grammar, with
+the counter instrumented and the memo forced off:
+
+| grammar                 | thrown-away steps | / source length |
+| ----------------------- | ----------------: | --------------: |
+| `examples/brainfuck`    |                 0 |           0.000 |
+| `examples/feature-tour` |                 0 |           0.000 |
+| `examples/funcfuck`     |                 0 |           0.000 |
+| `examples/thunkwasm`    |                 0 |           0.000 |
+
+Ordinary source is **not** guaranteed to throw away nothing, and an earlier
+version of this document said so incorrectly. The claim was that a token ending
+on a dead transition leaves `index == best_end`; that is false whenever one
+token is a proper prefix of a longer one and the longer form fails after
+consuming at least one more code point. With `FLOAT = /[0-9]+\.[0-9]+/` and
+`INT = /[0-9]+/` over 65,536 units of `12345.xxxx` repeated, the scan accepts
+`INT` at 5, consumes the `.` toward `FLOAT`, and dies on the `x`:
+
+| input                 | thrown-away steps | / source length | longest tail |
+| --------------------- | ----------------: | --------------: | -----------: |
+| `12345.xxxx` repeated |             5,958 |          0.0909 |            1 |
+| `12345.6789` repeated |                 0 |          0.0000 |            0 |
+| `12345` repeated      |                 0 |          0.0000 |            0 |
+
+0.09x against a 1.0x threshold. The four example grammars simply have no token
+that is a proper prefix of a longer one across more than one code point.
+
+### What it costs in memory
+
+`ceil(dfaStateCount / 32)` i32 per source position, in a caller-owned buffer
+sized from the `lex_memo_i32_per_position` export. It is a separate argument to
+`lex_all`, `parse_trace` and `parse_cursor` rather than scratch inside the token
+records, so nothing outside the returned records is written.
+
+| grammar                       | DFA states | memo B/position | memo at 1 MiB | token buffer at 1 MiB |
+| ----------------------------- | ---------: | --------------: | ------------: | --------------------: |
+| `examples/brainfuck`          |         16 |               4 |      2.00 MiB |              8.00 MiB |
+| `examples/feature-tour`       |         32 |               4 |      2.00 MiB |              8.00 MiB |
+| `examples/thunkwasm`          |         65 |              12 |      6.00 MiB |              8.00 MiB |
+| `examples/funcfuck`           |         81 |              12 |      6.00 MiB |              8.00 MiB |
+| `fixtures/perf/error-heavy`   |         37 |               8 |      4.00 MiB |              8.00 MiB |
+| `fixtures/perf/large-runtime` |        241 |              32 |     16.00 MiB |              8.00 MiB |
+
+For every shipped grammar but the largest the memo is smaller than the token
+buffer the host already has to allocate. It grows with the DFA, so a grammar
+with a few hundred lexer states pays a few tens of bytes per source position.
+There is no cap: a cap would silently reintroduce the quadratic case for
+grammars above it, and the requirement is visible to the host through the export
+instead. The buffer is only touched once the memo switches on, so on ordinary
+source it costs address space and a `memory.grow`, not traffic.
+
+### What it costs on ordinary source
+
+14 - 20% against the immediately preceding engine, and nothing against the
+engine before that. Measured on 1 MiB of source per grammar, both builds
+instantiated in one process and alternated, records verified equal i32 by i32,
+median of 15:
+
+| grammar      | per-position memo | (position, state) memo | delta |
+| ------------ | ----------------: | ---------------------: | ----: |
+| brainfuck    |          8.234 ms |               9.906 ms |  +20% |
+| feature-tour |          7.260 ms |               8.312 ms |  +14% |
+| funcfuck     |          7.195 ms |               8.404 ms |  +17% |
+| thunkwasm    |          7.198 ms |               8.260 ms |  +15% |
+
+That delta is code layout, not work. The same measurement against the engine
+from before any memo existed - which runs strictly less code on this input than
+either of the others - puts the new engine at parity:
+
+| grammar      | no memo at all | (position, state) memo | delta |
+| ------------ | -------------: | ---------------------: | ----: |
+| brainfuck    |       9.232 ms |               9.158 ms |   -1% |
+| feature-tour |       8.646 ms |               8.245 ms |   -5% |
+| funcfuck     |       8.595 ms |               8.319 ms |   -3% |
+| thunkwasm    |       8.845 ms |               8.768 ms |   -1% |
+
+All three builds execute the same instructions on this corpus: it throws away
+nothing, so neither memo is ever read or written. The per-position build was
+simply lucky with codegen, which is what the `fn table_lookup` section above
+already documents about this engine, and it is not a gain that can be defended
+or preserved. Three loop shapes were measured against the per-position build
+before settling: the single loop that shipped, with the memo gated on a floor
+variable, at +15%; the same code split into a pre-memo phase and a memo phase,
+at +26 to +34%; and a branch on the memo flag inside the token loop, at +20%.
+The cheapest shape is the one with the least duplicated code, not the one with
+the fewest instructions on the fast path.
 
 ### What did not fix it
 
 - **A dead-state early exit does nothing.** `if target < 0 { break }` in
-  `lex_all` already is that exit, and it never fires here: the parked states all
-  have outgoing edges covering the input character, and the scan stops only at
-  end of input. Confirmed against the generated plan - the scan cycles through
-  states 2, 22 and 29, which have 5, 4 and 5 outgoing edges. A stronger "can
-  this state still reach an accepting state" prune also fails: no state in this
-  DFA is unable to reach an accept, because a single `"` from the parked state
-  closes the string.
+  `lex_all` already is that exit, and it never fires on any of the four shapes:
+  the parked states all have outgoing edges covering the input character, and
+  the scan stops only at end of input. A stronger "can this state still reach an
+  accepting state" prune also fails on all four: a single terminator - `"`, `;`,
+  `=`, `b` - from the parked state completes the token, so no state in any of
+  these DFAs is unable to reach an accept.
 - **Binary search does not help.** The cost is the number of scan steps, not the
   cost of each step.
-
-### The fix
-
-A per-position failure memo: one `i32` per source position recording the DFA
-state the scan was in, written only for positions visited AFTER a scan's last
-accepting position, and checked on the hot loop. Arriving at the same position
-in the same state is the same deterministic future over the same input, so it
-cannot accept either and the scan stops immediately.
-
-It is exact rather than heuristic in the direction that matters: a memo entry is
-a true fact about the input, so a lost or overwritten entry costs speed and
-never output. Emitted records cannot move, because the memo is consulted only
-strictly past `best_end`, which is after `best_spec`, `best_end` and
-`best_state` are already settled for the token being cut.
-
-The memory it needs is **not** new memory and needed no ABI signature change.
-The memo lives inside the caller's token buffer, in the `specIndex` slot of the
-record a token starting at that position would occupy. `lex_all` maintains
-`count <= offset` because every token consumes at least one code unit, while
-every memo read sits at `index > offset` and every memo write at
-`position > best_end >= offset`. So the memo only ever touches record slots
-strictly above the highest record already emitted, and the single cell
-`store_token_record` can overwrite - the one for position `count` - is by the
-same invariant never read again. The buffer must therefore hold `sourceLength`
-records, which was already required and already enforced: `lex_all` can emit one
-record per code unit, and `parse_trace` and `parse_cursor` both reject
-`token_capacity < len`. See `docs/wasm-abi.md`.
-
-Ordinary source pays a single `index <= memo_hi` compare per DFA step, which
-fails on the first comparison until some scan has actually run past an accept -
-and ordinary source never does, because a token that ends on a dead transition
-leaves `index == best_end`. Measured on 1 MiB of source per grammar, records
-verified equal i32 by i32, median of 7, interleaved in one process:
-
-| grammar      | before ms | after ms | delta |
-| ------------ | --------: | -------: | ----: |
-| funcfuck     |     18.26 |    15.66 |  -14% |
-| thunkwasm    |     17.94 |    15.09 |  -16% |
-| brainfuck    |     19.89 |    16.90 |  -15% |
-| feature-tour |     17.22 |    14.05 |  -18% |
-
-Ordinary lexing did not regress; it got faster, reproducibly and independently
-of which build runs first in a trial. That is not the memo doing useful work -
-it is never read on this input - so it is the same code-layout sensitivity the
-`fn table_lookup` section above documents, and it must not be treated as a
-durable gain. The claim this table supports is the negative one: the memo costs
-ordinary input nothing measurable.
+- **A memo keyed by position alone does not help**, for the reason and with the
+  numbers in the section above.
 
 `deno task bench:runtime` is not a useful judge of this change. Its lexer figure
 runs on 15 and 67 token inputs, where run-to-run spread on a single unchanged
-build is 90,864-99,552 ns/token and 66,016-73,595 ns/token - wider than any
-before/after difference. The generated core module grows 11,805 -> 12,056 bytes,
-against a 250,000 byte budget.
+build is wider than any before/after difference. The generated core module grows
+12,056 -> 12,436 bytes, against a 250,000 byte budget.
 
 ### A compile-time warning was considered and rejected
 

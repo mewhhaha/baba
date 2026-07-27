@@ -3,7 +3,7 @@
 ## 7.0.0
 
 Three versioned contracts move in this release, and all three require
-regeneration: the package (6.1.0 -> 7.0.0), the Wasm core ABI (7 -> 8) and the
+regeneration: the package (6.1.0 -> 7.0.0), the Wasm core ABI (7 -> 9) and the
 core plan format (3 -> 4). Regenerate `parser.wasm` and `parser.plan` together;
 a mismatched pair is rejected rather than misread. `PortableParserPlan` version
 2 and metadata schema version 2 are unchanged.
@@ -39,13 +39,24 @@ needs updating.
 
 ### Changed
 
-- Wasm core ABI version 7 -> 8. Cursor child edges and array items are linked
+- Wasm core ABI version 7 -> 9. Cursor child edges and array items are linked
   node records of two `i32` each rather than contiguous `i32` slices, and the
   internal fragment record widened from 9 to 10 `i32`. `wasm/abi.json` gains
   `core.layouts.cursorChildRecord` and `core.layouts.cursorValueItemRecord`.
-  `PortableParserPlan` version 2 is unchanged. Regenerate `parser.wasm`
-  alongside the adapter. The core plan format also moves this release, to 4; see
-  below.
+  `lex_all` gains `tokenCapacity`, `memoPtr` and `memoCapacity`; `parse_trace`
+  and `parse_cursor` gain `memoPtr` and `memoCapacity`; and the new
+  `lex_memo_i32_per_position` export sizes the memo buffer. `PortableParserPlan`
+  version 2 is unchanged. Regenerate `parser.wasm` alongside the adapter. The
+  core plan format also moves this release, to 4; see below.
+- `lex_all` takes a capacity for every buffer it writes and rejects an
+  undersized one with a status instead of writing past it. It was the only
+  buffer-writing export with no capacity argument. `tokenCapacity` must be at
+  least `sourceLength` (the worst case is one error token per code point) and is
+  rejected with `-1`; the failure memo now has its own buffer, sized
+  `(sourceLength + 1) * lex_memo_i32_per_position()` and rejected with `-2`.
+  `lex_all` writes nothing into the token records past the count it returns.
+  `parse_trace` and `parse_cursor` apply the same memo requirement and report it
+  through the statuses they already use for a short token buffer.
 - `parser.lex()` is roughly 3x faster and no longer degrades with input size. It
   built two throwaway JavaScript objects per token before returning; the token
   tape now holds the raw records as a single `Int32Array` and materializes a
@@ -85,28 +96,48 @@ needs updating.
 
 ### Fixed
 
-- `fn lex_all` was O(n^2) on backtracking-heavy input and is now linear. A
-  grammar with the ordinary string-literal regex `/"([^"\\]|\\.)*"/` - which
-  compiles with no diagnostics - degraded to 2.0x ms/MiB per doubling on `"\`
-  repeated, because the string state never closes and never dies, so every scan
-  ran to end of input and the next token rescanned the same suffix. 32,768 code
-  units took 1,554 ms and 131,072 took 25,473 ms. They now take 0.93 ms and 3.80
-  ms.
+- `fn lex_all` was O(n^2) on backtracking-heavy input and is now linear. The
+  shape is a token regex whose scan can run far past its last accepting position
+  and then fail, and it is reachable from grammars that compile with no
+  diagnostics: `/"([^"\\]|\\.)*"/` on `"\` repeated, `/([0-9a-f][0-9a-f])+;/` on
+  `a` repeated, `/([A-Za-z0-9+\/]{4})+=/` on `A` repeated, `/(aa)*b/` on `a`
+  repeated. Every scan runs to end of input, finds nothing, emits a one-code-
+  point error token and restarts one code point along. The trigger is an
+  unterminated literal, which is what a file looks like while it is being typed.
 
-  `lex_all` carries a per-position failure memo: the DFA state a scan was in at
-  positions it visited after its last accepting position. Re-entering the same
-  (position, state) pair is the same deterministic future on the same input, so
-  the scan stops. Emitted token records are byte-identical, `acceptingState`
-  included, because the memo is only consulted strictly past the point where the
-  token being cut is already decided.
+  The memo is keyed by **(position, state)**: one bit per source position per
+  DFA state, set for the positions a scan visited after its last accept.
+  Re-entering the same pair is the same deterministic future over the same
+  input, so the scan stops. Every wasted step therefore lands on a pair no scan
+  has visited before or ends the scan, which bounds total work at
+  `O(sourceLength * dfaStateCount)`.
 
-  No ABI signature changed. The memo lives in the token records `lex_all` has
-  not returned, so it needs no new memory. `docs/wasm-abi.md` now states what
-  was already the only safe reading of the contract: the token buffer must hold
-  `sourceLength` records, and `lex_all` may write scratch into the ones past the
-  returned count. Ordinary lexing did not regress - measured on 1 MiB per
-  example grammar it got 14-18% faster, which is code layout rather than the
-  memo. `docs/performance.md` has the curves and the controls.
+  Measured at 32,768 code units, before and after: 5,665 -> 2.36 ms for the hex
+  run, 5,692 -> 3.83 ms for the base64 run, 5,897 -> 1.62 ms for the pair run.
+  Before, each of those was 4.0x per doubling at every size; after, all four
+  shapes are 2.0x. At 65,536 units the hex run goes from 22,680 ms to 4.70 ms.
+  The escaped-string shape stays linear and gets slower - 0.85 -> 1.47 ms at
+  32,768 - because it has a single scan phase, which is the best case for the
+  memo this replaces.
+
+  Emitted token records are byte-identical, `acceptingState` included, because
+  the memo is only consulted strictly past the point where the token being cut
+  is already decided. Verified i32 by i32 on 1 MiB of source per example grammar
+  and on every shape above.
+
+  The memo needs `ceil(dfaStateCount / 32)` i32 per source position in a
+  caller-owned buffer - 4 bytes per position for `examples/brainfuck`, 12 for
+  `examples/funcfuck`, 32 for `fixtures/perf/large-runtime` - and it is switched
+  on lazily, only once a call has thrown away more scan steps than the source
+  has code units. Ordinary source regresses 14-20% against 7.0.0's earlier
+  per-position memo and is at parity with 6.1.0; the difference is code layout,
+  not work, and `docs/performance.md` has the controls that show it, along with
+  the curves, the memory table and the shapes.
+
+  This supersedes the per-position failure memo added earlier in this release,
+  which fixed only the escaped-string shape. Scans starting at offsets in
+  different phases of a repeated group reach the same position in different
+  states, evict each other's single entry, and never hit.
 
 - The DFA start state was hardcoded to `0` in the Rust engine and the WebGPU
   kernel and was never stored in the plan, so a plan whose DFA started anywhere

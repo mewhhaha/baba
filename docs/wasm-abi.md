@@ -29,14 +29,14 @@ The generated descriptor has:
     "runtimeMetadataVersion": 2
   },
   "core": {
-    "abiVersion": 8
+    "abiVersion": 9
   }
 }
 ```
 
 The core module exports `load_plan(planPtr, planLength) -> i32`,
 `plan_buffer_base() -> i32`, `input_base() -> i32`, `abi_version() -> i32`,
-`plan_version() -> i32`, and `semantics_version() -> i32`. For ABI version 8,
+`plan_version() -> i32`, and `semantics_version() -> i32`. For ABI version 9,
 the generated adapter writes `parser.plan` into linear memory at or after
 `plan_buffer_base()`, calls `load_plan`, and then checks that the descriptor and
 core exports agree before the adapter uses the module.
@@ -52,33 +52,34 @@ The descriptor also records:
 
 ## Core Exports
 
-ABI version 8 core modules export:
+ABI version 9 core modules export:
 
-| Export                   | Kind     | Contract                                                                         |
-| ------------------------ | -------- | -------------------------------------------------------------------------------- |
-| `memory`                 | memory   | Linear memory owned by the instance.                                             |
-| `lex_one`                | function | Writes one lexical result and returns `1`, or returns `0` when no token matches. |
-| `lex_all`                | function | Writes token records and returns the token count.                                |
-| `parser_action`          | function | Returns the first encoded LR action for deterministic callers.                   |
-| `parser_actions`         | function | Writes all encoded LR actions for a state/terminal pair and returns their count. |
-| `parser_select_action`   | function | Selects an unguarded contextual token/action pair for a parser state.            |
-| `parse_trace`            | function | Parses to an action trace for validation and cursor replay.                      |
-| `parse_cursor`           | function | Parses directly into cursor tapes.                                               |
-| `parser_goto`            | function | Returns a parser state, or `-1` when absent.                                     |
-| `load_plan`              | function | Loads the external parser plan and returns `1` when accepted.                    |
-| `abi_version`            | function | Returns the core ABI version.                                                    |
-| `plan_version`           | function | Returns the loaded portable parser-plan version, or `0` before `load_plan`.      |
-| `semantics_version`      | function | Returns the runtime implementation semantics version.                            |
-| `reset`                  | function | Clears reusable core runtime state.                                              |
-| `plan_buffer_base`       | function | Returns the first implementation-safe offset where the host may copy the plan.   |
-| `input_base`             | function | Returns the first byte offset available for host input.                          |
-| `max_pages`              | function | Returns the configured maximum linear-memory page count.                         |
-| `source_encoding`        | function | Returns the source encoding enum.                                                |
-| `span_unit`              | function | Returns the public span unit enum.                                               |
-| `lex_result_i32_count`   | function | Returns the width of a lexical result record.                                    |
-| `token_record_i32_count` | function | Returns the width of a token record.                                             |
-| `host_ownership_model`   | function | Returns the input/result ownership enum.                                         |
-| `result_lifetime_model`  | function | Returns the raw result lifetime enum.                                            |
+| Export                      | Kind     | Contract                                                                         |
+| --------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `memory`                    | memory   | Linear memory owned by the instance.                                             |
+| `lex_one`                   | function | Writes one lexical result and returns `1`, or returns `0` when no token matches. |
+| `lex_all`                   | function | Writes token records and returns the token count, or a negative status.          |
+| `lex_memo_i32_per_position` | function | Returns the i32 the lexer failure memo needs per source position.                |
+| `parser_action`             | function | Returns the first encoded LR action for deterministic callers.                   |
+| `parser_actions`            | function | Writes all encoded LR actions for a state/terminal pair and returns their count. |
+| `parser_select_action`      | function | Selects an unguarded contextual token/action pair for a parser state.            |
+| `parse_trace`               | function | Parses to an action trace for validation and cursor replay.                      |
+| `parse_cursor`              | function | Parses directly into cursor tapes.                                               |
+| `parser_goto`               | function | Returns a parser state, or `-1` when absent.                                     |
+| `load_plan`                 | function | Loads the external parser plan and returns `1` when accepted.                    |
+| `abi_version`               | function | Returns the core ABI version.                                                    |
+| `plan_version`              | function | Returns the loaded portable parser-plan version, or `0` before `load_plan`.      |
+| `semantics_version`         | function | Returns the runtime implementation semantics version.                            |
+| `reset`                     | function | Clears reusable core runtime state.                                              |
+| `plan_buffer_base`          | function | Returns the first implementation-safe offset where the host may copy the plan.   |
+| `input_base`                | function | Returns the first byte offset available for host input.                          |
+| `max_pages`                 | function | Returns the configured maximum linear-memory page count.                         |
+| `source_encoding`           | function | Returns the source encoding enum.                                                |
+| `span_unit`                 | function | Returns the public span unit enum.                                               |
+| `lex_result_i32_count`      | function | Returns the width of a lexical result record.                                    |
+| `token_record_i32_count`    | function | Returns the width of a token record.                                             |
+| `host_ownership_model`      | function | Returns the input/result ownership enum.                                         |
+| `result_lifetime_model`     | function | Returns the raw result lifetime enum.                                            |
 
 `parser_select_action` has no source pointer, so it does not select tokens with
 trailing guards. `parse_trace` and `parse_cursor` evaluate those guards against
@@ -92,7 +93,7 @@ each exported function.
 
 ## External Plan
 
-ABI version 8 keeps grammar-specific DFA and LR table data outside
+ABI version 9 keeps grammar-specific DFA and LR table data outside
 `parser.wasm`. The generated `parser.plan` starts with the core table section
 expected by `load_plan`, followed by shared runtime metadata used by the
 TypeScript adapter. The host calls `plan_buffer_base()`, writes `parser.plan`
@@ -121,7 +122,7 @@ the combined plan layout.
 
 ## Source And Spans
 
-ABI version 8 uses source encoding enum value `1`, meaning UTF-16 code units.
+ABI version 9 uses source encoding enum value `1`, meaning UTF-16 code units.
 The host writes the source into linear memory as contiguous unsigned 16-bit code
 units. `sourceLength` is a count of UTF-16 code units, not bytes.
 
@@ -138,8 +139,8 @@ characters therefore occupy two units in public spans.
 | `specIndex` | `i32` |    `0` |
 | `end`       | `i32` |    `4` |
 
-`lex_all(sourcePtr, sourceLength, mode, tokenPtr)` writes token records at
-`tokenPtr`. The current mode value is `0`.
+`lex_all(sourcePtr, sourceLength, mode, tokenPtr, tokenCapacity, memoPtr, memoCapacity)`
+writes token records at `tokenPtr`. The current mode value is `0`.
 
 | Field            | Type  | Offset |
 | ---------------- | ----- | -----: |
@@ -148,18 +149,32 @@ characters therefore occupy two units in public spans.
 | `end`            | `i32` |    `8` |
 | `acceptingState` | `i32` |   `12` |
 
-The buffer at `tokenPtr` must have room for `sourceLength` records, never fewer.
-That is the worst case `lex_all` can emit - one error token per code unit - so
-it was already the only safe size, and it is what `parse_trace` and
-`parse_cursor` enforce when they reject `token_capacity < sourceLength`.
+`tokenCapacity` counts records and must be at least `sourceLength`. That is the
+worst case `lex_all` can emit - one error token per code point - and it is the
+same bound `parse_trace` and `parse_cursor` enforce. Only the first `count`
+records a call returns are meaningful; `lex_all` writes no record past `count`.
 
-`lex_all` uses the records it has not returned as scratch: it may write any
-value into the record slots from the returned count up to `sourceLength - 1`.
-This is how its per-position failure memo avoids O(n^2) backtracking without a
-separate scratch allocation (`docs/performance.md`, "Lexer backtracking worst
-case"). Only the first `count` records the call returns are meaningful, which
-was already true - the rest were previously stale bytes from earlier calls - so
-hosts sizing the buffer correctly need no change.
+`memoPtr` points at scratch for the lexer's failure memo and `memoCapacity`
+counts i32. The requirement is
+`(sourceLength + 1) * lex_memo_i32_per_position()`. The memo is one bit per
+(source position, DFA state), so `lex_memo_i32_per_position()` returns
+`ceil(dfaStateCount / 32)`; it needs a loaded plan and returns `0` before
+`load_plan`. The buffer contents are private to the engine, need no
+initialisation, and carry nothing between calls. This is what keeps `lex_all`
+out of O(n^2) backtracking (`docs/performance.md`, "Lexer backtracking worst
+case").
+
+`lex_all` returns the token count, or a negative status:
+
+| Status | Meaning                                                                                           |
+| -----: | ------------------------------------------------------------------------------------------------- |
+|   `-1` | `tokenCapacity` is smaller than `sourceLength`.                                                   |
+|   `-2` | `memoCapacity` is smaller than the requirement above, or that requirement does not fit in an i32. |
+
+`parse_trace` and `parse_cursor` take the same `memoPtr` and `memoCapacity` and
+apply the same requirement; `parse_cursor` reports a short memo buffer as its
+capacity status (`3`) and `parse_trace` as its internal status (`2`), matching
+how each already reports a short token buffer.
 
 `parse_trace` writes a trace result record at `resultPtr`:
 
@@ -245,7 +260,7 @@ growth.
 handles. It does not promise to shrink linear memory; repeated parses may reuse
 the previous high-water allocation.
 
-ABI version 8 has instance-owned core memory. Generated adapters expose
+ABI version 9 has instance-owned core memory. Generated adapters expose
 `createParser()` and `createParserAsync()` as the public lifecycle API. Each
 parser instance owns its `WebAssembly.Instance`, memory, loaded plan, and
 disposed state. `reset()` on a parser instance clears reusable core state.
@@ -263,7 +278,7 @@ where the host permits workers.
 
 ## Limits And Overflow
 
-ABI version 8 uses 65,536-byte WebAssembly pages and a configured maximum of
+ABI version 9 uses 65,536-byte WebAssembly pages and a configured maximum of
 65,535 pages. Adapter-side offset arithmetic checks multiplication, addition,
 alignment, and page-count growth against the 32-bit Wasm address space before
 calling `memory.grow()`.

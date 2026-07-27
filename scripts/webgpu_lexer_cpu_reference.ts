@@ -21,7 +21,11 @@ interface LexEngineExports {
     length: number,
     mode: number,
     tokens: number,
+    tokenCapacity: number,
+    memo: number,
+    memoCapacity: number,
   ) => number;
+  readonly lex_memo_i32_per_position: () => number;
   readonly token_record_i32_count: () => number;
   readonly source_encoding: () => number;
   readonly span_unit: () => number;
@@ -43,6 +47,8 @@ export class CpuReferenceLexer {
   readonly #sourcePointer: number;
   #tokenPointer: number;
   #capacityRecords: number;
+  #memoPointer: number;
+  #memoCapacity: number;
   readonly abiVersion: number;
 
   private constructor(
@@ -55,6 +61,8 @@ export class CpuReferenceLexer {
     this.#sourcePointer = sourcePointer;
     this.#tokenPointer = tokenPointer;
     this.#capacityRecords = capacityRecords;
+    this.#memoPointer = 0;
+    this.#memoCapacity = 0;
     this.abiVersion = exports.abi_version();
   }
 
@@ -95,12 +103,19 @@ export class CpuReferenceLexer {
   #reserve(sourceLength: number): void {
     const tokenPointer = alignUp(this.#sourcePointer + sourceLength * 2, 4);
     const capacityRecords = Math.max(sourceLength, 1);
-    growTo(
-      this.#exports.memory,
+    // The lexer's (position, state) failure memo is a caller-owned buffer, one
+    // bit per source position per DFA state. The engine reports the width.
+    const memoPointer = alignUp(
       tokenPointer + capacityRecords * TOKEN_RECORD_I32_COUNT * 4,
+      4,
     );
+    const memoCapacity = (sourceLength + 1) *
+      this.#exports.lex_memo_i32_per_position();
+    growTo(this.#exports.memory, memoPointer + memoCapacity * 4);
     this.#tokenPointer = tokenPointer;
     this.#capacityRecords = capacityRecords;
+    this.#memoPointer = memoPointer;
+    this.#memoCapacity = memoCapacity;
   }
 
   /** Returns the raw 4 x i32 records exactly as `lex_all` wrote them. */
@@ -119,6 +134,9 @@ export class CpuReferenceLexer {
       source.length,
       0,
       this.#tokenPointer,
+      this.#capacityRecords,
+      this.#memoPointer,
+      this.#memoCapacity,
     );
     const afterLex = performance.now();
     if (count < 0 || count > this.#capacityRecords) {

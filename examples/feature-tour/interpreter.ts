@@ -41,7 +41,7 @@ try {
   assertEquals(wasm.parserPlanFormat, "baba-parser-plan");
   assertEquals(wasm.parserPlanVersion, 2);
   assertEquals(wasm.parserPlanSemantics, "baba-portable-v2");
-  assertEquals(wasm.wasmAbiVersion, 8);
+  assertEquals(wasm.wasmAbiVersion, 9);
 
   const abi = JSON.parse(
     await Deno.readTextFile(new URL("generated/wasm/abi.json", here)),

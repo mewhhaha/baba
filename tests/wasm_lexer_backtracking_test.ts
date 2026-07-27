@@ -1,20 +1,30 @@
 /**
  * Pins BOTH halves of the `lex_all` backtracking fix: the token tape it emits
- * on the pathological input shape, and the cost bound that shape must now obey.
+ * on the pathological input shapes, and the cost bound those shapes must obey.
  *
- * `fixtures/perf/error-heavy/grammar.baba` declares the ordinary string-literal
- * regex `/"([^"\\]|\\.)*"/`. On the two-code-unit sequence `"\` repeated, every
- * `"` is consumed as the escaped character of the preceding `\`, so the string
- * never closes. Each scan used to run from its start offset to end of input,
- * find no accepting configuration, emit a one-unit error token and restart one
- * unit along - O(n^2) DFA steps in total, measured at 2.0x ms/MiB per doubling.
- * `lex_all` now carries a per-position failure memo, so a scan stops as soon as
- * it re-enters a (position, state) pair a previous scan already proved cannot
- * accept. See `docs/performance.md` ("Lexer backtracking worst case").
+ * The shape is a token regex whose scan can run a long way past its last
+ * accepting position and then fail. Four reproducers, all from grammars that
+ * compile with zero diagnostics:
+ *
+ *  - `/"([^"\\]|\\.)*"/` (`fixtures/perf/error-heavy/grammar.baba`) on `"\`
+ *    repeated: every `"` is consumed as the escaped character of the preceding
+ *    `\`, so the string never closes.
+ *  - `/([0-9a-f][0-9a-f])+;/` on `a` repeated - an unterminated hex run.
+ *  - `/([A-Za-z0-9+\/]{4})+=/` on `A` repeated - an unterminated base64 run.
+ *  - `/(aa)*b/` on `a` repeated - the same shape at its smallest.
+ *
+ * Each scan runs from its start offset to end of input, finds no accepting
+ * configuration, emits a one-code-point error token and restarts one code point
+ * along: O(n^2) DFA steps. `lex_all` now carries a (position, state) failure
+ * memo, so a scan stops as soon as it re-enters a (position, state) pair some
+ * earlier scan already proved cannot accept. The last three shapes are the ones
+ * a memo keyed by position alone does NOT fix - scans starting at different
+ * offsets reach the same position in different states and evict each other. See
+ * `docs/performance.md` ("Lexer backtracking worst case").
  *
  * The tape assertions are the correctness half: the memo is only ever consulted
  * strictly past a scan's last accepting position, so every emitted record -
- * `acceptingState` included - must be bit-identical to the pre-fix output.
+ * `acceptingState` included - must be bit-identical to the unmemoised output.
  *
  * Sizes stay small on purpose: this is a correctness test first, and the cost
  * assertion only has to separate linear from quadratic, not measure throughput.
@@ -118,10 +128,11 @@ Deno.test("lex_all memo stays token-identical across surrogate boundaries", () =
   );
 
   // The memo advances by code point, so it steps over the trailing unit of a
-  // surrogate pair and parks an impossible state there rather than leaving a
-  // hole inside its valid interval. These inputs are the ones that can read
-  // such a hole. All three open a string that never closes, so every code point
-  // is its own error token, and the expected tape follows from the code-point
+  // surrogate pair and never records a bit there. That is harmless because a
+  // memo bit is a fact about (position, state) rather than a slot that has to
+  // be kept consistent, but these are the inputs that would expose it if it
+  // were not. All three open a string that never closes, so every code point is
+  // its own error token, and the expected tape follows from the code-point
   // widths alone rather than from what the engine happens to emit.
   const inputs = [
     // Paired: `\` escapes the astral code point, so scan positions land on
@@ -201,6 +212,175 @@ Deno.test("lex_all stays within a linear cost envelope on the backtracking shape
       ordinaryMs.toFixed(2)
     } ms for ordinary source of the same length (ratio ${
       ratio.toFixed(1)
-    }x, bound ${MAX_RATIO}x). The per-position failure memo in fn lex_all has stopped working.`,
+    }x, bound ${MAX_RATIO}x). The (position, state) failure memo in fn lex_all has stopped working.`,
   );
+});
+
+/**
+ * The three shapes a memo keyed by position alone cannot fix.
+ *
+ * Each grammar is a repeated group that can only accept at a terminator the
+ * input never supplies, so every scan runs to end of input and fails. Because
+ * the group has a cycle length k > 1, scans starting at offsets in different
+ * phases pass through the same positions in DIFFERENT states: a one-entry
+ * per-position memo makes them evict each other and never hit, while a
+ * (position, state) memo records both phases and every scan after the first k
+ * stops on its first step.
+ */
+const REPEATED_GROUP_TAIL = `
+skip WS = /[ \\t\\r\\n]+/ ;
+module = statement* ;
+statement = X ;
+`;
+
+interface RepeatedGroupShape {
+  readonly name: string;
+  readonly grammar: string;
+  /** Input the token can never match: no terminator anywhere. */
+  readonly unterminated: (units: number) => string;
+  /** Input of the same length the token matches over and over. */
+  readonly terminated: (units: number) => string;
+}
+
+const REPEATED_GROUP_SHAPES: readonly RepeatedGroupShape[] = [
+  {
+    name: "hex run /([0-9a-f][0-9a-f])+;/",
+    grammar: `token X = /([0-9a-f][0-9a-f])+;/ ;${REPEATED_GROUP_TAIL}`,
+    unterminated: (units) => "a".repeat(units),
+    terminated: (units) => "aa;".repeat(Math.ceil(units / 3)).slice(0, units),
+  },
+  {
+    name: "base64 run /([A-Za-z0-9+\\/]{4})+=/",
+    grammar: `token X = /([A-Za-z0-9+\\/]{4})+=/ ;${REPEATED_GROUP_TAIL}`,
+    unterminated: (units) => "A".repeat(units),
+    terminated: (units) => "AAAA=".repeat(Math.ceil(units / 5)).slice(0, units),
+  },
+  {
+    name: "pair run /(aa)*b/",
+    grammar: `token X = /(aa)*b/ ;${REPEATED_GROUP_TAIL}`,
+    unterminated: (units) => "a".repeat(units),
+    terminated: (units) => "aab".repeat(Math.ceil(units / 3)).slice(0, units),
+  },
+];
+
+function shapePlan(source: string): Uint8Array {
+  const result = compile(source, { targets: ["wasm"] });
+  // Same rule as `errorHeavyPlan`: the reproducer only counts if the grammar
+  // compiles clean, so a diagnostic here means re-deriving the shape.
+  assertEquals(
+    result.diagnostics.length,
+    0,
+    `Expected a clean compile, got ${
+      result.diagnostics.map((diagnostic) => diagnostic.code).join(", ")
+    }.`,
+  );
+  assert(result.bundle !== undefined, "Expected a generated bundle.");
+  const plan = result.bundle.files.find((file) =>
+    file.path === "wasm/parser.plan"
+  );
+  assert(plan !== undefined, "Expected wasm/parser.plan.");
+  assert(plan.encoding === "binary", "Expected a binary plan.");
+  return plan.content;
+}
+
+Deno.test("lex_all emits one error token per unit for an unterminated repeated group", () => {
+  for (const shape of REPEATED_GROUP_SHAPES) {
+    const lexer = CpuReferenceLexer.create(
+      wasmCoreRuntimeBytes(),
+      shapePlan(shape.grammar),
+    );
+    for (const units of [1, 2, 5, 64]) {
+      const records = lexer.lex(toUnits(shape.unterminated(units))).records;
+      assertEquals(
+        records.length / TOKEN_RECORD_I32_COUNT,
+        units,
+        `${shape.name}: expected one token per code unit at ${units} units.`,
+      );
+      for (let index = 0; index < units; index += 1) {
+        const base = index * TOKEN_RECORD_I32_COUNT;
+        assertEquals(records[base], -1, `${shape.name}: token ${index} spec.`);
+        assertEquals(
+          records[base + 1],
+          index,
+          `${shape.name}: token ${index} start.`,
+        );
+        assertEquals(
+          records[base + 2],
+          index + 1,
+          `${shape.name}: token ${index} end.`,
+        );
+        assertEquals(
+          records[base + 3],
+          -1,
+          `${shape.name}: token ${index} acceptingState.`,
+        );
+      }
+    }
+  }
+});
+
+Deno.test("lex_all still matches the same repeated groups when they terminate", () => {
+  for (const shape of REPEATED_GROUP_SHAPES) {
+    const lexer = CpuReferenceLexer.create(
+      wasmCoreRuntimeBytes(),
+      shapePlan(shape.grammar),
+    );
+    const records = lexer.lex(toUnits(shape.terminated(300))).records;
+    const count = records.length / TOKEN_RECORD_I32_COUNT;
+    assert(count > 0, `${shape.name}: expected tokens.`);
+    assertEquals(
+      records[0] >= 0,
+      true,
+      `${shape.name}: the first token should be a real match, got spec ${
+        records[0]
+      }.`,
+    );
+    assertEquals(records[1], 0, `${shape.name}: first token start.`);
+  }
+});
+
+Deno.test("lex_all stays within a linear cost envelope on repeated-group backtracking", () => {
+  // Same construction as the escaped-string bound above: a RATIO against input
+  // of the same length on the SAME grammar, so it does not depend on machine
+  // speed. Measured at 16,384 units on the fixed engine the ratios are 5.0x
+  // (pair run), 6.1x (hex run) and 13.9x (base64 run); on the engine with a
+  // per-position memo the pathological side alone is 1,430-1,450 ms against
+  // about 0.15-0.20 ms for the terminated input, i.e. ratios near 10,000x.
+  // `MAX_RATIO` sits far above the former and far below the latter.
+  const MAX_RATIO = 60;
+  const UNITS = 16384;
+
+  for (const shape of REPEATED_GROUP_SHAPES) {
+    const lexer = CpuReferenceLexer.create(
+      wasmCoreRuntimeBytes(),
+      shapePlan(shape.grammar),
+    );
+    const terminated = toUnits(shape.terminated(UNITS));
+    const unterminated = toUnits(shape.unterminated(UNITS));
+
+    function medianLexMs(source: Uint16Array): number {
+      const samples: number[] = [];
+      for (let trial = 0; trial < 3; trial += 1) {
+        samples.push(lexer.lex(source).timings.lexAllMs);
+      }
+      samples.sort((left, right) => left - right);
+      return samples[1];
+    }
+
+    // Terminated first, so a cold instance cannot bias the ratio upward.
+    const terminatedMs = medianLexMs(terminated);
+    const unterminatedMs = medianLexMs(unterminated);
+    const ratio = unterminatedMs / terminatedMs;
+
+    assert(
+      ratio < MAX_RATIO,
+      `lex_all on ${UNITS} units of ${shape.name} without a terminator took ${
+        unterminatedMs.toFixed(2)
+      } ms against ${
+        terminatedMs.toFixed(2)
+      } ms for terminated input of the same length (ratio ${
+        ratio.toFixed(1)
+      }x, bound ${MAX_RATIO}x). The (position, state) failure memo in fn lex_all has stopped working.`,
+    );
+  }
 });

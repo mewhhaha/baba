@@ -131,6 +131,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "parse_cursor",
     "parser_goto",
     "lex_all",
+    "lex_memo_i32_per_position",
     "load_plan",
     "abi_version",
     "plan_version",

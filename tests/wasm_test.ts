@@ -149,9 +149,12 @@ interface RawCursorWasmExports {
     stackPtr: number,
     fragmentPtr: number,
     fragmentCapacity: number,
+    memoPtr: number,
+    memoCapacity: number,
     preserveTrivia: number,
     maxTraceActions: number,
   ): number;
+  lex_memo_i32_per_position(): number;
 }
 
 interface GeneratedWasmModule {
@@ -265,8 +268,13 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
   assert(lexAll, "Expected lex_all in abi.json.");
   assertEquals(
     lexAll.params?.join(","),
-    "sourcePtr,sourceLength,mode,tokenPtr",
+    "sourcePtr,sourceLength,mode,tokenPtr,tokenCapacity,memoPtr,memoCapacity",
   );
+  const lexMemo = abi.core?.exports?.find((entry) =>
+    entry.name === "lex_memo_i32_per_position"
+  );
+  assert(lexMemo, "Expected lex_memo_i32_per_position in abi.json.");
+  assertEquals(lexMemo.params?.join(","), "");
   assertNotIncludes(
     bundle.files.map((file) => file.path).join(","),
     "lexer.ts",
@@ -1080,8 +1088,13 @@ Deno.test("Wasm parse_cursor export materializes cursor tapes", async () => {
       stackPtr + structuralCapacity * WASM_I32_BYTES,
       WASM_I32_BYTES,
     );
-    const requiredBytes = fragmentPtr +
-      structuralCapacity * 9 * WASM_I32_BYTES;
+    const memoPtr = alignTest(
+      fragmentPtr + structuralCapacity * 9 * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const memoCapacity = (source.length + 1) *
+      wasm.lex_memo_i32_per_position();
+    const requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
     if (wasm.memory.buffer.byteLength < requiredBytes) {
       const missing = requiredBytes - wasm.memory.buffer.byteLength;
       wasm.memory.grow(Math.ceil(missing / 65_536));
@@ -1113,6 +1126,8 @@ Deno.test("Wasm parse_cursor export materializes cursor tapes", async () => {
       stackPtr,
       fragmentPtr,
       structuralCapacity,
+      memoPtr,
+      memoCapacity,
       0,
       10_000,
     );

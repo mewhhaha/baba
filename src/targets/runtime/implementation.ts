@@ -33,7 +33,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/runtime/generated_wasm.ts",
       role: "generated-wasm-parser-loader",
-      hash: "fnv1a64:867dd302261cdf9a",
+      hash: "fnv1a64:8174bb6d04e833f5",
     },
     {
       path: "src/targets/runtime/diagnostic_codes.ts",
@@ -43,7 +43,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_abi.ts",
       role: "wasm-abi-constants",
-      hash: "fnv1a64:d01c6e7fc98801ce",
+      hash: "fnv1a64:4be2e1d1da84e3a7",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime.ts",
@@ -73,12 +73,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_engine_rs/src/lib.rs",
       role: "wasm-core-runtime-rust-source",
-      hash: "fnv1a64:7b43c2bbfcc428da",
+      hash: "fnv1a64:21037b2de8d91d64",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime_bytes.ts",
       role: "wasm-core-runtime-embedded-bytes",
-      hash: "fnv1a64:a880c42999d0fbf9",
+      hash: "fnv1a64:88ad77ca27c97dc7",
     },
     {
       path: "src/targets/runtime/provenance.ts",
@@ -87,7 +87,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:a61f0bc30b705353" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:5fdc027adc798736" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

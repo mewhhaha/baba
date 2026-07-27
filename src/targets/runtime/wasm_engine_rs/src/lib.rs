@@ -2,7 +2,7 @@
 
 use core::panic::PanicInfo;
 
-const WASM_ABI_VERSION: i32 = 8;
+const WASM_ABI_VERSION: i32 = 9;
 const RUNTIME_IMPLEMENTATION_VERSION: i32 = 2;
 const MAX_WASM_PAGES: i32 = 65_535;
 const SOURCE_ENCODING_UTF16: i32 = 1;
@@ -64,6 +64,10 @@ const ACTION_REDUCE: i32 = 0x0200_0000;
 const ACTION_ACCEPT: i32 = 0x0300_0000;
 const ACTION_KIND_MASK: i32 = ACTION_SHIFT | ACTION_REDUCE | ACTION_ACCEPT;
 const ACTION_PAYLOAD_MASK: i32 = 0x00ff_ffff;
+
+// `lex_all` returns a token count, so its failures are the negative values.
+const LEX_STATUS_TOKEN_CAPACITY: i32 = -1;
+const LEX_STATUS_MEMO_CAPACITY: i32 = -2;
 
 const PARSE_STATUS_OK: i32 = 0;
 const PARSE_STATUS_UNEXPECTED: i32 = 1;
@@ -350,50 +354,140 @@ pub extern "C" fn lex_one(src: i32, len: i32, offset: i32, result: i32) -> i32 {
     0
 }
 
-/// Address of the failure-memo cell for source position `position`.
+/// i32 words of failure memo one source position needs: one bit per DFA state.
 ///
-/// The memo lives INSIDE the caller's token buffer, in the `specIndex` slot of
-/// the record that a token starting at `position` would occupy. That is sound
-/// because `lex_all` maintains `count <= offset` (every token consumes at least
-/// one code unit) while every memo read sits at `index > offset` and every memo
-/// write at `position > best_end >= offset`. So a memo cell is only ever
-/// touched at a record index strictly greater than the highest record already
-/// emitted, and `store_token_record` can only overwrite the cell for position
-/// `count`, which by the same invariant is never read again. The buffer must
-/// therefore hold `sourceLength` records, which is the pre-existing contract -
-/// `lex_all` can emit one record per code unit - and is what `parse_trace` and
-/// `parse_cursor` already enforce. See `docs/wasm-abi.md`.
-fn memo_address(tokens: i32, position: i32) -> i32 {
-    token_record_address(tokens, position)
+/// The memo is keyed by (position, state), NOT by position alone. A memo keyed
+/// by position can hold only one state per position, so scans that reach the
+/// same position in different states evict each other and no scan ever hits -
+/// which is exactly what happens on any grammar with a repeated group that can
+/// fail late (`/([0-9a-f][0-9a-f])+;/`, `/([A-Za-z0-9+\/]{4})+=/`, `/(aa)*b/`).
+/// See `docs/performance.md`.
+///
+/// Hosts size the memo buffer with this rather than by reading the plan
+/// header, so the bitset layout stays private to the engine.
+#[no_mangle]
+pub extern "C" fn lex_memo_i32_per_position() -> i32 {
+    let states = header(PLAN_HEADER_DFA_STATE_COUNT);
+    if states <= 0 {
+        return 0;
+    }
+    (states + 31) / 32
 }
 
-/// Longest-match-with-restart tokenizer with a per-position failure memo.
+/// i32 the memo buffer must hold for a source of `len` code units under the
+/// currently loaded plan, or `-1` when that does not fit in an i32.
+///
+/// `len + 1` scan positions, because a scan can stop at end of input and that
+/// configuration is worth memoising too.
+fn memo_i32_count(len: i32) -> i32 {
+    if len < 0 {
+        return 0;
+    }
+    let words = lex_memo_i32_per_position();
+    if words <= 0 {
+        return 0;
+    }
+    let total = ((len as i64) + 1) * (words as i64);
+    // Bounded by i32 BYTES rather than i32 words, so `memo_word_address` cannot
+    // overflow the offset it computes.
+    if total > (i32::MAX / 4) as i64 {
+        return -1;
+    }
+    total as i32
+}
+
+/// Address of the memo word holding the bit for (`position`, `state`).
+fn memo_word_address(memo: i32, words: i32, position: i32, state: i32) -> i32 {
+    memo + (position * words + (state >> 5)) * 4
+}
+
+/// True when a previous scan in THIS call proved that arriving at `position` in
+/// `state` cannot accept before the scan dies.
+fn memo_is_set(memo: i32, words: i32, position: i32, state: i32) -> bool {
+    // A plan whose transition table names a state outside the declared state
+    // count would index past the bitset, so the width is enforced here rather
+    // than assumed. Such a state is simply never memoised.
+    if state < 0 || state >= words * 32 {
+        return false;
+    }
+    let word = unsafe { load_i32(memo_word_address(memo, words, position, state)) };
+    word & (1 << (state & 31)) != 0
+}
+
+fn memo_set(memo: i32, words: i32, position: i32, state: i32) {
+    if state < 0 || state >= words * 32 {
+        return;
+    }
+    let address = memo_word_address(memo, words, position, state);
+    let word = unsafe { load_i32(address) };
+    unsafe { store_i32(address, word | (1 << (state & 31))) };
+}
+
+fn memo_clear(memo: i32, word_count: i32) {
+    let mut index = 0;
+    while index < word_count {
+        unsafe { store_i32(memo + index * 4, 0) };
+        index += 1;
+    }
+}
+
+/// Longest-match-with-restart tokenizer with a (position, state) failure memo.
 ///
 /// Without the memo this is O(n^2): a scan that runs far past its last
 /// accepting position throws that suffix away and the next token rescans it.
-/// `fixtures/perf/error-heavy/grammar.baba` on `"\` repeated reaches 2.0x
-/// ms/MiB per doubling because the string state never dies and never accepts,
-/// so no dead-state or reachability prune can fire. See `docs/performance.md`.
+/// No dead-state or reachability prune can fire on the shapes that trigger it -
+/// the parked states all have outgoing edges and can all still reach an accept.
+/// See `docs/performance.md`.
 ///
-/// The memo records, for source positions the scan visited AFTER its last
-/// accept, the DFA state it was in. Arriving at the same position in the same
-/// state again is the same deterministic future on the same input, so it cannot
-/// accept either and the scan stops. `memo_lo`/`memo_hi` bound the positions
-/// written during THIS call, so nothing stale is ever trusted; a memo entry is
-/// a pure fact about the input, so a lost or overwritten entry only costs
-/// speed. Emitted records are unchanged, `acceptingState` included: the memo is
-/// only consulted strictly past `best_end`, which cannot move `best_spec`,
-/// `best_end` or `best_state`.
+/// The memo records, for source positions a scan visited AFTER its last accept,
+/// the DFA state it was in. Arriving at the same position in the same state
+/// again is the same deterministic future over the same input - `transition`
+/// and `selected_global_spec` both depend only on `(src, len, position, state)`
+/// - so it cannot accept either and the scan stops. Every tail step therefore
+/// either lands on a (position, state) pair never seen before in this call or
+/// ends the scan, which bounds total scan work at `O(len * stateCount)`.
+///
+/// The memo is exact in the direction that matters: a set bit is a true fact
+/// about the input, so it can only stop a scan that was going to fail anyway,
+/// and a bit that is never set only costs speed. Emitted records are unchanged,
+/// `acceptingState` included, because the memo is consulted only strictly past
+/// `best_end`, which is after `best_spec`, `best_end` and `best_state` are
+/// settled for the token being cut.
+///
+/// It is switched on lazily. Until a call has thrown away more scan steps than
+/// the source has code units the memo is neither read nor written and not even
+/// zeroed, so ordinary source - which does run past its last accept whenever a
+/// token is a proper prefix of a longer one - pays one compare per DFA step and
+/// nothing else. That bounds the pre-memo waste at `O(len)`.
 #[no_mangle]
-pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
+pub extern "C" fn lex_all(
+    src: i32,
+    len: i32,
+    _mode: i32,
+    tokens: i32,
+    token_capacity: i32,
+    memo: i32,
+    memo_capacity: i32,
+) -> i32 {
+    // One record per code point is the worst case - an unrecognisable code
+    // point becomes its own error token - so `len` records is the requirement.
+    if token_capacity < len {
+        return LEX_STATUS_TOKEN_CAPACITY;
+    }
+    let memo_required = memo_i32_count(len);
+    if memo_required < 0 {
+        return LEX_STATUS_MEMO_CAPACITY;
+    }
+    if memo_capacity < memo_required {
+        return LEX_STATUS_MEMO_CAPACITY;
+    }
+
+    let memo_words = lex_memo_i32_per_position();
+    let mut memo_enabled = false;
+    let mut wasted: i64 = 0;
+
     let mut offset = 0;
     let mut count = 0;
-
-    // Empty half-open-by-convention interval: `index <= memo_hi` is the first
-    // test on the hot path and fails on the first compare until a scan has
-    // actually written a past-accept suffix. Ordinary source never writes one.
-    let mut memo_lo = 1;
-    let mut memo_hi = 0;
 
     let start_state = header(PLAN_HEADER_DFA_START_STATE);
     while offset < len {
@@ -403,6 +497,16 @@ pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
         let mut best_end = offset;
         let mut best_state = -1;
 
+        // Positions at or below `memo_floor` are never consulted. While the
+        // memo is off it sits at `len`, which no `index` can exceed, so the
+        // whole memo path costs one never-taken compare per DFA step. While it
+        // is on it tracks `best_end`: a pair at or below the last accept cannot
+        // be in the memo, because the memo only holds pairs that fail.
+        let mut memo_floor = len;
+        if memo_enabled {
+            memo_floor = offset;
+        }
+
         while index < len {
             let decoded = decode_code_point(src, index, len);
             let target = transition(state, decoded.code_point);
@@ -411,16 +515,17 @@ pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
             }
             index += decoded.width;
             state = target;
-            if index <= memo_hi && index >= memo_lo {
-                if unsafe { load_i32(memo_address(tokens, index)) } == state {
-                    break;
-                }
+            if index > memo_floor && memo_is_set(memo, memo_words, index, state) {
+                break;
             }
             let accept = selected_global_spec(src, len, index, state);
             if accept >= 0 {
                 best_spec = accept;
                 best_end = index;
                 best_state = state;
+                if memo_enabled {
+                    memo_floor = index;
+                }
             }
         }
 
@@ -428,42 +533,27 @@ pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
         // end of input. Everything in `(best_end, index]` was visited without
         // accepting and cannot accept later, so it is memo-able.
         let scan_end = index;
-        let mut memo_index = best_end;
-        let mut memo_state = start_state;
-        if best_spec >= 0 {
-            memo_state = best_state;
-        }
-        while memo_index < scan_end {
-            let decoded = decode_code_point(src, memo_index, len);
-            let target = transition(memo_state, decoded.code_point);
-            if target < 0 {
-                break;
+        if memo_enabled {
+            let mut memo_index = best_end;
+            let mut memo_state = start_state;
+            if best_spec >= 0 {
+                memo_state = best_state;
             }
-            if decoded.width == 2 && memo_index + 1 < len {
-                // A surrogate pair steps over its trailing position, so nothing
-                // writes a state there. Park an impossible state rather than
-                // leave a hole inside `[memo_lo, memo_hi]` that a scan starting
-                // on the lone low surrogate could read as a stale match.
-                unsafe { store_i32(memo_address(tokens, memo_index + 1), -1) };
+            while memo_index < scan_end {
+                let decoded = decode_code_point(src, memo_index, len);
+                let target = transition(memo_state, decoded.code_point);
+                if target < 0 {
+                    break;
+                }
+                memo_index += decoded.width;
+                memo_state = target;
+                memo_set(memo, memo_words, memo_index, memo_state);
             }
-            memo_index += decoded.width;
-            memo_state = target;
-            if memo_index < len {
-                unsafe { store_i32(memo_address(tokens, memo_index), memo_state) };
-            }
-        }
-
-        let mut written_hi = scan_end;
-        if written_hi > len - 1 {
-            written_hi = len - 1;
-        }
-        let written_lo = best_end + 1;
-        if written_lo <= written_hi {
-            if memo_lo > memo_hi || written_lo > memo_hi + 1 {
-                memo_lo = written_lo;
-                memo_hi = written_hi;
-            } else if written_hi > memo_hi {
-                memo_hi = written_hi;
+        } else {
+            wasted += (scan_end - best_end) as i64;
+            if memo_words > 0 && wasted > len as i64 {
+                memo_clear(memo, memo_required);
+                memo_enabled = true;
             }
         }
 
@@ -927,6 +1017,8 @@ pub extern "C" fn parse_trace(
     result: i32,
     stack_ptr: i32,
     stack_capacity: i32,
+    memo_ptr: i32,
+    memo_capacity: i32,
     preserve_trivia: i32,
     max_trace_actions: i32,
 ) -> i32 {
@@ -957,8 +1049,28 @@ pub extern "C" fn parse_trace(
             token_read,
         );
     }
+    let memo_required = memo_i32_count(len);
+    if memo_required < 0 || memo_capacity < memo_required {
+        return return_parse_trace_status(
+            PARSE_STATUS_INTERNAL,
+            result,
+            token_write,
+            trace_count,
+            len,
+            current_state,
+            token_read,
+        );
+    }
 
-    let raw_token_count = lex_all(src, len, 0, token_ptr);
+    let raw_token_count = lex_all(
+        src,
+        len,
+        0,
+        token_ptr,
+        token_capacity,
+        memo_ptr,
+        memo_capacity,
+    );
     if raw_token_count < 0 || raw_token_count > token_capacity {
         return return_parse_trace_status(
             PARSE_STATUS_INTERNAL,
@@ -1301,6 +1413,8 @@ pub extern "C" fn parse_cursor(
     stack_ptr: i32,
     fragment_ptr: i32,
     fragment_capacity: i32,
+    memo_ptr: i32,
+    memo_capacity: i32,
     preserve_trivia: i32,
     max_trace_actions: i32,
 ) -> i32 {
@@ -1348,8 +1462,29 @@ pub extern "C" fn parse_cursor(
             token_read,
         );
     }
+    // Reported as a capacity failure here rather than as the internal error a
+    // negative `lex_all` return would otherwise become.
+    let memo_required = memo_i32_count(len);
+    if memo_required < 0 || memo_capacity < memo_required {
+        return return_parse_cursor_status(
+            PARSE_CURSOR_STATUS_CAPACITY,
+            result,
+            token_write,
+            len,
+            current_state,
+            token_read,
+        );
+    }
 
-    let raw_token_count = lex_all(src, len, 0, token_ptr);
+    let raw_token_count = lex_all(
+        src,
+        len,
+        0,
+        token_ptr,
+        token_capacity,
+        memo_ptr,
+        memo_capacity,
+    );
     if raw_token_count < 0 {
         return return_parse_cursor_status(
             PARSE_STATUS_INTERNAL,
