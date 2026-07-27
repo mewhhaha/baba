@@ -47,6 +47,13 @@ const CORE_HEADER_ALPHABET_RANGES = 35;
 const I32_BYTES = 4;
 const ASCII_CLASS_LIMIT = 128;
 const MAX_CODE_POINT = 0x10ffff;
+
+// Ceiling on segment-state checks when verifying the alphabet partition. The
+// work is inherent to the property, but both of its factors grow with plan
+// size, so an untrusted plan could otherwise buy quadratic validation time.
+// The shipped example grammars sit near 10^4 and the large-runtime fixture
+// near 5x10^4, so this leaves roughly three orders of magnitude of headroom.
+const MAX_ALPHABET_PARTITION_WORK = 1 << 24;
 const COMPACT_I16_OFFSET_TAG = 2;
 const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 const WASM_PLAN_RUNTIME_SECTION_MAGIC = new Uint8Array([
@@ -914,6 +921,18 @@ function validateAlphabetPartition(
     );
   }
 
+  // Every class must own at least one segment, and there are at most
+  // ASCII_CLASS_LIMIT + rangeCount segments, so a larger classCount cannot
+  // describe a partition. Checked before allocating anything sized by it: this
+  // runs on caller-supplied plan bytes, where a declared count is an attacker's
+  // free variable rather than a fact.
+  const segmentCount = segmentStarts.length;
+  if (input.classCount > segmentCount) {
+    throw new Error(
+      `Wasm parser plan declares ${input.classCount} alphabet classes but only ${segmentCount} segments, so some class covers no code points.`,
+    );
+  }
+
   const classSeen = new Uint8Array(input.classCount);
   for (const classId of segmentClasses) {
     classSeen[classId] = 1;
@@ -926,13 +945,38 @@ function validateAlphabetPartition(
     }
   }
 
-  // Target of every segment in every state, computed by walking each state's
-  // CSR row alongside the segment list. Both are ascending and disjoint, which
-  // is checked here rather than assumed.
-  const segmentCount = segmentStarts.length;
-  const targets = new Int32Array(
-    checkedMul(segmentCount, input.dfaStateCount, "alphabet target vector"),
+  // Verifying the partition means checking, for every state, that all segments
+  // of a class share a transition target. The obvious shape is a
+  // segment-by-state matrix, but both dimensions grow with plan size, so that
+  // is quadratic in the bytes a caller hands us: a valid 1.5 MB plan wanted
+  // 14.7 GiB. Only one question is ever asked of that matrix - does this
+  // segment agree with the first segment of its class - and one state at a
+  // time answers it in O(classCount), because segments are walked in ascending
+  // order so a class's first segment is always reached before its others.
+  const firstSegmentOfClass = new Int32Array(input.classCount).fill(-1);
+  for (let segment = 0; segment < segmentCount; segment++) {
+    const classId = segmentClasses[segment];
+    if (firstSegmentOfClass[classId] < 0) {
+      firstSegmentOfClass[classId] = segment;
+    }
+  }
+
+  // Work is still stateCount * segmentCount, which is inherent to the property
+  // being checked. Bound it so a plan cannot buy unbounded validation time:
+  // the shipped grammars sit near 10^4, and large-runtime near 5x10^4.
+  const partitionWork = checkedMul(
+    segmentCount,
+    input.dfaStateCount,
+    "alphabet partition work",
   );
+  if (partitionWork > MAX_ALPHABET_PARTITION_WORK) {
+    throw new Error(
+      `Wasm parser plan alphabet partition needs ${partitionWork} segment-state checks, above the ${MAX_ALPHABET_PARTITION_WORK} limit.`,
+    );
+  }
+
+  // Reference target per class for the state being walked, refilled each state.
+  const classTarget = new Int32Array(input.classCount);
   for (let state = 0; state < input.dfaStateCount; state++) {
     const rowStart = readRowValue(bytes, input.transitionRows, state);
     const rowEnd = readRowValue(bytes, input.transitionRows, state + 1);
@@ -975,21 +1019,14 @@ function validateAlphabetPartition(
         }
         break;
       }
-      targets[segment * input.dfaStateCount + state] = target;
-    }
-  }
-
-  const firstSegmentOfClass = new Int32Array(input.classCount).fill(-1);
-  for (let segment = 0; segment < segmentCount; segment++) {
-    const classId = segmentClasses[segment];
-    const first = firstSegmentOfClass[classId];
-    if (first < 0) {
-      firstSegmentOfClass[classId] = segment;
-      continue;
-    }
-    for (let state = 0; state < input.dfaStateCount; state++) {
-      const expected = targets[first * input.dfaStateCount + state];
-      const actual = targets[segment * input.dfaStateCount + state];
+      const classId = segmentClasses[segment];
+      const first = firstSegmentOfClass[classId];
+      if (segment === first) {
+        classTarget[classId] = target;
+        continue;
+      }
+      const expected = classTarget[classId];
+      const actual = target;
       if (expected === actual) continue;
       throw new Error(
         `Wasm parser plan alphabet class ${classId} is not an equivalence class: lexer state ${state} goes to ${expected} on code point ${
