@@ -73,12 +73,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_engine_rs/src/lib.rs",
       role: "wasm-core-runtime-rust-source",
-      hash: "fnv1a64:08339f9d30b96f69",
+      hash: "fnv1a64:7b43c2bbfcc428da",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime_bytes.ts",
       role: "wasm-core-runtime-embedded-bytes",
-      hash: "fnv1a64:3cbc282b88645a06",
+      hash: "fnv1a64:a880c42999d0fbf9",
     },
     {
       path: "src/targets/runtime/provenance.ts",
@@ -87,7 +87,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:d578d4035bdebc42" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:24ee61ebb4551f58" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

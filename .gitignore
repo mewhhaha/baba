@@ -2,3 +2,4 @@ tmp/
 examples/*/generated/
 src/targets/runtime/wasm_engine_rs/target/
 src/compiler/grammar_rs/target/
+runtime-bench.json

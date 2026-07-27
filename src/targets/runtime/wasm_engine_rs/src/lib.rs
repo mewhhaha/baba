@@ -350,10 +350,50 @@ pub extern "C" fn lex_one(src: i32, len: i32, offset: i32, result: i32) -> i32 {
     0
 }
 
+/// Address of the failure-memo cell for source position `position`.
+///
+/// The memo lives INSIDE the caller's token buffer, in the `specIndex` slot of
+/// the record that a token starting at `position` would occupy. That is sound
+/// because `lex_all` maintains `count <= offset` (every token consumes at least
+/// one code unit) while every memo read sits at `index > offset` and every memo
+/// write at `position > best_end >= offset`. So a memo cell is only ever
+/// touched at a record index strictly greater than the highest record already
+/// emitted, and `store_token_record` can only overwrite the cell for position
+/// `count`, which by the same invariant is never read again. The buffer must
+/// therefore hold `sourceLength` records, which is the pre-existing contract -
+/// `lex_all` can emit one record per code unit - and is what `parse_trace` and
+/// `parse_cursor` already enforce. See `docs/wasm-abi.md`.
+fn memo_address(tokens: i32, position: i32) -> i32 {
+    token_record_address(tokens, position)
+}
+
+/// Longest-match-with-restart tokenizer with a per-position failure memo.
+///
+/// Without the memo this is O(n^2): a scan that runs far past its last
+/// accepting position throws that suffix away and the next token rescans it.
+/// `fixtures/perf/error-heavy/grammar.baba` on `"\` repeated reaches 2.0x
+/// ms/MiB per doubling because the string state never dies and never accepts,
+/// so no dead-state or reachability prune can fire. See `docs/performance.md`.
+///
+/// The memo records, for source positions the scan visited AFTER its last
+/// accept, the DFA state it was in. Arriving at the same position in the same
+/// state again is the same deterministic future on the same input, so it cannot
+/// accept either and the scan stops. `memo_lo`/`memo_hi` bound the positions
+/// written during THIS call, so nothing stale is ever trusted; a memo entry is
+/// a pure fact about the input, so a lost or overwritten entry only costs
+/// speed. Emitted records are unchanged, `acceptingState` included: the memo is
+/// only consulted strictly past `best_end`, which cannot move `best_spec`,
+/// `best_end` or `best_state`.
 #[no_mangle]
 pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
     let mut offset = 0;
     let mut count = 0;
+
+    // Empty half-open-by-convention interval: `index <= memo_hi` is the first
+    // test on the hot path and fails on the first compare until a scan has
+    // actually written a past-accept suffix. Ordinary source never writes one.
+    let mut memo_lo = 1;
+    let mut memo_hi = 0;
 
     let start_state = header(PLAN_HEADER_DFA_START_STATE);
     while offset < len {
@@ -371,11 +411,59 @@ pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
             }
             index += decoded.width;
             state = target;
+            if index <= memo_hi && index >= memo_lo {
+                if unsafe { load_i32(memo_address(tokens, index)) } == state {
+                    break;
+                }
+            }
             let accept = selected_global_spec(src, len, index, state);
             if accept >= 0 {
                 best_spec = accept;
                 best_end = index;
                 best_state = state;
+            }
+        }
+
+        // `index` is now where the scan stopped: dead transition, memo hit or
+        // end of input. Everything in `(best_end, index]` was visited without
+        // accepting and cannot accept later, so it is memo-able.
+        let scan_end = index;
+        let mut memo_index = best_end;
+        let mut memo_state = start_state;
+        if best_spec >= 0 {
+            memo_state = best_state;
+        }
+        while memo_index < scan_end {
+            let decoded = decode_code_point(src, memo_index, len);
+            let target = transition(memo_state, decoded.code_point);
+            if target < 0 {
+                break;
+            }
+            if decoded.width == 2 && memo_index + 1 < len {
+                // A surrogate pair steps over its trailing position, so nothing
+                // writes a state there. Park an impossible state rather than
+                // leave a hole inside `[memo_lo, memo_hi]` that a scan starting
+                // on the lone low surrogate could read as a stale match.
+                unsafe { store_i32(memo_address(tokens, memo_index + 1), -1) };
+            }
+            memo_index += decoded.width;
+            memo_state = target;
+            if memo_index < len {
+                unsafe { store_i32(memo_address(tokens, memo_index), memo_state) };
+            }
+        }
+
+        let mut written_hi = scan_end;
+        if written_hi > len - 1 {
+            written_hi = len - 1;
+        }
+        let written_lo = best_end + 1;
+        if written_lo <= written_hi {
+            if memo_lo > memo_hi || written_lo > memo_hi + 1 {
+                memo_lo = written_lo;
+                memo_hi = written_hi;
+            } else if written_hi > memo_hi {
+                memo_hi = written_hi;
             }
         }
 

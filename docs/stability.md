@@ -111,6 +111,13 @@ each generated `wasm/abi.json`. Changes to exported core functions, record
 layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.
 
+How much of a caller-owned buffer an export may write is part of that contract.
+`lex_all` scribbles scratch into the token records it did not return, which
+`docs/wasm-abi.md` spells out; a host that sized the buffer for fewer than
+`sourceLength` records was already unsound, so this needed no version change
+beyond the `7 -> 8` bump this release already carries. Narrowing what an export
+may write is additive; widening it is not, and needs a version change.
+
 The TypeScript Wasm adapter API is stable at the generated module entrypoint.
 Generated modules import their loader from
 `@mewhhaha/baba/runtime/generated-wasm`. Low-level helper names and embedded

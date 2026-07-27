@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 7.0.0
+
+Three versioned contracts move in this release, and all three require
+regeneration: the package (6.1.0 -> 7.0.0), the Wasm core ABI (7 -> 8) and the
+core plan format (3 -> 4). Regenerate `parser.wasm` and `parser.plan` together;
+a mismatched pair is rejected rather than misread. `PortableParserPlan` version
+2 and metadata schema version 2 are unchanged.
+
+The behavioural break to check first: `parse()`, `validate()` and `lex()` no
+longer throw `RangeError` on oversized input. They return the structured
+`PARSER_INPUT_TOO_LARGE` diagnostic instead, so a caller that catches the throw
+needs updating.
 
 ### Added
 
@@ -11,7 +22,7 @@
   cannot be hosted inside the synchronous generated `parser.lex()`; it supports
   guard-free grammars only and refuses others with a structured diagnostic; it
   requires a WebGPU adapter; and it is measurably slower than the shipping lexer
-  below roughly 768 KiB of source, with a one-time device setup that no single
+  below roughly 896 KiB of source, with a one-time device setup that no single
   document repays. `docs/webgpu-lexer.md` has the measured numbers and the
   limits, and `docs/stability.md` records that the module carries no
   compatibility or performance guarantee.
@@ -32,8 +43,9 @@
   node records of two `i32` each rather than contiguous `i32` slices, and the
   internal fragment record widened from 9 to 10 `i32`. `wasm/abi.json` gains
   `core.layouts.cursorChildRecord` and `core.layouts.cursorValueItemRecord`.
-  `PortableParserPlan` is untouched: plan version 2 and core plan format version
-  3 are unchanged. Regenerate `parser.wasm` alongside the adapter.
+  `PortableParserPlan` version 2 is unchanged. Regenerate `parser.wasm`
+  alongside the adapter. The core plan format also moves this release, to 4; see
+  below.
 - `parser.lex()` is roughly 3x faster and no longer degrades with input size. It
   built two throwaway JavaScript objects per token before returning; the token
   tape now holds the raw records as a single `Int32Array` and materializes a
@@ -72,6 +84,29 @@
   instead, and `docs/webgpu-lexer.md` carries the current numbers.
 
 ### Fixed
+
+- `fn lex_all` was O(n^2) on backtracking-heavy input and is now linear. A
+  grammar with the ordinary string-literal regex `/"([^"\\]|\\.)*"/` - which
+  compiles with no diagnostics - degraded to 2.0x ms/MiB per doubling on `"\`
+  repeated, because the string state never closes and never dies, so every scan
+  ran to end of input and the next token rescanned the same suffix. 32,768 code
+  units took 1,554 ms and 131,072 took 25,473 ms. They now take 0.93 ms and 3.80
+  ms.
+
+  `lex_all` carries a per-position failure memo: the DFA state a scan was in at
+  positions it visited after its last accepting position. Re-entering the same
+  (position, state) pair is the same deterministic future on the same input, so
+  the scan stops. Emitted token records are byte-identical, `acceptingState`
+  included, because the memo is only consulted strictly past the point where the
+  token being cut is already decided.
+
+  No ABI signature changed. The memo lives in the token records `lex_all` has
+  not returned, so it needs no new memory. `docs/wasm-abi.md` now states what
+  was already the only safe reading of the contract: the token buffer must hold
+  `sourceLength` records, and `lex_all` may write scratch into the ones past the
+  returned count. Ordinary lexing did not regress - measured on 1 MiB per
+  example grammar it got 14-18% faster, which is code layout rather than the
+  memo. `docs/performance.md` has the curves and the controls.
 
 - The DFA start state was hardcoded to `0` in the Rust engine and the WebGPU
   kernel and was never stored in the plan, so a plan whose DFA started anywhere

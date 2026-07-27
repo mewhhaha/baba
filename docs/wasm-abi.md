@@ -148,6 +148,19 @@ characters therefore occupy two units in public spans.
 | `end`            | `i32` |    `8` |
 | `acceptingState` | `i32` |   `12` |
 
+The buffer at `tokenPtr` must have room for `sourceLength` records, never fewer.
+That is the worst case `lex_all` can emit - one error token per code unit - so
+it was already the only safe size, and it is what `parse_trace` and
+`parse_cursor` enforce when they reject `token_capacity < sourceLength`.
+
+`lex_all` uses the records it has not returned as scratch: it may write any
+value into the record slots from the returned count up to `sourceLength - 1`.
+This is how its per-position failure memo avoids O(n^2) backtracking without a
+separate scratch allocation (`docs/performance.md`, "Lexer backtracking worst
+case"). Only the first `count` records the call returns are meaningful, which
+was already true - the rest were previously stale bytes from earlier calls - so
+hosts sizing the buffer correctly need no change.
+
 `parse_trace` writes a trace result record at `resultPtr`:
 
 | Field              | Type  | Offset |
