@@ -4,7 +4,7 @@ import type {
   AnalyzedGrammarToken,
   GrammarModeId,
 } from "./grammar_ir.ts";
-import type { Dfa } from "./regex/dfa.ts";
+import { DEAD_DFA_ALPHABET, type Dfa } from "./regex/dfa.ts";
 import { parsePortableRegex } from "./regex/parser.ts";
 import { buildLexerDfa, type LexerRegexSpec } from "./regex/lexer.ts";
 
@@ -138,6 +138,7 @@ export function buildGrammarLexerPlan(
         selectedAccept: null,
         transitions: [],
       }],
+      alphabet: DEAD_DFA_ALPHABET,
     };
     if (regexSpecs.length > 0) {
       dfa = buildLexerDfa(regexSpecs);

@@ -4,9 +4,9 @@ import {
 } from "./compact_plan_binary.ts";
 
 const CORE_PLAN_MAGIC = 0x31505742;
-const CORE_PLAN_FORMAT_VERSION = 3;
+const CORE_PLAN_FORMAT_VERSION = 4;
 const CORE_PLAN_VERSION = 2;
-const CORE_PLAN_HEADER_I32_COUNT = 31;
+const CORE_PLAN_HEADER_I32_COUNT = 36;
 const CORE_PLAN_HEADER_BYTES = CORE_PLAN_HEADER_I32_COUNT * 4;
 const CORE_HEADER_MAGIC = 0;
 const CORE_HEADER_FORMAT_VERSION = 1;
@@ -39,7 +39,14 @@ const CORE_HEADER_GUARD_TRANSITIONS = 27;
 const CORE_HEADER_SPEC_WORD_ROWS = 28;
 const CORE_HEADER_WORD_ROWS = 29;
 const CORE_HEADER_WORD_CODE_POINTS = 30;
+const CORE_HEADER_DFA_START_STATE = 31;
+const CORE_HEADER_ALPHABET_CLASS_COUNT = 32;
+const CORE_HEADER_ALPHABET_ASCII_CLASSES = 33;
+const CORE_HEADER_ALPHABET_RANGE_COUNT = 34;
+const CORE_HEADER_ALPHABET_RANGES = 35;
 const I32_BYTES = 4;
+const ASCII_CLASS_LIMIT = 128;
+const MAX_CODE_POINT = 0x10ffff;
 const COMPACT_I16_OFFSET_TAG = 2;
 const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 const WASM_PLAN_RUNTIME_SECTION_MAGIC = new Uint8Array([
@@ -374,6 +381,37 @@ function validateCorePlan(planBytes: Uint8Array): {
     planBytes,
     CORE_HEADER_WORD_CODE_POINTS,
   );
+  const dfaStartState = readNonNegativeI32(
+    planBytes,
+    CORE_HEADER_DFA_START_STATE,
+    "DFA start state",
+  );
+  if (dfaStartState >= dfaStateCount) {
+    throw new Error(
+      `Wasm parser plan DFA start state ${dfaStartState} is outside [0, ${dfaStateCount}).`,
+    );
+  }
+  const alphabetClassCount = readNonNegativeI32(
+    planBytes,
+    CORE_HEADER_ALPHABET_CLASS_COUNT,
+    "alphabet class count",
+  );
+  if (alphabetClassCount < 1) {
+    throw new Error("Wasm parser plan alphabet has no equivalence classes.");
+  }
+  const alphabetAsciiClasses = readI32(
+    planBytes,
+    CORE_HEADER_ALPHABET_ASCII_CLASSES,
+  );
+  const alphabetRangeCount = readNonNegativeI32(
+    planBytes,
+    CORE_HEADER_ALPHABET_RANGE_COUNT,
+    "alphabet range count",
+  );
+  if (alphabetRangeCount < 1) {
+    throw new Error("Wasm parser plan alphabet range list is empty.");
+  }
+  const alphabetRanges = readI32(planBytes, CORE_HEADER_ALPHABET_RANGES);
 
   validateSection(
     "accepts",
@@ -735,7 +773,231 @@ function validateCorePlan(planBytes: Uint8Array): {
       );
     }
   }
+  const transitionCount = readRowValue(
+    planBytes,
+    transitionRows,
+    dfaStateCount,
+  );
+  validateSection(
+    "transitions",
+    transitions,
+    checkedMul(
+      checkedMul(transitionCount, 3, "transition i32 count"),
+      I32_BYTES,
+      "transition byte length",
+    ),
+    coreByteLength,
+  );
+  validateSection(
+    "alphabet ASCII classes",
+    alphabetAsciiClasses,
+    checkedMul(
+      ASCII_CLASS_LIMIT,
+      I32_BYTES,
+      "alphabet ASCII class byte length",
+    ),
+    coreByteLength,
+  );
+  validateSection(
+    "alphabet ranges",
+    alphabetRanges,
+    checkedMul(
+      checkedMul(alphabetRangeCount, 3, "alphabet range i32 count"),
+      I32_BYTES,
+      "alphabet range byte length",
+    ),
+    coreByteLength,
+  );
+  validateAlphabetPartition(
+    planBytes,
+    {
+      dfaStateCount,
+      transitionRows,
+      transitions,
+      classCount: alphabetClassCount,
+      asciiClasses: alphabetAsciiClasses,
+      ranges: alphabetRanges,
+      rangeCount: alphabetRangeCount,
+    },
+  );
   return { coreByteLength, parserPlanVersion };
+}
+
+interface AlphabetPartitionInput {
+  readonly dfaStateCount: number;
+  readonly transitionRows: CompactSectionOffset;
+  readonly transitions: number;
+  readonly classCount: number;
+  readonly asciiClasses: number;
+  readonly ranges: number;
+  readonly rangeCount: number;
+}
+
+/**
+ * Validates the persisted alphabet equivalence classes.
+ *
+ * The partition is the contract that makes a dense `(states x classes)`
+ * transition table well defined, so a wrong partition would not corrupt the
+ * shipping lexer - which reads the CSR rows - but would silently give a
+ * class-table consumer different transitions. There is no cheaper way to catch
+ * that than to check the defining property directly, so this recomputes the
+ * per-segment target vectors from the CSR rows and requires every segment of a
+ * class to agree with the first segment of that class.
+ */
+function validateAlphabetPartition(
+  bytes: Uint8Array,
+  input: AlphabetPartitionInput,
+): void {
+  const asciiClasses = new Int32Array(ASCII_CLASS_LIMIT);
+  for (let codePoint = 0; codePoint < ASCII_CLASS_LIMIT; codePoint++) {
+    const classId = readI32AtByteOffset(
+      bytes,
+      input.asciiClasses + codePoint * I32_BYTES,
+    );
+    if (classId < 0 || classId >= input.classCount) {
+      throw new Error(
+        `Wasm parser plan alphabet class ${classId} at code point ${codePoint} is out of range.`,
+      );
+    }
+    asciiClasses[codePoint] = classId;
+  }
+
+  // Segment boundaries of the partition, in ascending order: ASCII runs first,
+  // then the range list, which must tile [ASCII_CLASS_LIMIT, MAX_CODE_POINT].
+  const segmentStarts: number[] = [0];
+  const segmentEnds: number[] = [];
+  const segmentClasses: number[] = [asciiClasses[0]];
+  for (let codePoint = 1; codePoint < ASCII_CLASS_LIMIT; codePoint++) {
+    if (asciiClasses[codePoint] === asciiClasses[codePoint - 1]) continue;
+    segmentEnds.push(codePoint - 1);
+    segmentStarts.push(codePoint);
+    segmentClasses.push(asciiClasses[codePoint]);
+  }
+  segmentEnds.push(ASCII_CLASS_LIMIT - 1);
+
+  let expectedStart = ASCII_CLASS_LIMIT;
+  for (let index = 0; index < input.rangeCount; index++) {
+    const base = input.ranges + index * 3 * I32_BYTES;
+    const start = readI32AtByteOffset(bytes, base);
+    const end = readI32AtByteOffset(bytes, base + I32_BYTES);
+    const classId = readI32AtByteOffset(bytes, base + 2 * I32_BYTES);
+    if (start !== expectedStart) {
+      throw new Error(
+        `Wasm parser plan alphabet range ${index} starts at ${start}, expected ${expectedStart}.`,
+      );
+    }
+    if (end < start || end > MAX_CODE_POINT) {
+      throw new Error(
+        `Wasm parser plan alphabet range ${index} has an invalid end ${end}.`,
+      );
+    }
+    if (classId < 0 || classId >= input.classCount) {
+      throw new Error(
+        `Wasm parser plan alphabet range ${index} has class ${classId}, which is out of range.`,
+      );
+    }
+    if (index > 0 && segmentClasses[segmentClasses.length - 1] === classId) {
+      throw new Error(
+        `Wasm parser plan alphabet range ${index} repeats the previous class ${classId} instead of being coalesced.`,
+      );
+    }
+    segmentStarts.push(start);
+    segmentEnds.push(end);
+    segmentClasses.push(classId);
+    expectedStart = end + 1;
+  }
+  if (expectedStart !== MAX_CODE_POINT + 1) {
+    throw new Error(
+      `Wasm parser plan alphabet ranges stop at ${
+        expectedStart - 1
+      }, expected ${MAX_CODE_POINT}.`,
+    );
+  }
+
+  const classSeen = new Uint8Array(input.classCount);
+  for (const classId of segmentClasses) {
+    classSeen[classId] = 1;
+  }
+  for (let classId = 0; classId < input.classCount; classId++) {
+    if (classSeen[classId] === 0) {
+      throw new Error(
+        `Wasm parser plan alphabet class ${classId} covers no code points.`,
+      );
+    }
+  }
+
+  // Target of every segment in every state, computed by walking each state's
+  // CSR row alongside the segment list. Both are ascending and disjoint, which
+  // is checked here rather than assumed.
+  const segmentCount = segmentStarts.length;
+  const targets = new Int32Array(
+    checkedMul(segmentCount, input.dfaStateCount, "alphabet target vector"),
+  );
+  for (let state = 0; state < input.dfaStateCount; state++) {
+    const rowStart = readRowValue(bytes, input.transitionRows, state);
+    const rowEnd = readRowValue(bytes, input.transitionRows, state + 1);
+    let cursor = rowStart;
+    let previousEnd = -1;
+    for (let segment = 0; segment < segmentCount; segment++) {
+      const start = segmentStarts[segment];
+      let target = -1;
+      while (cursor < rowEnd) {
+        const base = input.transitions + cursor * 3 * I32_BYTES;
+        const rangeStart = readI32AtByteOffset(bytes, base);
+        const rangeEnd = readI32AtByteOffset(bytes, base + I32_BYTES);
+        if (rangeStart > rangeEnd || rangeStart <= previousEnd) {
+          throw new Error(
+            `Wasm parser plan lexer state ${state} has transitions that are not ascending and disjoint.`,
+          );
+        }
+        if (rangeEnd < start) {
+          previousEnd = rangeEnd;
+          cursor++;
+          continue;
+        }
+        if (rangeStart <= start) {
+          if (rangeEnd < segmentEnds[segment]) {
+            throw new Error(
+              `Wasm parser plan lexer state ${state} has a transition ending at ${rangeEnd} inside alphabet segment [${start}, ${
+                segmentEnds[segment]
+              }].`,
+            );
+          }
+          target = readI32AtByteOffset(bytes, base + 2 * I32_BYTES);
+          break;
+        }
+        if (rangeStart <= segmentEnds[segment]) {
+          throw new Error(
+            `Wasm parser plan lexer state ${state} has a transition starting at ${rangeStart} inside alphabet segment [${start}, ${
+              segmentEnds[segment]
+            }].`,
+          );
+        }
+        break;
+      }
+      targets[segment * input.dfaStateCount + state] = target;
+    }
+  }
+
+  const firstSegmentOfClass = new Int32Array(input.classCount).fill(-1);
+  for (let segment = 0; segment < segmentCount; segment++) {
+    const classId = segmentClasses[segment];
+    const first = firstSegmentOfClass[classId];
+    if (first < 0) {
+      firstSegmentOfClass[classId] = segment;
+      continue;
+    }
+    for (let state = 0; state < input.dfaStateCount; state++) {
+      const expected = targets[first * input.dfaStateCount + state];
+      const actual = targets[segment * input.dfaStateCount + state];
+      if (expected === actual) continue;
+      throw new Error(
+        `Wasm parser plan alphabet class ${classId} is not an equivalence class: lexer state ${state} goes to ${expected} on code point ${
+          segmentStarts[first]
+        } but to ${actual} on code point ${segmentStarts[segment]}.`,
+      );
+    }
+  }
 }
 
 function validateSection(

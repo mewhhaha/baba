@@ -1,6 +1,6 @@
 import type { Diagnostic, SourceSpan } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
-import type { Dfa } from "../../compiler/regex/dfa.ts";
+import { computeDfaAlphabet, type Dfa } from "../../compiler/regex/dfa.ts";
 import type {
   BnfGrammar,
   BnfProduction,
@@ -884,15 +884,20 @@ export function portablePlanToLrTable(plan: PortableParserPlan): LrTable {
 }
 
 export function portablePlanToDfa(plan: PortableParserPlan): Dfa {
+  const states = plan.lexer.states.map((state) => ({
+    id: state.id,
+    nfaStates: [],
+    accepts: [...state.accepts],
+    selectedAccept: state.selectedAccept,
+    transitions: state.transitions.map((transition) => ({ ...transition })),
+  }));
+  // The alphabet partition is derived rather than carried in the portable plan:
+  // it is a function of the transitions alone, so recomputing it here produces
+  // exactly what `buildDfa` produced and adds no field to the portable contract.
   return {
     start: plan.lexer.startState,
-    states: plan.lexer.states.map((state) => ({
-      id: state.id,
-      nfaStates: [],
-      accepts: [...state.accepts],
-      selectedAccept: state.selectedAccept,
-      transitions: state.transitions.map((transition) => ({ ...transition })),
-    })),
+    states,
+    alphabet: computeDfaAlphabet(states),
   };
 }
 

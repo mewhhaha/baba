@@ -48,8 +48,18 @@
   behavior, including negative-only, nullable-positive, and overlapping-positive
   guards.
 
+- Core plan format version 3 -> 4. Header slots 31-35 carry the explicit DFA
+  start state and the lexer's alphabet equivalence classes (class count, ASCII
+  class table, sorted range list). The dense `(state x class)` transition table
+  is deliberately not persisted: measured across the four example grammars and
+  `fixtures/perf/large-runtime` it is 1.4x to 3.9x the CSR bytes it would
+  duplicate and is derivable in one lookup per class. `PortableParserPlan`
+  version 2 is unchanged. Regenerate `parser.plan`.
+
 ### Removed
 
+- `docs/migrating-to-5.md`, which described upgrading from Baba 4 to Baba 5.
+- `src/targets/wasm/module_emit.ts`, a 93-byte re-export with one importer.
 - `bench/ts_vs_wasm.ts`. It benchmarked the TypeScript runtime against the Wasm
   one, and the TypeScript runtime was removed in 6.0.0. It has failed to type
   check ever since (it still passes `targets: ["typescript", "wasm"]`), which
@@ -63,6 +73,10 @@
 
 ### Fixed
 
+- The DFA start state was hardcoded to `0` in the Rust engine and the WebGPU
+  kernel and was never stored in the plan, so a plan whose DFA started anywhere
+  else would have been mislexed with nothing to detect it. It is now an explicit
+  plan field that both consumers read.
 - The WebGPU backend's documented crossover was stale. Removing the lexer's dead
   ASCII fall-through made `lex_all` faster - about 48-50 MiB/s where it
   previously measured 44-48 - so the point where the GPU backend starts winning

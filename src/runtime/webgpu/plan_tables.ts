@@ -23,7 +23,7 @@
 
 import { inspectCombinedWasmParserPlan } from "../wasm_plan.ts";
 
-const CORE_PLAN_HEADER_I32_COUNT = 31;
+const CORE_PLAN_HEADER_I32_COUNT = 36;
 const CORE_PLAN_HEADER_BYTES = CORE_PLAN_HEADER_I32_COUNT * 4;
 
 const CORE_HEADER_FORMAT_VERSION = 1;
@@ -41,29 +41,54 @@ const CORE_HEADER_SPEC_FOLLOW_STARTS = 22;
 const CORE_HEADER_SPEC_NOT_FOLLOW_STARTS = 23;
 const CORE_HEADER_GUARD_STATE_COUNT = 24;
 const CORE_HEADER_SPEC_WORD_ROWS = 28;
+const CORE_HEADER_DFA_START_STATE = 31;
+const CORE_HEADER_ALPHABET_CLASS_COUNT = 32;
+const CORE_HEADER_ALPHABET_ASCII_CLASSES = 33;
+const CORE_HEADER_ALPHABET_RANGE_COUNT = 34;
+const CORE_HEADER_ALPHABET_RANGES = 35;
 
 const COMPACT_I16_OFFSET_TAG = 2;
 const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 
-const EXPECTED_CORE_FORMAT_VERSION = 3;
+const EXPECTED_CORE_FORMAT_VERSION = 4;
 const EXPECTED_PARSER_PLAN_VERSION = 2;
 
-/**
- * The lexer DFA start state is NOT stored in the plan. `buildDfa`
- * (`src/compiler/regex/dfa.ts`) creates it with the first `addState()` call, so
- * it is always id 0, and the Rust `lex_all` hard-codes `let mut state = 0;`.
- * The GPU kernel hard-codes the same value.
- */
-export const DFA_START_STATE = 0;
+export const ASCII_CLASS_LIMIT = 128;
+export const CODE_POINT_LIMIT = 0x110000;
 
 export interface CompactSection {
   readonly offset: number;
   readonly cellBytes: 2 | 4;
 }
 
+export interface PlanClassRange {
+  readonly start: number;
+  /** Inclusive. */
+  readonly end: number;
+  readonly classId: number;
+}
+
+/**
+ * The alphabet equivalence classes exactly as the compiler computed them, read
+ * out of core plan format version 4. Nothing here is re-derived: two code points
+ * share a class because the compiler said so, which is what makes a dense
+ * `(states x classes)` table built from this agree with the CSR rows the Wasm
+ * engine walks.
+ */
+export interface PlanAlphabet {
+  readonly classCount: number;
+  /** Length `ASCII_CLASS_LIMIT`; class id of each ASCII code point. */
+  readonly asciiClass: Int32Array;
+  /** Sorted, gap-free ranges covering `[ASCII_CLASS_LIMIT, 0x10FFFF]`. */
+  readonly aboveAsciiRanges: readonly PlanClassRange[];
+}
+
 export interface LexerPlanTables {
   readonly stateCount: number;
   readonly specCount: number;
+  /** Explicit DFA start state from the plan header, never assumed to be 0. */
+  readonly startState: number;
+  readonly alphabet: PlanAlphabet;
   /** CSR row starts into `transitions`, in units of triples. Length stateCount + 1. */
   readonly transitionRows: Int32Array;
   /** Flat (start, end, target) i32 triples. Length 3 * transitionCount. */
@@ -324,9 +349,47 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
     );
   }
 
+  const startState = headerI32(planBytes, CORE_HEADER_DFA_START_STATE);
+  if (startState < 0 || startState >= stateCount) {
+    throw new Error(
+      `Plan DFA start state ${startState} is outside [0, ${stateCount}).`,
+    );
+  }
+
+  const classCount = headerI32(planBytes, CORE_HEADER_ALPHABET_CLASS_COUNT);
+  if (classCount <= 0) {
+    throw new Error(`Plan reports ${classCount} alphabet classes.`);
+  }
+  const asciiClass = readPlainI32Array(
+    planBytes,
+    headerI32(planBytes, CORE_HEADER_ALPHABET_ASCII_CLASSES),
+    ASCII_CLASS_LIMIT,
+    "alphabet ASCII classes",
+  );
+  const rangeCount = headerI32(planBytes, CORE_HEADER_ALPHABET_RANGE_COUNT);
+  if (rangeCount <= 0) {
+    throw new Error(`Plan reports ${rangeCount} alphabet ranges.`);
+  }
+  const rangeWords = readPlainI32Array(
+    planBytes,
+    headerI32(planBytes, CORE_HEADER_ALPHABET_RANGES),
+    rangeCount * 3,
+    "alphabet ranges",
+  );
+  const aboveAsciiRanges: PlanClassRange[] = [];
+  for (let index = 0; index < rangeCount; index += 1) {
+    aboveAsciiRanges.push({
+      start: rangeWords[index * 3],
+      end: rangeWords[index * 3 + 1],
+      classId: rangeWords[index * 3 + 2],
+    });
+  }
+
   return {
     stateCount,
     specCount,
+    startState,
+    alphabet: { classCount, asciiClass, aboveAsciiRanges },
     transitionRows,
     transitions,
     acceptSpecByState,

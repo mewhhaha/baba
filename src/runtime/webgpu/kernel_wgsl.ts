@@ -204,6 +204,8 @@ export interface PackedTables {
   readonly rangesOffset: number;
   readonly rangeCount: number;
   readonly stateCount: number;
+  /** DFA start state, read from the plan header rather than assumed to be 0. */
+  readonly startState: number;
   readonly classCount: number;
   readonly workgroupTableBytes: number;
 }
@@ -255,6 +257,7 @@ export function packTables(
     rangesOffset,
     rangeCount,
     stateCount: plan.stateCount,
+    startState: plan.startState,
     classCount: alphabet.classCount,
     workgroupTableBytes,
   };
@@ -413,9 +416,10 @@ export function buildKernelSource(
         if (q < STATE_COUNT) {
           col[writeSlot * STATE_COUNT + q] = w0_${slot};
           col[(writeSlot + 1u) * STATE_COUNT + q] = w1_${slot};
-          if (q == 0u) {
+          if (q == START_STATE) {
             // Scratch handoff: pass_z reads these back and overwrites them in
-            // place, so no per-offset storage is added.
+            // place, so no per-offset storage is added. The row that matters is
+            // the one for the DFA start state, which the plan header names.
             nextPos[p] = w0_${slot};
             packedRec[p] = w1_${slot};
           }
@@ -429,6 +433,7 @@ export function buildKernelSource(
 // ---------------------------------------------------------------------------
 
 const STATE_COUNT: u32 = ${packed.stateCount}u;
+const START_STATE: u32 = ${packed.startState}u;
 const CLASS_COUNT: u32 = ${packed.classCount}u;
 const DENSE_LEN: u32 = ${denseLength}u;
 const RANGE_COUNT: i32 = ${packed.rangeCount};

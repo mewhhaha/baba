@@ -11,7 +11,7 @@ const HOST_OWNERSHIP_CALLER_MANAGED: i32 = 1;
 const RESULT_LIFETIME_CALLER_BUFFER: i32 = 1;
 
 const PLAN_MAGIC: i32 = 0x3150_5742;
-const PLAN_FORMAT_VERSION: i32 = 3;
+const PLAN_FORMAT_VERSION: i32 = 4;
 const PLAN_HEADER_MAGIC: i32 = 0;
 const PLAN_HEADER_FORMAT_VERSION: i32 = 1;
 const PLAN_HEADER_PARSER_PLAN_VERSION: i32 = 2;
@@ -42,7 +42,8 @@ const PLAN_HEADER_GUARD_TRANSITIONS: i32 = 27;
 const PLAN_HEADER_SPEC_WORD_ROWS: i32 = 28;
 const PLAN_HEADER_WORD_ROWS: i32 = 29;
 const PLAN_HEADER_WORD_CODE_POINTS: i32 = 30;
-const PLAN_HEADER_BYTES: i32 = 31 * 4;
+const PLAN_HEADER_DFA_START_STATE: i32 = 31;
+const PLAN_HEADER_BYTES: i32 = 36 * 4;
 const SPEC_FLAG_CONTEXTUAL: i32 = 1;
 const SPEC_FLAG_FOLLOW_EOF: i32 = 2;
 const SPEC_FLAG_HAS_FOLLOW: i32 = 4;
@@ -302,6 +303,13 @@ pub extern "C" fn load_plan(ptr: i32, len: i32) -> i32 {
     if core_byte_length > len {
         return 0;
     }
+    // The DFA start state is an explicit header slot rather than an assumed 0.
+    // Reject a plan whose start state is not a real state instead of walking
+    // the transition table from an address that does not belong to a state.
+    let start_state = header_at(ptr, PLAN_HEADER_DFA_START_STATE);
+    if start_state < 0 || start_state >= header_at(ptr, PLAN_HEADER_DFA_STATE_COUNT) {
+        return 0;
+    }
     unsafe {
         PLAN_BASE = ptr;
         PLAN_LENGTH = len;
@@ -311,7 +319,8 @@ pub extern "C" fn load_plan(ptr: i32, len: i32) -> i32 {
 
 #[no_mangle]
 pub extern "C" fn lex_one(src: i32, len: i32, offset: i32, result: i32) -> i32 {
-    let mut state = 0;
+    let start_state = header(PLAN_HEADER_DFA_START_STATE);
+    let mut state = start_state;
     let mut index = offset;
     let mut best_spec = -1;
     let mut best_end = offset;
@@ -346,8 +355,9 @@ pub extern "C" fn lex_all(src: i32, len: i32, _mode: i32, tokens: i32) -> i32 {
     let mut offset = 0;
     let mut count = 0;
 
+    let start_state = header(PLAN_HEADER_DFA_START_STATE);
     while offset < len {
-        let mut state = 0;
+        let mut state = start_state;
         let mut index = offset;
         let mut best_spec = -1;
         let mut best_end = offset;

@@ -1,5 +1,5 @@
 // Core Wasm parser runtime byte emitter shared by Wasm target packaging.
-import type { Dfa } from "../../compiler/regex/dfa.ts";
+import { ASCII_CLASS_LIMIT, type Dfa } from "../../compiler/regex/dfa.ts";
 import type {
   LrAction,
   LrActionSet,
@@ -43,6 +43,8 @@ interface PlanDataLayout {
   specWordRows: number;
   wordRows: number;
   wordCodePoints: number;
+  alphabetAsciiClasses: number;
+  alphabetRanges: number;
   inputBase: number;
   bytes: Uint8Array;
 }
@@ -69,8 +71,8 @@ export interface WasmCoreLexerSpecMetadata {
 }
 
 const PLAN_MAGIC = 0x31505742;
-const PLAN_FORMAT_VERSION = 3;
-const PLAN_HEADER_I32_COUNT = 31;
+const PLAN_FORMAT_VERSION = 4;
+const PLAN_HEADER_I32_COUNT = 36;
 const PLAN_HEADER_BYTES = PLAN_HEADER_I32_COUNT * 4;
 const COMPACT_I16_OFFSET_TAG = 2;
 const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
@@ -356,6 +358,30 @@ function buildPlanDataLayout(
   const wordRowsOffset = appendI32s(wordRows);
   const wordCodePointsOffset = appendI32s(wordCodePoints);
 
+  const alphabet = dfa.alphabet;
+  if (alphabet.asciiClasses.length !== ASCII_CLASS_LIMIT) {
+    throw new Error(
+      `Wasm core plan alphabet ASCII table has ${alphabet.asciiClasses.length} entries, expected ${ASCII_CLASS_LIMIT}.`,
+    );
+  }
+  if (alphabet.classCount < 1) {
+    throw new Error(
+      `Wasm core plan alphabet has ${alphabet.classCount} equivalence classes.`,
+    );
+  }
+  const alphabetAsciiClassesOffset = appendI32s(alphabet.asciiClasses);
+  const alphabetRangeValues: number[] = [];
+  for (const range of alphabet.aboveAsciiRanges) {
+    alphabetRangeValues.push(range.start, range.end, range.classId);
+  }
+  const alphabetRangesOffset = appendI32s(alphabetRangeValues);
+
+  if (dfa.start < 0 || dfa.start >= dfa.states.length) {
+    throw new Error(
+      `Wasm core plan DFA start state ${dfa.start} is outside [0, ${dfa.states.length}).`,
+    );
+  }
+
   const bytes = Uint8Array.from(data);
   const header = [
     PLAN_MAGIC,
@@ -389,6 +415,11 @@ function buildPlanDataLayout(
     specWordRowsOffset,
     wordRowsOffset,
     wordCodePointsOffset,
+    dfa.start,
+    alphabet.classCount,
+    alphabetAsciiClassesOffset,
+    alphabet.aboveAsciiRanges.length,
+    alphabetRangesOffset,
   ];
   writeHeader(bytes, header);
 
@@ -414,6 +445,8 @@ function buildPlanDataLayout(
     specWordRows: specWordRowsOffset,
     wordRows: wordRowsOffset,
     wordCodePoints: wordCodePointsOffset,
+    alphabetAsciiClasses: alphabetAsciiClassesOffset,
+    alphabetRanges: alphabetRangesOffset,
     inputBase: align(bytes.length, 8),
     bytes,
   };

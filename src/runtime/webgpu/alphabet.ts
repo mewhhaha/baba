@@ -2,11 +2,15 @@
  * Alphabet equivalence classes for the lexer DFA, plus a dense
  * (states x classes) transition table.
  *
- * This prototypes, in userland, a compiler stage that would eventually belong in
- * `src/compiler/regex/dfa.ts`. `collectAlphabetSegments` there already computes
- * the segments transiently and then re-coalesces them away; nothing equivalent
- * is persisted in `parser.plan`, so the classes are rebuilt here from the sparse
- * CSR ranges.
+ * The classes are no longer derived here. `computeDfaAlphabet` in
+ * `src/compiler/regex/dfa.ts` computes them, core plan format version 4
+ * persists them, and this module reads them back. What is still built at load
+ * time is the dense `(states x classes)` table, which is deliberately not in the
+ * plan: it is a pure function of the persisted classes and the CSR rows, and
+ * measured against the four example grammars and `fixtures/perf/large-runtime`
+ * it costs between 1.4x and 3.9x the CSR bytes it would duplicate - 66516 B on
+ * large-runtime, whose whole plan is 118231 B against a 125000 B budget. See
+ * `docs/stability.md`.
  *
  * ## Why this shape for the codepoint -> class lookup
  *
@@ -37,18 +41,16 @@
  * is exact because the CSR rows are disjoint and ascending.
  */
 
-import type { LexerPlanTables } from "./plan_tables.ts";
-import { sparseTransition } from "./plan_tables.ts";
+import type { LexerPlanTables, PlanClassRange } from "./plan_tables.ts";
+import {
+  ASCII_CLASS_LIMIT as ASCII_LIMIT,
+  CODE_POINT_LIMIT,
+  sparseTransition,
+} from "./plan_tables.ts";
 
-export const CODE_POINT_LIMIT = 0x110000;
-export const ASCII_LIMIT = 128;
+export { ASCII_LIMIT, CODE_POINT_LIMIT };
 
-export interface ClassRange {
-  readonly start: number;
-  /** Inclusive. */
-  readonly end: number;
-  readonly classId: number;
-}
+export type ClassRange = PlanClassRange;
 
 export interface AlphabetTables {
   readonly classCount: number;
@@ -65,106 +67,19 @@ export interface AlphabetTables {
 
 export function buildAlphabetTables(tables: LexerPlanTables): AlphabetTables {
   const { stateCount } = tables;
+  const { classCount, asciiClass, aboveAsciiRanges } = tables.alphabet;
 
-  // 1. Cut the codepoint space at every transition boundary.
-  const cuts = new Set<number>();
-  cuts.add(0);
-  cuts.add(CODE_POINT_LIMIT);
-  const tripleCount = tables.transitions.length / 3;
-  for (let index = 0; index < tripleCount; index += 1) {
-    const start = tables.transitions[index * 3];
-    const end = tables.transitions[index * 3 + 1];
-    if (start < 0 || end < start || end >= CODE_POINT_LIMIT) {
-      throw new Error(
-        `Lexer transition ${index} has a malformed range [${start}, ${end}].`,
-      );
-    }
-    cuts.add(start);
-    cuts.add(end + 1);
-  }
-  // Cut at the ASCII boundary too so no segment straddles it. This is what lets
-  // the direct-mapped ASCII table and the range list be built independently.
-  cuts.add(ASCII_LIMIT);
-  const boundaries = [...cuts].sort((left, right) => left - right);
-
-  // 2. For each segment, the full target vector across all states identifies the
-  //    equivalence class.
-  const classKeyToId = new Map<string, number>();
-  const segmentClassId: number[] = [];
-  const classTargets: Int32Array[] = [];
-  for (let segment = 0; segment + 1 < boundaries.length; segment += 1) {
-    const representative = boundaries[segment];
-    const targets = new Int32Array(stateCount);
-    for (let state = 0; state < stateCount; state += 1) {
-      targets[state] = sparseTransition(tables, state, representative);
-    }
-    const key = targets.join(",");
-    const existing = classKeyToId.get(key);
-    if (existing === undefined) {
-      const classId = classTargets.length;
-      classKeyToId.set(key, classId);
-      classTargets.push(targets);
-      segmentClassId.push(classId);
-      continue;
-    }
-    segmentClassId.push(existing);
-  }
-  const classCount = classTargets.length;
-  if (classCount === 0) {
-    throw new Error("Alphabet partition produced zero equivalence classes.");
-  }
-
-  // 3. Dense (state x class) table.
-  const dense = new Int32Array(stateCount * classCount);
-  for (let classId = 0; classId < classCount; classId += 1) {
-    const targets = classTargets[classId];
-    for (let state = 0; state < stateCount; state += 1) {
-      dense[state * classCount + classId] = targets[state];
-    }
-  }
-
-  // 4. ASCII direct-mapped table.
-  const asciiClass = new Int32Array(ASCII_LIMIT).fill(-1);
-  for (let segment = 0; segment + 1 < boundaries.length; segment += 1) {
-    const start = boundaries[segment];
-    const end = boundaries[segment + 1] - 1;
-    if (start >= ASCII_LIMIT) {
-      continue;
-    }
-    const clampedEnd = Math.min(end, ASCII_LIMIT - 1);
-    for (let codePoint = start; codePoint <= clampedEnd; codePoint += 1) {
-      asciiClass[codePoint] = segmentClassId[segment];
-    }
-  }
+  // 1. Re-check the structural invariants the GPU classifier relies on. The
+  //    plan validator already enforces these, but this module is the parity
+  //    gate's own reader and a violation here would be a silent wrong answer
+  //    rather than an error.
   for (let codePoint = 0; codePoint < ASCII_LIMIT; codePoint += 1) {
-    if (asciiClass[codePoint] < 0) {
+    const classId = asciiClass[codePoint];
+    if (classId < 0 || classId >= classCount) {
       throw new Error(
-        `ASCII class table has a hole at codepoint ${codePoint}.`,
+        `ASCII class table names class ${classId} at codepoint ${codePoint}, which is outside [0, ${classCount}).`,
       );
     }
-  }
-
-  // 5. Above-ASCII range list, coalescing adjacent same-class segments.
-  const aboveAsciiRanges: ClassRange[] = [];
-  for (let segment = 0; segment + 1 < boundaries.length; segment += 1) {
-    const start = Math.max(boundaries[segment], ASCII_LIMIT);
-    const end = boundaries[segment + 1] - 1;
-    if (end < start) {
-      continue;
-    }
-    const classId = segmentClassId[segment];
-    const last = aboveAsciiRanges[aboveAsciiRanges.length - 1];
-    if (
-      last !== undefined && last.classId === classId && last.end + 1 === start
-    ) {
-      aboveAsciiRanges[aboveAsciiRanges.length - 1] = {
-        start: last.start,
-        end,
-        classId,
-      };
-      continue;
-    }
-    aboveAsciiRanges.push({ start, end, classId });
   }
   if (aboveAsciiRanges.length === 0) {
     throw new Error("Above-ASCII range list is empty; expected full coverage.");
@@ -177,25 +92,73 @@ export function buildAlphabetTables(tables: LexerPlanTables): AlphabetTables {
   ) {
     throw new Error("Above-ASCII range list does not end at U+10FFFF.");
   }
-  for (let index = 1; index < aboveAsciiRanges.length; index += 1) {
-    if (aboveAsciiRanges[index - 1].end + 1 !== aboveAsciiRanges[index].start) {
+  for (let index = 0; index < aboveAsciiRanges.length; index += 1) {
+    const range = aboveAsciiRanges[index];
+    if (range.classId < 0 || range.classId >= classCount) {
+      throw new Error(
+        `Above-ASCII range ${index} names class ${range.classId}, which is outside [0, ${classCount}).`,
+      );
+    }
+    if (range.end < range.start) {
+      throw new Error(`Above-ASCII range ${index} is inverted.`);
+    }
+    if (index > 0 && aboveAsciiRanges[index - 1].end + 1 !== range.start) {
       throw new Error(
         `Above-ASCII range list has a gap before index ${index}.`,
       );
     }
   }
 
+  // 2. Every class, and one representative codepoint for it. The representative
+  //    is a fact about the persisted partition rather than a choice: any member
+  //    of a class gives the same column, which is what makes it a class.
+  const representative = new Int32Array(classCount).fill(-1);
   const classRanges: ClassRange[][] = [];
   for (let classId = 0; classId < classCount; classId += 1) {
     classRanges.push([]);
   }
-  for (let segment = 0; segment + 1 < boundaries.length; segment += 1) {
-    const classId = segmentClassId[segment];
-    classRanges[classId].push({
-      start: boundaries[segment],
-      end: boundaries[segment + 1] - 1,
-      classId,
-    });
+  let runStart = 0;
+  for (let codePoint = 1; codePoint <= ASCII_LIMIT; codePoint += 1) {
+    if (
+      codePoint < ASCII_LIMIT && asciiClass[codePoint] === asciiClass[runStart]
+    ) {
+      continue;
+    }
+    const classId = asciiClass[runStart];
+    classRanges[classId].push({ start: runStart, end: codePoint - 1, classId });
+    if (representative[classId] < 0) {
+      representative[classId] = runStart;
+    }
+    runStart = codePoint;
+  }
+  for (const range of aboveAsciiRanges) {
+    classRanges[range.classId].push(range);
+    if (representative[range.classId] < 0) {
+      representative[range.classId] = range.start;
+    }
+  }
+  for (let classId = 0; classId < classCount; classId += 1) {
+    if (representative[classId] < 0) {
+      throw new Error(
+        `Alphabet class ${classId} covers no codepoint in the persisted partition.`,
+      );
+    }
+  }
+
+  // 3. Dense (state x class) table, filled from the CSR rows at one codepoint
+  //    per class. This table is not persisted: measured on the four example
+  //    grammars and large-runtime it is 1.4x to 3.9x the CSR bytes it would
+  //    duplicate, and it is derivable in exactly this many lookups.
+  const dense = new Int32Array(stateCount * classCount);
+  for (let classId = 0; classId < classCount; classId += 1) {
+    const codePoint = representative[classId];
+    for (let state = 0; state < stateCount; state += 1) {
+      dense[state * classCount + classId] = sparseTransition(
+        tables,
+        state,
+        codePoint,
+      );
+    }
   }
 
   return {

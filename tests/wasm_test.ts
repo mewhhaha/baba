@@ -522,6 +522,198 @@ Deno.test("combined parser plans round-trip runtime metadata v2 with exact secti
   );
 });
 
+// Core plan format version 4 header slots. Named here rather than imported
+// because the encoder and the validator both keep them module-private, and a
+// test that reads the bytes is exactly the place that should re-state them.
+const CORE_HEADER_DFA_STATE_COUNT = 3;
+const CORE_HEADER_DFA_START_STATE = 31;
+const CORE_HEADER_ALPHABET_CLASS_COUNT = 32;
+const CORE_HEADER_ALPHABET_ASCII_CLASSES = 33;
+const CORE_HEADER_ALPHABET_RANGE_COUNT = 34;
+const CORE_HEADER_ALPHABET_RANGES = 35;
+const ASCII_CLASS_LIMIT = 128;
+const MAX_CODE_POINT = 0x10ffff;
+
+function planI32(bytes: Uint8Array, byteOffset: number): number {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    .getInt32(byteOffset, true);
+}
+
+function planHeader(bytes: Uint8Array, slot: number): number {
+  return planI32(bytes, slot * WASM_I32_BYTES);
+}
+
+function setPlanI32(
+  bytes: Uint8Array,
+  byteOffset: number,
+  value: number,
+): void {
+  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    .setInt32(byteOffset, value, true);
+}
+
+function corePlanBytes(source: string): Uint8Array {
+  const bundle = wasmBundle(source);
+  const file = bundle.files.find((entry) => entry.path === "wasm/parser.plan");
+  assert(file, "Expected wasm/parser.plan.");
+  assert(file.encoding === "binary", "Expected a binary parser plan.");
+  return new Uint8Array(file.content);
+}
+
+Deno.test("core parser plans carry an explicit DFA start state", () => {
+  const plan = corePlanBytes(STATEMENT_GRAMMAR);
+  const stateCount = planHeader(plan, CORE_HEADER_DFA_STATE_COUNT);
+  const startState = planHeader(plan, CORE_HEADER_DFA_START_STATE);
+  assert(stateCount > 0, "Expected a non-empty lexer DFA.");
+  assert(
+    startState >= 0 && startState < stateCount,
+    `Start state ${startState} is outside [0, ${stateCount}).`,
+  );
+
+  const outOfRange = new Uint8Array(plan);
+  setPlanI32(
+    outOfRange,
+    CORE_HEADER_DFA_START_STATE * WASM_I32_BYTES,
+    stateCount,
+  );
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(outOfRange),
+    `DFA start state ${stateCount} is outside`,
+  );
+
+  const negative = new Uint8Array(plan);
+  setPlanI32(negative, CORE_HEADER_DFA_START_STATE * WASM_I32_BYTES, -1);
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(negative),
+    "DFA start state must be non-negative",
+  );
+});
+
+Deno.test("core parser plans persist the alphabet equivalence classes", () => {
+  const plan = corePlanBytes(STATEMENT_GRAMMAR);
+  const classCount = planHeader(plan, CORE_HEADER_ALPHABET_CLASS_COUNT);
+  const asciiOffset = planHeader(plan, CORE_HEADER_ALPHABET_ASCII_CLASSES);
+  const rangeCount = planHeader(plan, CORE_HEADER_ALPHABET_RANGE_COUNT);
+  const rangesOffset = planHeader(plan, CORE_HEADER_ALPHABET_RANGES);
+  assert(classCount > 1, `Expected several classes, got ${classCount}.`);
+  assert(rangeCount >= 1, "Expected at least one above-ASCII range.");
+
+  const used = new Set<number>();
+  for (let codePoint = 0; codePoint < ASCII_CLASS_LIMIT; codePoint += 1) {
+    const classId = planI32(
+      plan,
+      asciiOffset + codePoint * WASM_I32_BYTES,
+    );
+    assert(
+      classId >= 0 && classId < classCount,
+      `ASCII class ${classId} at ${codePoint} is out of range.`,
+    );
+    used.add(classId);
+  }
+  let expectedStart = ASCII_CLASS_LIMIT;
+  for (let index = 0; index < rangeCount; index += 1) {
+    const base = rangesOffset + index * 3 * WASM_I32_BYTES;
+    const start = planI32(plan, base);
+    const end = planI32(plan, base + WASM_I32_BYTES);
+    const classId = planI32(plan, base + 2 * WASM_I32_BYTES);
+    assertEquals(start, expectedStart);
+    assert(end >= start, `Range ${index} is inverted.`);
+    assert(
+      classId >= 0 && classId < classCount,
+      `Range class ${classId} is out of range.`,
+    );
+    used.add(classId);
+    expectedStart = end + 1;
+  }
+  assertEquals(expectedStart, MAX_CODE_POINT + 1);
+  assertEquals(used.size, classCount);
+});
+
+Deno.test("core plan validation rejects a corrupted alphabet section", () => {
+  const plan = corePlanBytes(STATEMENT_GRAMMAR);
+  const classCount = planHeader(plan, CORE_HEADER_ALPHABET_CLASS_COUNT);
+  const asciiOffset = planHeader(plan, CORE_HEADER_ALPHABET_ASCII_CLASSES);
+  const rangesOffset = planHeader(plan, CORE_HEADER_ALPHABET_RANGES);
+  const asciiClasses: number[] = [];
+  for (let codePoint = 0; codePoint < ASCII_CLASS_LIMIT; codePoint += 1) {
+    asciiClasses.push(planI32(plan, asciiOffset + codePoint * WASM_I32_BYTES));
+  }
+
+  const emptyClasses = new Uint8Array(plan);
+  setPlanI32(
+    emptyClasses,
+    CORE_HEADER_ALPHABET_CLASS_COUNT * WASM_I32_BYTES,
+    0,
+  );
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(emptyClasses),
+    "alphabet has no equivalence classes",
+  );
+
+  const badAsciiClass = new Uint8Array(plan);
+  setPlanI32(badAsciiClass, asciiOffset, classCount);
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(badAsciiClass),
+    `alphabet class ${classCount} at code point 0 is out of range`,
+  );
+
+  const gappedRanges = new Uint8Array(plan);
+  setPlanI32(gappedRanges, rangesOffset, ASCII_CLASS_LIMIT + 1);
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(gappedRanges),
+    `alphabet range 0 starts at ${ASCII_CLASS_LIMIT + 1}, expected 128`,
+  );
+
+  const truncatedRanges = new Uint8Array(plan);
+  setPlanI32(
+    truncatedRanges,
+    rangesOffset + WASM_I32_BYTES,
+    MAX_CODE_POINT - 1,
+  );
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(truncatedRanges),
+    "alphabet ranges stop at",
+  );
+
+  // Merging two classes leaves every offset and length intact, so nothing but
+  // the defining property of an equivalence class can catch it. The relabelled
+  // code point keeps its own segment (both neighbours hold a third class) and
+  // its old class stays populated, so this is exactly a class that no longer
+  // has one target vector.
+  let merged = -1;
+  let mergedInto = -1;
+  for (
+    let codePoint = 1;
+    codePoint < ASCII_CLASS_LIMIT - 1 && merged < 0;
+    codePoint += 1
+  ) {
+    const own = asciiClasses[codePoint];
+    const stillUsed = asciiClasses.some((classId, index) =>
+      classId === own && index !== codePoint
+    );
+    if (!stillUsed) continue;
+    for (let candidate = 0; candidate < classCount; candidate += 1) {
+      if (candidate === own) continue;
+      if (candidate === asciiClasses[codePoint - 1]) continue;
+      if (candidate === asciiClasses[codePoint + 1]) continue;
+      merged = codePoint;
+      mergedInto = candidate;
+      break;
+    }
+  }
+  assert(merged >= 0, "Expected a relabellable ASCII code point.");
+  const mergedClasses = new Uint8Array(plan);
+  setPlanI32(
+    mergedClasses,
+    asciiOffset + merged * WASM_I32_BYTES,
+    mergedInto,
+  );
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(mergedClasses),
+    `alphabet class ${mergedInto} is not an equivalence class`,
+  );
+});
+
 Deno.test("Wasm target emits typed cursor result surface", async () => {
   const bundle = wasmBundle(STATEMENT_GRAMMAR);
   const syntax = textFile(bundle, "wasm/syntax.ts");

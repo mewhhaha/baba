@@ -15,10 +15,55 @@ export interface DfaState {
   transitions: readonly DfaTransition[];
 }
 
+/** First code point that is not covered by the direct-mapped ASCII class table. */
+export const ASCII_CLASS_LIMIT = 128;
+
+export interface DfaClassRange extends CharRange {
+  classId: number;
+}
+
+/**
+ * Alphabet equivalence classes of a lexer DFA.
+ *
+ * Two code points share a class exactly when every DFA state transitions on
+ * them to the same target (with "no transition" counted as a distinct target).
+ * The partition is therefore the coarsest one for which a dense
+ * `(states x classes)` transition table is well defined, which is what a
+ * consumer wanting such a table needs.
+ *
+ * The split into a direct-mapped ASCII table plus a range list above ASCII is
+ * deliberate: `ASCII_CLASS_LIMIT` is always a class boundary, so the two halves
+ * are independent and a consumer can classify ASCII with one indexed load.
+ */
+export interface DfaAlphabet {
+  readonly classCount: number;
+  /** Length `ASCII_CLASS_LIMIT`; class id of each code point below ASCII_CLASS_LIMIT. */
+  readonly asciiClasses: readonly number[];
+  /** Sorted, gap-free ranges covering `[ASCII_CLASS_LIMIT, MAX_CODE_POINT]`. */
+  readonly aboveAsciiRanges: readonly DfaClassRange[];
+}
+
 export interface Dfa {
   start: number;
   states: readonly DfaState[];
+  alphabet: DfaAlphabet;
 }
+
+/**
+ * Partition of a DFA that has no transitions at all: every code point is dead,
+ * so the whole space is one class. Written out rather than derived so that a
+ * caller building a placeholder DFA state by state does not have to run the
+ * partitioner to get a well-formed alphabet.
+ */
+export const DEAD_DFA_ALPHABET: DfaAlphabet = {
+  classCount: 1,
+  asciiClasses: new Array(ASCII_CLASS_LIMIT).fill(0),
+  aboveAsciiRanges: [{
+    start: ASCII_CLASS_LIMIT,
+    end: MAX_CODE_POINT,
+    classId: 0,
+  }],
+};
 
 export function buildDfa(
   nfa: Nfa,
@@ -85,7 +130,119 @@ export function buildDfa(
     states[dfaState.id] = { ...dfaState, transitions };
   }
 
-  return { start, states };
+  return { start, states, alphabet: computeDfaAlphabet(states) };
+}
+
+/**
+ * Computes the alphabet equivalence classes of an already-built DFA.
+ *
+ * The boundaries come from the DFA's own coalesced transition ranges rather than
+ * from the NFA segments `collectAlphabetSegments` produces, for two reasons.
+ * The DFA ranges give the coarsest correct partition, because segments the
+ * subset construction merged back together cannot be distinguished by any state.
+ * And it means a DFA rebuilt from a serialized plan partitions identically to
+ * the DFA the compiler built, since the transitions are all that survives the
+ * round trip.
+ */
+export function computeDfaAlphabet(
+  states: readonly DfaState[],
+): DfaAlphabet {
+  const boundaries = new Set([0, ASCII_CLASS_LIMIT, MAX_CODE_POINT + 1]);
+  for (const state of states) {
+    for (const transition of state.transitions) {
+      if (transition.start < 0 || transition.end > MAX_CODE_POINT) {
+        throw new Error(
+          `DFA transition range [${transition.start}, ${transition.end}] is outside the code point space.`,
+        );
+      }
+      if (transition.start > transition.end) {
+        throw new Error(
+          `DFA transition range [${transition.start}, ${transition.end}] is inverted.`,
+        );
+      }
+      boundaries.add(transition.start);
+      if (transition.end < MAX_CODE_POINT) boundaries.add(transition.end + 1);
+    }
+  }
+  const cuts = [...boundaries].sort((left, right) => left - right);
+
+  // The target vector across every state is the class identity. Segments are
+  // visited in ascending order, so class ids are assigned in order of first
+  // appearance and are therefore stable for a given DFA.
+  const classIdByKey = new Map<string, number>();
+  const segmentClassIds: number[] = [];
+  const segments: CharRange[] = [];
+  for (let index = 0; index + 1 < cuts.length; index++) {
+    const start = cuts[index];
+    const end = cuts[index + 1] - 1;
+    if (start > end) continue;
+    const targets: number[] = [];
+    for (const state of states) {
+      targets.push(transitionTargetAt(state, start));
+    }
+    const key = targets.join(",");
+    const existing = classIdByKey.get(key);
+    if (existing === undefined) {
+      const classId = classIdByKey.size;
+      classIdByKey.set(key, classId);
+      segments.push({ start, end });
+      segmentClassIds.push(classId);
+      continue;
+    }
+    segments.push({ start, end });
+    segmentClassIds.push(existing);
+  }
+  const classCount = classIdByKey.size;
+  if (classCount === 0) {
+    throw new Error("DFA alphabet partition produced zero classes.");
+  }
+
+  const asciiClasses = new Array(ASCII_CLASS_LIMIT).fill(-1);
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+    if (segment.start >= ASCII_CLASS_LIMIT) continue;
+    const end = Math.min(segment.end, ASCII_CLASS_LIMIT - 1);
+    for (let codePoint = segment.start; codePoint <= end; codePoint++) {
+      asciiClasses[codePoint] = segmentClassIds[index];
+    }
+  }
+  for (let codePoint = 0; codePoint < ASCII_CLASS_LIMIT; codePoint++) {
+    if (asciiClasses[codePoint] < 0) {
+      throw new Error(
+        `DFA alphabet ASCII table has a hole at code point ${codePoint}.`,
+      );
+    }
+  }
+
+  const aboveAsciiRanges: DfaClassRange[] = [];
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+    if (segment.end < ASCII_CLASS_LIMIT) continue;
+    const start = Math.max(segment.start, ASCII_CLASS_LIMIT);
+    const classId = segmentClassIds[index];
+    const previous = aboveAsciiRanges[aboveAsciiRanges.length - 1];
+    if (
+      previous !== undefined && previous.classId === classId &&
+      previous.end + 1 === start
+    ) {
+      previous.end = segment.end;
+      continue;
+    }
+    aboveAsciiRanges.push({ start, end: segment.end, classId });
+  }
+  if (aboveAsciiRanges.length === 0) {
+    throw new Error("DFA alphabet range list above ASCII is empty.");
+  }
+  return { classCount, asciiClasses, aboveAsciiRanges };
+}
+
+function transitionTargetAt(state: DfaState, codePoint: number): number {
+  for (const transition of state.transitions) {
+    if (transition.start <= codePoint && codePoint <= transition.end) {
+      return transition.target;
+    }
+  }
+  return -1;
 }
 
 function defaultAccept(accepts: readonly number[]): number | null {
