@@ -42,8 +42,9 @@
  *           at which chunk k is entered. Only numChunks dependent loads.
  *   PASS D  one thread per chunk: walk entry(k) .. chunkEnd counting tokens.
  *   PASS E  two-level exclusive prefix sum over the per-chunk counts.
- *   PASS F  one thread per chunk: walk again, writing the 4 x i32 records at
- *           the scanned offset.
+ *   PASS F  one thread per chunk: walk again, writing a compact pair at the
+ *           scanned offset: token end and packed (spec, accepting state). The
+ *           host reconstructs each start from the previous token's end.
  *
  * All nine stages are dispatches inside a single command encoder, so the whole
  * lex is ONE queue.submit() and ONE mapAsync(). No CPU is in the loop.
@@ -151,6 +152,11 @@ export function passXWorkgroupBytes(
 ): number {
   const tableWords = 128 + stateCount + stateCount * classCount;
   return tableWords * 4 + 8 * stateCount * 4;
+}
+
+/** Workgroup storage for pass_x when the dense table stays in device storage. */
+export function passXStorageWorkgroupBytes(stateCount: number): number {
+  return (128 + stateCount + 8 * stateCount) * 4;
 }
 
 /** Workgroup storage `pass_y` needs: three u32 per state. */
@@ -281,14 +287,20 @@ export function buildKernelSource(
   // requirement is checked against the device limit that was actually requested,
   // not against a constant chosen on one adapter.
   const passXBytes = passXWorkgroupBytes(packed.stateCount, packed.classCount);
-  if (passXBytes > maxComputeWorkgroupStorageSize) {
+  const storagePassXBytes = passXStorageWorkgroupBytes(packed.stateCount);
+  const useStorageTable = passXBytes > maxComputeWorkgroupStorageSize;
+  if (
+    useStorageTable &&
+    storagePassXBytes > maxComputeWorkgroupStorageSize
+  ) {
     throw new Error(
       `pass_x needs ${passXBytes} B of workgroup storage: the DFA tables ` +
         `(128 + stateCount ${packed.stateCount} + stateCount*classCount ${denseLength} i32) ` +
         `plus four rotating columns of two u32 per state (${
           8 * packed.stateCount * 4
         } B); this device reports maxComputeWorkgroupStorageSize=${maxComputeWorkgroupStorageSize} B. ` +
-        `A storage-buffer fallback for the DFA tables is not implemented.`,
+        `The storage-buffer fallback needs ${storagePassXBytes} B, ` +
+        `but this device reports maxComputeWorkgroupStorageSize=${maxComputeWorkgroupStorageSize} B.`,
     );
   }
   const passYBytes = passYWorkgroupBytes(packed.stateCount);
@@ -335,7 +347,7 @@ export function buildKernelSource(
         w0_${slot} = DEAD;
         w1_${slot} = 0u;
         if (q < STATE_COUNT) {
-          let nextState = wgDense[cls * STATE_COUNT + q];
+          let nextState = dense_transition(cls, q);
           if (nextState >= 0) {
             let t = u32(nextState);
             // Identity element when the run leaves the segment alive in state t.
@@ -482,15 +494,19 @@ struct Params {
 @group(0) @binding(4) var<storage, read_write> packedRec: array<u32>;
 @group(0) @binding(5) var<storage, read_write> exitPos: array<u32>;
 @group(0) @binding(6) var<storage, read_write> aux: array<u32>;
-@group(0) @binding(7) var<storage, read_write> records: array<i32>;
+@group(0) @binding(7) var<storage, read_write> records: array<u32>;
 
 // --- shared helpers ---------------------------------------------------------
 
 var<workgroup> wgAscii: array<i32, 128>;
 var<workgroup> wgAccept: array<i32, ${packed.stateCount}>;
-// Dense transition table, TRANSPOSED as [class][state]: pass_x reads it with one
+${
+    useStorageTable
+      ? ""
+      : `// Dense transition table, TRANSPOSED as [class][state]: pass_x reads it with one
 // thread per state, so this layout is what makes the read bank-conflict free.
-var<workgroup> wgDense: array<i32, ${denseLength}>;
+var<workgroup> wgDense: array<i32, ${denseLength}>;`
+  }
 
 fn read_unit(i: u32) -> u32 {
   let w = src[i >> 1u];
@@ -535,6 +551,14 @@ fn class_of(cp: u32) -> u32 {
   return found;
 }
 
+fn dense_transition(cls: u32, state: u32) -> i32 {
+${
+    useStorageTable
+      ? "  return tables[TBL_DENSE + cls * STATE_COUNT + state];"
+      : "  return wgDense[cls * STATE_COUNT + state];"
+  }
+}
+
 // First offset belonging to segment k.
 //
 // Segments must never split a surrogate pair, or a run would leave a segment one
@@ -576,7 +600,11 @@ fn pass_x(
 ) {
   for (var i = li; i < 128u; i += PASS_X_WG) { wgAscii[i] = tables[TBL_ASCII + i]; }
   for (var i = li; i < STATE_COUNT; i += PASS_X_WG) { wgAccept[i] = tables[TBL_ACCEPT + i]; }
-  for (var i = li; i < DENSE_LEN; i += PASS_X_WG) { wgDense[i] = tables[TBL_DENSE + i]; }
+${
+    useStorageTable
+      ? ""
+      : "  for (var i = li; i < DENSE_LEN; i += PASS_X_WG) { wgDense[i] = tables[TBL_DENSE + i]; }"
+  }
   workgroupBarrier();
 
   let n = params.n;
@@ -911,11 +939,9 @@ fn pass_f(@builtin(global_invocation_id) gid: vec3<u32>) {
         let end = nextPos[p];
         let bits = packedRec[p];
         if (out < params.capacityRecords) {
-          let base = out * 4u;
-          records[base] = i32(bits & 0xFFFFu) - 1;
-          records[base + 1u] = i32(p);
-          records[base + 2u] = i32(end);
-          records[base + 3u] = i32(bits >> 16u) - 1;
+          let base = out * 2u;
+          records[base] = end;
+          records[base + 1u] = bits;
         }
         out += 1u;
         p = end;

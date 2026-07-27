@@ -2,6 +2,7 @@
  * The kernel's former worst case, re-measured.
  *
  *   deno task bench:webgpu-lexer:pathological
+ *   deno task bench:webgpu-lexer:pathological --allow-fallback-adapter
  *
  * Reads `examples/funcfuck/generated/wasm/`, a gitignored local build output.
  * Run `deno task bootstrap` first on a fresh clone.
@@ -27,12 +28,38 @@
  */
 
 import { CpuReferenceLexer, toUtf16 } from "./webgpu_lexer_cpu_reference.ts";
-import { WebGpuLexer } from "../src/runtime/webgpu/lexer.ts";
+import {
+  GpuLexerCapacityError,
+  WebGpuLexer,
+} from "../src/runtime/webgpu/lexer.ts";
 import { exampleGrammar } from "./webgpu_lexer_corpus.ts";
 import { SEG_SIZE } from "../src/runtime/webgpu/kernel_wgsl.ts";
 
 const MIB = 1024 * 1024;
 const RUNS = 5;
+
+function allowFallbackAdapter(): boolean {
+  for (const argument of Deno.args) {
+    if (argument === "--allow-fallback-adapter") {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function inspectDefaultAdapter(): Promise<GPUAdapterInfo> {
+  if (navigator.gpu === undefined) {
+    throw new Error(
+      "This host exposes no WebGPU implementation (navigator.gpu is undefined). " +
+        "Deno needs --unstable-webgpu.",
+    );
+  }
+  const adapter = await navigator.gpu.requestAdapter();
+  if (adapter === null) {
+    throw new Error("No WebGPU adapter is available.");
+  }
+  return adapter.info;
+}
 
 function median(values: readonly number[]): number {
   if (values.length === 0) {
@@ -62,28 +89,48 @@ const grammar = exampleGrammar("funcfuck");
 const planBytes = await Deno.readFile(grammar.planPath);
 const wasmBytes = await Deno.readFile(grammar.wasmPath);
 const cpu = CpuReferenceLexer.create(wasmBytes, planBytes);
-const gpu = await WebGpuLexer.create(planBytes);
+const gpu = await WebGpuLexer.create(planBytes, {
+  allowFallbackAdapter: allowFallbackAdapter(),
+});
+const adapter = await inspectDefaultAdapter();
 
 console.log(
   `single-token input (funcfuck WS run): states=${gpu.plan.stateCount} segSize=${SEG_SIZE} chunkSize=${gpu.chunkSize}`,
 );
 console.log(
-  `medians of ${RUNS} runs after 1 warmup. "x+y+z" is pass_x + pass_y + pass_z, the stages that replaced the quadratic scan.`,
+  `adapter (default requestAdapter() observation): vendor=${
+    JSON.stringify(adapter.vendor)
+  } ` +
+    `architecture=${JSON.stringify(adapter.architecture)} ` +
+    `device=${JSON.stringify(adapter.device)} ` +
+    `description=${JSON.stringify(adapter.description)} ` +
+    `fallback=${adapter.isFallbackAdapter === true}`,
+);
+if (adapter.isFallbackAdapter === true) {
+  console.log(
+    "WARNING: this is a software fallback adapter. These numbers are not hardware GPU results.",
+  );
+}
+console.log(
+  `medians of ${RUNS} runs after 1 warmup. Timestamp stages=${gpu.hasTimestamps}. ` +
+    "The input is known to emit one record, so GPU output capacity is exactly one record.",
 );
 console.log("");
-console.log(
-  [
-    "chars".padStart(9),
-    "tokens".padStart(7),
-    "parity".padStart(7),
-    "cpu ms".padStart(9),
+const headers = [
+  "chars".padStart(9),
+  "tokens".padStart(7),
+  "parity".padStart(7),
+  "cpu records".padStart(11),
+];
+if (gpu.hasTimestamps) {
+  headers.push(
     "pass_x ms".padStart(10),
     "x+y+z ms".padStart(9),
     "x+y+z/MiB".padStart(10),
-    "gpu total".padStart(10),
-    "gpu/cpu".padStart(8),
-  ].join(" "),
-);
+  );
+}
+headers.push("gpu total".padStart(10), "gpu/cpu".padStart(8));
+console.log(headers.join(" "));
 
 const sizes = [
   16 * 1024,
@@ -100,11 +147,26 @@ const sizes = [
 ];
 
 let mismatches = 0;
+let capacitySkipped = 0;
+let attempted = 0;
 for (const chars of sizes) {
   const units = toUtf16(" ".repeat(chars));
   const expected = cpu.lex(units);
 
-  const warmup = await gpu.lex(units);
+  let warmup;
+  try {
+    warmup = await gpu.lex(units, { capacityRecords: 1 });
+  } catch (error) {
+    if (!(error instanceof GpuLexerCapacityError)) {
+      throw error;
+    }
+    capacitySkipped += 1;
+    console.log(
+      `${String(chars).padStart(9)}  SKIPPED: ${error.message}`,
+    );
+    continue;
+  }
+  attempted += 1;
   let equal = warmup.records.length === expected.records.length;
   if (equal) {
     for (let index = 0; index < expected.records.length; index += 1) {
@@ -124,50 +186,68 @@ for (const chars of sizes) {
   const totalSamples: number[] = [];
   let tokenCount = warmup.tokenCount;
   for (let run = 0; run < RUNS; run += 1) {
-    cpuSamples.push(cpu.lex(units).timings.lexAllMs);
-    const actual = await gpu.lex(units);
+    cpuSamples.push(cpu.lex(units).timings.totalMs);
+    const actual = await gpu.lex(units, { capacityRecords: 1 });
     tokenCount = actual.tokenCount;
-    const stages = actual.timings.stagesMs;
-    const passX = stageMs(stages, "pass_x_sweep");
-    const passY = stageMs(stages, "pass_y_segscan");
-    const passZ = stageMs(stages, "pass_z_finalize");
-    passXSamples.push(passX);
-    sweepSamples.push(passX + passY + passZ);
+    if (gpu.hasTimestamps) {
+      const stages = actual.timings.stagesMs;
+      const passX = stageMs(stages, "pass_x_sweep");
+      const passY = stageMs(stages, "pass_y_segscan");
+      const passZ = stageMs(stages, "pass_z_finalize");
+      passXSamples.push(passX);
+      sweepSamples.push(passX + passY + passZ);
+    }
     totalSamples.push(actual.timings.totalMs);
   }
 
   const cpuMs = median(cpuSamples);
-  const sweepMs = median(sweepSamples);
   const totalMs = median(totalSamples);
-  console.log(
-    [
-      String(chars).padStart(9),
-      String(tokenCount).padStart(7),
-      String(equal).padStart(7),
-      cpuMs.toFixed(2).padStart(9),
+  const row = [
+    String(chars).padStart(9),
+    String(tokenCount).padStart(7),
+    String(equal).padStart(7),
+    cpuMs.toFixed(2).padStart(11),
+  ];
+  if (gpu.hasTimestamps) {
+    const sweepMs = median(sweepSamples);
+    row.push(
       median(passXSamples).toFixed(2).padStart(10),
       sweepMs.toFixed(2).padStart(9),
       (sweepMs / (chars / MIB)).toFixed(2).padStart(10),
-      totalMs.toFixed(2).padStart(10),
-      `${(totalMs / cpuMs).toFixed(2)}x`.padStart(8),
-    ].join(" "),
+    );
+  }
+  row.push(
+    totalMs.toFixed(2).padStart(10),
+    `${(totalMs / cpuMs).toFixed(2)}x`.padStart(8),
   );
+  console.log(row.join(" "));
 }
 
 console.log("");
 if (mismatches > 0) {
   console.error(
-    `PARITY FAILURE: ${mismatches} of ${sizes.length} sizes did not match lex_all.`,
+    `PARITY FAILURE: ${mismatches} of ${attempted} capacity-supported sizes did not match lex_all.`,
   );
   gpu.destroy();
   Deno.exit(1);
 }
-console.log(
-  "x+y+z/MiB is the linearity check. It falls to a floor and stays within a small " +
-    "constant of it; it does NOT double from row to row. The removed scan's " +
-    "equivalent column did double from row to row (369, 699, 1368, 2708 ms/MiB at " +
-    "0.25/0.5/1/2 MiB), which is what O(n^2) looks like in this column.",
-);
+if (capacitySkipped > 0) {
+  console.log(
+    `${capacitySkipped} size rows were skipped because exact one-record output still exceeded a device limit.`,
+  );
+}
+if (gpu.hasTimestamps) {
+  console.log(
+    "x+y+z/MiB is the linearity check. It falls to a floor and stays within a small " +
+      "constant of it; it does NOT double from row to row. The removed scan's " +
+      "equivalent column did double from row to row (369, 699, 1368, 2708 ms/MiB at " +
+      "0.25/0.5/1/2 MiB), which is what O(n^2) looks like in this column.",
+  );
+} else {
+  console.log(
+    "Timestamp-query is unavailable, so this run reports wall-clock behavior only and cannot establish per-stage linearity.",
+  );
+}
 console.log(
   "Two artefacts to read past. Below ~1 MiB, pass_x is pinned at its latency " +
     "floor: each workgroup walks SEG_SIZE code units serially, so a segment costs " +

@@ -2,7 +2,7 @@
 
 use core::panic::PanicInfo;
 
-const WASM_ABI_VERSION: i32 = 9;
+const WASM_ABI_VERSION: i32 = 10;
 const RUNTIME_IMPLEMENTATION_VERSION: i32 = 2;
 const MAX_WASM_PAGES: i32 = 65_535;
 const SOURCE_ENCODING_UTF16: i32 = 1;
@@ -1436,44 +1436,12 @@ pub extern "C" fn parse_cursor(
     };
     ctx.initialize_result();
 
-    let mut token_read = 0;
-    let mut token_write = 0;
-    let mut action_count = 0;
-    let mut current_state = 0;
-    let mut fragment_count = 0;
-
     if token_capacity < len {
-        return return_parse_cursor_status(
-            PARSE_CURSOR_STATUS_CAPACITY,
-            result,
-            token_write,
-            len,
-            current_state,
-            token_read,
-        );
+        return return_parse_cursor_status(PARSE_CURSOR_STATUS_CAPACITY, result, 0, len, 0, 0);
     }
-    if fragment_capacity < 1 {
-        return return_parse_cursor_status(
-            PARSE_CURSOR_STATUS_CAPACITY,
-            result,
-            token_write,
-            len,
-            current_state,
-            token_read,
-        );
-    }
-    // Reported as a capacity failure here rather than as the internal error a
-    // negative `lex_all` return would otherwise become.
     let memo_required = memo_i32_count(len);
     if memo_required < 0 || memo_capacity < memo_required {
-        return return_parse_cursor_status(
-            PARSE_CURSOR_STATUS_CAPACITY,
-            result,
-            token_write,
-            len,
-            current_state,
-            token_read,
-        );
+        return return_parse_cursor_status(PARSE_CURSOR_STATUS_CAPACITY, result, 0, len, 0, 0);
     }
 
     let raw_token_count = lex_all(
@@ -1486,8 +1454,136 @@ pub extern "C" fn parse_cursor(
         memo_capacity,
     );
     if raw_token_count < 0 {
+        return return_parse_cursor_status(PARSE_STATUS_INTERNAL, result, 0, len, 0, 0);
+    }
+    if raw_token_count > token_capacity {
+        return return_parse_cursor_status(PARSE_CURSOR_STATUS_CAPACITY, result, 0, len, 0, 0);
+    }
+
+    parse_cursor_records_impl(
+        src,
+        len,
+        token_ptr,
+        raw_token_count,
+        token_capacity,
+        rule_ptr,
+        rule_capacity,
+        child_ptr,
+        child_capacity,
+        field_ptr,
+        field_capacity,
+        value_ptr,
+        value_capacity,
+        value_item_ptr,
+        value_item_capacity,
+        result,
+        stack_ptr,
+        fragment_ptr,
+        fragment_capacity,
+        preserve_trivia,
+        max_trace_actions,
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn parse_cursor_records(
+    src: i32,
+    len: i32,
+    token_ptr: i32,
+    raw_token_count: i32,
+    token_capacity: i32,
+    rule_ptr: i32,
+    rule_capacity: i32,
+    child_ptr: i32,
+    child_capacity: i32,
+    field_ptr: i32,
+    field_capacity: i32,
+    value_ptr: i32,
+    value_capacity: i32,
+    value_item_ptr: i32,
+    value_item_capacity: i32,
+    result: i32,
+    stack_ptr: i32,
+    fragment_ptr: i32,
+    fragment_capacity: i32,
+    preserve_trivia: i32,
+    max_trace_actions: i32,
+) -> i32 {
+    parse_cursor_records_impl(
+        src,
+        len,
+        token_ptr,
+        raw_token_count,
+        token_capacity,
+        rule_ptr,
+        rule_capacity,
+        child_ptr,
+        child_capacity,
+        field_ptr,
+        field_capacity,
+        value_ptr,
+        value_capacity,
+        value_item_ptr,
+        value_item_capacity,
+        result,
+        stack_ptr,
+        fragment_ptr,
+        fragment_capacity,
+        preserve_trivia,
+        max_trace_actions,
+    )
+}
+
+fn parse_cursor_records_impl(
+    src: i32,
+    len: i32,
+    token_ptr: i32,
+    raw_token_count: i32,
+    token_capacity: i32,
+    rule_ptr: i32,
+    rule_capacity: i32,
+    child_ptr: i32,
+    child_capacity: i32,
+    field_ptr: i32,
+    field_capacity: i32,
+    value_ptr: i32,
+    value_capacity: i32,
+    value_item_ptr: i32,
+    value_item_capacity: i32,
+    result: i32,
+    stack_ptr: i32,
+    fragment_ptr: i32,
+    fragment_capacity: i32,
+    preserve_trivia: i32,
+    max_trace_actions: i32,
+) -> i32 {
+    let ctx = CursorCtx {
+        token_ptr,
+        token_capacity,
+        rule_ptr,
+        rule_capacity,
+        child_ptr,
+        child_capacity,
+        field_ptr,
+        field_capacity,
+        value_ptr,
+        value_capacity,
+        value_item_ptr,
+        value_item_capacity,
+        result,
+        fragment_ptr,
+    };
+    ctx.initialize_result();
+
+    let mut token_read = 0;
+    let mut token_write = 0;
+    let mut action_count = 0;
+    let mut current_state = 0;
+    let mut fragment_count = 0;
+
+    if raw_token_count < 0 || raw_token_count > token_capacity {
         return return_parse_cursor_status(
-            PARSE_STATUS_INTERNAL,
+            PARSE_CURSOR_STATUS_CAPACITY,
             result,
             token_write,
             len,
@@ -1495,7 +1591,7 @@ pub extern "C" fn parse_cursor(
             token_read,
         );
     }
-    if raw_token_count > token_capacity {
+    if fragment_capacity < 1 {
         return return_parse_cursor_status(
             PARSE_CURSOR_STATUS_CAPACITY,
             result,

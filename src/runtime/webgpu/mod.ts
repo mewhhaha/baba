@@ -10,9 +10,10 @@
  *
  * - it is **async**, so it cannot be hosted inside the generated `parser.lex()`,
  *   which is synchronous;
- * - it **loses to the CPU below ~768 KiB of source** on the one stack it was
- *   measured on, and the ~226 ms one-time device setup is never repaid by any
- *   single document;
+ * - its historical Deno/wgpu hardware measurement lost to the CPU below about
+ *   896 KiB, but that result predates the current Wasm lexer optimization and
+ *   is not a supported crossover threshold; setup is still large enough that a
+ *   single document does not repay it;
  * - it supports **guard-free grammars only** and refuses others loudly;
  * - it requires a hardware WebGPU adapter by default; software fallback
  *   adapters require explicit `allowFallbackAdapter` opt-in.
@@ -31,6 +32,15 @@ export type {
   GpuSetupTimings,
   WebGpuLexerCreateOptions,
 } from "./lexer.ts";
+
+export { WebGpuLexerContext, WebGpuRuntime } from "./context.ts";
+export type {
+  WebGpuLexerContextOptions,
+  WebGpuRuntimeCapabilities,
+  WebGpuRuntimeCreateOptions,
+  WebGpuRuntimeLease,
+  WebGpuRuntimeLimits,
+} from "./context.ts";
 
 /**
  * Guard-free preflight. `WebGpuLexer.create` refuses a guard-carrying plan, but

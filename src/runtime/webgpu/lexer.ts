@@ -1,10 +1,12 @@
 /**
  * WebGPU execution backend for `lex_all`.
  *
- * Consumes an existing `parser.plan`. Produces the identical 4 x i32 token
- * records in the identical order. One `queue.submit()` and one `mapAsync()` per
- * lex - Deno's WebGPU pays a fixed ~11 ms per host<->device synchronization, so
- * anything with a CPU in the loop is pointless.
+ * Consumes an existing `parser.plan`. The GPU emits two u32 per token (end and
+ * packed spec/accepting state), then the host expands those pairs into the
+ * identical 4 x i32 token records in the identical order. One `queue.submit()`
+ * and one `mapAsync()` per lex - Deno's WebGPU pays a fixed ~11 ms per
+ * host<->device synchronization, so anything with a CPU in the loop is
+ * pointless.
  */
 
 import { decodeLexerPlanTables, type LexerPlanTables } from "./plan_tables.ts";
@@ -18,11 +20,13 @@ import {
   packTables,
   PASS_Z_WORKGROUP,
   passXWorkgroup,
+  passXWorkgroupBytes,
   SCAN_WORKGROUP,
   SEG_SIZE,
   SEG_SUMMARY_U32_PER_STATE,
   STORAGE_BINDING_COUNT,
 } from "./kernel_wgsl.ts";
+import type { WebGpuRuntime, WebGpuRuntimeLease } from "./context.ts";
 
 interface KernelStage {
   /** Reporting name; the key used in `GpuLexTimings.stagesMs`. */
@@ -55,6 +59,10 @@ const TIMESTAMP_COUNT = STAGES.length * 2;
 const STAGING_META_BYTES = 16;
 const STAGING_TIMESTAMP_BYTES = TIMESTAMP_COUNT * 8;
 const STAGING_RECORDS_OFFSET = STAGING_META_BYTES + STAGING_TIMESTAMP_BYTES;
+const COMPACT_RECORD_U32_COUNT = 2;
+const COMPACT_RECORD_BYTES = COMPACT_RECORD_U32_COUNT *
+  Uint32Array.BYTES_PER_ELEMENT;
+const HOST_RECORD_I32_COUNT = 4;
 
 export interface GpuLexTimings {
   /** Wall time for uploading the UTF-16 source and the uniform params. */
@@ -70,7 +78,7 @@ export interface GpuLexTimings {
    * WebGPU, not of the algorithm.
    */
   readonly mapRangeMs: number;
-  /** Wall time for the extra copy into an owned Int32Array (0 when borrowing). */
+  /** Wall time for expanding compact GPU pairs into the public record layout. */
   readonly copyOutMs: number;
   /** mapRangeMs + copyOutMs + header decode. */
   readonly readbackMs: number;
@@ -120,6 +128,8 @@ export interface GpuLexerLimits {
 export interface WebGpuLexerCreateOptions {
   /** Software fallback adapters are rejected unless explicitly enabled. */
   readonly allowFallbackAdapter?: boolean;
+  /** Use a device owned by a shared WebGpuRuntime. */
+  readonly runtime?: WebGpuRuntime;
   /**
    * Test hook: pretend `maxComputeWorkgroupStorageSize` is this small. The
    * WebGPU-guaranteed floor is 16384 B, which is half of what a 4096-unit
@@ -161,11 +171,9 @@ export interface GpuLexerOptions {
    */
   readonly capacityRecords?: number;
   /**
-   * Return the records as a view straight into the mapped staging range instead
-   * of copying them into an owned Int32Array. The view stays valid until the
-   * next `lex()` call or `destroy()`. This is what a real backend integration
-   * would do; the copying default is the safe one and is what the parity gate
-   * in `tests/webgpu_lexer_parity_test.ts` uses.
+   * Compact GPU records cannot expose the public four-word layout as a mapped
+   * view. Passing true is rejected. A future leased-result API can expose the
+   * compact representation without an implicit lifetime tied to the next call.
    */
   readonly borrowRecords?: boolean;
   /**
@@ -187,6 +195,17 @@ interface DeviceLostBox {
   reason: string | null;
 }
 
+function requirePositiveSafeInteger(value: number, optionName: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(
+      `${optionName} must be a positive safe integer; received ${
+        String(value)
+      }.`,
+    );
+  }
+  return value;
+}
+
 export class WebGpuLexer {
   readonly device: GPUDevice;
   readonly plan: LexerPlanTables;
@@ -196,6 +215,8 @@ export class WebGpuLexer {
   readonly limits: GpuLexerLimits;
   /** Chunk size chosen for this device from its workgroup-storage limit. */
   readonly chunkSize: number;
+  /** True when pass_x reads dense transitions from storage instead of workgroup memory. */
+  readonly usesStorageTables: boolean;
   readonly setupTimings: GpuSetupTimings;
 
   readonly #pipelines: Map<string, GPUComputePipeline>;
@@ -222,9 +243,10 @@ export class WebGpuLexer {
    * the same input reproduces identical sizes).
    */
   #bufferGeneration = 0;
-  #pendingUnmap = false;
   #lexInFlight = false;
   #destroyed = false;
+  readonly #ownsDevice: boolean;
+  readonly #runtime: WebGpuRuntime | undefined;
 
   private constructor(
     device: GPUDevice,
@@ -241,6 +263,9 @@ export class WebGpuLexer {
     chunkSize: number,
     setupTimings: GpuSetupTimings,
     deviceLost: DeviceLostBox,
+    ownsDevice: boolean,
+    usesStorageTables: boolean,
+    runtime: WebGpuRuntime | undefined,
   ) {
     this.device = device;
     this.plan = plan;
@@ -255,14 +280,41 @@ export class WebGpuLexer {
     this.hasTimestamps = querySet !== null;
     this.limits = limits;
     this.chunkSize = chunkSize;
+    this.usesStorageTables = usesStorageTables;
     this.setupTimings = setupTimings;
     this.#deviceLost = deviceLost;
+    this.#ownsDevice = ownsDevice;
+    this.#runtime = runtime;
   }
 
   static async create(
     planBytes: Uint8Array,
     options: WebGpuLexerCreateOptions = {},
   ): Promise<WebGpuLexer> {
+    let runtimeLease: WebGpuRuntimeLease | null = null;
+    if (options.runtime !== undefined) {
+      runtimeLease = await options.runtime.acquireLease();
+    }
+    try {
+      return await WebGpuLexer.#createOnDevice(planBytes, options);
+    } finally {
+      if (runtimeLease !== null) {
+        runtimeLease.release();
+      }
+    }
+  }
+
+  static async #createOnDevice(
+    planBytes: Uint8Array,
+    options: WebGpuLexerCreateOptions,
+  ): Promise<WebGpuLexer> {
+    let simulatedWorkgroupStorageLimit: number | undefined;
+    if (options.simulateWorkgroupStorageLimit !== undefined) {
+      simulatedWorkgroupStorageLimit = requirePositiveSafeInteger(
+        options.simulateWorkgroupStorageLimit,
+        "simulateWorkgroupStorageLimit",
+      );
+    }
     const setupStart = performance.now();
     const decodeStart = performance.now();
     const plan = decodeLexerPlanTables(planBytes);
@@ -279,48 +331,63 @@ export class WebGpuLexer {
     const packed = packTables(plan, alphabet);
     const packEnd = performance.now();
 
-    // `navigator.gpu` is absent entirely on hosts without WebGPU (a Deno without
-    // --unstable-webgpu, an older runtime, a browser that does not implement
-    // it). Reading `.requestAdapter` off `undefined` would be a bare TypeError,
-    // which tells a caller nothing about what to do next.
-    if (navigator.gpu === undefined) {
-      throw new Error(
-        "This host exposes no WebGPU implementation (navigator.gpu is undefined). " +
-          "Deno needs --unstable-webgpu.",
-      );
+    let device: GPUDevice;
+    let ownsDevice = false;
+    let wantsTimestamps: boolean;
+    let adapterStart = performance.now();
+    let adapterEnd = adapterStart;
+    let deviceStart = adapterStart;
+    let deviceEnd = adapterStart;
+    if (options.runtime !== undefined) {
+      device = options.runtime.device;
+      wantsTimestamps = options.runtime.capabilities.hasTimestampQueries;
+    } else {
+      // `navigator.gpu` is absent entirely on hosts without WebGPU (a Deno
+      // without --unstable-webgpu, an older runtime, or a browser that does not
+      // implement it). Guard the global before reading `.gpu` so SSR callers get
+      // an actionable error rather than a ReferenceError.
+      if (typeof navigator === "undefined" || navigator.gpu === undefined) {
+        throw new Error(
+          "This host exposes no WebGPU implementation (navigator.gpu is unavailable). " +
+            "Deno needs --unstable-webgpu.",
+        );
+      }
+      adapterStart = performance.now();
+      const adapter = await navigator.gpu.requestAdapter();
+      adapterEnd = performance.now();
+      if (adapter === null) {
+        throw new Error("No WebGPU adapter is available.");
+      }
+      const adapterInfo = adapter.info;
+      if (
+        adapterInfo !== undefined &&
+        adapterInfo.isFallbackAdapter === true &&
+        options.allowFallbackAdapter !== true
+      ) {
+        throw new Error(
+          `WebGPU selected the software fallback adapter "${adapterInfo.description}" ` +
+            `(vendor ${adapterInfo.vendor}). Set allowFallbackAdapter=true to opt in explicitly.`,
+        );
+      }
+      wantsTimestamps = adapter.features.has("timestamp-query");
+      const requiredFeatures: GPUFeatureName[] = [];
+      if (wantsTimestamps) {
+        requiredFeatures.push("timestamp-query");
+      }
+      deviceStart = performance.now();
+      device = await adapter.requestDevice({
+        requiredFeatures,
+        requiredLimits: {
+          maxStorageBufferBindingSize:
+            adapter.limits.maxStorageBufferBindingSize,
+          maxBufferSize: adapter.limits.maxBufferSize,
+          maxComputeWorkgroupStorageSize:
+            adapter.limits.maxComputeWorkgroupStorageSize,
+        },
+      });
+      deviceEnd = performance.now();
+      ownsDevice = true;
     }
-    const adapterStart = performance.now();
-    const adapter = await navigator.gpu.requestAdapter();
-    const adapterEnd = performance.now();
-    if (adapter === null) {
-      throw new Error("No WebGPU adapter is available.");
-    }
-    const adapterInfo = adapter.info;
-    if (
-      adapterInfo.isFallbackAdapter === true &&
-      options.allowFallbackAdapter !== true
-    ) {
-      throw new Error(
-        `WebGPU selected the software fallback adapter "${adapterInfo.description}" ` +
-          `(vendor ${adapterInfo.vendor}). Set allowFallbackAdapter=true to opt in explicitly.`,
-      );
-    }
-    const wantsTimestamps = adapter.features.has("timestamp-query");
-    const requiredFeatures: GPUFeatureName[] = [];
-    if (wantsTimestamps) {
-      requiredFeatures.push("timestamp-query");
-    }
-    const deviceStart = performance.now();
-    const device = await adapter.requestDevice({
-      requiredFeatures,
-      requiredLimits: {
-        maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
-        maxBufferSize: adapter.limits.maxBufferSize,
-        maxComputeWorkgroupStorageSize:
-          adapter.limits.maxComputeWorkgroupStorageSize,
-      },
-    });
-    const deviceEnd = performance.now();
     const deviceLost: DeviceLostBox = { reason: null };
     device.lost.then((info) => {
       deviceLost.reason = `${info.reason}: ${info.message}`;
@@ -336,10 +403,10 @@ export class WebGpuLexer {
     // most what was asked for, and asking for the adapter maximum tells you
     // nothing about whether the adapter offered more than the spec floor.
     let workgroupStorage = device.limits.maxComputeWorkgroupStorageSize;
-    if (options.simulateWorkgroupStorageLimit !== undefined) {
+    if (simulatedWorkgroupStorageLimit !== undefined) {
       workgroupStorage = Math.min(
         workgroupStorage,
-        options.simulateWorkgroupStorageLimit,
+        simulatedWorkgroupStorageLimit,
       );
     }
     const limits: GpuLexerLimits = {
@@ -354,6 +421,9 @@ export class WebGpuLexer {
         device.limits.maxStorageBuffersPerShaderStage,
     };
     if (limits.maxStorageBuffersPerShaderStage < STORAGE_BINDING_COUNT) {
+      if (ownsDevice) {
+        device.destroy();
+      }
       throw new GpuLexerCapacityError(
         "maxStorageBuffersPerShaderStage",
         STORAGE_BINDING_COUNT,
@@ -370,12 +440,38 @@ export class WebGpuLexer {
       passXInvocations,
     );
     if (limits.maxComputeInvocationsPerWorkgroup < requiredInvocations) {
+      if (ownsDevice) {
+        device.destroy();
+      }
       throw new GpuLexerCapacityError(
         "maxComputeInvocationsPerWorkgroup",
         requiredInvocations,
         limits.maxComputeInvocationsPerWorkgroup,
         `pass_b/pass_d/pass_e1/pass_f declare @workgroup_size(${MAX_WORKGROUP_INVOCATIONS}) ` +
           `and pass_x/pass_y declare @workgroup_size(${passXInvocations}) for ${plan.stateCount} DFA states`,
+      );
+    }
+    const tablesBufferSize = Math.max(4, packed.words.byteLength);
+    if (tablesBufferSize > limits.maxStorageBufferBindingSize) {
+      if (ownsDevice) {
+        device.destroy();
+      }
+      throw new GpuLexerCapacityError(
+        "maxStorageBufferBindingSize",
+        tablesBufferSize,
+        limits.maxStorageBufferBindingSize,
+        `The grammar's packed lexer tables need a ${tablesBufferSize} B storage binding`,
+      );
+    }
+    if (tablesBufferSize > limits.maxBufferSize) {
+      if (ownsDevice) {
+        device.destroy();
+      }
+      throw new GpuLexerCapacityError(
+        "maxBufferSize",
+        tablesBufferSize,
+        limits.maxBufferSize,
+        `The grammar's packed lexer tables need a ${tablesBufferSize} B buffer`,
       );
     }
     // wgpu does NOT validate workgroup storage at createComputePipeline (a
@@ -385,6 +481,9 @@ export class WebGpuLexer {
     // 16384 B the previously hard-coded 4096-unit chunk was 2x over.
     const chunkLog2 = chooseChunkLog2(limits.maxComputeWorkgroupStorageSize);
     const chunkSize = 1 << chunkLog2;
+    const usesStorageTables =
+      passXWorkgroupBytes(plan.stateCount, alphabet.classCount) >
+        limits.maxComputeWorkgroupStorageSize;
 
     const buildStart = performance.now();
     const source = buildKernelSource(
@@ -394,20 +493,32 @@ export class WebGpuLexer {
     );
     const buildEnd = performance.now();
     device.pushErrorScope("validation");
-    const module = device.createShaderModule({
-      code: source,
-      label: "baba-lexer",
-    });
-    const compilationInfo = await module.getCompilationInfo();
+    let module: GPUShaderModule;
+    let compilationInfo: GPUCompilationInfo;
+    let scopeError: GPUError | null = null;
+    try {
+      module = device.createShaderModule({
+        code: source,
+        label: "baba-lexer",
+      });
+      compilationInfo = await module.getCompilationInfo();
+    } finally {
+      scopeError = await device.popErrorScope();
+    }
     const errors = compilationInfo.messages.filter((m) => m.type === "error");
     if (errors.length > 0) {
       const detail = errors
         .map((m) => `line ${m.lineNum}:${m.linePos}: ${m.message}`)
         .join("\n");
+      if (ownsDevice) {
+        device.destroy();
+      }
       throw new Error(`WGSL compilation failed:\n${detail}`);
     }
-    const scopeError = await device.popErrorScope();
     if (scopeError !== null) {
+      if (ownsDevice) {
+        device.destroy();
+      }
       throw new Error(`WGSL module creation failed: ${scopeError.message}`);
     }
     const shaderEnd = performance.now();
@@ -455,24 +566,32 @@ export class WebGpuLexer {
       },
     ];
     device.pushErrorScope("validation");
-    const layout = device.createBindGroupLayout({ entries });
-    const pipelineLayout = device.createPipelineLayout({
-      bindGroupLayouts: [layout],
-    });
-
+    let layout: GPUBindGroupLayout;
     const pipelines = new Map<string, GPUComputePipeline>();
-    for (const stage of STAGES) {
-      pipelines.set(
-        stage.label,
-        device.createComputePipeline({
-          layout: pipelineLayout,
-          compute: { module, entryPoint: stage.entryPoint },
-          label: stage.label,
-        }),
-      );
+    let pipelineError: GPUError | null = null;
+    try {
+      layout = device.createBindGroupLayout({ entries });
+      const pipelineLayout = device.createPipelineLayout({
+        bindGroupLayouts: [layout],
+      });
+
+      for (const stage of STAGES) {
+        pipelines.set(
+          stage.label,
+          device.createComputePipeline({
+            layout: pipelineLayout,
+            compute: { module, entryPoint: stage.entryPoint },
+            label: stage.label,
+          }),
+        );
+      }
+    } finally {
+      pipelineError = await device.popErrorScope();
     }
-    const pipelineError = await device.popErrorScope();
     if (pipelineError !== null) {
+      if (ownsDevice) {
+        device.destroy();
+      }
       throw new Error(
         `Compute pipeline creation failed: ${pipelineError.message}`,
       );
@@ -481,45 +600,77 @@ export class WebGpuLexer {
 
     device.pushErrorScope("validation");
     device.pushErrorScope("out-of-memory");
-    const tablesBuffer = device.createBuffer({
-      size: Math.max(4, packed.words.byteLength),
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      label: "tables",
-    });
-    device.queue.writeBuffer(
-      tablesBuffer,
-      0,
-      packed.words.buffer as ArrayBuffer,
-      packed.words.byteOffset,
-      packed.words.byteLength,
-    );
-
-    // 13 u32 of Params, rounded up to the 16-byte struct alignment.
-    const paramsBuffer = device.createBuffer({
-      size: 64,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      label: "params",
-    });
-
+    let tablesBuffer: GPUBuffer;
+    let paramsBuffer: GPUBuffer;
     let querySet: GPUQuerySet | null = null;
     let resolveBuffer: GPUBuffer | null = null;
-    if (wantsTimestamps) {
-      querySet = device.createQuerySet({
-        type: "timestamp",
-        count: TIMESTAMP_COUNT,
+    let setupOom: GPUError | null = null;
+    let setupValidation: GPUError | null = null;
+    try {
+      tablesBuffer = device.createBuffer({
+        size: tablesBufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        label: "tables",
       });
-      resolveBuffer = device.createBuffer({
-        size: STAGING_TIMESTAMP_BYTES,
-        usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
-        label: "timestamps",
+      device.queue.writeBuffer(
+        tablesBuffer,
+        0,
+        packed.words.buffer as ArrayBuffer,
+        packed.words.byteOffset,
+        packed.words.byteLength,
+      );
+
+      // 13 u32 of Params, rounded up to the 16-byte struct alignment.
+      paramsBuffer = device.createBuffer({
+        size: 64,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        label: "params",
       });
+
+      if (wantsTimestamps) {
+        querySet = device.createQuerySet({
+          type: "timestamp",
+          count: TIMESTAMP_COUNT,
+        });
+        resolveBuffer = device.createBuffer({
+          size: STAGING_TIMESTAMP_BYTES,
+          usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+          label: "timestamps",
+        });
+      }
+    } finally {
+      try {
+        setupOom = await device.popErrorScope();
+      } finally {
+        setupValidation = await device.popErrorScope();
+      }
     }
-    const setupOom = await device.popErrorScope();
     if (setupOom !== null) {
+      tablesBuffer.destroy();
+      paramsBuffer.destroy();
+      if (resolveBuffer !== null) {
+        resolveBuffer.destroy();
+      }
+      if (querySet !== null) {
+        querySet.destroy();
+      }
+      if (ownsDevice) {
+        device.destroy();
+      }
       throw new Error(`Setup allocation failed: ${setupOom.message}`);
     }
-    const setupValidation = await device.popErrorScope();
     if (setupValidation !== null) {
+      tablesBuffer.destroy();
+      paramsBuffer.destroy();
+      if (resolveBuffer !== null) {
+        resolveBuffer.destroy();
+      }
+      if (querySet !== null) {
+        querySet.destroy();
+      }
+      if (ownsDevice) {
+        device.destroy();
+      }
       throw new Error(`Setup validation failed: ${setupValidation.message}`);
     }
     const buffersEnd = performance.now();
@@ -552,6 +703,9 @@ export class WebGpuLexer {
       chunkSize,
       setupTimings,
       deviceLost,
+      ownsDevice,
+      usesStorageTables,
+      options.runtime,
     );
   }
 
@@ -565,32 +719,41 @@ export class WebGpuLexer {
     if (current !== null && current.size >= wanted) {
       return current;
     }
+    const replacement = {
+      buffer: this.device.createBuffer({ size: wanted, usage, label }),
+      size: wanted,
+    };
     if (current !== null) {
       current.buffer.destroy();
     }
     this.#bufferGeneration += 1;
-    return {
-      buffer: this.device.createBuffer({ size: wanted, usage, label }),
-      size: wanted,
-    };
+    return replacement;
   }
 
   /**
    * Largest input, in UTF-16 code units, this device can lex in one submit at a
    * given output capacity ratio. The binding wall is the records buffer, which
-   * is 16 B per record.
+   * is 8 B per compact GPU record.
    */
   maxInputUnits(recordsPerUnit = 1): number {
+    if (!Number.isFinite(recordsPerUnit) || recordsPerUnit <= 0) {
+      throw new TypeError(
+        `recordsPerUnit must be finite and greater than zero; received ${
+          String(recordsPerUnit)
+        }.`,
+      );
+    }
     const perUnitBindingBytes = 4; // nextPos / packedRec / exitPos are u32 each
     const byPositionArrays = Math.floor(
       this.limits.maxStorageBufferBindingSize / perUnitBindingBytes,
     );
     const byRecords = Math.floor(
-      this.limits.maxStorageBufferBindingSize / (16 * recordsPerUnit),
+      this.limits.maxStorageBufferBindingSize /
+        (COMPACT_RECORD_BYTES * recordsPerUnit),
     );
     const byStaging = Math.floor(
       (this.limits.maxBufferSize - STAGING_RECORDS_OFFSET) /
-        (16 * recordsPerUnit),
+        (COMPACT_RECORD_BYTES * recordsPerUnit),
     );
     const byChunkDispatch = this.limits.maxComputeWorkgroupsPerDimension *
       SCAN_WORKGROUP * this.chunkSize;
@@ -627,7 +790,7 @@ export class WebGpuLexer {
       srcBytes: number;
       posBytes: number;
       auxBytes: number;
-      recordBytes: number;
+      compactRecordBytes: number;
       stagingBytes: number;
     },
     dispatches: {
@@ -643,7 +806,7 @@ export class WebGpuLexer {
       ["src", sizes.srcBytes],
       ["nextPos/packedRec/exitPos", sizes.posBytes],
       ["aux", sizes.auxBytes],
-      ["records", sizes.recordBytes],
+      ["compactRecords", sizes.compactRecordBytes],
     ];
     for (const [name, bytes] of bindings) {
       if (bytes > binding) {
@@ -659,7 +822,7 @@ export class WebGpuLexer {
       ["src", sizes.srcBytes],
       ["nextPos/packedRec/exitPos", sizes.posBytes],
       ["aux", sizes.auxBytes],
-      ["records", sizes.recordBytes],
+      ["compactRecords", sizes.compactRecordBytes],
       ["staging", sizes.stagingBytes],
     ];
     for (const [name, bytes] of buffers) {
@@ -704,8 +867,16 @@ export class WebGpuLexer {
     if (this.#destroyed) {
       throw new Error("This WebGpuLexer has been destroyed.");
     }
+    if (this.#runtime !== undefined) {
+      this.#runtime.assertUsable();
+    }
     if (this.#deviceLost.reason !== null) {
       throw new Error(`WebGPU device was lost: ${this.#deviceLost.reason}`);
+    }
+    if (options.borrowRecords === true) {
+      throw new TypeError(
+        "borrowRecords is unsupported because compact GPU records must be expanded into the public four-word layout.",
+      );
     }
     if (this.#lexInFlight) {
       throw new Error(
@@ -713,9 +884,16 @@ export class WebGpuLexer {
       );
     }
     this.#lexInFlight = true;
+    let runtimeLease: WebGpuRuntimeLease | null = null;
     try {
+      if (this.#runtime !== undefined) {
+        runtimeLease = await this.#runtime.acquireLease();
+      }
       return await this.#lexInternal(units, options);
     } finally {
+      if (runtimeLease !== null) {
+        runtimeLease.release();
+      }
       this.#lexInFlight = false;
     }
   }
@@ -724,11 +902,21 @@ export class WebGpuLexer {
     units: Uint16Array,
     options: GpuLexerOptions = {},
   ): Promise<GpuLexResult> {
-    const totalStart = performance.now();
-    if (this.#pendingUnmap && this.#staging !== null) {
-      this.#staging.buffer.unmap();
-      this.#pendingUnmap = false;
+    let requestedCapacity: number | undefined;
+    if (options.capacityRecords !== undefined) {
+      requestedCapacity = requirePositiveSafeInteger(
+        options.capacityRecords,
+        "capacityRecords",
+      );
     }
+    let debugWorkgroupLimit: number | undefined;
+    if (options.debugMaxWorkgroupsPerDimension !== undefined) {
+      debugWorkgroupLimit = requirePositiveSafeInteger(
+        options.debugMaxWorkgroupsPerDimension,
+        "debugMaxWorkgroupsPerDimension",
+      );
+    }
+    const totalStart = performance.now();
     const n = units.length;
     const chunkSize = this.chunkSize;
     const numChunks = Math.ceil(n / chunkSize);
@@ -741,8 +929,8 @@ export class WebGpuLexer {
     const numSegAlloc = Math.max(1, numSeg);
 
     let capacityRecords = n;
-    if (options.capacityRecords !== undefined) {
-      capacityRecords = Math.min(n, Math.max(1, options.capacityRecords));
+    if (requestedCapacity !== undefined) {
+      capacityRecords = Math.min(n, requestedCapacity);
     }
     capacityRecords = Math.max(1, capacityRecords);
 
@@ -756,14 +944,14 @@ export class WebGpuLexer {
     const segSumOff = AUX_HEADER_U32 + 2 * numChunksAlloc + 2 * numBlocksAlloc;
     const auxU32 = segSumOff +
       numSegAlloc * this.plan.stateCount * SEG_SUMMARY_U32_PER_STATE;
-    const recordBytes = capacityRecords * 16;
-    const stagingBytes = STAGING_RECORDS_OFFSET + recordBytes;
+    const compactRecordBytes = capacityRecords * COMPACT_RECORD_BYTES;
+    const stagingBytes = STAGING_RECORDS_OFFSET + compactRecordBytes;
 
     let perDimension = this.limits.maxComputeWorkgroupsPerDimension;
-    if (options.debugMaxWorkgroupsPerDimension !== undefined) {
+    if (debugWorkgroupLimit !== undefined) {
       perDimension = Math.max(
         1,
-        Math.min(perDimension, options.debugMaxWorkgroupsPerDimension),
+        Math.min(perDimension, debugWorkgroupLimit),
       );
     }
     const passXWorkgroups = Math.min(perDimension, Math.max(1, numSeg));
@@ -781,7 +969,13 @@ export class WebGpuLexer {
     this.#checkLimits(
       n,
       capacityRecords,
-      { srcBytes, posBytes, auxBytes: auxU32 * 4, recordBytes, stagingBytes },
+      {
+        srcBytes,
+        posBytes,
+        auxBytes: auxU32 * 4,
+        compactRecordBytes,
+        stagingBytes,
+      },
       {
         passX: passXWorkgroups,
         passZ: passZWorkgroups,
@@ -796,194 +990,229 @@ export class WebGpuLexer {
     // PREVIOUS submit's staging contents with overflow === false.
     this.device.pushErrorScope("validation");
     this.device.pushErrorScope("out-of-memory");
-
-    this.#src = this.#ensure(
-      this.#src,
-      srcBytes,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      "src",
-    );
-    this.#nextPos = this.#ensure(
-      this.#nextPos,
-      posBytes,
-      GPUBufferUsage.STORAGE,
-      "nextPos",
-    );
-    this.#packedRec = this.#ensure(
-      this.#packedRec,
-      posBytes,
-      GPUBufferUsage.STORAGE,
-      "packedRec",
-    );
-    this.#exitPos = this.#ensure(
-      this.#exitPos,
-      posBytes,
-      GPUBufferUsage.STORAGE,
-      "exitPos",
-    );
-    this.#aux = this.#ensure(
-      this.#aux,
-      auxU32 * 4,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      "aux",
-    );
-    this.#records = this.#ensure(
-      this.#records,
-      recordBytes,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      "records",
-    );
-    this.#staging = this.#ensure(
-      this.#staging,
-      stagingBytes,
-      GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      "staging",
-    );
-
-    const key = [
-      this.#bufferGeneration,
-      this.#src.size,
-      this.#nextPos.size,
-      this.#packedRec.size,
-      this.#exitPos.size,
-      this.#aux.size,
-      this.#records.size,
-    ].join(":");
-    if (this.#bindGroup === null || this.#bindGroupKey !== key) {
-      this.#bindGroup = this.device.createBindGroup({
-        layout: this.#layout,
-        entries: [
-          { binding: 0, resource: { buffer: this.#paramsBuffer } },
-          { binding: 1, resource: { buffer: this.#src.buffer } },
-          { binding: 2, resource: { buffer: this.#tablesBuffer } },
-          { binding: 3, resource: { buffer: this.#nextPos.buffer } },
-          { binding: 4, resource: { buffer: this.#packedRec.buffer } },
-          { binding: 5, resource: { buffer: this.#exitPos.buffer } },
-          { binding: 6, resource: { buffer: this.#aux.buffer } },
-          { binding: 7, resource: { buffer: this.#records.buffer } },
-        ],
-      });
-      this.#bindGroupKey = key;
-    }
-
-    // --- upload -------------------------------------------------------------
-    const uploadStart = performance.now();
-    const wholeWords = n >> 1;
-    if (wholeWords > 0) {
-      this.device.queue.writeBuffer(
-        this.#src.buffer,
-        0,
-        units.buffer as ArrayBuffer,
-        units.byteOffset,
-        wholeWords * 4,
+    let uploadStart = 0;
+    let uploadEnd = 0;
+    let encodeStart = 0;
+    let encodeEnd = 0;
+    let submitStart = 0;
+    let submitEnd = 0;
+    let oomError: GPUError | null = null;
+    let validationError: GPUError | null = null;
+    let gpuOperationFailure: { readonly cause: unknown } | null = null;
+    try {
+      this.#src = this.#ensure(
+        this.#src,
+        srcBytes,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        "src",
       );
-    }
-    if ((n & 1) === 1) {
-      this.device.queue.writeBuffer(
-        this.#src.buffer,
-        wholeWords * 4,
-        new Uint32Array([units[n - 1]]),
+      this.#nextPos = this.#ensure(
+        this.#nextPos,
+        posBytes,
+        GPUBufferUsage.STORAGE,
+        "nextPos",
       );
-    }
+      this.#packedRec = this.#ensure(
+        this.#packedRec,
+        posBytes,
+        GPUBufferUsage.STORAGE,
+        "packedRec",
+      );
+      this.#exitPos = this.#ensure(
+        this.#exitPos,
+        posBytes,
+        GPUBufferUsage.STORAGE,
+        "exitPos",
+      );
+      this.#aux = this.#ensure(
+        this.#aux,
+        auxU32 * 4,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        "aux",
+      );
+      this.#records = this.#ensure(
+        this.#records,
+        compactRecordBytes,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        "compactRecords",
+      );
+      this.#staging = this.#ensure(
+        this.#staging,
+        stagingBytes,
+        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        "staging",
+      );
 
-    const params = new Uint32Array([
-      n,
-      numChunks,
-      numBlocks,
-      capacityRecords,
-      AUX_HEADER_U32,
-      AUX_HEADER_U32 + numChunksAlloc,
-      AUX_HEADER_U32 + 2 * numChunksAlloc,
-      numSeg,
-      segSumOff,
-      passXWorkgroups,
-      passZWorkgroups * PASS_Z_WORKGROUP,
-      passBWorkgroups,
-      passDfWorkgroups * SCAN_WORKGROUP,
-    ]);
-    this.device.queue.writeBuffer(this.#paramsBuffer, 0, params);
-    const uploadEnd = performance.now();
-
-    // --- encode -------------------------------------------------------------
-    const encodeStart = performance.now();
-    const encoder = this.device.createCommandEncoder();
-    const dispatches: readonly [string, number][] = [
-      ["pass_x_sweep", passXWorkgroups],
-      ["pass_y_segscan", 1],
-      ["pass_z_finalize", passZWorkgroups],
-      ["pass_b_double", passBWorkgroups],
-      ["pass_c_entries", 1],
-      ["pass_d_counts", passDfWorkgroups],
-      ["pass_e1_blockscan", passE1Workgroups],
-      ["pass_e2_blockoffsets", 1],
-      ["pass_f_emit", passDfWorkgroups],
-    ];
-    for (let index = 0; index < dispatches.length; index += 1) {
-      const [stage, workgroups] = dispatches[index];
-      const pipeline = this.#pipelines.get(stage);
-      if (pipeline === undefined) {
-        throw new Error(`Missing compute pipeline for stage ${stage}.`);
+      const key = [
+        this.#bufferGeneration,
+        this.#src.size,
+        this.#nextPos.size,
+        this.#packedRec.size,
+        this.#exitPos.size,
+        this.#aux.size,
+        this.#records.size,
+      ].join(":");
+      if (this.#bindGroup === null || this.#bindGroupKey !== key) {
+        this.#bindGroup = this.device.createBindGroup({
+          layout: this.#layout,
+          entries: [
+            { binding: 0, resource: { buffer: this.#paramsBuffer } },
+            { binding: 1, resource: { buffer: this.#src.buffer } },
+            { binding: 2, resource: { buffer: this.#tablesBuffer } },
+            { binding: 3, resource: { buffer: this.#nextPos.buffer } },
+            { binding: 4, resource: { buffer: this.#packedRec.buffer } },
+            { binding: 5, resource: { buffer: this.#exitPos.buffer } },
+            { binding: 6, resource: { buffer: this.#aux.buffer } },
+            { binding: 7, resource: { buffer: this.#records.buffer } },
+          ],
+        });
+        this.#bindGroupKey = key;
       }
-      const descriptor: GPUComputePassDescriptor = { label: stage };
-      if (this.#querySet !== null) {
-        descriptor.timestampWrites = {
-          querySet: this.#querySet,
-          beginningOfPassWriteIndex: index * 2,
-          endOfPassWriteIndex: index * 2 + 1,
-        };
-      }
-      const pass = encoder.beginComputePass(descriptor);
-      pass.setPipeline(pipeline);
-      pass.setBindGroup(0, this.#bindGroup);
-      pass.dispatchWorkgroups(workgroups);
-      pass.end();
-    }
 
-    encoder.copyBufferToBuffer(
-      this.#aux.buffer,
-      0,
-      this.#staging.buffer,
-      0,
-      16,
-    );
-    if (this.#querySet !== null && this.#resolveBuffer !== null) {
-      encoder.resolveQuerySet(
-        this.#querySet,
-        0,
-        TIMESTAMP_COUNT,
-        this.#resolveBuffer,
-        0,
-      );
+      // --- upload -------------------------------------------------------------
+      uploadStart = performance.now();
+      const wholeWords = n >> 1;
+      if (wholeWords > 0) {
+        this.device.queue.writeBuffer(
+          this.#src.buffer,
+          0,
+          units.buffer as ArrayBuffer,
+          units.byteOffset,
+          wholeWords * 4,
+        );
+      }
+      if ((n & 1) === 1) {
+        this.device.queue.writeBuffer(
+          this.#src.buffer,
+          wholeWords * 4,
+          new Uint32Array([units[n - 1]]),
+        );
+      }
+
+      const params = new Uint32Array([
+        n,
+        numChunks,
+        numBlocks,
+        capacityRecords,
+        AUX_HEADER_U32,
+        AUX_HEADER_U32 + numChunksAlloc,
+        AUX_HEADER_U32 + 2 * numChunksAlloc,
+        numSeg,
+        segSumOff,
+        passXWorkgroups,
+        passZWorkgroups * PASS_Z_WORKGROUP,
+        passBWorkgroups,
+        passDfWorkgroups * SCAN_WORKGROUP,
+      ]);
+      this.device.queue.writeBuffer(this.#paramsBuffer, 0, params);
+      uploadEnd = performance.now();
+
+      // --- encode -------------------------------------------------------------
+      encodeStart = performance.now();
+      const encoder = this.device.createCommandEncoder();
+      const dispatches: readonly [string, number][] = [
+        ["pass_x_sweep", passXWorkgroups],
+        ["pass_y_segscan", 1],
+        ["pass_z_finalize", passZWorkgroups],
+        ["pass_b_double", passBWorkgroups],
+        ["pass_c_entries", 1],
+        ["pass_d_counts", passDfWorkgroups],
+        ["pass_e1_blockscan", passE1Workgroups],
+        ["pass_e2_blockoffsets", 1],
+        ["pass_f_emit", passDfWorkgroups],
+      ];
+      for (let index = 0; index < dispatches.length; index += 1) {
+        const [stage, workgroups] = dispatches[index];
+        const pipeline = this.#pipelines.get(stage);
+        if (pipeline === undefined) {
+          throw new Error(`Missing compute pipeline for stage ${stage}.`);
+        }
+        const descriptor: GPUComputePassDescriptor = { label: stage };
+        if (this.#querySet !== null) {
+          descriptor.timestampWrites = {
+            querySet: this.#querySet,
+            beginningOfPassWriteIndex: index * 2,
+            endOfPassWriteIndex: index * 2 + 1,
+          };
+        }
+        const pass = encoder.beginComputePass(descriptor);
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, this.#bindGroup);
+        pass.dispatchWorkgroups(workgroups);
+        pass.end();
+      }
+
       encoder.copyBufferToBuffer(
-        this.#resolveBuffer,
+        this.#aux.buffer,
         0,
         this.#staging.buffer,
-        STAGING_META_BYTES,
-        STAGING_TIMESTAMP_BYTES,
+        0,
+        16,
       );
-    }
-    encoder.copyBufferToBuffer(
-      this.#records.buffer,
-      0,
-      this.#staging.buffer,
-      STAGING_RECORDS_OFFSET,
-      recordBytes,
-    );
-    const commands = encoder.finish();
-    const encodeEnd = performance.now();
+      if (this.#querySet !== null && this.#resolveBuffer !== null) {
+        encoder.resolveQuerySet(
+          this.#querySet,
+          0,
+          TIMESTAMP_COUNT,
+          this.#resolveBuffer,
+          0,
+        );
+        encoder.copyBufferToBuffer(
+          this.#resolveBuffer,
+          0,
+          this.#staging.buffer,
+          STAGING_META_BYTES,
+          STAGING_TIMESTAMP_BYTES,
+        );
+      }
+      encoder.copyBufferToBuffer(
+        this.#records.buffer,
+        0,
+        this.#staging.buffer,
+        STAGING_RECORDS_OFFSET,
+        compactRecordBytes,
+      );
+      const commands = encoder.finish();
+      encodeEnd = performance.now();
 
-    // --- one submit, one sync ----------------------------------------------
-    const submitStart = performance.now();
-    this.device.queue.submit([commands]);
-    await this.#staging.buffer.mapAsync(GPUMapMode.READ, 0, stagingBytes);
-    const submitEnd = performance.now();
+      // --- one submit, one sync ----------------------------------------------
+      submitStart = performance.now();
+      this.device.queue.submit([commands]);
+      await this.#staging.buffer.mapAsync(GPUMapMode.READ, 0, stagingBytes);
+      submitEnd = performance.now();
+    } catch (cause) {
+      gpuOperationFailure = { cause };
+    } finally {
+      try {
+        oomError = await this.device.popErrorScope();
+      } finally {
+        validationError = await this.device.popErrorScope();
+      }
+    }
 
     // The scopes are popped AFTER the sync, so they cost no extra round trip -
     // every enclosed operation has already completed.
-    const oomError = await this.device.popErrorScope();
-    const validationError = await this.device.popErrorScope();
+    if (gpuOperationFailure !== null) {
+      if (this.#staging !== null) {
+        this.#staging.buffer.unmap();
+      }
+      this.#bindGroupKey = "";
+      this.#bindGroup = null;
+      throw new Error(
+        `GPU lex of ${n} UTF-16 units failed before readback: ${
+          String(gpuOperationFailure.cause)
+        }`,
+        { cause: gpuOperationFailure.cause },
+      );
+    }
+    if (this.#staging === null) {
+      throw new Error(
+        `GPU lex of ${n} UTF-16 units completed without a staging buffer.`,
+      );
+    }
+    const stagingBuffer = this.#staging.buffer;
     if (oomError !== null || validationError !== null) {
-      this.#staging.buffer.unmap();
+      stagingBuffer.unmap();
       // A faulted submit leaves stale bytes in the staging buffer; the cached
       // bind group may also be invalid. Force a rebuild rather than reusing it.
       this.#bindGroupKey = "";
@@ -1002,7 +1231,7 @@ export class WebGpuLexer {
       );
     }
     if (this.#deviceLost.reason !== null) {
-      this.#staging.buffer.unmap();
+      stagingBuffer.unmap();
       throw new Error(
         `WebGPU device was lost during lex: ${this.#deviceLost.reason}`,
       );
@@ -1013,7 +1242,7 @@ export class WebGpuLexer {
     // Only the header is mapped first: the record region is mapped afterwards at
     // exactly the emitted size, so an over-sized output buffer costs nothing on
     // the readback path.
-    const header = this.#staging.buffer.getMappedRange(
+    const header = stagingBuffer.getMappedRange(
       0,
       STAGING_RECORDS_OFFSET,
     );
@@ -1021,7 +1250,7 @@ export class WebGpuLexer {
     const tokenCount = meta[0];
     const overflow = meta[1] === 1;
     if (tokenCount > n && n > 0) {
-      this.#staging.buffer.unmap();
+      stagingBuffer.unmap();
       throw new Error(
         `GPU reported ${tokenCount} tokens for ${n} UTF-16 units, which is impossible (every token consumes at least one unit).`,
       );
@@ -1046,31 +1275,41 @@ export class WebGpuLexer {
     }
 
     const emitted = Math.min(tokenCount, capacityRecords);
-    const borrow = options.borrowRecords === true;
     let records = new Int32Array(0);
     let mapRangeMs = 0;
     let copyOutMs = 0;
-    if (emitted > 0) {
-      const mapStart = performance.now();
-      const region = this.#staging.buffer.getMappedRange(
-        STAGING_RECORDS_OFFSET,
-        emitted * 16,
-      );
-      const mapEnd = performance.now();
-      mapRangeMs = mapEnd - mapStart;
-      const view = new Int32Array(region, 0, emitted * 4);
-      if (borrow) {
-        records = view;
-      } else {
-        records = new Int32Array(emitted * 4);
-        records.set(view);
+    try {
+      if (emitted > 0) {
+        const mapStart = performance.now();
+        const region = stagingBuffer.getMappedRange(
+          STAGING_RECORDS_OFFSET,
+          emitted * COMPACT_RECORD_BYTES,
+        );
+        const mapEnd = performance.now();
+        mapRangeMs = mapEnd - mapStart;
+
+        const compactRecords = new Uint32Array(
+          region,
+          0,
+          emitted * COMPACT_RECORD_U32_COUNT,
+        );
+        records = new Int32Array(emitted * HOST_RECORD_I32_COUNT);
+        let start = 0;
+        for (let index = 0; index < emitted; index += 1) {
+          const compactOffset = index * COMPACT_RECORD_U32_COUNT;
+          const end = compactRecords[compactOffset];
+          const packedSpecAndState = compactRecords[compactOffset + 1];
+          const hostOffset = index * HOST_RECORD_I32_COUNT;
+          records[hostOffset] = (packedSpecAndState & 0xFFFF) - 1;
+          records[hostOffset + 1] = start;
+          records[hostOffset + 2] = end;
+          records[hostOffset + 3] = (packedSpecAndState >>> 16) - 1;
+          start = end;
+        }
+        copyOutMs = performance.now() - mapEnd;
       }
-      copyOutMs = performance.now() - mapEnd;
-    }
-    if (borrow) {
-      this.#pendingUnmap = true;
-    } else {
-      this.#staging.buffer.unmap();
+    } finally {
+      stagingBuffer.unmap();
     }
     const readbackEnd = performance.now();
 
@@ -1098,10 +1337,6 @@ export class WebGpuLexer {
     }
     if (this.#lexInFlight) {
       throw new Error("Cannot destroy WebGpuLexer while lex() is in flight.");
-    }
-    if (this.#pendingUnmap && this.#staging !== null) {
-      this.#staging.buffer.unmap();
-      this.#pendingUnmap = false;
     }
     for (
       const sized of [
@@ -1131,6 +1366,17 @@ export class WebGpuLexer {
     this.#bindGroup = null;
     this.#bindGroupKey = "";
     this.#bufferGeneration += 1;
+    this.#tablesBuffer.destroy();
+    this.#paramsBuffer.destroy();
+    if (this.#resolveBuffer !== null) {
+      this.#resolveBuffer.destroy();
+    }
+    if (this.#querySet !== null) {
+      this.#querySet.destroy();
+    }
+    if (this.#ownsDevice) {
+      this.device.destroy();
+    }
     this.#destroyed = true;
   }
 }

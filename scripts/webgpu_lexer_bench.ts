@@ -4,6 +4,7 @@
  *   deno task bench:webgpu-lexer
  *   deno task bench:webgpu-lexer --grammar thunkwasm
  *   deno task bench:webgpu-lexer --runs 7 --json out.json
+ *   deno task bench:webgpu-lexer --allow-fallback-adapter
  *
  * Machine-readable output is opt-in via `--json PATH`, and is deliberately not
  * written by default so that a routine bench run never silently overwrites a
@@ -17,23 +18,19 @@
  * [min..max] of the same samples. The raw per-run samples are written to the
  * JSON output so a median can be re-derived and the spread audited.
  *
- * Three GPU configurations are measured so that every cost is attributable to
+ * Two GPU configurations are measured so that every cost is attributable to
  * exactly one decision:
  *
  *   1. "worst-case, owned"    capacity = one token per UTF-16 code unit (can
- *                             never overflow) and the records are copied into an
- *                             owned Int32Array. Most conservative; this is what
- *                             the parity gate runs. THE HEADLINE.
- *   2. "worst-case, borrowed" same capacity, records returned as a view into the
- *                             mapped staging range. What a real backend
- *                             integration would do. The gap against (1) is the
- *                             cost of materializing an owned array.
- *   3. "oracle-tuned"         capacity = the exact token count, obtained by
+ *                             never overflow) and compact GPU records are
+ *                             expanded into the public owned Int32Array. Most
+ *                             conservative; this is the headline.
+ *   2. "oracle-tuned"         capacity = the exact token count, obtained by
  *                             lexing the same input first. NO REAL CALLER CAN DO
  *                             THIS - it is an oracle, not an estimate. The gap
- *                             against (2) is the cost of conservative sizing.
+ *                             against (1) is the cost of conservative sizing.
  *
- * The headline is (1) rather than (3) because (3) was previously used for the
+ * The headline is (1) rather than (2) because the oracle configuration was previously used for the
  * speedup column, the MiB/s column and the crossover verdict, which flattered
  * every one of them.
  *
@@ -62,6 +59,8 @@ interface Options {
   readonly warmup: number;
   readonly sizes: readonly number[];
   readonly jsonPath: string | null;
+  /** Never publish software-adapter numbers as hardware results by accident. */
+  readonly allowFallbackAdapter: boolean;
 }
 
 function parseArgs(): Options {
@@ -69,6 +68,7 @@ function parseArgs(): Options {
   let runs = 5;
   let warmup = 2;
   let jsonPath: string | null = null;
+  let allowFallbackAdapter = false;
   let sizes = [
     16 * KIB,
     32 * KIB,
@@ -105,9 +105,67 @@ function parseArgs(): Options {
     if (args[index] === "--sizes" && index + 1 < args.length) {
       sizes = args[index + 1].split(",").map((value) => Number(value));
       index += 1;
+      continue;
+    }
+    if (args[index] === "--allow-fallback-adapter") {
+      allowFallbackAdapter = true;
     }
   }
-  return { grammar, runs, warmup, sizes, jsonPath };
+  if (!Number.isSafeInteger(runs) || runs < 1) {
+    throw new Error(`--runs must be a positive safe integer, got ${runs}.`);
+  }
+  if (!Number.isSafeInteger(warmup) || warmup < 0) {
+    throw new Error(
+      `--warmup must be a non-negative safe integer, got ${warmup}.`,
+    );
+  }
+  for (const size of sizes) {
+    if (!Number.isSafeInteger(size) || size < 1) {
+      throw new Error(
+        `--sizes must contain positive safe integers, got ${size}.`,
+      );
+    }
+  }
+  return {
+    grammar,
+    runs,
+    warmup,
+    sizes,
+    jsonPath,
+    allowFallbackAdapter,
+  };
+}
+
+interface AdapterReport {
+  /** A post-setup observation using the default requestAdapter() call the lexer uses. */
+  readonly selection: "default-request-adapter-observation";
+  readonly vendor: string;
+  readonly architecture: string;
+  readonly device: string;
+  readonly description: string;
+  readonly isFallbackAdapter: boolean;
+}
+
+async function inspectDefaultAdapter(): Promise<AdapterReport> {
+  if (navigator.gpu === undefined) {
+    throw new Error(
+      "This host exposes no WebGPU implementation (navigator.gpu is undefined). " +
+        "Deno needs --unstable-webgpu.",
+    );
+  }
+  const adapter = await navigator.gpu.requestAdapter();
+  if (adapter === null) {
+    throw new Error("No WebGPU adapter is available.");
+  }
+  const info = adapter.info;
+  return {
+    selection: "default-request-adapter-observation",
+    vendor: info.vendor,
+    architecture: info.architecture,
+    device: info.device,
+    description: info.description,
+    isFallbackAdapter: info.isFallbackAdapter === true,
+  };
 }
 
 interface Stat {
@@ -161,15 +219,19 @@ function sizeLabel(chars: number): string {
 }
 
 interface SizeResult {
+  readonly status: "measured";
   readonly chars: number;
   readonly label: string;
   readonly tokens: number;
   readonly cpuWriteSourceMs: Stat;
   readonly cpuLexAllMs: Stat;
+  readonly cpuCopyOutMs: Stat;
   readonly cpuTotalMs: Stat;
+  /** Raw-record end-to-end rate: Wasm input copy, lex_all, and owned record copy. */
   readonly cpuMiBPerSec: number;
+  /** Diagnostic-only kernel rate; never compared with GPU wall-clock total. */
+  readonly cpuLexAllMiBPerSec: number;
   readonly gpuWorstCaseOwned: GpuSample;
-  readonly gpuWorstCaseBorrowed: GpuSample;
   readonly gpuTunedOracle: GpuSample;
   readonly utf16ConvertMs: number;
 }
@@ -184,9 +246,20 @@ interface GpuSample {
   readonly readbackMs: Stat;
   readonly totalMs: Stat;
   readonly miBPerSec: number;
-  readonly stagesMs: Record<string, Stat>;
-  readonly gpuStagesTotalMs: Stat;
+  /** null when the adapter does not expose timestamp-query. */
+  readonly stagesMs: Readonly<Record<string, Stat>> | null;
+  readonly gpuStagesTotalMs: Stat | null;
 }
+
+interface SkippedSizeResult {
+  readonly status: "skipped";
+  readonly chars: number;
+  readonly label: string;
+  readonly reason: string;
+  readonly maxInputUnitsWorstCaseCapacity: number;
+}
+
+type BenchSizeResult = SizeResult | SkippedSizeResult;
 
 function summarizeGpu(
   samples: readonly GpuLexResult[],
@@ -194,33 +267,36 @@ function summarizeGpu(
   capacityRecords: number,
 ): GpuSample {
   const firstStages = samples[0].timings.stagesMs;
-  if (firstStages === null) {
-    throw new Error(
-      "timestamp queries are unavailable on this device; per-stage GPU timing cannot be reported",
-    );
-  }
-  const stageNames = Object.keys(firstStages);
-  const stagesMs: Record<string, Stat> = {};
-  for (const name of stageNames) {
-    stagesMs[name] = stat(
+  let stagesMs: Record<string, Stat> | null = null;
+  let gpuStagesTotalMs: Stat | null = null;
+  if (firstStages !== null) {
+    const stageNames = Object.keys(firstStages);
+    stagesMs = {};
+    for (const name of stageNames) {
+      stagesMs[name] = stat(
+        samples.map((sample) => {
+          const stages = sample.timings.stagesMs;
+          if (stages === null) {
+            throw new Error(
+              "timestamp-query availability changed during one benchmark run.",
+            );
+          }
+          return stages[name];
+        }),
+      );
+    }
+    gpuStagesTotalMs = stat(
       samples.map((sample) => {
-        const stages = sample.timings.stagesMs;
-        if (stages === null) {
-          throw new Error("timestamp queries are unavailable on this device");
+        const total = sample.timings.gpuStagesTotalMs;
+        if (total === null) {
+          throw new Error(
+            "timestamp-query availability changed during one benchmark run.",
+          );
         }
-        return stages[name];
+        return total;
       }),
     );
   }
-  const gpuStagesTotalMs = stat(
-    samples.map((sample) => {
-      const total = sample.timings.gpuStagesTotalMs;
-      if (total === null) {
-        throw new Error("timestamp queries are unavailable on this device");
-      }
-      return total;
-    }),
-  );
   const totalMs = stat(samples.map((sample) => sample.timings.totalMs));
   return {
     capacityRecords,
@@ -248,7 +324,10 @@ async function main(): Promise<void> {
   const cpuSetupStart = performance.now();
   const cpu = CpuReferenceLexer.create(wasmBytes, planBytes);
   const cpuSetupMs = performance.now() - cpuSetupStart;
-  const gpu = await WebGpuLexer.create(planBytes);
+  const gpu = await WebGpuLexer.create(planBytes, {
+    allowFallbackAdapter: options.allowFallbackAdapter,
+  });
+  const adapter = await inspectDefaultAdapter();
   const setup = gpu.setupTimings;
 
   console.log(
@@ -257,6 +336,20 @@ async function main(): Promise<void> {
   console.log(
     `runs=${options.runs} warmup=${options.warmup} timestamps=${gpu.hasTimestamps} chunkSize=${gpu.chunkSize}`,
   );
+  console.log(
+    `adapter (${adapter.selection}): vendor=${
+      JSON.stringify(adapter.vendor)
+    } ` +
+      `architecture=${JSON.stringify(adapter.architecture)} ` +
+      `device=${JSON.stringify(adapter.device)} ` +
+      `description=${JSON.stringify(adapter.description)} ` +
+      `fallback=${adapter.isFallbackAdapter}`,
+  );
+  if (adapter.isFallbackAdapter) {
+    console.log(
+      "WARNING: this is a software fallback adapter. These numbers are not hardware GPU results.",
+    );
+  }
   console.log(
     `device limits: maxStorageBufferBindingSize=${gpu.limits.maxStorageBufferBindingSize} ` +
       `maxBufferSize=${gpu.limits.maxBufferSize} ` +
@@ -315,10 +408,32 @@ async function main(): Promise<void> {
       `repeated example programs (strictly periodic, ${joined.length}-char period)`;
   }
   console.log(`corpus: ${corpusKind}`);
+  console.log(
+    "timing scope: both paths receive the same pre-built Uint16Array and reuse steady-state buffers; " +
+      "string-to-UTF-16 conversion is measured separately. CPU headline is source copy + lex_all + owned record copy. " +
+      "GPU headline is upload + encode + submit/map + compact-record expansion.",
+  );
   console.log("");
 
-  const results: SizeResult[] = [];
+  const results: BenchSizeResult[] = [];
+  const maxInputUnitsWorstCaseCapacity = gpu.maxInputUnits(1);
   for (const chars of options.sizes) {
+    if (chars > maxInputUnitsWorstCaseCapacity) {
+      const skipped: SkippedSizeResult = {
+        status: "skipped",
+        chars,
+        label: sizeLabel(chars),
+        reason:
+          "The worst-case owned headline reserves one token record per UTF-16 code unit.",
+        maxInputUnitsWorstCaseCapacity,
+      };
+      results.push(skipped);
+      console.log(
+        `${skipped.label.padStart(8)}  SKIPPED: ${skipped.reason} ` +
+          `Device limit supports at most ${maxInputUnitsWorstCaseCapacity} UTF-16 units.`,
+      );
+      continue;
+    }
     const text = makeSource(chars);
     const convertStart = performance.now();
     const units = toUtf16(text);
@@ -356,43 +471,39 @@ async function main(): Promise<void> {
     for (let index = 0; index < options.warmup; index += 1) {
       cpu.lex(units);
       await gpu.lex(units);
-      await gpu.lex(units, { borrowRecords: true });
-      await gpu.lex(units, { capacityRecords: tokens, borrowRecords: true });
+      await gpu.lex(units, { capacityRecords: tokens });
     }
 
     const cpuWrite: number[] = [];
     const cpuLex: number[] = [];
+    const cpuCopyOut: number[] = [];
     const cpuTotal: number[] = [];
     const worstCaseOwned: GpuLexResult[] = [];
-    const worstCaseBorrowed: GpuLexResult[] = [];
     const tuned: GpuLexResult[] = [];
     for (let index = 0; index < options.runs; index += 1) {
       const cpuResult = cpu.lex(units);
       cpuWrite.push(cpuResult.timings.writeSourceMs);
       cpuLex.push(cpuResult.timings.lexAllMs);
+      cpuCopyOut.push(cpuResult.timings.copyOutMs);
       cpuTotal.push(cpuResult.timings.totalMs);
       worstCaseOwned.push(await gpu.lex(units));
-      worstCaseBorrowed.push(await gpu.lex(units, { borrowRecords: true }));
-      tuned.push(
-        await gpu.lex(units, { capacityRecords: tokens, borrowRecords: true }),
-      );
+      tuned.push(await gpu.lex(units, { capacityRecords: tokens }));
     }
 
     const cpuLexAllMs = stat(cpuLex);
+    const cpuTotalMs = stat(cpuTotal);
     const result: SizeResult = {
+      status: "measured",
       chars,
       label: sizeLabel(chars),
       tokens,
       cpuWriteSourceMs: stat(cpuWrite),
       cpuLexAllMs,
-      cpuTotalMs: stat(cpuTotal),
-      cpuMiBPerSec: mibPerSecond(chars, cpuLexAllMs.median),
+      cpuCopyOutMs: stat(cpuCopyOut),
+      cpuTotalMs,
+      cpuMiBPerSec: mibPerSecond(chars, cpuTotalMs.median),
+      cpuLexAllMiBPerSec: mibPerSecond(chars, cpuLexAllMs.median),
       gpuWorstCaseOwned: summarizeGpu(worstCaseOwned, chars, units.length),
-      gpuWorstCaseBorrowed: summarizeGpu(
-        worstCaseBorrowed,
-        chars,
-        units.length,
-      ),
       gpuTunedOracle: summarizeGpu(tuned, chars, tokens),
       utf16ConvertMs,
     };
@@ -400,17 +511,21 @@ async function main(): Promise<void> {
 
     console.log(
       `${result.label.padStart(8)}  tokens=${String(tokens).padStart(9)}  ` +
-        `cpu lex_all=${fmtSpread(cpuLexAllMs).padStart(24)} ms (${
+        `cpu records=${fmtSpread(cpuTotalMs).padStart(24)} ms (${
           fmt(result.cpuMiBPerSec).padStart(7)
         } MiB/s)  ` +
         `gpu total=${
           fmtSpread(result.gpuWorstCaseOwned.totalMs).padStart(24)
         } ms (${fmt(result.gpuWorstCaseOwned.miBPerSec).padStart(8)} MiB/s)  ` +
         `speedup=${
-          fmt(cpuLexAllMs.median / result.gpuWorstCaseOwned.totalMs.median)
+          fmt(cpuTotalMs.median / result.gpuWorstCaseOwned.totalMs.median)
         }x`,
     );
   }
+
+  const measuredResults = results.filter(
+    (result): result is SizeResult => result.status === "measured",
+  );
 
   console.log("");
   console.log(
@@ -419,33 +534,28 @@ async function main(): Promise<void> {
   );
 
   console.log("");
-  console.log("the other two GPU configurations, and what each gap costs:");
+  console.log("the oracle capacity configuration, and what its gap costs:");
   console.log(
     [
       "size".padStart(8),
       "(1) worst/owned".padStart(17),
-      "(2) worst/borrowed".padStart(20),
-      "(3) oracle/borrowed".padStart(21),
-      "owned copy".padStart(12),
+      "(2) oracle/owned".padStart(19),
       "sizing".padStart(9),
       "(1) speedup".padStart(12),
-      "(3) speedup".padStart(12),
+      "(2) speedup".padStart(12),
     ].join(" "),
   );
-  for (const result of results) {
+  for (const result of measuredResults) {
     const owned = result.gpuWorstCaseOwned.totalMs.median;
-    const borrowed = result.gpuWorstCaseBorrowed.totalMs.median;
     const oracle = result.gpuTunedOracle.totalMs.median;
     console.log(
       [
         result.label.padStart(8),
         fmt(owned, 2).padStart(17),
-        fmt(borrowed, 2).padStart(20),
-        fmt(oracle, 2).padStart(21),
-        fmt(owned - borrowed, 2).padStart(12),
-        fmt(borrowed - oracle, 2).padStart(9),
-        `${fmt(result.cpuLexAllMs.median / owned)}x`.padStart(12),
-        `${fmt(result.cpuLexAllMs.median / oracle)}x`.padStart(12),
+        fmt(oracle, 2).padStart(19),
+        fmt(owned - oracle, 2).padStart(9),
+        `${fmt(result.cpuTotalMs.median / owned)}x`.padStart(12),
+        `${fmt(result.cpuTotalMs.median / oracle)}x`.padStart(12),
       ].join(" "),
     );
   }
@@ -454,34 +564,58 @@ async function main(): Promise<void> {
   console.log(
     "GPU submit+sync and kernel time (ms, median [min..max], configuration (1)):",
   );
-  for (const result of results) {
+  for (const result of measuredResults) {
+    const stageTotal = result.gpuWorstCaseOwned.gpuStagesTotalMs;
+    let kernels = "unavailable (timestamp-query unsupported)";
+    if (stageTotal !== null) {
+      kernels = `${fmtSpread(stageTotal).padStart(24)} ms`;
+    }
     console.log(
       `${result.label.padStart(8)}  submit+sync=${
         fmtSpread(result.gpuWorstCaseOwned.submitAndSyncMs).padStart(24)
-      } ms  ` +
-        `kernels=${
-          fmtSpread(result.gpuWorstCaseOwned.gpuStagesTotalMs).padStart(24)
-        } ms`,
+      } ms  kernels=${kernels}`,
     );
   }
 
   console.log("");
-  console.log(
-    "per-stage GPU time (ms, median, configuration (1)):",
-  );
-  const stageNames = Object.keys(results[0].gpuWorstCaseOwned.stagesMs);
-  console.log(
-    ["size".padStart(8), ...stageNames.map((n) => n.padStart(20))].join(" "),
-  );
-  for (const result of results) {
+  if (!gpu.hasTimestamps) {
     console.log(
-      [
-        result.label.padStart(8),
-        ...stageNames.map((name) =>
-          fmt(result.gpuWorstCaseOwned.stagesMs[name].median, 3).padStart(20)
-        ),
-      ].join(" "),
+      "per-stage GPU time is unavailable because this adapter does not support timestamp-query.",
     );
+  } else if (measuredResults.length === 0) {
+    console.log(
+      "per-stage GPU time has no capacity-supported sizes to report.",
+    );
+  } else {
+    const firstStages = measuredResults[0].gpuWorstCaseOwned.stagesMs;
+    if (firstStages === null) {
+      throw new Error(
+        "The lexer reported timestamp-query support without per-stage timings.",
+      );
+    }
+    const stageNames = Object.keys(firstStages);
+    console.log(
+      "per-stage GPU time (ms, median, configuration (1)):",
+    );
+    console.log(
+      ["size".padStart(8), ...stageNames.map((n) => n.padStart(20))].join(
+        " ",
+      ),
+    );
+    for (const result of measuredResults) {
+      const stages = result.gpuWorstCaseOwned.stagesMs;
+      if (stages === null) {
+        throw new Error(
+          "timestamp-query availability changed during one benchmark run.",
+        );
+      }
+      console.log(
+        [
+          result.label.padStart(8),
+          ...stageNames.map((name) => fmt(stages[name].median, 3).padStart(20)),
+        ].join(" "),
+      );
+    }
   }
 
   console.log("");
@@ -499,7 +633,7 @@ async function main(): Promise<void> {
       "total".padStart(9),
     ].join(" "),
   );
-  for (const result of results) {
+  for (const result of measuredResults) {
     console.log(
       [
         result.label.padStart(8),
@@ -519,22 +653,22 @@ async function main(): Promise<void> {
   let crossoverWorstCaseOwned: string | null = null;
   let crossoverWorstCaseOwnedPessimistic: string | null = null;
   let crossoverTunedOracle: string | null = null;
-  for (const result of results) {
+  for (const result of measuredResults) {
     if (
       crossoverWorstCaseOwned === null &&
-      result.gpuWorstCaseOwned.totalMs.median < result.cpuLexAllMs.median
+      result.gpuWorstCaseOwned.totalMs.median < result.cpuTotalMs.median
     ) {
       crossoverWorstCaseOwned = result.label;
     }
     if (
       crossoverWorstCaseOwnedPessimistic === null &&
-      result.gpuWorstCaseOwned.totalMs.max < result.cpuLexAllMs.min
+      result.gpuWorstCaseOwned.totalMs.max < result.cpuTotalMs.min
     ) {
       crossoverWorstCaseOwnedPessimistic = result.label;
     }
     if (
       crossoverTunedOracle === null &&
-      result.gpuTunedOracle.totalMs.median < result.cpuLexAllMs.median
+      result.gpuTunedOracle.totalMs.median < result.cpuTotalMs.median
     ) {
       crossoverTunedOracle = result.label;
     }
@@ -547,10 +681,10 @@ async function main(): Promise<void> {
     `crossover (1) worst gpu sample vs best cpu sample:      ${crossoverWorstCaseOwnedPessimistic}`,
   );
   console.log(
-    `crossover (3) oracle capacity, medians:                 ${crossoverTunedOracle}`,
+    `crossover (2) oracle capacity, medians:                 ${crossoverTunedOracle}`,
   );
   console.log(
-    "The crossover is only ever reported as one of the sizes actually measured. " +
+    "The crossover compares end-to-end raw records on both paths and is only reported as one of the sizes actually measured. " +
       "Anything finer requires a --sizes sweep.",
   );
   console.log(
@@ -562,14 +696,26 @@ async function main(): Promise<void> {
     generatedAt: new Date().toISOString(),
     grammar: options.grammar,
     corpus: corpusKind,
+    adapter,
+    fallbackAdapterAllowed: options.allowFallbackAdapter,
+    hardwareResult: !adapter.isFallbackAdapter,
     runs: options.runs,
     warmup: options.warmup,
     deno: Deno.version.deno,
     dfaStateCount: gpu.plan.stateCount,
     alphabetClassCount: gpu.alphabet.classCount,
     chunkSize: gpu.chunkSize,
+    timestampQueries: gpu.hasTimestamps,
     deviceLimits: gpu.limits,
-    maxInputUnitsWorstCaseCapacity: gpu.maxInputUnits(1),
+    maxInputUnitsWorstCaseCapacity,
+    timingScope: {
+      input:
+        "A pre-built Uint16Array; string-to-UTF-16 conversion is excluded and reported per measured row.",
+      cpu: "steady-state Wasm source copy + lex_all + owned raw-record copy",
+      gpu:
+        "steady-state source/params upload + command encoding + submit/map + compact-record expansion",
+      allocation: "Capacity growth is excluded from both paths after warmup.",
+    },
     setup: { cpuCreateMs: cpuSetupMs, gpu: setup },
     headline: "gpuWorstCaseOwned",
     crossoverWorstCaseOwned,

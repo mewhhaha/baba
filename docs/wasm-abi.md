@@ -29,14 +29,14 @@ The generated descriptor has:
     "runtimeMetadataVersion": 2
   },
   "core": {
-    "abiVersion": 9
+    "abiVersion": 10
   }
 }
 ```
 
 The core module exports `load_plan(planPtr, planLength) -> i32`,
 `plan_buffer_base() -> i32`, `input_base() -> i32`, `abi_version() -> i32`,
-`plan_version() -> i32`, and `semantics_version() -> i32`. For ABI version 9,
+`plan_version() -> i32`, and `semantics_version() -> i32`. For ABI version 10,
 the generated adapter writes `parser.plan` into linear memory at or after
 `plan_buffer_base()`, calls `load_plan`, and then checks that the descriptor and
 core exports agree before the adapter uses the module.
@@ -52,7 +52,7 @@ The descriptor also records:
 
 ## Core Exports
 
-ABI version 9 core modules export:
+ABI version 10 core modules export:
 
 | Export                      | Kind     | Contract                                                                         |
 | --------------------------- | -------- | -------------------------------------------------------------------------------- |
@@ -65,6 +65,7 @@ ABI version 9 core modules export:
 | `parser_select_action`      | function | Selects an unguarded contextual token/action pair for a parser state.            |
 | `parse_trace`               | function | Parses to an action trace for validation and cursor replay.                      |
 | `parse_cursor`              | function | Parses directly into cursor tapes.                                               |
+| `parse_cursor_records`      | function | Parses externally supplied raw lexer records directly into cursor tapes.         |
 | `parser_goto`               | function | Returns a parser state, or `-1` when absent.                                     |
 | `load_plan`                 | function | Loads the external parser plan and returns `1` when accepted.                    |
 | `abi_version`               | function | Returns the core ABI version.                                                    |
@@ -93,7 +94,7 @@ each exported function.
 
 ## External Plan
 
-ABI version 9 keeps grammar-specific DFA and LR table data outside
+ABI version 10 keeps grammar-specific DFA and LR table data outside
 `parser.wasm`. The generated `parser.plan` starts with the core table section
 expected by `load_plan`, followed by shared runtime metadata used by the
 TypeScript adapter. The host calls `plan_buffer_base()`, writes `parser.plan`
@@ -122,7 +123,7 @@ the combined plan layout.
 
 ## Source And Spans
 
-ABI version 9 uses source encoding enum value `1`, meaning UTF-16 code units.
+ABI version 10 uses source encoding enum value `1`, meaning UTF-16 code units.
 The host writes the source into linear memory as contiguous unsigned 16-bit code
 units. `sourceLength` is a count of UTF-16 code units, not bytes.
 
@@ -175,6 +176,14 @@ case").
 apply the same requirement; `parse_cursor` reports a short memo buffer as its
 capacity status (`3`) and `parse_trace` as its internal status (`2`), matching
 how each already reports a short token buffer.
+
+`parse_cursor_records` takes `rawTokenCount` immediately after `tokenPtr`,
+followed by `tokenCapacity` and the same cursor arena parameters as
+`parse_cursor`. It does not take lexer memo parameters and does not call
+`lex_all`. The supplied records must use the four-i32 layout above, cover the
+source contiguously from `0` through `sourceLength`, and fit within
+`tokenCapacity`. The parser resolves contextual candidates, filters trivia, and
+compacts selected records in place exactly as `parse_cursor` does.
 
 `parse_trace` writes a trace result record at `resultPtr`:
 
@@ -260,7 +269,7 @@ growth.
 handles. It does not promise to shrink linear memory; repeated parses may reuse
 the previous high-water allocation.
 
-ABI version 9 has instance-owned core memory. Generated adapters expose
+ABI version 10 has instance-owned core memory. Generated adapters expose
 `createParser()` and `createParserAsync()` as the public lifecycle API. Each
 parser instance owns its `WebAssembly.Instance`, memory, loaded plan, and
 disposed state. `reset()` on a parser instance clears reusable core state.
@@ -278,7 +287,7 @@ where the host permits workers.
 
 ## Limits And Overflow
 
-ABI version 9 uses 65,536-byte WebAssembly pages and a configured maximum of
+ABI version 10 uses 65,536-byte WebAssembly pages and a configured maximum of
 65,535 pages. Adapter-side offset arithmetic checks multiplication, addition,
 alignment, and page-count growth against the 32-bit Wasm address space before
 calling `memory.grow()`.

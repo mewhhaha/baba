@@ -66,6 +66,7 @@
       "src/runtime/generated_wasm.ts",
       "src/runtime/wasm_plan.ts",
       "src/runtime/webgpu/alphabet.ts",
+      "src/runtime/webgpu/context.ts",
       "src/runtime/webgpu/kernel_wgsl.ts",
       "src/runtime/webgpu/lexer.ts",
       "src/runtime/webgpu/mod.ts",

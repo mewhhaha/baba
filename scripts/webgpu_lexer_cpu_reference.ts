@@ -39,6 +39,8 @@ function alignUp(value: number, alignment: number): number {
 export interface CpuLexTimings {
   readonly writeSourceMs: number;
   readonly lexAllMs: number;
+  /** Copy raw records from Wasm memory into the owned result array. */
+  readonly copyOutMs: number;
   readonly totalMs: number;
 }
 
@@ -142,18 +144,21 @@ export class CpuReferenceLexer {
     if (count < 0 || count > this.#capacityRecords) {
       throw new Error(`lex_all returned an out-of-range count ${count}.`);
     }
+    const copyStart = performance.now();
     const records = new Int32Array(
       this.#exports.memory.buffer.slice(
         this.#tokenPointer,
         this.#tokenPointer + count * TOKEN_RECORD_I32_COUNT * 4,
       ),
     );
+    const copyEnd = performance.now();
     return {
       records,
       timings: {
         writeSourceMs: afterWrite - startWrite,
         lexAllMs: afterLex - afterWrite,
-        totalMs: afterLex - startWrite,
+        copyOutMs: copyEnd - copyStart,
+        totalMs: copyEnd - startWrite,
       },
     };
   }
