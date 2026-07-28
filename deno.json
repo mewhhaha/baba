@@ -79,6 +79,7 @@
       "src/targets/runtime/diagnostic_codes.ts",
       "src/targets/runtime/field_schema.ts",
       "src/targets/runtime/implementation.ts",
+      "src/targets/runtime/parser_plan_contract.ts",
       "src/targets/runtime/plan.ts",
       "src/targets/runtime/portable_plan.ts",
       "src/targets/runtime/provenance.ts",

@@ -66,6 +66,11 @@ import {
   type WasmModuleImage,
 } from "../runtime/wasm_core_runtime.ts";
 import {
+  PARSER_PLAN_FORMAT,
+  PARSER_PLAN_SEMANTICS,
+  PARSER_PLAN_VERSION,
+} from "../runtime/parser_plan_contract.ts";
+import {
   encodeCombinedWasmParserPlan,
   parserPlanRuntimeMetadataVersion,
 } from "../../runtime/wasm_plan.ts";
@@ -185,7 +190,6 @@ export function planWasmTarget(
   const wasm = emitWasmModule(
     portableDfa,
     portableLr,
-    runtimePlan.portable.version,
     wasmCoreRuntimeMetadata(analyzed, runtimePlan),
   );
   const parserPlanBytes = encodeCombinedWasmParserPlan(
@@ -296,10 +300,10 @@ function wasmRuntimeManifestSource(): string {
         version: 1,
         abiVersion: WASM_ABI_VERSION,
         parserPlan: {
-          format: "baba-parser-plan",
-          version: 2,
+          format: PARSER_PLAN_FORMAT,
+          version: PARSER_PLAN_VERSION,
           runtimeMetadataVersion: parserPlanRuntimeMetadataVersion,
-          semantics: "baba-portable-v2",
+          semantics: PARSER_PLAN_SEMANTICS,
           storage: "external-binary",
           moduleExport: "load_plan",
           path: "parser.plan",
@@ -325,10 +329,10 @@ function wasmAbiDescriptor(): unknown {
     version: 1,
     targetKind: WASM_TARGET_KIND,
     parserPlan: {
-      format: "baba-parser-plan",
-      version: 2,
+      format: PARSER_PLAN_FORMAT,
+      version: PARSER_PLAN_VERSION,
       runtimeMetadataVersion: parserPlanRuntimeMetadataVersion,
-      semantics: "baba-portable-v2",
+      semantics: PARSER_PLAN_SEMANTICS,
       storage: "external-binary",
     },
     runtimeImplementation: {
@@ -697,8 +701,8 @@ function wasmAbiDescriptor(): unknown {
 function wasmModSource(): string {
   return `${
     generatedSourceBanner({
-      parserPlanVersion: 2,
-      parserPlanSemantics: "baba-portable-v2",
+      parserPlanVersion: PARSER_PLAN_VERSION,
+      parserPlanSemantics: PARSER_PLAN_SEMANTICS,
     })
   }
 import type { CursorParseResult, LexOptions, LexTapeResult, ParseOptions, RootCursor, ValidateParseResult } from "./syntax.ts";

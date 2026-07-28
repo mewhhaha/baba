@@ -5,23 +5,23 @@
  * consumes exactly the artifact the Wasm runtime consumes. Nothing has to be
  * regenerated.
  *
- * The header constants and the sign-tagged compact-offset scheme are mirrored
- * from `src/runtime/wasm_plan.ts` (module-private there) and from the Rust
- * reader `src/targets/runtime/wasm_engine_rs/src/lib.rs`. Because the copy can
- * rot, `inspectCombinedWasmParserPlan` is called first: it validates the magic,
- * the core format version and the parser plan version, and throws otherwise.
+ * The header indexes and the sign-tagged compact-offset scheme are mirrored
+ * from `src/runtime/wasm_plan.ts` and from the Rust reader
+ * `src/targets/runtime/wasm_engine_rs/src/lib.rs`. Because the copy can rot,
+ * `inspectCombinedWasmParserPlan` is called first: it validates the magic and
+ * contract versions, and throws otherwise.
  *
  * The duplication is deliberate and must stay. `src/runtime/wasm_plan.ts` is one
- * of the files hashed into the runtime-implementation manifest in
- * `src/targets/runtime/implementation.ts`; widening its exports to share
- * `readI32`, `readRowValue`, `decodeCompactOffset` or the `CORE_HEADER_*`
- * constants would move the runtime-implementation hash and break
- * `deno task bootstrap:check` and every generated manifest in the wild. An
- * experimental backend is not a good enough reason to churn that hash, so the
- * decoder is re-declared here and pinned by the version assertions below.
+ * of the files hashed into the runtime-implementation manifest. The decoder
+ * stays independent, while the expected versions come from the shared current
+ * contract below.
  */
 
 import { inspectCombinedWasmParserPlan } from "../wasm_plan.ts";
+import {
+  PARSER_PLAN_VERSION,
+  WASM_CORE_PLAN_FORMAT_VERSION,
+} from "../../targets/runtime/parser_plan_contract.ts";
 
 const CORE_PLAN_HEADER_I32_COUNT = 36;
 const CORE_PLAN_HEADER_BYTES = CORE_PLAN_HEADER_I32_COUNT * 4;
@@ -49,9 +49,6 @@ const CORE_HEADER_ALPHABET_RANGES = 35;
 
 const COMPACT_I16_OFFSET_TAG = 2;
 const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
-
-const EXPECTED_CORE_FORMAT_VERSION = 5;
-const EXPECTED_PARSER_PLAN_VERSION = 2;
 
 export const ASCII_CLASS_LIMIT = 128;
 export const CODE_POINT_LIMIT = 0x110000;
@@ -184,18 +181,18 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
   inspectCombinedWasmParserPlan(planBytes);
 
   const formatVersion = headerI32(planBytes, CORE_HEADER_FORMAT_VERSION);
-  if (formatVersion !== EXPECTED_CORE_FORMAT_VERSION) {
+  if (formatVersion !== WASM_CORE_PLAN_FORMAT_VERSION) {
     throw new Error(
-      `Unsupported core plan format version ${formatVersion}; this experiment pins ${EXPECTED_CORE_FORMAT_VERSION}.`,
+      `Unsupported core plan format version ${formatVersion}; this experiment pins ${WASM_CORE_PLAN_FORMAT_VERSION}.`,
     );
   }
   const parserPlanVersion = headerI32(
     planBytes,
     CORE_HEADER_PARSER_PLAN_VERSION,
   );
-  if (parserPlanVersion !== EXPECTED_PARSER_PLAN_VERSION) {
+  if (parserPlanVersion !== PARSER_PLAN_VERSION) {
     throw new Error(
-      `Unsupported parser plan version ${parserPlanVersion}; this experiment pins ${EXPECTED_PARSER_PLAN_VERSION}.`,
+      `Unsupported parser plan version ${parserPlanVersion}; this experiment pins ${PARSER_PLAN_VERSION}.`,
     );
   }
 

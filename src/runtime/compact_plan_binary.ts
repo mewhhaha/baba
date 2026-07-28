@@ -1,5 +1,9 @@
+import {
+  COMPACT_PLAN_VERSION,
+  PARSER_PLAN_RUNTIME_METADATA_VERSION,
+} from "../targets/runtime/parser_plan_contract.ts";
+
 const MAGIC = new Uint8Array([66, 65, 66, 65, 95, 80, 76, 65, 78, 0]);
-const VERSION = 1;
 
 type CompactValue =
   | null
@@ -18,7 +22,7 @@ interface EncodeState {
 
 export interface CompactPlanBinaryInfo {
   readonly format: "baba-compact-plan";
-  readonly version: 1;
+  readonly version: typeof COMPACT_PLAN_VERSION;
   readonly stringCount: number;
   readonly bytes: number;
   readonly jsonBytes: number;
@@ -39,7 +43,7 @@ export function encodeCompactPlanBinary(value: unknown): Uint8Array {
   const payload: number[] = [];
   writeValue(payload, compact, stringIds);
   const bytes: number[] = [...MAGIC];
-  writeU16(bytes, VERSION);
+  writeU16(bytes, COMPACT_PLAN_VERSION);
   writeVarUint(bytes, strings.length);
   for (const string of strings) {
     const encoded = new TextEncoder().encode(string);
@@ -57,7 +61,7 @@ export function decodeCompactPlanBinary(bytes: Uint8Array): unknown {
     if (reader.u8() !== byte) throw new Error("Invalid compact plan magic.");
   }
   const version = reader.u16();
-  if (version !== VERSION) {
+  if (version !== COMPACT_PLAN_VERSION) {
     throw new Error(`Unsupported compact plan version ${version}.`);
   }
   const stringCount = reader.varUint();
@@ -89,7 +93,7 @@ export function inspectCompactPlanBinary(
   const metadata = compactMetadata(value);
   return {
     format: "baba-compact-plan",
-    version: VERSION,
+    version: COMPACT_PLAN_VERSION,
     stringCount: strings.size,
     bytes: bytes.length,
     jsonBytes: new TextEncoder().encode(JSON.stringify(value)).length,
@@ -102,13 +106,15 @@ function compactMetadata(value: unknown): CompactPlanBinaryInfo["metadata"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const meta = (value as { m?: unknown }).m;
   if (Array.isArray(meta)) {
-    if (meta[0] === 2) {
+    if (meta[0] === PARSER_PLAN_RUNTIME_METADATA_VERSION) {
       const metadata: {
         runtimeMetadataVersion: number;
         parserPlanVersion?: number;
         parserPlanHash?: string;
         runtimeImplementationHash?: string;
-      } = { runtimeMetadataVersion: 2 };
+      } = {
+        runtimeMetadataVersion: PARSER_PLAN_RUNTIME_METADATA_VERSION,
+      };
       if (typeof meta[2] === "number") {
         metadata.parserPlanVersion = meta[2];
       }
@@ -120,31 +126,7 @@ function compactMetadata(value: unknown): CompactPlanBinaryInfo["metadata"] {
       }
       return metadata;
     }
-    return {
-      parserPlanVersion: typeof meta[1] === "number" ? meta[1] : undefined,
-      parserPlanHash: typeof meta[3] === "string" ? meta[3] : undefined,
-      runtimeImplementationHash: typeof meta[4] === "string"
-        ? meta[4]
-        : undefined,
-    };
   }
-  const kit = value as {
-    portablePlan?: { version?: unknown; hash?: unknown };
-    runtimeImplementation?: { hash?: unknown };
-  };
-  if (!kit.portablePlan) return;
-  return {
-    parserPlanVersion: typeof kit.portablePlan.version === "number"
-      ? kit.portablePlan.version
-      : undefined,
-    parserPlanHash: typeof kit.portablePlan.hash === "string"
-      ? kit.portablePlan.hash
-      : undefined,
-    runtimeImplementationHash:
-      typeof kit.runtimeImplementation?.hash === "string"
-        ? kit.runtimeImplementation.hash
-        : undefined,
-  };
 }
 
 function collectStrings(
