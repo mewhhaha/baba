@@ -241,6 +241,12 @@ if (!result.ok) {
 runtime.dispose();
 ```
 
+When the next consumer is another GPU pass, `ingestResident(source)` returns the
+staged token/node/edge buffer without mapping it or running host semantic
+recipes. Its status and result counts remain in the device header. Dispose the
+resident result before reusing that frontend execution slot or disposing the
+runtime.
+
 `WebGpuRuntime` owns one device and should be reused across calls. It rejects
 software fallback adapters by default; use
 `WebGpuRuntime.create({ allowFallbackAdapter: true })` only for explicit

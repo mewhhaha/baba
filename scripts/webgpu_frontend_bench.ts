@@ -19,6 +19,7 @@ interface Options {
   readonly warmup: number;
   readonly runs: number;
   readonly allowFallbackAdapter: boolean;
+  readonly resident: boolean;
 }
 
 interface Distribution {
@@ -33,10 +34,15 @@ function parseOptions(): Options {
   let warmup = 2;
   let runs = 7;
   let allowFallbackAdapter = false;
+  let resident = false;
   for (let index = 0; index < Deno.args.length; index += 1) {
     const argument = Deno.args[index];
     if (argument === "--allow-fallback-adapter") {
       allowFallbackAdapter = true;
+      continue;
+    }
+    if (argument === "--resident") {
+      resident = true;
       continue;
     }
     if (argument === "--sizes" && index + 1 < Deno.args.length) {
@@ -74,7 +80,7 @@ function parseOptions(): Options {
       );
     }
   }
-  return { sizes, warmup, runs, allowFallbackAdapter };
+  return { sizes, warmup, runs, allowFallbackAdapter, resident };
 }
 
 function gpuDuckCorpus(targetBytes: number): string {
@@ -202,10 +208,17 @@ try {
         lexerCapacityRecords,
       });
       assertProgramParity(cpuResult, gpuResult);
+      if (options.resident) {
+        const resident = await frontend.ingestResident(source, {
+          lexerCapacityRecords,
+        });
+        resident.dispose();
+      }
     }
 
     const cpuSamples: number[] = [];
     const gpuSamples: number[] = [];
+    const residentGpuSamples: number[] = [];
     let tokenCount = 0;
     let nodeCount = 0;
     let edgeCount = 0;
@@ -234,10 +247,25 @@ try {
         program.edges.byteLength +
         program.symbols.byteLength +
         program.types.byteLength;
+
+      if (options.resident) {
+        const residentStart = performance.now();
+        const resident = await frontend.ingestResident(source, {
+          lexerCapacityRecords,
+        });
+        residentGpuSamples.push(performance.now() - residentStart);
+        resident.dispose();
+      }
     }
 
     const cpuMs = distribution(cpuSamples);
     const gpuMs = distribution(gpuSamples);
+    let residentGpuMs: Distribution | null = null;
+    let residentSpeedup: number | null = null;
+    if (residentGpuSamples.length > 0) {
+      residentGpuMs = distribution(residentGpuSamples);
+      residentSpeedup = cpuMs.median / residentGpuMs.median;
+    }
     console.log(JSON.stringify({
       mebibytes,
       sourceBytes: source.length,
@@ -248,6 +276,8 @@ try {
       cpuMs,
       gpuMs,
       speedup: cpuMs.median / gpuMs.median,
+      residentGpuMs,
+      residentSpeedup,
       stagesMs,
     }));
   }

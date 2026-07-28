@@ -2,7 +2,6 @@ import type {
   GpuFrontendBoundaryPlan,
   GpuFrontendPlan,
   GpuIslandEmitPlan,
-  GpuIslandTransducerPlan,
 } from "../../compiler/gpu_frontend.ts";
 import { decodeCombinedWasmParserPlan } from "../wasm_plan.ts";
 import { decodeLexerPlanTables, type LexerPlanTables } from "./plan_tables.ts";
@@ -67,6 +66,38 @@ export interface GpuFrontendTimings {
   readonly stagesMs: Readonly<Record<string, number>> | null;
 }
 
+export interface GpuResidentFrontendLayout {
+  readonly byteLength: number;
+  readonly headerWords: number;
+  readonly statusWord: 0;
+  readonly tokenCountWord: 1;
+  readonly nodeCountWord: 2;
+  readonly edgeCountWord: 3;
+  readonly tokenCapacity: number;
+  readonly nodeCapacity: number;
+  readonly edgeCapacity: number;
+  readonly tokenOffsetWords: number;
+  readonly nodeOffsetWords: number;
+  readonly edgeOffsetWords: number;
+}
+
+export interface GpuResidentFrontendTimings {
+  readonly uploadMs: number;
+  readonly submitAndCompletionMs: number;
+  readonly totalMs: number;
+}
+
+/**
+ * Device-resident syntax IR. Counts and status remain in the buffer header so
+ * a downstream GPU pass can consume the result without a mapped readback.
+ */
+export interface GpuResidentFrontendResult {
+  readonly buffer: GPUBuffer;
+  readonly layout: GpuResidentFrontendLayout;
+  readonly timings: GpuResidentFrontendTimings;
+  dispose(): void;
+}
+
 export type GpuFrontendResult =
   | {
     readonly ok: true;
@@ -93,6 +124,9 @@ export interface WebGpuFrontendOptions extends CpuFrontendOptions {
 
 export interface GpuFrontendPlanInspection {
   readonly version: 3;
+  readonly throughput: "general" | "strict";
+  readonly rootLoopIsland: number | null;
+  readonly parallelLongRegionIslands: number;
   readonly lexerStates: number;
   readonly islandCount: number;
   readonly islandStates: number;
@@ -304,6 +338,12 @@ export class WebGpuFrontend {
     let islandExecutionMs = 0;
     let stagesMs: Readonly<Record<string, number>> | null = null;
     const lexerLease = await this.#lexer.acquireIntegratedLexer();
+    try {
+      this.#islands.assertExecutionSlotAvailable(lexerLease.lexer);
+    } catch (error) {
+      lexerLease.release();
+      throw error;
+    }
     const runtimeLease = await this.runtime.acquireLease();
     let execution: GpuIslandExecution;
     try {
@@ -365,6 +405,74 @@ export class WebGpuFrontend {
     }
     return { ok: true, program, diagnostics: [], timings };
   }
+
+  async ingestResident(
+    source: string,
+    options: WebGpuFrontendOptions = {},
+  ): Promise<GpuResidentFrontendResult> {
+    const started = performance.now();
+    assertDeviceCapacity(source.length, this.plan, this.runtime);
+    const units = new Uint16Array(source.length);
+    for (let index = 0; index < source.length; index += 1) {
+      units[index] = source.charCodeAt(index);
+    }
+    const afterUpload = performance.now();
+    const lexerLease = await this.#lexer.acquireIntegratedLexer();
+    try {
+      this.#islands.assertExecutionSlotAvailable(lexerLease.lexer);
+    } catch (error) {
+      lexerLease.release();
+      throw error;
+    }
+    const runtimeLease = await this.runtime.acquireLease();
+    let execution;
+    try {
+      execution = await this.#islands.executeResident(
+        lexerLease.lexer,
+        units,
+        options.lexerCapacityRecords,
+        options.maxNodes,
+        options.maxEdges,
+      );
+    } catch (error) {
+      runtimeLease.release();
+      lexerLease.release();
+      throw error;
+    }
+    lexerLease.release();
+    const finished = performance.now();
+    let disposed = false;
+    return {
+      buffer: execution.buffer,
+      layout: {
+        byteLength: execution.byteLength,
+        headerWords: execution.headerWords,
+        statusWord: 0,
+        tokenCountWord: 1,
+        nodeCountWord: 2,
+        edgeCountWord: 3,
+        tokenCapacity: execution.tokenCapacity,
+        nodeCapacity: execution.nodeCapacity,
+        edgeCapacity: execution.edgeCapacity,
+        tokenOffsetWords: execution.tokenOffsetWords,
+        nodeOffsetWords: execution.nodeOffsetWords,
+        edgeOffsetWords: execution.edgeOffsetWords,
+      },
+      timings: {
+        uploadMs: afterUpload - started,
+        submitAndCompletionMs: execution.submitAndCompletionMs,
+        totalMs: finished - started,
+      },
+      dispose: () => {
+        if (disposed) {
+          return;
+        }
+        disposed = true;
+        execution.release();
+        runtimeLease.release();
+      },
+    };
+  }
 }
 
 function executionStatusDiagnostic(status: number): number {
@@ -402,6 +510,12 @@ export function decodeGpuFrontendPlan(planBytes: Uint8Array): GpuFrontendPlan {
     );
   }
   const plan = expectRecord(section, "gpuFrontend runtime section");
+  const throughput = plan.throughput;
+  if (throughput !== "general" && throughput !== "strict") {
+    throw new Error(
+      `gpuFrontend runtime section has invalid throughput profile '${throughput}'.`,
+    );
+  }
   if (plan.format !== "baba-gpu-frontend") {
     throw new Error(
       `Unsupported GPU frontend format '${String(plan.format)}'.`,
@@ -423,6 +537,10 @@ export function decodeGpuFrontendPlan(planBytes: Uint8Array): GpuFrontendPlan {
   const execution = expectRecord(plan.execution, "GPU frontend execution");
   expectArray(execution.locators, "GPU frontend boundary locators");
   expectArray(execution.rootAnchors, "GPU frontend root segment anchors");
+  if (execution.rootLoop !== null) {
+    expectRecord(execution.rootLoop, "GPU frontend root loop");
+  }
+  expectArray(execution.longRegions, "GPU frontend long regions");
   const denseTransitions = expectRecord(
     execution.denseTransitions,
     "GPU frontend dense transitions",
@@ -446,8 +564,15 @@ export function inspectGpuFrontendPlan(
     return null;
   }
   const plan = decodeGpuFrontendPlan(planBytes);
+  let rootLoopIsland: number | null = null;
+  if (plan.execution.rootLoop !== null) {
+    rootLoopIsland = plan.execution.rootLoop.island;
+  }
   return {
     version: plan.version,
+    throughput: plan.throughput,
+    rootLoopIsland,
+    parallelLongRegionIslands: plan.execution.longRegions.length,
     lexerStates: plan.statistics.lexerStates,
     islandCount: plan.islands.length,
     islandStates: plan.statistics.islandStates,

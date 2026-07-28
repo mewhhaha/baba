@@ -2,6 +2,7 @@
   "version": 2,
   "gpuFrontend": {
     "version": 3,
+    "throughput": "strict",
     "root": "module",
     "islands": [
       { "rule": "module", "boundary": { "kind": "root" } },

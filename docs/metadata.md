@@ -43,6 +43,7 @@ runtime section stored in `parser.plan`:
   "version": 2,
   "gpuFrontend": {
     "version": 3,
+    "throughput": "strict",
     "root": "module",
     "islands": [
       { "rule": "module", "boundary": { "kind": "root" } },
@@ -88,6 +89,14 @@ properties:
   zero-width output cycle;
 - the dense transition table, contraction descriptors, output bounds, and packed
   plan fit the configured limits.
+
+`throughput` is optional. When it is `"strict"`, generation additionally
+requires exactly one root self-loop over a repeated island, an explicit
+`paired`, `separated`, or `terminated` boundary for that island, and proof that
+the repeated island does not contain itself as a placeholder. The resulting
+`rootLoopIsland` is stored in the execution plan rather than rediscovered by the
+runtime. GPU Duck uses this profile; Funcfuck remains on the general profile
+because its root has no single repeated-island loop.
 
 The boundary is an allocation and parallelism promise, not only syntax
 documentation. Prefer explicit terminators and typed delimiter pairs, distinct

@@ -28,6 +28,9 @@ const DEFAULT_MAX_ISLAND_TRANSITIONS = 100_000;
 const DEFAULT_MAX_SEMANTIC_OPCODES = 4_096;
 const DEFAULT_MAX_PLAN_BYTES = 16 * 1024 * 1024;
 const MAX_CONTRACTION_ROUNDS = 33;
+// Two 256-chunk summary tables, entry states, and scan storage fit the
+// WebGPU-guaranteed 16 KiB workgroup-storage limit at seven states.
+const MAX_PARALLEL_CHUNK_STATES = 7;
 
 const SEMANTIC_OPCODE_CATALOG = new Set([
   "module",
@@ -63,6 +66,7 @@ export interface GpuFrontendPlan {
   readonly format: "baba-gpu-frontend";
   readonly version: 3;
   readonly semantics: "baba-gpu-frontend-v3";
+  readonly throughput: "general" | "strict";
   readonly rootIsland: number;
   readonly terminalClassification: readonly number[];
   readonly boundaries: readonly GpuFrontendBoundaryPlan[];
@@ -125,9 +129,21 @@ export interface GpuIslandEmitPlan {
 export interface GpuFrontendExecutionPlan {
   readonly locators: readonly GpuFrontendLocatorPlan[];
   readonly rootAnchors: readonly GpuFrontendRootAnchorPlan[];
+  readonly rootLoop: GpuFrontendRootLoopPlan | null;
+  readonly longRegions: readonly GpuFrontendLongRegionPlan[];
   readonly denseTransitions: GpuFrontendDenseTransitionPlan;
   readonly contractions: readonly GpuFrontendContractionPlan[];
   readonly bounds: GpuFrontendExecutionBoundsPlan;
+}
+
+export interface GpuFrontendRootLoopPlan {
+  readonly island: number;
+  readonly state: number;
+}
+
+export interface GpuFrontendLongRegionPlan {
+  readonly island: number;
+  readonly stateCount: number;
 }
 
 export interface GpuFrontendLocatorPlan {
@@ -505,11 +521,16 @@ export function compileGpuFrontendPlan(
     edgesPerToken,
     constraintsPerNode,
   };
+  let throughput: "general" | "strict" = "general";
+  if (metadata.throughput === "strict") {
+    throughput = "strict";
+  }
   const execution = compileExecutionPlan(
     islands,
     boundaries,
     portable.symbols.terminals,
     capacity,
+    throughput,
     diagnostics,
   );
   if (execution === undefined) {
@@ -523,6 +544,7 @@ export function compileGpuFrontendPlan(
     format: "baba-gpu-frontend" as const,
     version: GPU_FRONTEND_PLAN_VERSION,
     semantics: GPU_FRONTEND_SEMANTICS,
+    throughput,
     rootIsland: 0,
     terminalClassification,
     boundaries,
@@ -584,6 +606,7 @@ function compileExecutionPlan(
   boundaries: readonly GpuFrontendBoundaryPlan[],
   terminals: readonly TerminalPlan[],
   capacity: GpuFrontendCapacityPlan,
+  throughput: "general" | "strict",
   diagnostics: Diagnostic[],
 ): GpuFrontendExecutionPlan | undefined {
   const closerByOpener = new Map<number, number>();
@@ -712,6 +735,75 @@ function compileExecutionPlan(
     }
     return { island, startTerminals, priority };
   });
+  const rootLoops = root.states.flatMap((state) =>
+    state.transitions.filter((transition) =>
+      transition.inputKind === "island" && transition.target === state.id
+    ).map((transition) => ({
+      island: transition.input,
+      state: state.id,
+    }))
+  );
+  let rootLoop: GpuFrontendRootLoopPlan | null = null;
+  if (rootLoops.length === 1) {
+    rootLoop = rootLoops[0];
+  }
+  if (throughput === "strict" && rootLoop === null) {
+    diagnostics.push({
+      code: "GPU_FRONTEND_STRICT_ROOT_LOOP",
+      severity: "error",
+      backend: "webgpu",
+      message:
+        `GPU frontend strict throughput requires exactly one repeated root island; '${root.ruleName}' has ${rootLoops.length}.`,
+    });
+  }
+  if (throughput === "strict" && rootLoop !== null) {
+    const loopBoundary = boundaries[rootLoop.island];
+    if (loopBoundary === undefined) {
+      throw new Error(
+        `GPU frontend root loop island ${rootLoop.island} has no boundary.`,
+      );
+    }
+    if (loopBoundary.kind === "root") {
+      diagnostics.push({
+        code: "GPU_FRONTEND_STRICT_ROOT_BOUNDARY",
+        severity: "error",
+        backend: "webgpu",
+        message: `GPU frontend strict root loop island '${
+          islands[rootLoop.island].ruleName
+        }' requires an explicit paired, separated, or terminated boundary.`,
+      });
+    }
+    const loopIsland = islands[rootLoop.island];
+    const selfNesting = loopIsland.states.some((state) =>
+      state.transitions.some((transition) =>
+        transition.inputKind === "island" &&
+        transition.input === rootLoop.island
+      )
+    );
+    if (selfNesting) {
+      diagnostics.push({
+        code: "GPU_FRONTEND_STRICT_SELF_NESTING",
+        severity: "error",
+        backend: "webgpu",
+        message:
+          `GPU frontend strict root loop island '${loopIsland.ruleName}' cannot contain itself as a nested placeholder.`,
+      });
+    }
+  }
+  if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return undefined;
+  }
+  const longRegions = islands.filter((island) => {
+    if (island.states.length > MAX_PARALLEL_CHUNK_STATES) {
+      return false;
+    }
+    return !island.states.some((state) =>
+      state.transitions.some((transition) => transition.inputKind === "island")
+    );
+  }).map((island) => ({
+    island: island.id,
+    stateCount: island.states.length,
+  }));
 
   let terminalSymbols = 0;
   for (const terminal of terminals) {
@@ -781,6 +873,8 @@ function compileExecutionPlan(
   return {
     locators,
     rootAnchors,
+    rootLoop,
+    longRegions,
     denseTransitions: {
       terminalSymbols,
       symbols,

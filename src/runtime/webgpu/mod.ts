@@ -5,7 +5,8 @@
  * not generate targets. The standalone lexer emits the same four-`i32` token
  * records as the shipping Rust/Wasm `lex_all`. A plan with an opt-in version-3
  * GPU frontend section can also execute lexing, structural matching, island
- * recognition, and flat IR allocation in one submission and one map.
+ * recognition, and flat IR allocation in one submission. `ingest()` maps the
+ * owned result once; `ingestResident()` leaves the syntax IR on the device.
  *
  * Read `docs/webgpu-frontend.md` or `docs/webgpu-lexer.md` before selecting a
  * backend. In particular:
@@ -69,5 +70,8 @@ export type {
   GpuFrontendPlanInspection,
   GpuFrontendResult,
   GpuFrontendTimings,
+  GpuResidentFrontendLayout,
+  GpuResidentFrontendResult,
+  GpuResidentFrontendTimings,
   WebGpuFrontendOptions,
 } from "./frontend.ts";

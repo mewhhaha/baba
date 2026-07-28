@@ -1,5 +1,9 @@
 import { assert, assertEquals, assertThrowsIncludes } from "./helpers.ts";
-import { buildDfa } from "../src/compiler/regex/dfa.ts";
+import {
+  buildDfa,
+  computeDfaAlphabet,
+  minimizeDfa,
+} from "../src/compiler/regex/dfa.ts";
 import { dfaIntersectionWitness } from "../src/compiler/regex/intersect.ts";
 import { buildRegexNfa } from "../src/compiler/regex/nfa.ts";
 import { regexCanMatchEmpty } from "../src/compiler/regex/nullable.ts";
@@ -66,4 +70,45 @@ Deno.test("DFA intersection produces concrete witnesses", () => {
     buildDfa(buildRegexNfa(parsePortableRegex("[A-Z]+"))),
   );
   assertEquals(disjoint, null);
+});
+
+Deno.test("DFA minimization preserves complete accepting candidates", () => {
+  const states = [
+    {
+      id: 0,
+      nfaStates: [0],
+      accepts: [],
+      selectedAccept: null,
+      transitions: [
+        { start: 97, end: 97, target: 1 },
+        { start: 98, end: 98, target: 2 },
+      ],
+    },
+    {
+      id: 1,
+      nfaStates: [1],
+      accepts: [2, 4],
+      selectedAccept: 2,
+      transitions: [],
+    },
+    {
+      id: 2,
+      nfaStates: [2],
+      accepts: [2, 4],
+      selectedAccept: 2,
+      transitions: [],
+    },
+  ];
+  const minimized = minimizeDfa({
+    start: 0,
+    states,
+    alphabet: computeDfaAlphabet(states),
+  });
+
+  assertEquals(minimized.states.length, 2);
+  assertEquals(minimized.states[1].accepts.join(","), "2,4");
+  assertEquals(
+    JSON.stringify(minimized.states[0].transitions),
+    JSON.stringify([{ start: 97, end: 98, target: 1 }]),
+  );
 });
