@@ -26,6 +26,7 @@ import { GpuFrontendCapacityError } from "./frontend_capacity.ts";
 const TOKEN_WORDS = 4;
 const NODE_WORDS = 8;
 const EDGE_WORDS = 4;
+const CANDIDATE_WORDS = 16;
 const DIAGNOSTIC_WORDS = 8;
 
 const DIAGNOSTIC_LEXICAL = 1;
@@ -617,7 +618,10 @@ export function decodeGpuFrontendPlan(planBytes: Uint8Array): GpuFrontendPlan {
   expectArray(plan.boundaries, "island boundaries");
   expectArray(plan.islands, "island transducers");
   const execution = expectRecord(plan.execution, "GPU frontend execution");
-  expectArray(execution.locators, "GPU frontend boundary locators");
+  const locators = expectArray(
+    execution.locators,
+    "GPU frontend boundary locators",
+  );
   expectArray(execution.rootAnchors, "GPU frontend root segment anchors");
   if (execution.rootLoop !== null) {
     expectRecord(execution.rootLoop, "GPU frontend root loop");
@@ -627,13 +631,122 @@ export function decodeGpuFrontendPlan(planBytes: Uint8Array): GpuFrontendPlan {
     execution.denseTransitions,
     "GPU frontend dense transitions",
   );
-  expectArray(denseTransitions.targets, "GPU frontend dense targets");
-  expectArray(denseTransitions.fields, "GPU frontend dense fields");
-  expectArray(denseTransitions.kinds, "GPU frontend dense kinds");
+  const denseTargets = expectArray(
+    denseTransitions.targets,
+    "GPU frontend dense targets",
+  );
+  const denseFields = expectArray(
+    denseTransitions.fields,
+    "GPU frontend dense fields",
+  );
+  const denseKinds = expectArray(
+    denseTransitions.kinds,
+    "GPU frontend dense kinds",
+  );
+  const denseRows = expectPositiveSafeInteger(
+    denseTransitions.rows,
+    "GPU frontend dense transition rows",
+  );
+  const denseSymbols = expectPositiveSafeInteger(
+    denseTransitions.symbols,
+    "GPU frontend dense transition symbols",
+  );
+  const denseEntries = denseRows * denseSymbols;
+  if (
+    !Number.isSafeInteger(denseEntries) ||
+    denseTargets.length !== denseEntries ||
+    denseFields.length !== denseEntries ||
+    denseKinds.length !== denseEntries
+  ) {
+    throw new Error(
+      `GPU frontend dense transition table declares ${denseRows} rows and ${denseSymbols} symbols, but its target, field, and kind lengths are ${denseTargets.length}, ${denseFields.length}, and ${denseKinds.length}.`,
+    );
+  }
   expectArray(execution.contractions, "GPU frontend contractions");
-  expectRecord(execution.bounds, "GPU frontend execution bounds");
-  expectRecord(plan.capacity, "GPU frontend capacity");
-  expectRecord(plan.statistics, "GPU frontend statistics");
+  const bounds = expectRecord(
+    execution.bounds,
+    "GPU frontend execution bounds",
+  );
+  for (
+    const key of [
+      "regionsPerToken",
+      "candidatesPerToken",
+      "summariesPerCandidate",
+      "nodesPerToken",
+      "edgesPerToken",
+      "diagnosticsPerToken",
+    ]
+  ) {
+    expectPositiveSafeInteger(
+      bounds[key],
+      `GPU frontend execution bound ${key}`,
+    );
+  }
+  if (
+    typeof bounds.candidatesPerToken === "number" &&
+    bounds.candidatesPerToken > locators.length
+  ) {
+    throw new Error(
+      `GPU frontend candidate multiplicity ${bounds.candidatesPerToken} exceeds its ${locators.length} boundary locators.`,
+    );
+  }
+  const capacity = expectRecord(plan.capacity, "GPU frontend capacity");
+  for (
+    const key of [
+      "nodesPerToken",
+      "edgesPerToken",
+      "constraintsPerNode",
+    ]
+  ) {
+    expectPositiveSafeInteger(
+      capacity[key],
+      `GPU frontend capacity ${key}`,
+    );
+  }
+  const statistics = expectRecord(
+    plan.statistics,
+    "GPU frontend statistics",
+  );
+  expectPositiveSafeInteger(
+    statistics.contractionRounds,
+    "GPU frontend contraction rounds",
+  );
+  const islands = plan.islands as unknown[];
+  let islandStates = 0;
+  let islandTransitions = 0;
+  for (let islandIndex = 0; islandIndex < islands.length; islandIndex += 1) {
+    const island = expectRecord(
+      islands[islandIndex],
+      `GPU frontend island ${islandIndex}`,
+    );
+    const states = expectArray(
+      island.states,
+      `GPU frontend island ${islandIndex} states`,
+    );
+    islandStates += states.length;
+    for (let stateIndex = 0; stateIndex < states.length; stateIndex += 1) {
+      const state = expectRecord(
+        states[stateIndex],
+        `GPU frontend island ${islandIndex} state ${stateIndex}`,
+      );
+      islandTransitions += expectArray(
+        state.transitions,
+        `GPU frontend island ${islandIndex} state ${stateIndex} transitions`,
+      ).length;
+    }
+  }
+  if (
+    statistics.islandStates !== islandStates ||
+    statistics.islandTransitions !== islandTransitions
+  ) {
+    throw new Error(
+      `GPU frontend statistics declare ${
+        String(statistics.islandStates)
+      } states and ${
+        String(statistics.islandTransitions)
+      } transitions, but the island tables contain ${islandStates} states and ${islandTransitions} transitions.`,
+    );
+  }
   return plan as unknown as GpuFrontendPlan;
 }
 
@@ -1687,6 +1800,12 @@ function assertDeviceCapacity(
         sourceLength * 3
       ) * Int32Array.BYTES_PER_ELEMENT,
     },
+    {
+      name: "islandCandidatesHead",
+      bytes: Math.ceil(
+        (1 + sourceLength * plan.execution.bounds.candidatesPerToken) / 2,
+      ) * CANDIDATE_WORDS * Int32Array.BYTES_PER_ELEMENT,
+    },
   ];
   for (const buffer of buffers) {
     if (!Number.isSafeInteger(buffer.bytes) || buffer.bytes > limit) {
@@ -1708,6 +1827,19 @@ function expectRecord(
 function expectArray(value: unknown, subject: string): unknown[] {
   if (!Array.isArray(value)) {
     throw new Error(`${subject} must be an array.`);
+  }
+  return value;
+}
+
+function expectPositiveSafeInteger(value: unknown, subject: string): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1
+  ) {
+    throw new Error(
+      `${subject} must be a positive safe integer, got '${String(value)}'.`,
+    );
   }
   return value;
 }
