@@ -25,8 +25,8 @@ The generated descriptor has:
   "format": "baba-wasm-abi",
   "version": 1,
   "parserPlan": {
-    "version": 1,
-    "runtimeMetadataVersion": 2
+    "version": 2,
+    "runtimeMetadataVersion": 3
   },
   "core": {
     "abiVersion": 11
@@ -111,11 +111,11 @@ core-plan detail; hosts should validate the plan with `wasm/abi.json` and
 `load_plan` rather than decoding those tables directly.
 
 The runtime metadata subsection is independently versioned and currently uses
-version `2`. It contains only runtime identity, trivia and conflict policy, rule
-names, token/literal mappings, lexer specifications and accept candidates,
-terminal displays, and cursor field schemas. DFA transitions, LR actions and
-gotos, productions, reducers, and planning statistics are not duplicated in host
-metadata. Baba 5 rejects metadata version `1` with an instruction to regenerate
+version `3`. It contains only runtime identity, trivia policy, rule names,
+token/literal mappings, lexer specifications and accept candidates, terminal
+displays, and cursor field schemas. DFA transitions, LR actions and gotos,
+productions, reducers, and planning statistics are not duplicated in host
+metadata. Older metadata versions are rejected with an instruction to regenerate
 the plan.
 
 The descriptor exposes plan metadata under `core.plan`, including the plan

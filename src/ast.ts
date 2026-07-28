@@ -89,6 +89,8 @@ export interface GpuFrontendLimitMetadata {
   maxIslandTransitions?: number;
   maxSemanticOpcodes?: number;
   maxPlanBytes?: number;
+  /** Maximum device contraction passes available to nested island chains. */
+  maxContractionRounds?: number;
   maxNodesPerToken?: number;
   maxEdgesPerToken?: number;
   maxConstraintsPerNode?: number;

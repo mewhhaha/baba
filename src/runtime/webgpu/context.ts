@@ -80,6 +80,12 @@ interface WorkerWaiter {
   reject: (reason: Error) => void;
 }
 
+interface RuntimeFrontend {
+  readonly isDisposed: boolean;
+  assertDisposable(): void;
+  dispose(): void;
+}
+
 /**
  * A single, explicitly-owned WebGPU device shared by one or more lexer plans.
  *
@@ -101,6 +107,7 @@ export class WebGpuRuntime {
   #compiledByPlan = new Map<string, Promise<WebGpuLexerContext>>();
   #contexts = new Set<WebGpuLexerContext>();
   #contextKeys = new Map<WebGpuLexerContext, string>();
+  #frontends = new Set<RuntimeFrontend>();
   #compilingPlans = 0;
 
   private constructor(
@@ -289,7 +296,13 @@ export class WebGpuRuntime {
   ): Promise<import("./frontend.ts").WebGpuFrontend> {
     this.#assertUsable();
     const module = await import("./frontend.ts");
-    return await module.WebGpuFrontend.create(this, planBytes);
+    const frontend = await module.WebGpuFrontend.create(this, planBytes);
+    if (this.#disposed) {
+      frontend.dispose();
+      throw new Error("WebGpuRuntime has been disposed.");
+    }
+    this.#frontends.add(frontend);
+    return frontend;
   }
 
   /**
@@ -321,6 +334,10 @@ export class WebGpuRuntime {
     }
   }
 
+  releaseFrontend(frontend: RuntimeFrontend): void {
+    this.#frontends.delete(frontend);
+  }
+
   dispose(): void {
     if (this.#disposed) {
       return;
@@ -330,8 +347,15 @@ export class WebGpuRuntime {
         `Cannot dispose WebGpuRuntime while ${this.#activeLeases} lex job(s) are in flight.`,
       );
     }
+    for (const frontend of this.#frontends) {
+      frontend.assertDisposable();
+    }
     this.#disposed = true;
     this.#rejectWaiters(new Error("WebGpuRuntime has been disposed."));
+    for (const frontend of [...this.#frontends]) {
+      frontend.dispose();
+    }
+    this.#frontends.clear();
     for (const context of [...this.#contexts]) {
       context.dispose();
     }

@@ -485,7 +485,7 @@ Deno.test("Wasm core and wrapper are stable across grammars", () => {
   );
 });
 
-Deno.test("combined parser plans round-trip runtime metadata v2 with exact section sizes", () => {
+Deno.test("combined parser plans round-trip current runtime metadata with exact section sizes", () => {
   const bundle = wasmBundle(STATEMENT_GRAMMAR);
   const file = bundle.files.find((entry) => entry.path === "wasm/parser.plan");
   assert(file, "Expected wasm/parser.plan.");
@@ -1423,36 +1423,24 @@ Deno.test("Wasm cursor parser selects the first viable token candidate determini
   }
 });
 
-Deno.test("shared Wasm adapter explores declared branching LR action sets", async () => {
+Deno.test("Wasm generation rejects declared branching LR action sets", () => {
   const grammar = `
     module = left | right ;
     left = "a" ;
     right = "a" ;
   `;
-  const { dir, mod, bytes, plan } = await materialize(
-    grammar,
-    declaredConflictMetadata(grammar),
+  const result = compile(grammar, {
+    targets: ["wasm"],
+    metadata: declaredConflictMetadata(grammar),
+  });
+  assertEquals(result.bundle, undefined);
+  assertEquals(
+    result.diagnostics[0].code,
+    "WASM_BRANCHING_ACTIONS_UNSUPPORTED",
   );
-  try {
-    const parser = mod.createParser({ bytes, plan });
-    assertEquals("parseTree" in parser, false);
-    const cursorParsed = parser.parse("a");
-    assertEquals(cursorParsed.ok, false);
-    assertEquals(
-      cursorParsed.diagnostics[0].code,
-      "PARSER_AMBIGUOUS_PARSE",
-    );
-    const validateParsed = parser.validate("a");
-    assertEquals(validateParsed.ok, false);
-    assertEquals(
-      validateParsed.diagnostics[0].code,
-      "PARSER_AMBIGUOUS_PARSE",
-    );
-
-    parser.dispose();
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
+  assertIncludes(result.diagnostics[0].message, "state ");
+  assertIncludes(result.diagnostics[0].message, "terminal ");
+  assertIncludes(result.diagnostics[0].message, "2 actions");
 });
 
 Deno.test("shared Wasm adapter loads concurrent parser instances with different plans", async () => {
@@ -1546,7 +1534,7 @@ Deno.test("shared Wasm adapter validates external plan bytes", async () => {
       corruptOffset.buffer,
       corruptOffset.byteOffset,
       corruptOffset.byteLength,
-    ).setInt32(20, corruptOffset.byteLength + 4, true);
+    ).setInt32(20, corruptOffset.byteLength + 1, true);
     assertThrowsIncludes(
       () => mod.createParser({ bytes, plan: corruptOffset }),
       "lexer fast specs offset is not aligned",

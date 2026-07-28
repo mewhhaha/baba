@@ -21,6 +21,9 @@ const METADATA = parseMetadata(JSON.stringify({
   gpuFrontend: {
     version: 3,
     throughput: "strict",
+    limits: {
+      maxContractionRounds: 1,
+    },
     root: "module",
     islands: [
       { rule: "module", boundary: { kind: "root" } },
@@ -78,6 +81,7 @@ Deno.test("GPU frontend v3 is persisted and interpreted by the CPU oracle", () =
   assertEquals(plan.execution.contractions.length, 2);
   assertEquals(plan.execution.rootLoop?.island, 1);
   assertEquals(plan.execution.longRegions.length, 1);
+  assertEquals(plan.statistics.contractionRounds, 1);
 
   const frontend = CpuFrontend.create(planFile.content);
   for (
@@ -440,6 +444,7 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
     assert(gpuDuckInspection);
     assertEquals(gpuDuckInspection.throughput, "strict");
     assertEquals(gpuDuckInspection.rootLoopIsland, 2);
+    assertEquals(gpuDuckInspection.contractionRounds, 33);
     const cpuDuck = CpuFrontend.create(gpuDuckPlan).ingest(gpuDuckSource);
     assert(cpuDuck.ok);
     const gpuDuckFrontend = await runtime.compileFrontend(gpuDuckPlan);
@@ -619,6 +624,19 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
           .join("|"),
       );
     }
+    longFrontend.dispose();
+    gpuDuckFrontend.dispose();
+    gpuFuncfuckFrontend.dispose();
+    frontend.dispose();
+    let disposedMessage = "";
+    try {
+      await frontend.ingest(source);
+    } catch (error) {
+      if (error instanceof Error) {
+        disposedMessage = error.message;
+      }
+    }
+    assert(disposedMessage.includes("has been disposed"), disposedMessage);
   } finally {
     runtime.dispose();
   }
@@ -679,6 +697,17 @@ Deno.test("GPU frontend eligibility failures use stable diagnostics", () => {
         limits: { maxLexerStates: 1 },
       },
       code: "GPU_FRONTEND_LEXER_STATE_LIMIT",
+    },
+    {
+      source: `module = "x" ;`,
+      gpuFrontend: {
+        version: 3,
+        root: "module",
+        islands: [{ rule: "module", boundary: { kind: "root" } }],
+        semantics: { rules: {} },
+        limits: { maxContractionRounds: 34 },
+      },
+      code: "GPU_FRONTEND_CONTRACTION_ROUND_LIMIT",
     },
     {
       source: `module = "x" ;`,

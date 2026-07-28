@@ -83,7 +83,6 @@ export interface WasmRuntimeMetadata {
   readonly portablePlan: PortableParserPlanMetadata;
   readonly runtimeImplementation: typeof RUNTIME_IMPLEMENTATION_METADATA;
   readonly defaultPreserveTrivia: boolean;
-  readonly conflictProfile: "deterministic" | "branching";
   readonly ruleNames: readonly string[];
   readonly namedTokens: readonly WasmRuntimeNamedToken[];
   readonly literalTokens: readonly WasmRuntimeLiteralToken[];
@@ -157,6 +156,21 @@ export function planWasmTarget(
   if (!runtimePlanInput) diagnostics.push(...runtimePlan.diagnostics);
   if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
     return { diagnostics };
+  }
+  for (const [state, row] of runtimePlan.lr.actions) {
+    for (const [terminal, actions] of row) {
+      if (actions.length < 2) {
+        continue;
+      }
+      diagnostics.push({
+        code: "WASM_BRANCHING_ACTIONS_UNSUPPORTED",
+        severity: "error",
+        backend: "wasm",
+        message:
+          `Wasm generation requires deterministic parser actions, but state ${state} and terminal ${terminal} have ${actions.length} actions.`,
+      });
+      return { diagnostics };
+    }
   }
   const portableBnf = runtimePlan.bnf;
   const portableLr = runtimePlan.lr;
@@ -838,14 +852,6 @@ function createWasmRuntimeMetadata(
       literalId: terminal.literalId,
     });
   }
-  let conflictProfile: WasmRuntimeMetadata["conflictProfile"] = "deterministic";
-  for (const row of runtime.lr.actions.values()) {
-    for (const actions of row.values()) {
-      if (actions.length > 1) {
-        conflictProfile = "branching";
-      }
-    }
-  }
   const acceptCandidates = runtime.portable.lexer.states.map((state) => {
     return [...state.accepts].sort((left, right) => {
       const leftSpec = runtime.portable.lexer.specifications[left];
@@ -880,7 +886,6 @@ function createWasmRuntimeMetadata(
     portablePlan: runtime.portableMetadata,
     runtimeImplementation: RUNTIME_IMPLEMENTATION_METADATA,
     defaultPreserveTrivia: preserveTrivia,
-    conflictProfile,
     ruleNames: analyzed.rules.map((rule) => rule.name),
     namedTokens,
     literalTokens,
@@ -895,10 +900,6 @@ function createWasmRuntimeMetadata(
 function compactWasmRuntimeMetadata(
   metadata: WasmRuntimeMetadata,
 ): unknown {
-  let conflictProfile = 0;
-  if (metadata.conflictProfile === "branching") {
-    conflictProfile = 1;
-  }
   const fieldIds = new Map<string, number>();
   for (const schema of metadata.fields) {
     for (const field of schema.fields) {
@@ -921,7 +922,6 @@ function compactWasmRuntimeMetadata(
     ],
     p: [
       metadata.defaultPreserveTrivia,
-      conflictProfile,
     ],
     r: metadata.ruleNames,
     n: metadata.namedTokens.map((token) => [

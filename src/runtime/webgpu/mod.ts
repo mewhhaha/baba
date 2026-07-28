@@ -57,12 +57,12 @@ export type { AlphabetTables, ClassRange } from "./alphabet.ts";
 export type { PackedTables } from "./kernel_wgsl.ts";
 
 export {
-  CpuFrontend,
   decodeGpuFrontendPlan,
   GpuFrontendCapacityError,
   inspectGpuFrontendPlan,
   WebGpuFrontend,
 } from "./frontend.ts";
+export { CpuFrontend } from "./cpu_frontend.ts";
 export type {
   CompactFrontendProgram,
   CpuFrontendOptions,
