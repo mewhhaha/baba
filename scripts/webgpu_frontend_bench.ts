@@ -8,6 +8,7 @@
 import {
   CpuFrontend,
   type GpuFrontendResult,
+  inspectGpuFrontendPlan,
   WebGpuRuntime,
 } from "../src/runtime/webgpu/mod.ts";
 
@@ -156,6 +157,12 @@ const options = parseOptions();
 const plan = await Deno.readFile(
   new URL("../examples/gpu-duck/generated/wasm/parser.plan", import.meta.url),
 );
+const planInspection = inspectGpuFrontendPlan(plan);
+if (planInspection === null) {
+  throw new Error(
+    "GPU Duck parser.plan has no version-3 GPU frontend section.",
+  );
+}
 
 const cpuSetupStart = performance.now();
 const cpu = CpuFrontend.create(plan);
@@ -171,6 +178,7 @@ const gpuSetupMs = performance.now() - gpuSetupStart;
 
 console.log(JSON.stringify({
   adapter: runtime.capabilities,
+  plan: planInspection,
   setupMs: { cpu: cpuSetupMs, gpu: gpuSetupMs },
 }));
 
@@ -200,6 +208,8 @@ try {
     const gpuSamples: number[] = [];
     let tokenCount = 0;
     let nodeCount = 0;
+    let edgeCount = 0;
+    let compactProgramBytes = 0;
     let stagesMs: Readonly<Record<string, number>> | null = null;
     for (let run = 0; run < options.runs; run += 1) {
       console.error(`${mebibytes} MiB run ${run + 1}/${options.runs}`);
@@ -218,6 +228,12 @@ try {
       const program = requireProgram(gpuResult, "GPU");
       tokenCount = program.tokens.length / 4;
       nodeCount = program.nodes.length / 8;
+      edgeCount = program.edges.length / 4;
+      compactProgramBytes = program.tokens.byteLength +
+        program.nodes.byteLength +
+        program.edges.byteLength +
+        program.symbols.byteLength +
+        program.types.byteLength;
     }
 
     const cpuMs = distribution(cpuSamples);
@@ -227,6 +243,8 @@ try {
       sourceBytes: source.length,
       tokenCount,
       nodeCount,
+      edgeCount,
+      compactProgramBytes,
       cpuMs,
       gpuMs,
       speedup: cpuMs.median / gpuMs.median,

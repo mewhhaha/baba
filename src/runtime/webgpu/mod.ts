@@ -1,21 +1,21 @@
 /**
  * Experimental WebGPU lexer and island-frontend backends.
  *
- * This is a second implementation of the shipping Rust/Wasm `lex_all`, not a new
- * generate target and not a new artifact. It consumes an existing `parser.plan`
- * unchanged and emits the identical four-`i32` token records
- * `{ specIndex, start, end, acceptingState }` in the identical order.
+ * Both backends consume an existing `parser.plan`; they are runtime choices,
+ * not generate targets. The standalone lexer emits the same four-`i32` token
+ * records as the shipping Rust/Wasm `lex_all`. A plan with an opt-in version-3
+ * GPU frontend section can also execute lexing, structural matching, island
+ * recognition, and flat IR allocation in one submission and one map.
  *
- * Read `docs/webgpu-lexer.md` before using it. In particular:
+ * Read `docs/webgpu-frontend.md` or `docs/webgpu-lexer.md` before selecting a
+ * backend. In particular:
  *
- * - it is **async**, so it cannot be hosted inside the generated `parser.lex()`,
- *   which is synchronous;
- * - its historical Deno/wgpu hardware measurement lost to the CPU below about
- *   896 KiB, but that result predates the current Wasm lexer optimization and
- *   is not a supported crossover threshold; setup is still large enough that a
- *   single document does not repay it;
- * - it supports **guard-free grammars only** and refuses others loudly;
- * - it requires a hardware WebGPU adapter by default; software fallback
+ * - both are **async** and cannot replace the generated synchronous methods;
+ * - device setup and mapped readback make the CPU path preferable for small or
+ *   one-off sources;
+ * - both require guard-free terminal identity, while the full frontend also
+ *   requires compiler-proven, locally locatable islands;
+ * - a hardware WebGPU adapter is required by default; software fallback
  *   adapters require explicit `allowFallbackAdapter` opt-in.
  *
  * Stability: this module is listed as an experimental surface in

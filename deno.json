@@ -29,6 +29,7 @@
       "docs/stability.md",
       "docs/wasm-abi.md",
       "docs/wasm.md",
+      "docs/webgpu-frontend.md",
       "docs/webgpu-lexer.md",
       "scripts/build_wasm_engine.ts",
       "scripts/build_grammar_parser.ts",

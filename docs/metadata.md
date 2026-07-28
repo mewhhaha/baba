@@ -67,10 +67,49 @@ runtime section stored in `parser.plan`:
 ```
 
 Boundary kinds are `root`, `paired`, `terminated`, and `separated`. Boundary
-terminals must resolve to one lexical terminal. The compiler rejects contextual
-terminal identity, unresolved parser conflicts, residual recursion after nested
-islands become placeholders, ambiguous transducer output, invalid semantic
-recipes, zero-width repetition cycles, and configured plan limits.
+terminals must resolve to one lexical terminal.
+
+The profile is accepted only when the compiler can prove all of these
+properties:
+
+- `root` names the parser root and that rule is the first island;
+- every token has parser-state-independent terminal identity: contextual tokens
+  and trailing-context guards are not eligible;
+- every parser action is deterministic after declared conflict resolution;
+- every island has at least one lexically identifiable FIRST terminal after
+  nested islands become typed placeholders;
+- a `terminated` boundary has one lexically unique terminator; a `paired` or
+  `separated` boundary has lexically unique opener and closer terminals;
+- one opener never selects different closer terminals, and no structural
+  terminal serves as both opener and closer;
+- a `separated` boundary uses a separator distinct from its opener and closer;
+- replacing nested islands with typed placeholders leaves a finite,
+  deterministic transducer with no residual recursion, ambiguous output, or
+  zero-width output cycle;
+- the dense transition table, contraction descriptors, output bounds, and packed
+  plan fit the configured limits.
+
+The boundary is an allocation and parallelism promise, not only syntax
+documentation. Prefer explicit terminators and typed delimiter pairs, distinct
+FIRST terminals for competing islands, many small root-level regions, and flat
+expression sequences. A single unbounded declaration or expression remains one
+region and exposes much less parallel work. Overlapping FIRST sets increase
+`maxCandidateMultiplicity`, while more lexer states directly increase the
+parallel DFA summary work. Inspect both before adopting the profile:
+
+```ts
+import { inspectGpuFrontendPlan } from "@mewhhaha/baba/runtime/webgpu";
+
+const inspection = inspectGpuFrontendPlan(plan);
+if (inspection === null) {
+  throw new Error("parser.plan has no version-3 GPU frontend section");
+}
+console.log({
+  lexerStates: inspection.lexerStates,
+  candidateMultiplicity: inspection.maxCandidateMultiplicity,
+  scratch: inspection.scratchExpansionFactors,
+});
+```
 
 The semantic `opcode` is selected from Baba's shared catalog; metadata cannot
 inject WGSL. `primitives` and `operators` map source spellings to shared runtime
@@ -78,6 +117,10 @@ operations. `scopes`, `namespaces`, `binders`, `references`, `patterns`, and
 `typeEntries` identify the grammar rules that participate in semantic passes.
 The profile is ignored only when it is absent. A malformed or ineligible profile
 fails generation with a `GPU_FRONTEND_*` diagnostic.
+
+See [WebGPU Frontend](webgpu-frontend.md) for runtime capacity behavior,
+performance-oriented grammar guidance, and comparison with other parallel parser
+designs.
 
 ### Parser Conflict Policy
 
