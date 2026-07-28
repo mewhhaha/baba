@@ -107,8 +107,8 @@ interface ExecutionSlot {
   indirect: SizedExecutionBuffer | null;
   residentHeld: boolean;
   pendingCompletion: Promise<Error | null> | null;
-  readonly querySet: GPUQuerySet | null;
-  readonly queryResolve: GPUBuffer | null;
+  querySet: GPUQuerySet | null;
+  queryResolve: GPUBuffer | null;
 }
 
 interface IslandDispatch {
@@ -877,7 +877,10 @@ export class GpuIslandExecutor {
     }
     const queryCount = (GPU_LEX_STAGE_LABELS.length + dispatches.length) * 2;
     const maximumQueryCount = MAX_EXECUTION_DISPATCHES * 2;
-    const timestampBytes = queryCount * BigUint64Array.BYTES_PER_ELEMENT;
+    let timestampBytes = 0;
+    if (resultLocation === "host" && timingMode === "collect") {
+      timestampBytes = queryCount * BigUint64Array.BYTES_PER_ELEMENT;
+    }
     const arenaBytes = layout.arenaWords * Uint32Array.BYTES_PER_ELEMENT;
     const candidateSplit = Math.ceil(candidateCount / 2);
     const candidateBytes = candidateSplit * CANDIDATE_WORDS *
@@ -906,23 +909,12 @@ export class GpuIslandExecutor {
     );
     this.#assertBufferLimit("islandScan", scratchBytes, true);
     this.#assertBufferLimit("deviceStaging", deviceStagingBytes, true);
-    this.#assertBufferLimit("islandStaging", stagingBytes, false);
+    if (resultLocation === "host") {
+      this.#assertBufferLimit("islandStaging", stagingBytes, false);
+    }
 
     let slot = this.#slots.get(lexer);
     if (slot === undefined) {
-      let querySet: GPUQuerySet | null = null;
-      let queryResolve: GPUBuffer | null = null;
-      if (this.device.features.has("timestamp-query")) {
-        querySet = this.device.createQuerySet({
-          type: "timestamp",
-          count: maximumQueryCount,
-        });
-        queryResolve = this.device.createBuffer({
-          label: "baba gpu frontend timestamp resolve",
-          size: maximumQueryCount * BigUint64Array.BYTES_PER_ELEMENT,
-          usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
-        });
-      }
       slot = {
         arena: null,
         candidates: null,
@@ -934,10 +926,26 @@ export class GpuIslandExecutor {
         indirect: null,
         residentHeld: false,
         pendingCompletion: null,
-        querySet,
-        queryResolve,
+        querySet: null,
+        queryResolve: null,
       };
       this.#slots.set(lexer, slot);
+    }
+    if (
+      resultLocation === "host" &&
+      timingMode === "collect" &&
+      this.device.features.has("timestamp-query") &&
+      slot.querySet === null
+    ) {
+      slot.querySet = this.device.createQuerySet({
+        type: "timestamp",
+        count: maximumQueryCount,
+      });
+      slot.queryResolve = this.device.createBuffer({
+        label: "baba gpu frontend timestamp resolve",
+        size: maximumQueryCount * BigUint64Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+      });
     }
     if (slot.residentHeld) {
       throw new Error(
@@ -994,12 +1002,14 @@ export class GpuIslandExecutor {
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
       "baba gpu frontend device staging",
     );
-    slot.staging = this.#ensureBuffer(
-      slot.staging,
-      stagingBytes,
-      GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      "baba gpu frontend island staging",
-    );
+    if (resultLocation === "host") {
+      slot.staging = this.#ensureBuffer(
+        slot.staging,
+        stagingBytes,
+        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        "baba gpu frontend island staging",
+      );
+    }
     const arenaBuffer = slot.arena.buffer;
     const candidateBuffer = slot.candidates.buffer;
     const candidateTailBuffer = slot.candidateTail.buffer;
@@ -1007,7 +1017,10 @@ export class GpuIslandExecutor {
     const deviceStagingBuffer = slot.deviceStaging.buffer;
     const paramsBuffer = slot.params.buffer;
     const indirectBuffer = slot.indirect.buffer;
-    const stagingBuffer = slot.staging.buffer;
+    let stagingBuffer: GPUBuffer | null = null;
+    if (slot.staging !== null) {
+      stagingBuffer = slot.staging.buffer;
+    }
     const integratedLex = lexer.prepareIntegratedLex(sourceUnits, {
       capacityRecords: maximumTokens,
     });
@@ -1191,6 +1204,11 @@ export class GpuIslandExecutor {
       }
 
       if (resultLocation === "host") {
+        if (stagingBuffer === null) {
+          throw new Error(
+            "GPU frontend host execution has no mapped staging buffer.",
+          );
+        }
         encoder.copyBufferToBuffer(
           deviceStagingBuffer,
           0,
@@ -1252,6 +1270,11 @@ export class GpuIslandExecutor {
             slot.residentHeld = false;
           },
         };
+      }
+      if (stagingBuffer === null) {
+        throw new Error(
+          "GPU frontend host execution completed without a mapped staging buffer.",
+        );
       }
       await stagingBuffer.mapAsync(GPUMapMode.READ);
       const finished = performance.now();

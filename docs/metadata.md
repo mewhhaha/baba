@@ -44,6 +44,9 @@ runtime section stored in `parser.plan`:
   "gpuFrontend": {
     "version": 3,
     "throughput": "strict",
+    "limits": {
+      "maxContractionRounds": 8
+    },
     "root": "module",
     "islands": [
       { "rule": "module", "boundary": { "kind": "root" } },
@@ -98,6 +101,13 @@ the repeated island does not contain itself as a placeholder. The resulting
 runtime. GPU Duck uses this profile; Funcfuck remains on the general profile
 because its root has no single repeated-island loop.
 
+`limits.maxContractionRounds` is an explicit source-shape budget. Each pass
+resolves one additional level in a nested island chain. Lower values remove two
+GPU dispatches per omitted round, one during contraction and one during the
+reachability down-sweep, but inputs with deeper island nesting are outside that
+profile. The default is 33. Set a smaller value only after parity tests cover
+the deepest input the application accepts.
+
 The boundary is an allocation and parallelism promise, not only syntax
 documentation. Prefer explicit terminators and typed delimiter pairs, distinct
 FIRST terminals for competing islands, many small root-level regions, and flat
@@ -149,9 +159,10 @@ The optional `parser` block controls standalone parser conflict handling:
 }
 ```
 
-`resolutions` make a conflict deterministic. `conflicts` declares a conflict
-that may be explored with bounded branch search. Stable conflict IDs reported by
-diagnostics are required selectors for both fields.
+`resolutions` make a conflict deterministic. The Wasm target rejects
+`parser.conflicts` declarations because its generated runtime supports only one
+action per state and terminal. Stable conflict IDs reported by diagnostics are
+required selectors for both fields.
 
 ## Tree-sitter Grammar Metadata
 

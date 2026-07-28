@@ -135,7 +135,8 @@ parser-target support constraints.
 
 ## Metadata
 
-Metadata is optional. The primary parser metadata today is conflict policy:
+Metadata is optional. The primary parser metadata today resolves parser
+conflicts:
 
 ```json
 {
@@ -145,18 +146,14 @@ Metadata is optional. The primary parser metadata today is conflict policy:
         "conflict": "c_0123456789abcdef",
         "prefer": "shift"
       }
-    ],
-    "conflicts": [
-      {
-        "conflict": "c_fedcba9876543210"
-      }
     ]
   }
 }
 ```
 
 Unresolved conflicts produce diagnostics with stable conflict IDs and suggested
-metadata entries.
+metadata entries. The Wasm target accepts deterministic resolutions and rejects
+declared branching conflicts during generation.
 
 ## CLI
 
@@ -191,7 +188,7 @@ Each `createParser()` call owns its own `WebAssembly.Instance`, memory, parser
 state, source buffers, and disposal lifecycle.
 
 `createParser()` does not load defaults: both the plan and exactly one Wasm
-module source are required. Parser plans use runtime metadata version 2;
+module source are required. Parser plans use runtime metadata version 3;
 regenerate plans produced by earlier Baba versions. Baba emits and accepts only
 the current parser-plan contract; it does not migrate older plans. Breaking
 changes for each release are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -239,6 +236,7 @@ if (!result.ok) {
   );
 }
 
+frontend.dispose();
 runtime.dispose();
 ```
 
@@ -249,13 +247,17 @@ string-to-unit conversion. Submit downstream work on the same queue before
 disposing the resident result; queue ordering makes the frontend output visible
 without a CPU fence.
 
-`WebGpuRuntime` owns one device and should be reused across calls. It rejects
-software fallback adapters by default; use
-`WebGpuRuntime.create({ allowFallbackAdapter: true })` only for explicit
-software testing. The GPU frontend requires compiler-proven, locally locatable
-islands with deterministic terminal identity and explicit structural boundaries.
-Broad inputs containing many small independent root segments fit the current
-kernels better than one very long island.
+`WebGpuRuntime` owns compiled frontends and disposes any that remain when the
+runtime is disposed. Call `frontend.dispose()` earlier to release its reusable
+device buffers as soon as a session ends. The runtime rejects software fallback
+adapters by default; use `WebGpuRuntime.create({ allowFallbackAdapter: true })`
+only for explicit software testing. The GPU frontend requires compiler-proven,
+locally locatable islands with deterministic terminal identity and explicit
+structural boundaries. Broad inputs containing many small independent root
+segments fit the current kernels better than one very long island. Strict
+profiles may also set `limits.maxContractionRounds` to trade supported
+island-nesting depth for two fewer dispatches per omitted round; parity tests
+should cover the deepest input the application permits.
 
 See [`docs/webgpu-frontend.md`](docs/webgpu-frontend.md) for the complete
 grammar requirements, current measurements, and comparison with other parallel

@@ -28,7 +28,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/parser_plan_contract.ts",
       role: "parser-plan-contract",
-      hash: "fnv1a64:1e439c267dfb05bc",
+      hash: "fnv1a64:c57000b314b12013",
     },
     {
       path: "src/runtime/wasm_plan.ts",
@@ -38,7 +38,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/runtime/generated_wasm.ts",
       role: "generated-wasm-parser-loader",
-      hash: "fnv1a64:e211c3450b0e49de",
+      hash: "fnv1a64:b93d8e3e05b21635",
     },
     {
       path: "src/targets/runtime/diagnostic_codes.ts",
@@ -92,7 +92,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:a549e00e46842f5a" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:ace0c4acf3f63f6c" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

@@ -69,6 +69,7 @@
       "src/runtime/wasm_plan.ts",
       "src/runtime/webgpu/alphabet.ts",
       "src/runtime/webgpu/context.ts",
+      "src/runtime/webgpu/cpu_frontend.ts",
       "src/runtime/webgpu/frontend.ts",
       "src/runtime/webgpu/frontend_capacity.ts",
       "src/runtime/webgpu/island_executor.ts",

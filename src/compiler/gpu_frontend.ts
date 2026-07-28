@@ -386,6 +386,7 @@ export function compileGpuFrontendPlan(
   let maxIslandTransitions = DEFAULT_MAX_ISLAND_TRANSITIONS;
   let maxSemanticOpcodes = DEFAULT_MAX_SEMANTIC_OPCODES;
   let maxPlanBytes = DEFAULT_MAX_PLAN_BYTES;
+  let contractionRounds = MAX_CONTRACTION_ROUNDS;
   if (limits?.maxLexerStates !== undefined) {
     maxLexerStates = limits.maxLexerStates;
   }
@@ -400,6 +401,17 @@ export function compileGpuFrontendPlan(
   }
   if (limits?.maxPlanBytes !== undefined) {
     maxPlanBytes = limits.maxPlanBytes;
+  }
+  if (limits?.maxContractionRounds !== undefined) {
+    contractionRounds = limits.maxContractionRounds;
+  }
+  if (contractionRounds > MAX_CONTRACTION_ROUNDS) {
+    diagnostics.push(limitDiagnostic(
+      "GPU_FRONTEND_CONTRACTION_ROUND_LIMIT",
+      "contraction rounds",
+      contractionRounds,
+      MAX_CONTRACTION_ROUNDS,
+    ));
   }
   if (portable.lexer.states.length > maxLexerStates) {
     diagnostics.push(limitDiagnostic(
@@ -590,7 +602,7 @@ export function compileGpuFrontendPlan(
         Uint32Array.BYTES_PER_ELEMENT *
         3,
       maxCandidateMultiplicity: execution.bounds.candidatesPerToken,
-      contractionRounds: MAX_CONTRACTION_ROUNDS,
+      contractionRounds,
       regionScratchPerToken: execution.bounds.regionsPerToken,
       candidateScratchPerToken: execution.bounds.candidatesPerToken,
       summaryScratchPerToken: execution.bounds.summariesPerCandidate,

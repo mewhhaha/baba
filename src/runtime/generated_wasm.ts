@@ -7,9 +7,10 @@
 import {
   parserPlanRuntimeMetadataVersion,
   validateCombinedWasmParserPlan,
+  type ValidatedWasmParserPlan,
 } from "./wasm_plan.ts";
+import { decodeCompactPlanBinary } from "./compact_plan_binary.ts";
 import {
-  COMPACT_PLAN_VERSION,
   PARSER_PLAN_FORMAT,
   PARSER_PLAN_SEMANTICS,
   PARSER_PLAN_VERSION,
@@ -401,7 +402,7 @@ export function createParser<Root extends RuleCursor = RuleCursor>(
   );
   return new ExternalWasmParserInstance(
     planBytes,
-    validated.parserPlanVersion,
+    validated,
     wasm,
     inputBase,
   );
@@ -476,7 +477,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
 
   constructor(
     private readonly planBytes: Uint8Array,
-    private readonly parserPlanVersionToMatch: number,
+    private readonly validatedPlan: ValidatedWasmParserPlan,
     private readonly wasm: ExternalParserWasmExports,
     private readonly inputBase: number,
   ) {
@@ -589,11 +590,6 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
         `Wasm parser external lexer records end at ${expectedStart}, expected source length ${source.length}.`,
       );
     }
-    if (metadata.conflictProfile !== "deterministic") {
-      return externalUnsupportedBranchingCursorResult(
-        source,
-      ) as CursorParseResult<Root>;
-    }
     return parseExternalCursorWithWasm(
       metadata,
       this.wasm,
@@ -625,7 +621,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
     }
     const metadata = decodeExternalRuntimeMetadata(
       this.planBytes,
-      this.parserPlanVersionToMatch,
+      this.validatedPlan,
     );
     this.#metadata = metadata;
     return metadata;
@@ -636,7 +632,6 @@ interface ExternalRuntimeMetadata {
   readonly defaultPreserveTrivia: boolean;
   readonly eofTerminal: number;
   readonly parserStateCount: number;
-  readonly conflictProfile: "deterministic" | "branching";
   readonly specs: readonly ExternalLexerSpec[];
   /** 1 when the lexer spec at that index produces a trivia-channel token. */
   readonly specIsTrivia: Uint8Array;
@@ -685,32 +680,18 @@ const EXTERNAL_CORE_HEADER_ACTION_ROWS = 9;
 const EXTERNAL_CORE_HEADER_ACTION_PAIRS = 10;
 const EXTERNAL_CORE_COMPACT_I16_OFFSET_TAG = 2;
 const EXTERNAL_CORE_COMPACT_U16_OFFSET_BASE = 0x4000_0000;
-const EXTERNAL_COMPACT_PLAN_MAGIC = new Uint8Array([
-  66,
-  65,
-  66,
-  65,
-  95,
-  80,
-  76,
-  65,
-  78,
-  0,
-]);
-
 function decodeExternalRuntimeMetadata(
   planBytes: Uint8Array,
-  parserPlanVersionToMatch: number,
+  validated: ValidatedWasmParserPlan,
 ): ExternalRuntimeMetadata {
-  const validated = validateCombinedWasmParserPlan(planBytes);
-  if (validated.parserPlanVersion !== parserPlanVersionToMatch) {
-    throw new Error("Wasm parser plan version changed after load.");
-  }
-  const compact = decodeExternalCompactRuntimeMetadata(
-    planBytes.subarray(
-      validated.runtimeMetadataOffset,
-      validated.runtimeMetadataOffset + validated.runtimeMetadataLength,
+  const compact = expectRecord(
+    decodeCompactPlanBinary(
+      planBytes.subarray(
+        validated.runtimeMetadataOffset,
+        validated.runtimeMetadataOffset + validated.runtimeMetadataLength,
+      ),
     ),
+    "compact runtime metadata",
   );
   const identity = expectArray(compact.m, "runtime identity metadata");
   const metadataVersion = expectNumber(
@@ -757,20 +738,6 @@ function decodeExternalRuntimeMetadata(
     policy[0],
     "default preserve-trivia policy",
   );
-  const conflictProfileValue = expectNumber(
-    policy[1],
-    "parser conflict profile",
-  );
-  let conflictProfile: ExternalRuntimeMetadata["conflictProfile"] =
-    "deterministic";
-  if (conflictProfileValue === 1) {
-    conflictProfile = "branching";
-  } else if (conflictProfileValue !== 0) {
-    throw new Error(
-      `Unsupported Wasm parser conflict profile ${conflictProfileValue}.`,
-    );
-  }
-
   const ruleNames = expectArray(compact.r, "rule-name metadata").map(
     (value, index) => expectString(value, `rule name ${index}`),
   );
@@ -944,7 +911,6 @@ function decodeExternalRuntimeMetadata(
     defaultPreserveTrivia,
     eofTerminal,
     parserStateCount,
-    conflictProfile,
     specs,
     specIsTrivia,
     hasTriviaSpecs,
@@ -960,124 +926,6 @@ function decodeExternalRuntimeMetadata(
     fieldNames,
     fieldSchemas,
   };
-}
-
-function decodeExternalCompactRuntimeMetadata(
-  compactBytes: Uint8Array,
-): Record<string, unknown> {
-  const reader = new ExternalCompactReader(compactBytes);
-  for (const byte of EXTERNAL_COMPACT_PLAN_MAGIC) {
-    if (reader.u8() !== byte) {
-      throw new Error("Invalid compact plan magic.");
-    }
-  }
-  const version = reader.u16();
-  if (version !== COMPACT_PLAN_VERSION) {
-    throw new Error(`Unsupported compact plan version ${version}.`);
-  }
-  const stringCount = reader.varUint();
-  const strings: string[] = [];
-  const decoder = new TextDecoder();
-  for (let index = 0; index < stringCount; index++) {
-    const length = reader.varUint();
-    strings.push(decoder.decode(reader.bytes(length)));
-  }
-  reader.strings = strings;
-  const payloadLength = reader.varUint();
-  const payloadEnd = reader.offset + payloadLength;
-  const value = readExternalCompactValue(reader);
-  if (reader.offset !== payloadEnd) {
-    throw new Error("Compact plan payload has trailing bytes.");
-  }
-  if (reader.offset !== compactBytes.length) {
-    throw new Error("Compact plan file has trailing bytes.");
-  }
-  return expectRecord(value, "compact runtime metadata");
-}
-
-class ExternalCompactReader {
-  offset = 0;
-  strings: readonly string[] = [];
-
-  constructor(private readonly bytesValue: Uint8Array) {}
-
-  u8(): number {
-    if (this.offset >= this.bytesValue.length) {
-      throw new Error("Compact plan is truncated.");
-    }
-    const value = this.bytesValue[this.offset];
-    this.offset++;
-    return value;
-  }
-
-  u16(): number {
-    const low = this.u8();
-    const high = this.u8();
-    return low | (high << 8);
-  }
-
-  bytes(length: number): Uint8Array {
-    if (length < 0 || this.offset + length > this.bytesValue.length) {
-      throw new Error("Compact plan is truncated.");
-    }
-    const value = this.bytesValue.subarray(this.offset, this.offset + length);
-    this.offset += length;
-    return value;
-  }
-
-  varUint(): number {
-    let value = 0;
-    let shift = 0;
-    while (true) {
-      const byte = this.u8();
-      value |= (byte & 0x7f) << shift;
-      if ((byte & 0x80) === 0) {
-        return value;
-      }
-      shift += 7;
-      if (shift > 35) {
-        throw new Error("Compact plan varuint is too large.");
-      }
-    }
-  }
-
-  string(id: number): string {
-    const value = this.strings[id];
-    if (value === undefined) {
-      throw new Error(`Invalid string id ${id}.`);
-    }
-    return value;
-  }
-}
-
-function readExternalCompactValue(reader: ExternalCompactReader): unknown {
-  const tag = reader.u8();
-  if (tag === 0) return null;
-  if (tag === 1) return false;
-  if (tag === 2) return true;
-  if (tag === 3) {
-    const value = reader.varUint();
-    return (value >>> 1) ^ -(value & 1);
-  }
-  if (tag === 4) return reader.string(reader.varUint());
-  if (tag === 5) {
-    const length = reader.varUint();
-    const values: unknown[] = [];
-    for (let index = 0; index < length; index++) {
-      values.push(readExternalCompactValue(reader));
-    }
-    return values;
-  }
-  if (tag === 6) {
-    const length = reader.varUint();
-    const value: Record<string, unknown> = {};
-    for (let index = 0; index < length; index++) {
-      const key = reader.string(reader.varUint());
-      value[key] = readExternalCompactValue(reader);
-    }
-    return value;
-  }
-  throw new Error(`Unknown compact plan value tag ${tag}.`);
 }
 
 function externalExpectedRowsFromCorePlan(
@@ -1497,9 +1345,6 @@ function parseExternalCursorDefault(
   source: string,
   options: ParseOptions | undefined,
 ): CursorParseResult<RuleCursor> {
-  if (metadata.conflictProfile !== "deterministic") {
-    return externalUnsupportedBranchingCursorResult(source);
-  }
   return parseExternalCursorWithWasm(
     metadata,
     wasm,
@@ -1589,19 +1434,6 @@ function validateExternalWasm(
   source: string,
   options: ParseOptions | undefined,
 ): ValidateParseResult {
-  if (metadata.conflictProfile !== "deterministic") {
-    return {
-      ok: false,
-      source,
-      diagnostics: [
-        externalParseDiagnostic(
-          "PARSER_AMBIGUOUS_PARSE",
-          "Wasm parser validation requires deterministic parser actions.",
-          { start: source.length, end: source.length },
-        ),
-      ],
-    };
-  }
   const maxParserActions = externalPositiveLimit(
     options,
     "maxParserActions",
@@ -2256,18 +2088,6 @@ function externalInvalidCursorTapeResult(
     externalParseDiagnostic(
       "PARSER_INTERNAL_ERROR",
       "Wasm cursor parser returned invalid cursor tape bounds.",
-      { start: source.length, end: source.length },
-    ),
-  ]);
-}
-
-function externalUnsupportedBranchingCursorResult(
-  source: string,
-): CursorParseResult<RuleCursor> {
-  return externalFailedCursorParseResult(source, [
-    externalParseDiagnostic(
-      "PARSER_AMBIGUOUS_PARSE",
-      "Wasm cursor parser requires deterministic parser actions.",
       { start: source.length, end: source.length },
     ),
   ]);

@@ -45,6 +45,7 @@ if (!result.ok) {
   console.log(result.timings);
 }
 
+frontend.dispose();
 runtime.dispose();
 ```
 
@@ -52,6 +53,10 @@ There is no automatic CPU fallback and no partial program on failure. Use
 `CpuFrontend.create(plan)` explicitly when the caller wants the byte-parity
 oracle or owns a fallback policy. A runtime should be reused: adapter and device
 creation are far too expensive to repeat for each source.
+
+Compiled frontends own grow-only execution buffers. Dispose a frontend when its
+session ends; disposing the runtime also disposes every remaining frontend.
+Neither operation is allowed while an ingestion or resident result is active.
 
 `ingest()` sizes its device buffers before submission. An input that exceeds a
 buffer, binding, or dispatch limit raises `GpuFrontendCapacityError` naming the
@@ -136,6 +141,14 @@ rejects the setting unless it can persist that root loop as an execution fact.
 The general profile remains available for roots such as Funcfuck's that do not
 have one repeated-island loop.
 
+Strict deployments can set `limits.maxContractionRounds` below the default 33.
+Each omitted round removes one contraction dispatch and one reachability
+dispatch, while also excluding source inputs with a deeper nested-island chain.
+This is an input contract, not a heuristic: choose it from corpus parity tests
+that include the deepest accepted nesting. GPU Duck retains the default because
+its mutually recursive expression, type, and pattern islands need the complete
+budget even for ordinary declarations.
+
 ## Grammar Shape for Throughput
 
 Eligibility does not imply useful GPU occupancy. Prefer source and grammar
@@ -165,7 +178,7 @@ device:
 - `maxCandidateMultiplicity`: the worst number of island candidates allocated
   per token;
 - `denseTransitionBytes`: immutable device table size;
-- `contractionRounds`: the fixed dispatch bound;
+- `contractionRounds`: the configured nested-island dispatch bound;
 - `scratchExpansionFactors`: worst-case region, candidate, summary, node, edge,
   and diagnostic allocation per token;
 - `packedBytes`: the version-3 runtime section size.
@@ -195,33 +208,24 @@ output bytes, full sample ranges, owned source/GPU/semantic phases, resident
 submission timing, and a separate per-stage timestamp profile when the adapter
 supports timestamp queries.
 
-The merged pre-batching implementation measured the broad GPU Duck corpus on an
-NVIDIA GeForce RTX 4080 SUPER with driver 610.43.03 as follows. Each cell is the
-median and full range of seven runs after two warmups. These are not portable
-crossover promises.
+The current broad GPU Duck corpus measured on an NVIDIA GeForce RTX 4080 SUPER
+with driver 610.43.03 as follows. Each cell is the median and full range of seven
+runs after two warmups. Parity was verified before every size. These are not
+portable crossover promises.
 
-| source | CPU oracle                     | owned `ingest()`              | resident `ingestResident()` | owned speedup |
-| ------ | ------------------------------ | ----------------------------- | --------------------------- | ------------- |
-| 1 MiB  | 385.96 ms [346.11, 411.68]     | 100.46 ms [84.06, 177.91]     | 30.44 ms [23.47, 56.33]     | 3.84x         |
-| 4 MiB  | 1544.04 ms [1431.34, 2053.84]  | 458.83 ms [399.34, 753.51]    | 76.16 ms [43.98, 85.57]     | 3.37x         |
-| 16 MiB | 7356.10 ms [6726.68, 12778.81] | 1431.73 ms [1353.08, 5090.93] | 130.63 ms [120.35, 576.62]  | 5.14x         |
+| source | CPU oracle                    | owned `ingest()`           | owned speedup |
+| ------ | ----------------------------- | -------------------------- | ------------- |
+| 1 MiB  | 351.61 ms [316.19, 367.35]    | 39.80 ms [32.20, 45.71]    | 8.84x         |
+| 4 MiB  | 1742.67 ms [1454.76, 1911.74] | 153.32 ms [130.61, 346.36] | 11.37x        |
+| 16 MiB | 6060.33 ms [5631.99, 7489.94] | 769.39 ms [605.48, 787.22] | 7.88x         |
 
-Resident latency is not a full CPU-oracle speedup: it stops before mapped
-readback and host semantic recipes by design. It measures when the next consumer
-stays on the device.
-
-After dispatch batching and compact host semantics, a seven-run 1 MiB
-measurement produced 34.43 ms owned ingestion [32.32, 39.66] against a 343.75 ms
-CPU oracle [281.79, 355.92], a 9.98x median speedup. Compact semantic validation
-fell from roughly 71.5 ms in the object-materializing path to 5.62 ms. Reusing
-one resident slot measured 8.17 ms total [7.71, 11.50], of which queue
-submission was 0.47 ms [0.43, 0.53]; callers with several in-flight slots can
-overlap that device work.
-
-The current 4 and 16 MiB matrix could not be rerun because an unrelated process
-held 12.55 GiB of the 16 GiB adapter. The table above remains the last verified
-large-input measurement rather than mixing an OOM-contended run into the
-comparison.
+The timestamped device work was 16.30, 22.54, and 91.10 ms respectively; queue
+completion, the single map, compact-array copies, and host semantics account for
+the rest of owned latency. Reusing one resident slot submitted in median 0.46,
+0.50, and 0.48 ms for 1, 4, and 16 MiB, with full ranges of [0.43, 0.58],
+[0.45, 0.68], and [0.45, 0.71] ms. Resident submission is not a full parse
+latency or CPU-oracle speedup because it deliberately stops before device
+completion, mapped readback, and host semantic recipes.
 
 ## Comparison with Parallel Parsers
 
@@ -265,6 +269,11 @@ choices; it does not establish a cross-system speed ranking.
 8. **Queue-ordered resident work.** Resident ingestion returns after submit and
    accepts pre-encoded UTF-16 units. Slot reuse waits for completion before
    recycling its buffers.
+9. **Explicit contraction budget.** Flat strict grammars can lower
+   `maxContractionRounds` and remove two dispatches per round. GPU Duck cannot:
+   its mutually recursive island graph needs all 33 rounds on the shipped
+   corpus. Reducing that tax requires flattening expression, type, and pattern
+   islands or giving them distinct non-recursive boundaries.
 
 Transfer streaming and device semantic/lowering passes remain separate future
 work. The principal owned-result cost is now the required one-map round trip and

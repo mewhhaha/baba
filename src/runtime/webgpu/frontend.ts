@@ -7,7 +7,7 @@ import {
   type GpuIslandEmitPlan,
 } from "../../compiler/gpu_frontend.ts";
 import { decodeCombinedWasmParserPlan } from "../wasm_plan.ts";
-import { decodeLexerPlanTables, type LexerPlanTables } from "./plan_tables.ts";
+import type { LexerPlanTables } from "./plan_tables.ts";
 import type { WebGpuLexerContext, WebGpuRuntime } from "./context.ts";
 import {
   type GpuIslandExecution,
@@ -205,99 +205,88 @@ interface RawDiagnostic {
   readonly parameter1: number;
 }
 
-/**
- * CPU interpreter for the exact island transducer and compact result contract
- * stored in parser.plan. It is an explicit backend and parity oracle.
- */
-export class CpuFrontend {
-  readonly plan: GpuFrontendPlan;
-  readonly lexer: LexerPlanTables;
-
-  private constructor(plan: GpuFrontendPlan, lexer: LexerPlanTables) {
-    this.plan = plan;
-    this.lexer = lexer;
+export function ingestCpuFrontend(
+  plan: GpuFrontendPlan,
+  lexer: LexerPlanTables,
+  source: string,
+  options: CpuFrontendOptions,
+): GpuFrontendResult {
+  const started = performance.now();
+  const units = new Uint16Array(source.length);
+  for (let index = 0; index < source.length; index += 1) {
+    units[index] = source.charCodeAt(index);
   }
-
-  static create(planBytes: Uint8Array): CpuFrontend {
-    return new CpuFrontend(
-      decodeGpuFrontendPlan(planBytes),
-      decodeLexerPlanTables(planBytes),
-    );
-  }
-
-  ingest(source: string, options: CpuFrontendOptions = {}): GpuFrontendResult {
-    const started = performance.now();
-    const units = new Uint16Array(source.length);
-    for (let index = 0; index < source.length; index += 1) {
-      units[index] = source.charCodeAt(index);
-    }
-    const afterUpload = performance.now();
-    const rawDiagnostics: RawDiagnostic[] = [];
-    const tokens = lex(
-      units,
-      this.lexer,
-      this.plan,
-      rawDiagnostics,
-      options.maxTokens,
-    );
-    const afterLex = performance.now();
-    const delimiterMatches = matchDelimiters(
+  const afterUpload = performance.now();
+  const rawDiagnostics: RawDiagnostic[] = [];
+  const tokens = lex(
+    units,
+    lexer,
+    plan,
+    rawDiagnostics,
+    options.maxTokens,
+  );
+  const afterLex = performance.now();
+  const delimiterMatches = matchDelimiters(
+    tokens,
+    plan.boundaries,
+    rawDiagnostics,
+  );
+  const afterDelimiters = performance.now();
+  let root: PendingNode | undefined;
+  if (rawDiagnostics.length === 0) {
+    root = executeRootIsland(
       tokens,
-      this.plan.boundaries,
+      delimiterMatches,
+      plan,
       rawDiagnostics,
     );
-    const afterDelimiters = performance.now();
-    let root: PendingNode | undefined;
-    if (rawDiagnostics.length === 0) {
-      root = executeRootIsland(
+  }
+  const afterIslands = performance.now();
+  let program: CompactFrontendProgram | null = null;
+  if (root !== undefined && rawDiagnostics.length === 0) {
+    try {
+      program = materializeProgram(
         tokens,
-        delimiterMatches,
-        this.plan,
+        root,
+        plan,
+        options,
+      );
+      const symbols = executeCompactSemanticRecipes(
+        program,
+        plan,
+        source,
         rawDiagnostics,
       );
-    }
-    const afterIslands = performance.now();
-    let program: CompactFrontendProgram | null = null;
-    if (root !== undefined && rawDiagnostics.length === 0) {
-      try {
-        program = materializeProgram(
-          tokens,
-          root,
-          this.plan,
-          options,
-          source,
-          rawDiagnostics,
-        );
-      } catch (error) {
-        if (!(error instanceof FrontendSourceCapacity)) {
-          throw error;
-        }
-        rawDiagnostics.push(error.diagnostic);
+      program = { ...program, symbols };
+    } catch (error) {
+      if (!(error instanceof FrontendSourceCapacity)) {
+        throw error;
       }
+      rawDiagnostics.push(error.diagnostic);
     }
-    const afterSemantics = performance.now();
-    rawDiagnostics.sort((left, right) =>
-      left.start - right.start ||
-      left.code - right.code ||
-      left.subjectId - right.subjectId
-    );
-    const diagnostics = rawDiagnostics.map(materializeDiagnostic);
-    const finished = performance.now();
-    const timings: GpuFrontendTimings = {
-      uploadMs: afterUpload - started,
-      lexMs: afterLex - afterUpload,
-      delimitersMs: afterDelimiters - afterLex,
-      islandsMs: afterIslands - afterDelimiters,
-      semanticsMs: afterSemantics - afterIslands,
-      readbackMs: finished - afterSemantics,
-      totalMs: finished - started,
-      stagesMs: null,
-    };
-    if (diagnostics.length > 0 || program === null) {
-      return { ok: false, program: null, diagnostics, timings };
-    }
-    return { ok: true, program, diagnostics: [], timings };
   }
+  const afterSemantics = performance.now();
+  rawDiagnostics.sort((left, right) =>
+    left.start - right.start ||
+    left.code - right.code ||
+    left.subjectId - right.subjectId
+  );
+  const diagnostics = rawDiagnostics.map(materializeDiagnostic);
+  const finished = performance.now();
+  const timings: GpuFrontendTimings = {
+    uploadMs: afterUpload - started,
+    lexMs: afterLex - afterUpload,
+    delimitersMs: afterDelimiters - afterLex,
+    islandsMs: afterIslands - afterDelimiters,
+    semanticsMs: afterSemantics - afterIslands,
+    readbackMs: finished - afterSemantics,
+    totalMs: finished - started,
+    stagesMs: null,
+  };
+  if (diagnostics.length > 0 || program === null) {
+    return { ok: false, program: null, diagnostics, timings };
+  }
+  return { ok: true, program, diagnostics: [], timings };
 }
 
 /**
@@ -310,6 +299,9 @@ export class WebGpuFrontend {
   readonly runtime: WebGpuRuntime;
   readonly #lexer: WebGpuLexerContext;
   readonly #islands: GpuIslandExecutor;
+  #activeJobs = 0;
+  #residentResults = 0;
+  #disposed = false;
 
   private constructor(
     plan: GpuFrontendPlan,
@@ -336,6 +328,18 @@ export class WebGpuFrontend {
   async ingest(
     source: string,
     options: WebGpuFrontendOptions = {},
+  ): Promise<GpuFrontendResult> {
+    this.#startJob();
+    try {
+      return await this.#ingest(source, options);
+    } finally {
+      this.#activeJobs -= 1;
+    }
+  }
+
+  async #ingest(
+    source: string,
+    options: WebGpuFrontendOptions,
   ): Promise<GpuFrontendResult> {
     if (
       options.stageTimings !== undefined &&
@@ -428,6 +432,18 @@ export class WebGpuFrontend {
     source: string | Uint16Array,
     options: GpuResidentFrontendOptions = {},
   ): Promise<GpuResidentFrontendResult> {
+    this.#startJob();
+    try {
+      return await this.#ingestResident(source, options);
+    } finally {
+      this.#activeJobs -= 1;
+    }
+  }
+
+  async #ingestResident(
+    source: string | Uint16Array,
+    options: GpuResidentFrontendOptions,
+  ): Promise<GpuResidentFrontendResult> {
     const started = performance.now();
     assertDeviceCapacity(source.length, this.plan, this.runtime);
     let units: Uint16Array;
@@ -462,8 +478,8 @@ export class WebGpuFrontend {
       lexerLease.release();
       throw error;
     }
-    lexerLease.release();
     const finished = performance.now();
+    this.#residentResults += 1;
     let disposed = false;
     return {
       buffer: execution.buffer,
@@ -492,9 +508,45 @@ export class WebGpuFrontend {
         }
         disposed = true;
         execution.release();
+        lexerLease.release();
         runtimeLease.release();
+        this.#residentResults -= 1;
       },
     };
+  }
+
+  get isDisposed(): boolean {
+    return this.#disposed;
+  }
+
+  dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.assertDisposable();
+    this.#disposed = true;
+    this.#islands.destroy();
+    this.runtime.releaseFrontend(this);
+  }
+
+  assertDisposable(): void {
+    if (this.#activeJobs > 0 || this.#residentResults > 0) {
+      throw new Error(
+        `Cannot dispose WebGpuFrontend while ${this.#activeJobs} ingestion job(s) and ${this.#residentResults} resident result(s) are active.`,
+      );
+    }
+  }
+
+  #startJob(): void {
+    if (this.#disposed) {
+      throw new Error("WebGpuFrontend has been disposed.");
+    }
+    if (this.#residentResults >= this.runtime.maxInFlight) {
+      throw new Error(
+        "GPU frontend resident result must be disposed before reusing its execution slot.",
+      );
+    }
+    this.#activeJobs += 1;
   }
 }
 
@@ -1072,8 +1124,6 @@ function materializeProgram(
   root: PendingNode,
   plan: GpuFrontendPlan,
   options: CpuFrontendOptions,
-  source: string,
-  diagnostics: RawDiagnostic[],
 ): CompactFrontendProgram {
   const pendingNodes: PendingNode[] = [];
   collectNodes(root, pendingNodes);
@@ -1092,13 +1142,6 @@ function materializeProgram(
   for (let index = 0; index < pendingNodes.length; index += 1) {
     pendingNodes[index].id = index;
   }
-  const symbols = executeSemanticRecipes(
-    pendingNodes,
-    tokens,
-    plan,
-    source,
-    diagnostics,
-  );
   const edgeCount = pendingNodes.reduce(
     (total, node) => total + node.edges.length,
     0,
@@ -1162,7 +1205,7 @@ function materializeProgram(
     tokens: tokenRecords,
     nodes: nodeRecords,
     edges: edgeRecords,
-    symbols,
+    symbols: new Int32Array(),
     types: new Int32Array([0]),
   };
 }
@@ -1546,169 +1589,6 @@ function isDecimalIntegerSpan(
     cursor += 1;
   }
   return true;
-}
-
-function executeSemanticRecipes(
-  nodes: readonly PendingNode[],
-  tokens: readonly Token[],
-  plan: GpuFrontendPlan,
-  source: string,
-  diagnostics: RawDiagnostic[],
-): Int32Array {
-  const recipeByRule = new Map(
-    plan.semanticRecipes.map((recipe) => [recipe.ruleId, recipe]),
-  );
-  const definitions: SemanticDefinition[] = [];
-  const definitionByName = new Map<string, number>();
-  const symbolWords: number[] = [];
-  for (const node of nodes) {
-    const ruleId = plan.islands[node.island].ruleId;
-    const recipe = recipeByRule.get(ruleId);
-    if (recipe?.opcode !== "define") {
-      continue;
-    }
-    const nameField = recipe.fields.find((field) =>
-      field.target === "binder" || field.target === "name"
-    );
-    if (nameField === undefined) {
-      continue;
-    }
-    const token = node.edges.find((edge) =>
-      edge.emit.field === nameField.field && edge.token !== undefined
-    )?.token;
-    if (token === undefined) {
-      continue;
-    }
-    const name = source.slice(token.start, token.end);
-    const previous = definitionByName.get(name);
-    if (previous !== undefined) {
-      diagnostics.push({
-        code: DIAGNOSTIC_DUPLICATE_BINDING,
-        start: token.start,
-        end: token.end,
-        subjectId: node.id,
-        parameter0: previous,
-        parameter1: 0,
-      });
-      continue;
-    }
-    const symbol = definitions.length;
-    definitionByName.set(name, symbol);
-    definitions.push({
-      start: node.start,
-      end: node.end,
-      nodeId: node.id,
-      symbol,
-    });
-    symbolWords.push(0, 0, token.outputIndex, -1, -1, node.id);
-  }
-
-  const referenceNodes = nodes.filter((node) => {
-    const ruleId = plan.islands[node.island].ruleId;
-    return recipeByRule.get(ruleId)?.opcode === "reference";
-  });
-  const primitiveNames = new Set(
-    plan.primitives.map((primitive) => primitive.source),
-  );
-  const referencesByDefinition = new Map<number, number[]>();
-  for (const node of referenceNodes) {
-    const ruleId = plan.islands[node.island].ruleId;
-    const recipe = recipeByRule.get(ruleId);
-    const nameField = recipe?.fields.find((field) =>
-      field.target === "name" || field.target === "reference"
-    );
-    if (nameField === undefined) {
-      continue;
-    }
-    const token = node.edges.find((edge) =>
-      edge.emit.field === nameField.field && edge.token !== undefined
-    )?.token;
-    if (token === undefined) {
-      continue;
-    }
-    const name = source.slice(token.start, token.end);
-    const target = definitionByName.get(name);
-    if (target === undefined) {
-      if (!primitiveNames.has(name)) {
-        diagnostics.push({
-          code: DIAGNOSTIC_UNKNOWN_REFERENCE,
-          start: token.start,
-          end: token.end,
-          subjectId: node.id,
-          parameter0: 0,
-          parameter1: 0,
-        });
-      }
-      continue;
-    }
-    const owner = definitions.find((definition) =>
-      node.start >= definition.start && node.end <= definition.end
-    );
-    if (owner === undefined) {
-      continue;
-    }
-    const references = referencesByDefinition.get(owner.symbol);
-    if (references === undefined) {
-      referencesByDefinition.set(owner.symbol, [target]);
-    } else {
-      references.push(target);
-    }
-  }
-  reportReferenceCycles(
-    definitions,
-    referencesByDefinition,
-    diagnostics,
-  );
-
-  for (const token of tokens) {
-    const text = source.slice(token.start, token.end);
-    if (!/^-?[0-9]+$/.test(text)) {
-      continue;
-    }
-    const integer = BigInt(text);
-    const isI32MinimumMagnitude = integer === 2147483648n &&
-      token.start > 0 &&
-      source[token.start - 1] === "-";
-    if (
-      integer < -2147483648n ||
-      (integer > 2147483647n && !isI32MinimumMagnitude)
-    ) {
-      diagnostics.push({
-        code: DIAGNOSTIC_INTEGER_BOUNDS,
-        start: token.start,
-        end: token.end,
-        subjectId: token.outputIndex,
-        parameter0: 0,
-        parameter1: 0,
-      });
-    }
-  }
-  for (const node of nodes) {
-    const ruleId = plan.islands[node.island].ruleId;
-    const recipe = recipeByRule.get(ruleId);
-    if (recipe?.opcode !== "repeat-limit") {
-      continue;
-    }
-    const countField = recipe.fields.find((field) => field.target === "count");
-    const token = node.edges.find((edge) =>
-      edge.emit.field === countField?.field && edge.token !== undefined
-    )?.token;
-    if (token === undefined) {
-      continue;
-    }
-    const count = BigInt(source.slice(token.start, token.end));
-    if (count < 0n || count > 1_000_000n) {
-      diagnostics.push({
-        code: DIAGNOSTIC_REPEAT_LIMIT,
-        start: token.start,
-        end: token.end,
-        subjectId: node.id,
-        parameter0: 1_000_000,
-        parameter1: 0,
-      });
-    }
-  }
-  return new Int32Array(symbolWords);
 }
 
 function reportReferenceCycles(

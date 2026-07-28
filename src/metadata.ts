@@ -311,6 +311,7 @@ function parseGpuFrontendLimits(
     "maxIslandTransitions",
     "maxSemanticOpcodes",
     "maxPlanBytes",
+    "maxContractionRounds",
     "maxNodesPerToken",
     "maxEdgesPerToken",
     "maxConstraintsPerNode",
