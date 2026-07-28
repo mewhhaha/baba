@@ -296,13 +296,7 @@ export class WebGpuRuntime {
   ): Promise<import("./frontend.ts").WebGpuFrontend> {
     this.#assertUsable();
     const module = await import("./frontend.ts");
-    const frontend = await module.WebGpuFrontend.create(this, planBytes);
-    if (this.#disposed) {
-      frontend.dispose();
-      throw new Error("WebGpuRuntime has been disposed.");
-    }
-    this.#frontends.add(frontend);
-    return frontend;
+    return await module.WebGpuFrontend.create(this, planBytes);
   }
 
   /**
@@ -336,6 +330,11 @@ export class WebGpuRuntime {
 
   releaseFrontend(frontend: RuntimeFrontend): void {
     this.#frontends.delete(frontend);
+  }
+
+  registerFrontend(frontend: RuntimeFrontend): void {
+    this.#assertUsable();
+    this.#frontends.add(frontend);
   }
 
   dispose(): void {
