@@ -322,7 +322,14 @@ export class WebGpuFrontend {
     const plan = decodeGpuFrontendPlan(planBytes);
     const lexer = await runtime.compileLexer(planBytes);
     const islands = await GpuIslandExecutor.create(runtime.device, plan);
-    return new WebGpuFrontend(plan, runtime, lexer, islands);
+    const frontend = new WebGpuFrontend(plan, runtime, lexer, islands);
+    try {
+      runtime.registerFrontend(frontend);
+    } catch (error) {
+      islands.destroy();
+      throw error;
+    }
+    return frontend;
   }
 
   async ingest(

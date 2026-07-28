@@ -3,6 +3,7 @@ import {
   CpuFrontend,
   decodeGpuFrontendPlan,
   inspectGpuFrontendPlan,
+  WebGpuFrontend,
   type WebGpuFrontendOptions,
   WebGpuRuntime,
 } from "../src/runtime/webgpu/mod.ts";
@@ -243,6 +244,7 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
   const cpu = cpuFrontend.ingest(source);
   assert(cpu.ok);
   const runtime = await WebGpuRuntime.create({ allowFallbackAdapter: true });
+  let directlyCreatedFrontend: WebGpuFrontend | undefined;
   try {
     const frontend = await runtime.compileFrontend(planFile.content);
     let invalidTimingMessage = "";
@@ -637,9 +639,15 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       }
     }
     assert(disposedMessage.includes("has been disposed"), disposedMessage);
+    directlyCreatedFrontend = await WebGpuFrontend.create(
+      runtime,
+      planFile.content,
+    );
   } finally {
     runtime.dispose();
   }
+  assert(directlyCreatedFrontend);
+  assertEquals(directlyCreatedFrontend.isDisposed, true);
 });
 
 Deno.test("GPU frontend eligibility failures use stable diagnostics", () => {
