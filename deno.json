@@ -50,7 +50,6 @@
       "src/compiler/regex/ast.ts",
       "src/compiler/regex/contextual.ts",
       "src/compiler/regex/dfa.ts",
-      "src/compiler/regex/diagnostics.ts",
       "src/compiler/regex/intersect.ts",
       "src/compiler/regex/lexer.ts",
       "src/compiler/regex/limits.ts",
