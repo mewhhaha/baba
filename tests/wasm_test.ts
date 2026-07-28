@@ -925,6 +925,21 @@ Deno.test("shared Wasm adapter preserves lexer and parser behavior", async () =>
     const missingFinalTokenValidate = parser.validate("let x = 42 ");
     assertEquals(missingFinalTokenValidate.ok, false);
     assertEquals(missingFinalTokenValidate.diagnostics[0].found, "EOF");
+    assertThrowsIncludes(
+      () => parser.lex("let x = 42;", { preserveTrivia: "yes" }),
+      "preserveTrivia must be a boolean, got 'yes'",
+    );
+    assertThrowsIncludes(
+      () => parser.parse("let x = 42;", { maxParserActions: 0 }),
+      "maxParserActions must be a positive safe integer, got '0'",
+    );
+    assertThrowsIncludes(
+      () =>
+        parser.validate("let x = 42;", {
+          maxParserActions: Number.MAX_SAFE_INTEGER + 1,
+        }),
+      "maxParserActions must be a positive safe integer",
+    );
     parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });
