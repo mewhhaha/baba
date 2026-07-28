@@ -61,6 +61,7 @@ interface SizedExecutionBuffer {
 interface ExecutionSlot {
   arena: SizedExecutionBuffer | null;
   candidates: SizedExecutionBuffer | null;
+  candidateTail: SizedExecutionBuffer | null;
   scratch: SizedExecutionBuffer | null;
   deviceStaging: SizedExecutionBuffer | null;
   staging: SizedExecutionBuffer | null;
@@ -616,8 +617,14 @@ export class GpuIslandExecutor {
     const maximumQueryCount = MAX_EXECUTION_DISPATCHES * 2;
     const timestampBytes = queryCount * BigUint64Array.BYTES_PER_ELEMENT;
     const arenaBytes = layout.arenaWords * Uint32Array.BYTES_PER_ELEMENT;
-    const candidateBytes = candidateCount * CANDIDATE_WORDS *
+    const candidateSplit = Math.ceil(candidateCount / 2);
+    const candidateBytes = candidateSplit * CANDIDATE_WORDS *
       Uint32Array.BYTES_PER_ELEMENT;
+    const candidateTailBytes = Math.max(
+      Uint32Array.BYTES_PER_ELEMENT,
+      (candidateCount - candidateSplit) * CANDIDATE_WORDS *
+        Uint32Array.BYTES_PER_ELEMENT,
+    );
     const scratchWords = Math.max(allocationScan.words, structural.words);
     const scratchBytes = scratchWords * Uint32Array.BYTES_PER_ELEMENT;
     const deviceStagingBytes = layout.stagingWords *
@@ -625,7 +632,12 @@ export class GpuIslandExecutor {
     const stagingBytes = timestampBytes +
       layout.stagingWords * Uint32Array.BYTES_PER_ELEMENT;
     this.#assertBufferLimit("islandArena", arenaBytes, true);
-    this.#assertBufferLimit("islandCandidates", candidateBytes, true);
+    this.#assertBufferLimit("islandCandidatesHead", candidateBytes, true);
+    this.#assertBufferLimit(
+      "islandCandidatesTail",
+      candidateTailBytes,
+      true,
+    );
     this.#assertBufferLimit("islandScan", scratchBytes, true);
     this.#assertBufferLimit("deviceStaging", deviceStagingBytes, true);
     this.#assertBufferLimit("islandStaging", stagingBytes, false);
@@ -648,6 +660,7 @@ export class GpuIslandExecutor {
       slot = {
         arena: null,
         candidates: null,
+        candidateTail: null,
         scratch: null,
         deviceStaging: null,
         staging: null,
@@ -669,6 +682,12 @@ export class GpuIslandExecutor {
       candidateBytes,
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       "baba gpu frontend island candidates",
+    );
+    slot.candidateTail = this.#ensureBuffer(
+      slot.candidateTail,
+      candidateTailBytes,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      "baba gpu frontend island candidate tail",
     );
     slot.params = this.#ensureBuffer(
       slot.params,
@@ -696,6 +715,7 @@ export class GpuIslandExecutor {
     );
     const arenaBuffer = slot.arena.buffer;
     const candidateBuffer = slot.candidates.buffer;
+    const candidateTailBuffer = slot.candidateTail.buffer;
     const scratchBuffer = slot.scratch.buffer;
     const deviceStagingBuffer = slot.deviceStaging.buffer;
     const paramsBuffer = slot.params.buffer;
@@ -728,6 +748,7 @@ export class GpuIslandExecutor {
       header[21] = contractionRounds;
       header[22] = candidateMultiplicity;
       header[23] = sourceUnits.length;
+      header[24] = candidateSplit;
       this.device.queue.writeBuffer(arenaBuffer, 0, header);
       this.device.queue.writeBuffer(
         candidateBuffer,
@@ -765,6 +786,23 @@ export class GpuIslandExecutor {
             binding: 7,
             resource: { buffer: paramsBuffer, size: 32 },
           },
+          { binding: 8, resource: { buffer: candidateTailBuffer } },
+        ],
+      });
+      const stagingBindGroup = this.device.createBindGroup({
+        layout: this.#islandPipeline("staging").getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: integratedLex.recordsBuffer } },
+          { binding: 1, resource: { buffer: integratedLex.sourceBuffer } },
+          { binding: 2, resource: { buffer: this.#planBuffer } },
+          { binding: 3, resource: { buffer: arenaBuffer } },
+          { binding: 4, resource: { buffer: integratedLex.metadataBuffer } },
+          { binding: 5, resource: { buffer: candidateBuffer } },
+          { binding: 6, resource: { buffer: scratchBuffer } },
+          {
+            binding: 7,
+            resource: { buffer: paramsBuffer, size: 32 },
+          },
           { binding: 8, resource: { buffer: deviceStagingBuffer } },
         ],
       });
@@ -784,7 +822,11 @@ export class GpuIslandExecutor {
         }
         const pass = encoder.beginComputePass(descriptor);
         pass.setPipeline(this.#islandPipeline(dispatch.entryPoint));
-        pass.setBindGroup(0, bindGroup, [
+        let dispatchBindGroup = bindGroup;
+        if (dispatch.entryPoint === "staging") {
+          dispatchBindGroup = stagingBindGroup;
+        }
+        pass.setBindGroup(0, dispatchBindGroup, [
           index * DISPATCH_PARAM_BYTES,
         ]);
         const workgroupsX = Math.min(dispatch.workgroups, 65_535);
@@ -869,6 +911,9 @@ export class GpuIslandExecutor {
       }
       if (slot.scratch !== null) {
         slot.scratch.buffer.destroy();
+      }
+      if (slot.candidateTail !== null) {
+        slot.candidateTail.buffer.destroy();
       }
       if (slot.deviceStaging !== null) {
         slot.deviceStaging.buffer.destroy();
@@ -1298,7 +1343,7 @@ struct DispatchParams {
 
 @group(0) @binding(6) var<storage, read_write> scan_scratch: array<u32>;
 @group(0) @binding(7) var<uniform> dispatch_params: DispatchParams;
-@group(0) @binding(8) var<storage, read_write> staging_words: array<u32>;
+@group(0) @binding(8) var<storage, read_write> candidate_tail: array<atomic<u32>>;
 var<workgroup> scan_values: array<u32, 256>;
 
 fn linear_invocation_index(invocation: vec3<u32>) -> u32 {
@@ -1310,11 +1355,28 @@ fn linear_workgroup_index(workgroup: vec3<u32>) -> u32 {
 }
 
 fn candidate_word(candidate: u32, word: u32) -> u32 {
-  return atomicLoad(&candidates[candidate * ${CANDIDATE_WORDS}u + word]);
+  if (candidate < arena[24u]) {
+    return atomicLoad(&candidates[candidate * ${CANDIDATE_WORDS}u + word]);
+  }
+  let tail_candidate = candidate - arena[24u];
+  return atomicLoad(
+    &candidate_tail[tail_candidate * ${CANDIDATE_WORDS}u + word],
+  );
 }
 
 fn set_candidate_word(candidate: u32, word: u32, value: u32) {
-  atomicStore(&candidates[candidate * ${CANDIDATE_WORDS}u + word], value);
+  if (candidate < arena[24u]) {
+    atomicStore(
+      &candidates[candidate * ${CANDIDATE_WORDS}u + word],
+      value,
+    );
+    return;
+  }
+  let tail_candidate = candidate - arena[24u];
+  atomicStore(
+    &candidate_tail[tail_candidate * ${CANDIDATE_WORDS}u + word],
+    value,
+  );
 }
 
 fn token_word(token: u32, word: u32) -> u32 {
@@ -1744,6 +1806,9 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
       transition_index += 1u;
     }
     if (child_candidate != 0xffffffffu) {
+      if (candidate == 0u) {
+        set_candidate_word(child_candidate, 2u, 1u);
+      }
       cursor = candidate_word(
         child_candidate,
         summary_base(read_bank) + 1u,
@@ -1953,6 +2018,7 @@ fn validate_root() {
   let end = candidate_word(0u, base + 1u);
   if (accepted == 1u && next_syntax(end, arena[1u]) == arena[1u]) {
     set_candidate_word(0u, 2u, 1u);
+    set_candidate_word(0u, 3u, 0xfffffffeu);
     return;
   }
   var start = 0u;
@@ -2141,7 +2207,7 @@ fn scan_level(
   }
   if (lane == 255u) {
     scan_scratch[
-      dispatch_params.block_sums_offset + workgroup.x
+      dispatch_params.block_sums_offset + linear_workgroup_index(workgroup)
     ] = scan_values[255u];
     scan_values[255u] = 0u;
   }
@@ -2328,25 +2394,25 @@ fn emit(@builtin(global_invocation_id) invocation: vec3<u32>) {
 fn staging(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let output = linear_invocation_index(invocation);
   if (output < HEADER_WORDS) {
-    staging_words[output] = arena[output];
+    atomicStore(&candidate_tail[output], arena[output]);
     return;
   }
   var relative = output - HEADER_WORDS;
   let token_words = arena[10u] * TOKEN_WORDS;
   if (relative < token_words) {
-    staging_words[output] = arena[arena[13u] + relative];
+    atomicStore(&candidate_tail[output], arena[arena[13u] + relative]);
     return;
   }
   relative -= token_words;
   let node_words = arena[11u] * NODE_WORDS;
   if (relative < node_words) {
-    staging_words[output] = arena[arena[14u] + relative];
+    atomicStore(&candidate_tail[output], arena[arena[14u] + relative]);
     return;
   }
   relative -= node_words;
   let edge_words = arena[12u] * EDGE_WORDS;
   if (relative < edge_words) {
-    staging_words[output] = arena[arena[16u] + relative];
+    atomicStore(&candidate_tail[output], arena[arena[16u] + relative]);
   }
 }
 `;

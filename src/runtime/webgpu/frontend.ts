@@ -1089,7 +1089,7 @@ function decodePendingProgram(
           throw new Error(
             `GPU island output edge ${
               edgeStart + ordinal
-            } has unknown node ${targetId}.`,
+            } has unknown node ${targetId}; ${nodes.length} nodes were allocated.`,
           );
         }
       } else {

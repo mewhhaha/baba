@@ -177,12 +177,22 @@ console.log(JSON.stringify({
 try {
   for (const mebibytes of options.sizes) {
     const source = gpuDuckCorpus(mebibytes * MIB);
+    console.error(`${mebibytes} MiB parity`);
+    const parityCpuResult = cpu.ingest(source);
+    const parityProgram = requireProgram(parityCpuResult, "CPU");
+    const lexerCapacityRecords = parityProgram.tokens.length / 4;
+    const parityGpuResult = await frontend.ingest(source, {
+      lexerCapacityRecords,
+    });
+    assertProgramParity(parityCpuResult, parityGpuResult);
     for (let warmup = 0; warmup < options.warmup; warmup += 1) {
       console.error(
         `${mebibytes} MiB warmup ${warmup + 1}/${options.warmup}`,
       );
       const cpuResult = cpu.ingest(source);
-      const gpuResult = await frontend.ingest(source);
+      const gpuResult = await frontend.ingest(source, {
+        lexerCapacityRecords,
+      });
       assertProgramParity(cpuResult, gpuResult);
     }
 
@@ -198,7 +208,9 @@ try {
       cpuSamples.push(performance.now() - cpuStart);
 
       const gpuStart = performance.now();
-      const gpuResult = await frontend.ingest(source);
+      const gpuResult = await frontend.ingest(source, {
+        lexerCapacityRecords,
+      });
       gpuSamples.push(performance.now() - gpuStart);
       stagesMs = gpuResult.timings.stagesMs;
 
