@@ -304,6 +304,31 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       gpuDuck.program.types.join(","),
       cpuDuck.program.types.join(","),
     );
+    for (const declarationCount of [0, 1, 1024]) {
+      const declarations: string[] = [];
+      for (let index = 0; index < declarationCount; index += 1) {
+        declarations.push(`let value_${index} = ${index % 1000};\n`);
+      }
+      const broadSource = "module Bench where\n\ndeclare operators {\n};\n\n" +
+        declarations.join("") +
+        "\nreturn {};\n";
+      const cpuBroad = CpuFrontend.create(gpuDuckPlan).ingest(broadSource);
+      const gpuBroad = await gpuDuckFrontend.ingest(broadSource);
+      assert(cpuBroad.ok);
+      assert(gpuBroad.ok);
+      assertEquals(
+        gpuBroad.program.tokens.join(","),
+        cpuBroad.program.tokens.join(","),
+      );
+      assertEquals(
+        gpuBroad.program.nodes.join(","),
+        cpuBroad.program.nodes.join(","),
+      );
+      assertEquals(
+        gpuBroad.program.edges.join(","),
+        cpuBroad.program.edges.join(","),
+      );
+    }
     for (
       const malformed of [
         gpuDuckSource.replace("return {", "return ["),

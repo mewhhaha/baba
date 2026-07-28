@@ -21,11 +21,20 @@ const PIPELINE_ENTRY_POINTS = [
   "structure",
   "regions",
   "contract_regions",
+  "root_chain_init",
+  "root_chain_start",
+  "root_chain_link",
+  "root_chain_finalize",
+  "root_chain_jump",
+  "root_chain_aggregate",
+  "contract_root",
   "validate_root",
+  "select_root_chain",
   "reachability",
   "scan_level",
   "add_scan_offsets",
   "finalize_offsets",
+  "emit_root_events",
   "emit",
   "staging",
 ] as const;
@@ -147,6 +156,7 @@ function structuralLayout(tokenCount: number): StructuralLayout {
 
 function islandDispatchLabels(
   rounds: number,
+  chainRounds: number,
   tokenWorkgroups: number,
   regionWorkgroups: number,
   candidateWorkgroups: number,
@@ -321,17 +331,69 @@ function islandDispatchLabels(
     });
   }
   dispatches.push({
+    entryPoint: "root_chain_init",
+    label: "root_chain_init",
+    workgroups: tokenWorkgroups,
+    params: [rounds - 1],
+  });
+  dispatches.push(
+    {
+      entryPoint: "root_chain_start",
+      label: "root_chain_start",
+      workgroups: 1,
+      params: [rounds - 1],
+    },
+    {
+      entryPoint: "root_chain_link",
+      label: "root_chain_link",
+      workgroups: tokenWorkgroups,
+      params: [rounds - 1],
+    },
+    {
+      entryPoint: "root_chain_finalize",
+      label: "root_chain_finalize",
+      workgroups: tokenWorkgroups,
+      params: [rounds - 1],
+    },
+  );
+  for (let round = 0; round < chainRounds; round += 1) {
+    dispatches.push({
+      entryPoint: "root_chain_jump",
+      label: `root_chain_${round}`,
+      workgroups: tokenWorkgroups,
+      params: [round],
+    });
+  }
+  dispatches.push({
+    entryPoint: "root_chain_aggregate",
+    label: "root_chain_aggregate",
+    workgroups: tokenWorkgroups,
+    params: [chainRounds - 1],
+  });
+  dispatches.push({
+    entryPoint: "contract_root",
+    label: "contract_root",
+    workgroups: 1,
+    params: [chainRounds - 1],
+  });
+  dispatches.push({
     entryPoint: "validate_root",
     label: "validate_root",
     workgroups: 1,
     params: [rounds - 1],
+  });
+  dispatches.push({
+    entryPoint: "select_root_chain",
+    label: "select_root_chain",
+    workgroups: tokenWorkgroups,
+    params: [chainRounds - 1],
   });
   for (let round = 0; round < rounds; round += 1) {
     dispatches.push({
       entryPoint: "reachability",
       label: `reachability_${round}`,
       workgroups: regionWorkgroups,
-      params: [rounds - 1],
+      params: [round],
     });
   }
   for (const mode of [0, 1]) {
@@ -397,6 +459,12 @@ function islandDispatchLabels(
   }
   dispatches.push(
     {
+      entryPoint: "emit_root_events",
+      label: "emit_root_events",
+      workgroups: tokenWorkgroups,
+      params: [rounds - 1],
+    },
+    {
       entryPoint: "emit",
       label: "emit",
       workgroups: candidateWorkgroups,
@@ -422,6 +490,7 @@ interface ExecutionLayout {
   readonly delimiterOffset: number;
   readonly delimiterTerminalStackOffset: number;
   readonly delimiterIndexStackOffset: number;
+  readonly rootFieldOffset: number;
   readonly arenaWords: number;
   readonly stagingWords: number;
 }
@@ -591,11 +660,14 @@ export class GpuIslandExecutor {
       1,
       Math.ceil(tokenCapacity / 256),
     );
+    const chainRounds = Math.ceil(Math.log2(Math.max(1, tokenCapacity)) / 2) +
+      1;
     const allocationScan = scanLayout(candidateCount);
     const candidateWorkgroups = Math.max(1, Math.ceil(candidateCount / 256));
     const structural = structuralLayout(tokenCapacity);
     const dispatches = islandDispatchLabels(
       contractionRounds,
+      chainRounds,
       tokenWorkgroups,
       tokenWorkgroups,
       candidateWorkgroups,
@@ -749,6 +821,7 @@ export class GpuIslandExecutor {
       header[22] = candidateMultiplicity;
       header[23] = sourceUnits.length;
       header[24] = candidateSplit;
+      header[25] = layout.rootFieldOffset;
       this.device.queue.writeBuffer(arenaBuffer, 0, header);
       this.device.queue.writeBuffer(
         candidateBuffer,
@@ -1065,7 +1138,8 @@ function executionLayout(
   const delimiterTerminalStackOffset = delimiterOffset + tokenCapacity;
   const delimiterIndexStackOffset = delimiterTerminalStackOffset +
     tokenCapacity;
-  const arenaWords = delimiterIndexStackOffset + tokenCapacity;
+  const rootFieldOffset = delimiterIndexStackOffset + tokenCapacity;
+  const arenaWords = rootFieldOffset + tokenCapacity;
   const stagingWords = HEADER_WORDS +
     tokenCapacity * TOKEN_WORDS +
     nodeCapacity * NODE_WORDS +
@@ -1080,6 +1154,7 @@ function executionLayout(
     delimiterOffset,
     delimiterTerminalStackOffset,
     delimiterIndexStackOffset,
+    rootFieldOffset,
     arenaWords,
     stagingWords,
   };
@@ -1123,6 +1198,26 @@ function packPlan(plan: GpuFrontendPlan): Uint32Array {
   words[11] = plan.execution.denseTransitions.terminalSymbols;
   words[12] = locatorOffset;
   words[13] = plan.execution.bounds.candidatesPerToken;
+  const root = plan.islands[plan.rootIsland];
+  if (root === undefined) {
+    throw new Error(`GPU frontend plan has no root island ${plan.rootIsland}.`);
+  }
+  const rootSelfLoops = root.states.flatMap((state) =>
+    state.transitions.filter((transition) =>
+      transition.inputKind === "island" && transition.target === state.id
+    ).map((transition) => ({ state: state.id, island: transition.input }))
+  );
+  if (rootSelfLoops.length === 1) {
+    let rootStateOffset = 0;
+    for (let island = 0; island < plan.rootIsland; island += 1) {
+      rootStateOffset += plan.islands[island].states.length;
+    }
+    words[14] = rootSelfLoops[0].island + 1;
+    words[15] = rootStateOffset + rootSelfLoops[0].state;
+  } else {
+    words[14] = 0;
+    words[15] = 0xffffffff;
+  }
 
   for (
     let index = 0;
@@ -1374,6 +1469,36 @@ fn set_candidate_word(candidate: u32, word: u32, value: u32) {
   }
   let tail_candidate = candidate - arena[24u];
   atomicStore(
+    &candidate_tail[tail_candidate * ${CANDIDATE_WORDS}u + word],
+    value,
+  );
+}
+
+fn min_candidate_word(candidate: u32, word: u32, value: u32) {
+  if (candidate < arena[24u]) {
+    atomicMin(
+      &candidates[candidate * ${CANDIDATE_WORDS}u + word],
+      value,
+    );
+    return;
+  }
+  let tail_candidate = candidate - arena[24u];
+  atomicMin(
+    &candidate_tail[tail_candidate * ${CANDIDATE_WORDS}u + word],
+    value,
+  );
+}
+
+fn max_candidate_word(candidate: u32, word: u32, value: u32) {
+  if (candidate < arena[24u]) {
+    atomicMax(
+      &candidates[candidate * ${CANDIDATE_WORDS}u + word],
+      value,
+    );
+    return;
+  }
+  let tail_candidate = candidate - arena[24u];
+  atomicMax(
     &candidate_tail[tail_candidate * ${CANDIDATE_WORDS}u + word],
     value,
   );
@@ -1683,6 +1808,7 @@ struct RegionSummary {
   events: u32,
   diagnostic_position: u32,
   diagnostic_context: u32,
+  stable: u32,
 }
 
 fn summary_base(bank: u32) -> u32 {
@@ -1720,6 +1846,31 @@ fn located_candidate_for_island(
         return 0xffffffffu;
       }
       return candidate;
+    }
+    slot += 1u;
+  }
+  return 0xffffffffu;
+}
+
+fn candidate_at_token_for_island(island: u32, token_index: u32) -> u32 {
+  if (token_index >= arena[1u]) {
+    return 0xffffffffu;
+  }
+  let token_terminal = terminal(token_index);
+  if (token_terminal < 0i || u32(token_terminal) >= plan[11u]) {
+    return 0xffffffffu;
+  }
+  let multiplicity = arena[22u];
+  var slot = 0u;
+  loop {
+    if (slot >= multiplicity) {
+      return 0xffffffffu;
+    }
+    let located = plan[
+      plan[12u] + u32(token_terminal) * multiplicity + slot
+    ];
+    if (located == island + 1u) {
+      return 1u + token_index * multiplicity + slot;
     }
     slot += 1u;
   }
@@ -1767,6 +1918,7 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
   var events = 0u;
   var farthest = cursor;
   var diagnostic_context = diagnostic_value(island, state);
+  var dependencies_stable = 1u;
   loop {
     cursor = next_syntax(cursor, limit);
     if (cursor < limit && cursor >= farthest) {
@@ -1778,6 +1930,7 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
     var transition_index = 0u;
     var child_candidate = 0xffffffffu;
     var child_target = 0xffffffffu;
+    var child_field = 0xffffffffu;
     loop {
       if (transition_index >= transition_count) {
         break;
@@ -1787,6 +1940,12 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
         let child_island = transition_word(transition, 1u);
         let located = located_candidate_for_island(child_island, cursor);
         if (located != 0xffffffffu) {
+          if (
+            candidate_word(located, 15u) != 0xffffffffu &&
+            candidate_word(located, 4u) != 0xfffffffdu
+          ) {
+            dependencies_stable = 0u;
+          }
           let child_base = summary_base(read_bank);
           let child_end = candidate_word(located, child_base + 1u);
           let child_farthest = candidate_word(located, child_base + 3u);
@@ -1798,6 +1957,7 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
             if (child_end > cursor && child_end <= limit) {
               child_candidate = located;
               child_target = transition_word(transition, 2u);
+              child_field = transition_word(transition, 3u);
               break;
             }
           }
@@ -1806,8 +1966,27 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
       transition_index += 1u;
     }
     if (child_candidate != 0xffffffffu) {
+      if (
+        candidate == 0u &&
+        plan[14u] != 0u &&
+        state == plan[15u] &&
+        candidate_word(child_candidate, 0u) + 1u == plan[14u]
+      ) {
+        let chain_count = candidate_word(child_candidate, 5u);
+        if (chain_count > 0u) {
+          arena[30u] = child_candidate;
+          arena[31u] = events;
+          cursor = candidate_word(child_candidate, 8u);
+          state = child_target;
+          events += chain_count;
+          continue;
+        }
+      }
       if (candidate == 0u) {
         set_candidate_word(child_candidate, 2u, 1u);
+        arena[arena[18u] + cursor] = events;
+        arena[arena[19u] + cursor] = child_candidate;
+        arena[arena[25u] + cursor] = child_field;
       }
       cursor = candidate_word(
         child_candidate,
@@ -1825,6 +2004,10 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
         u32(token_terminal) < plan[11u] &&
         dense_transition_word(state, u32(token_terminal), 9u) == 1u
       ) {
+        if (candidate == 0u) {
+          arena[arena[18u] + cursor] = events;
+          arena[arena[19u] + cursor] = 0x80000000u | state;
+        }
         state = dense_transition_word(state, u32(token_terminal), 7u);
         cursor += 1u;
         events += 1u;
@@ -1848,6 +2031,7 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
         events,
         farthest,
         diagnostic_context,
+        dependencies_stable,
       );
     }
     return RegionSummary(
@@ -1856,9 +2040,17 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
       events,
       farthest,
       diagnostic_context,
+      dependencies_stable,
     );
   }
-  return RegionSummary(0u, cursor, events, farthest, diagnostic_context);
+  return RegionSummary(
+    0u,
+    cursor,
+    events,
+    farthest,
+    diagnostic_context,
+    dependencies_stable,
+  );
 }
 
 @compute @workgroup_size(256)
@@ -1867,6 +2059,13 @@ fn regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
   if (worker >= arena[9u]) {
     return;
   }
+  if (worker == 0u) {
+    arena[30u] = 0xffffffffu;
+    arena[31u] = 0u;
+  }
+  arena[arena[18u] + worker] = 0xffffffffu;
+  arena[arena[19u] + worker] = 0xffffffffu;
+  arena[arena[25u] + worker] = 0xffffffffu;
   let multiplicity = arena[22u];
   var candidate = 1u + worker * multiplicity;
   let candidate_end = candidate + multiplicity;
@@ -1932,6 +2131,12 @@ fn contract_regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
   if (arena[0u] != 0u) {
     return;
   }
+  if (
+    dispatch_params.round > 0u &&
+    candidate_word(0u, 9u) < dispatch_params.round
+  ) {
+    return;
+  }
   let worker = linear_invocation_index(invocation);
   if (worker >= arena[9u]) {
     return;
@@ -1946,12 +2151,14 @@ fn contract_regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let write_bank = 1u - read_bank;
   loop {
     if (
+      candidate != 0u &&
       candidate_word(candidate, 0u) != 0xffffffffu &&
       candidate_word(candidate, 15u) != 0xffffffffu
     ) {
       let read_base = summary_base(read_bank);
       let base = summary_base(write_bank);
-      if (candidate_word(candidate, 4u) == 0xfffffffeu) {
+      let stable = candidate_word(candidate, 4u);
+      if (stable == 0xfffffffeu) {
         var summary_word = 0u;
         loop {
           if (summary_word >= 5u) {
@@ -1964,13 +2171,17 @@ fn contract_regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
           );
           summary_word += 1u;
         }
-      } else {
+        set_candidate_word(candidate, 4u, 0xfffffffdu);
+      } else if (stable != 0xfffffffdu) {
         let summary = summarize_region(candidate, read_bank);
         set_candidate_word(candidate, base, summary.accepted);
         set_candidate_word(candidate, base + 1u, summary.end);
         set_candidate_word(candidate, base + 2u, summary.events);
         set_candidate_word(candidate, base + 3u, summary.diagnostic_position);
         set_candidate_word(candidate, base + 4u, summary.diagnostic_context);
+        if (summary.stable == 1u) {
+          set_candidate_word(candidate, 4u, 0xfffffffeu);
+        }
         if (summary.accepted == 1u) {
           let island = candidate_word(candidate, 0u);
           let boundary_kind = island_word(island, 2u);
@@ -1994,6 +2205,9 @@ fn contract_regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
             set_candidate_word(candidate, 4u, 0xfffffffeu);
           }
         }
+        if (candidate_word(candidate, 4u) != 0xfffffffdu) {
+          max_candidate_word(0u, 9u, dispatch_params.round + 1u);
+        }
       }
     }
     if (candidate == 0u) {
@@ -2005,6 +2219,229 @@ fn contract_regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
       return;
     }
   }
+}
+
+fn root_chain_candidate(invocation: vec3<u32>) -> u32 {
+  if (plan[14u] == 0u) {
+    return 0xffffffffu;
+  }
+  return candidate_at_token_for_island(
+    plan[14u] - 1u,
+    linear_invocation_index(invocation),
+  );
+}
+
+@compute @workgroup_size(256)
+fn root_chain_init(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let candidate = root_chain_candidate(invocation);
+  if (candidate == 0xffffffffu || candidate >= arena[20u]) {
+    return;
+  }
+  let loop_island = plan[14u] - 1u;
+  let summary = summary_base(arena[21u] & 1u);
+  if (candidate_word(candidate, summary) != 1u) {
+    return;
+  }
+  let chain_end = candidate_word(candidate, summary + 1u);
+  var next_candidate = located_candidate_for_island(loop_island, chain_end);
+  if (
+    next_candidate == 0xffffffffu ||
+    candidate_word(next_candidate, summary) != 1u
+  ) {
+    next_candidate = 0xffffffffu;
+  }
+  set_candidate_word(candidate, 3u, 0xffffffffu);
+  set_candidate_word(candidate, 4u, 0u);
+  set_candidate_word(candidate, 5u, 0u);
+  set_candidate_word(candidate, 6u, 0xffffffffu);
+  set_candidate_word(candidate, 7u, 0u);
+  set_candidate_word(candidate, 8u, 0u);
+  set_candidate_word(candidate, 9u, next_candidate);
+}
+
+@compute @workgroup_size(1)
+fn root_chain_start() {
+  if (arena[0u] != 0u || plan[14u] == 0u) {
+    return;
+  }
+  let loop_island = plan[14u] - 1u;
+  let bank = arena[21u] & 1u;
+  let root_island = candidate_word(0u, 0u);
+  var cursor = candidate_word(0u, 1u);
+  let limit = candidate_word(0u, 15u);
+  var state = island_word(root_island, 1u);
+  loop {
+    cursor = next_syntax(cursor, limit);
+    if (state == plan[15u]) {
+      let child = candidate_for_island(loop_island, cursor, bank);
+      if (child != 0xffffffffu) {
+        arena[30u] = child;
+      }
+      return;
+    }
+    let transition_start = state_word(state, 1u);
+    let transition_count = state_word(state, 2u);
+    var transition_index = 0u;
+    var child_candidate = 0xffffffffu;
+    var child_target = 0xffffffffu;
+    loop {
+      if (transition_index >= transition_count) {
+        break;
+      }
+      let transition = transition_start + transition_index;
+      if (transition_word(transition, 0u) == 1u) {
+        let located = candidate_for_island(
+          transition_word(transition, 1u),
+          cursor,
+          bank,
+        );
+        if (located != 0xffffffffu) {
+          let child_end = candidate_word(
+            located,
+            summary_base(bank) + 1u,
+          );
+          if (child_end > cursor && child_end <= limit) {
+            child_candidate = located;
+            child_target = transition_word(transition, 2u);
+            break;
+          }
+        }
+      }
+      transition_index += 1u;
+    }
+    if (child_candidate != 0xffffffffu) {
+      cursor = candidate_word(
+        child_candidate,
+        summary_base(bank) + 1u,
+      );
+      state = child_target;
+      continue;
+    }
+    if (cursor < limit) {
+      let token_terminal = terminal(cursor);
+      if (
+        token_terminal >= 0i &&
+        u32(token_terminal) < plan[11u] &&
+        dense_transition_word(state, u32(token_terminal), 9u) == 1u
+      ) {
+        state = dense_transition_word(state, u32(token_terminal), 7u);
+        cursor += 1u;
+        continue;
+      }
+    }
+    return;
+  }
+}
+
+@compute @workgroup_size(256)
+fn root_chain_link(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let candidate = root_chain_candidate(invocation);
+  if (
+    candidate == 0xffffffffu ||
+    candidate >= arena[20u] ||
+    arena[30u] == 0xffffffffu ||
+    candidate < arena[30u]
+  ) {
+    return;
+  }
+  let summary = summary_base(arena[21u] & 1u);
+  if (candidate_word(candidate, summary) != 1u) {
+    return;
+  }
+  let successor = candidate_word(candidate, 9u);
+  if (successor != 0xffffffffu) {
+    min_candidate_word(successor, 3u, candidate);
+  }
+}
+
+@compute @workgroup_size(256)
+fn root_chain_finalize(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let candidate = root_chain_candidate(invocation);
+  if (candidate == 0xffffffffu || candidate >= arena[20u]) {
+    return;
+  }
+  let summary = summary_base(arena[21u] & 1u);
+  if (candidate_word(candidate, summary) != 1u) {
+    return;
+  }
+  var parent = candidate_word(candidate, 3u);
+  var distance = 1u;
+  if (parent == 0xffffffffu) {
+    parent = candidate;
+    distance = 0u;
+  }
+  set_candidate_word(candidate, 3u, parent);
+  set_candidate_word(candidate, 4u, distance);
+  set_candidate_word(candidate, 6u, parent);
+  set_candidate_word(candidate, 7u, distance);
+}
+
+@compute @workgroup_size(256)
+fn root_chain_jump(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let candidate = root_chain_candidate(invocation);
+  if (candidate == 0xffffffffu || candidate >= arena[20u]) {
+    return;
+  }
+  let summary = summary_base(arena[21u] & 1u);
+  if (candidate_word(candidate, summary) != 1u) {
+    return;
+  }
+  let read_base = 3u + (dispatch_params.round & 1u) * 3u;
+  let write_base = 3u + (1u - (dispatch_params.round & 1u)) * 3u;
+  var root = candidate;
+  var distance = 0u;
+  var hop = 0u;
+  loop {
+    if (hop >= 4u) {
+      break;
+    }
+    let parent = candidate_word(root, read_base);
+    distance += candidate_word(root, read_base + 1u);
+    if (parent == root) {
+      break;
+    }
+    root = parent;
+    hop += 1u;
+  }
+  set_candidate_word(candidate, write_base, root);
+  set_candidate_word(candidate, write_base + 1u, distance);
+}
+
+@compute @workgroup_size(256)
+fn root_chain_aggregate(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let candidate = root_chain_candidate(invocation);
+  if (candidate == 0xffffffffu || candidate >= arena[20u]) {
+    return;
+  }
+  let summary = summary_base(arena[21u] & 1u);
+  if (candidate_word(candidate, summary) != 1u) {
+    return;
+  }
+  let final_bank = (dispatch_params.round + 1u) & 1u;
+  let final_base = 3u + final_bank * 3u;
+  let root = candidate_word(candidate, final_base);
+  let distance = candidate_word(candidate, final_base + 1u);
+  max_candidate_word(root, 5u, distance + 1u);
+  max_candidate_word(
+    root,
+    8u,
+    candidate_word(candidate, summary + 1u),
+  );
+}
+
+@compute @workgroup_size(1)
+fn contract_root() {
+  if (arena[0u] != 0u) {
+    return;
+  }
+  let final_bank = arena[21u] & 1u;
+  let summary = summarize_region(0u, final_bank);
+  let base = summary_base(final_bank);
+  set_candidate_word(0u, base, summary.accepted);
+  set_candidate_word(0u, base + 1u, summary.end);
+  set_candidate_word(0u, base + 2u, summary.events);
+  set_candidate_word(0u, base + 3u, summary.diagnostic_position);
+  set_candidate_word(0u, base + 4u, summary.diagnostic_context);
 }
 
 @compute @workgroup_size(1)
@@ -2019,6 +2456,7 @@ fn validate_root() {
   if (accepted == 1u && next_syntax(end, arena[1u]) == arena[1u]) {
     set_candidate_word(0u, 2u, 1u);
     set_candidate_word(0u, 3u, 0xfffffffeu);
+    set_candidate_word(0u, 9u, 0u);
     return;
   }
   var start = 0u;
@@ -2038,7 +2476,37 @@ fn validate_root() {
   );
 }
 
-fn mark_region_children(candidate: u32, bank: u32) {
+@compute @workgroup_size(256)
+fn select_root_chain(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let candidate = root_chain_candidate(invocation);
+  if (candidate == 0xffffffffu || candidate >= arena[20u]) {
+    return;
+  }
+  let loop_island = plan[14u] - 1u;
+  let summary = summary_base(arena[21u] & 1u);
+  if (candidate_word(candidate, summary) != 1u) {
+    return;
+  }
+  let final_bank = (dispatch_params.round + 1u) & 1u;
+  let final_base = 3u + final_bank * 3u;
+  let root = candidate_word(candidate, final_base);
+  let distance = candidate_word(candidate, final_base + 1u);
+  if (arena[30u] != 0xffffffffu && root == arena[30u]) {
+    let start = candidate_word(candidate, 1u);
+    set_candidate_word(candidate, 2u, 1u);
+    arena[arena[18u] + start] = arena[31u] + distance;
+    arena[arena[19u] + start] = candidate;
+    arena[arena[25u] + start] = dense_transition_word(
+      plan[15u],
+      plan[11u] + loop_island,
+      8u,
+    );
+  }
+  set_candidate_word(candidate, 3u, 0xffffffffu);
+  set_candidate_word(candidate, 4u, 0xffffffffu);
+}
+
+fn mark_region_children(candidate: u32, bank: u32, round: u32) {
   let island = candidate_word(candidate, 0u);
   var cursor = candidate_word(candidate, 1u);
   let limit = candidate_word(candidate, 15u);
@@ -2076,7 +2544,10 @@ fn mark_region_children(candidate: u32, bank: u32) {
       transition_index += 1u;
     }
     if (child_candidate != 0xffffffffu) {
-      set_candidate_word(child_candidate, 2u, 1u);
+      if (candidate_word(child_candidate, 2u) == 0u) {
+        set_candidate_word(child_candidate, 2u, 1u);
+        max_candidate_word(0u, 9u, round + 1u);
+      }
       cursor = candidate_word(
         child_candidate,
         summary_base(bank) + 1u,
@@ -2105,6 +2576,12 @@ fn reachability(@builtin(global_invocation_id) invocation: vec3<u32>) {
   if (arena[0u] != 0u) {
     return;
   }
+  if (
+    dispatch_params.round > 0u &&
+    candidate_word(0u, 9u) < dispatch_params.round
+  ) {
+    return;
+  }
   let worker = linear_invocation_index(invocation);
   if (worker >= arena[9u]) {
     return;
@@ -2120,7 +2597,11 @@ fn reachability(@builtin(global_invocation_id) invocation: vec3<u32>) {
       candidate_word(candidate, 2u) == 1u &&
       candidate_word(candidate, 3u) == 0xffffffffu
     ) {
-      mark_region_children(candidate, arena[21u] & 1u);
+      mark_region_children(
+        candidate,
+        arena[21u] & 1u,
+        dispatch_params.round,
+      );
       set_candidate_word(candidate, 3u, 0xfffffffeu);
     }
     if (candidate == 0u) {
@@ -2307,6 +2788,9 @@ fn emit_region(candidate: u32, bank: u32) {
   arena[node_base + 5u] = event_count;
   arena[node_base + 6u] = 0xffffffffu;
   arena[node_base + 7u] = 0xffffffffu;
+  if (candidate == 0u) {
+    return;
+  }
 
   var cursor = candidate_word(candidate, 1u);
   let limit = candidate_word(candidate, 15u);
@@ -2375,6 +2859,36 @@ fn emit_region(candidate: u32, bank: u32) {
     }
     ordinal += 1u;
   }
+}
+
+@compute @workgroup_size(256)
+fn emit_root_events(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  if (arena[0u] != 0u) {
+    return;
+  }
+  let token_index = linear_invocation_index(invocation);
+  if (token_index >= arena[1u]) {
+    return;
+  }
+  let ordinal = arena[arena[18u] + token_index];
+  if (ordinal == 0xffffffffu) {
+    return;
+  }
+  let event_target = arena[arena[19u] + token_index];
+  let edge_offset = candidate_word(0u, 4u);
+  let edge_base = arena[16u] + (edge_offset + ordinal) * EDGE_WORDS;
+  arena[edge_base + 1u] = ordinal;
+  if ((event_target & 0x80000000u) == 0u) {
+    arena[edge_base] = arena[arena[25u] + token_index];
+    arena[edge_base + 2u] = 1u;
+    arena[edge_base + 3u] = candidate_word(event_target, 3u);
+    return;
+  }
+  let state = event_target & 0x7fffffffu;
+  let token_terminal = u32(terminal(token_index));
+  arena[edge_base] = dense_transition_word(state, token_terminal, 8u);
+  arena[edge_base + 2u] = 0u;
+  arena[edge_base + 3u] = token_index;
 }
 
 @compute @workgroup_size(256)
