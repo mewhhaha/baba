@@ -116,6 +116,21 @@ Deno.test("GPU frontend v3 is persisted and interpreted by the CPU oracle", () =
 
   const frontend = CpuFrontend.create(planFile.content);
   for (
+    const [options, expectedMessage] of [
+      [{ maxTokens: -1 }, "maxTokens must be a non-negative safe integer"],
+      [{ maxNodes: 1.5 }, "maxNodes must be a non-negative safe integer"],
+      [
+        { maxEdges: Number.NaN },
+        "maxEdges must be a non-negative safe integer",
+      ],
+    ] as const
+  ) {
+    assertThrowsIncludes(
+      () => frontend.ingest("", options),
+      expectedMessage,
+    );
+  }
+  for (
     const [source, expectedNodes] of [
       ["", 1],
       ["let first = 1;", 2],
@@ -318,6 +333,30 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
     const residentUnits = new Uint16Array(source.length);
     for (let index = 0; index < source.length; index += 1) {
       residentUnits[index] = source.charCodeAt(index);
+    }
+    for (
+      const [operation, expectedMessage] of [
+        [
+          () => frontend.ingest(source, { maxNodes: -1 }),
+          "maxNodes must be a non-negative safe integer",
+        ],
+        [
+          () => frontend.ingest(source, { lexerCapacityRecords: 0 }),
+          "lexerCapacityRecords must be a positive safe integer",
+        ],
+        [
+          () => frontend.ingestResident(residentUnits, { maxEdges: -1 }),
+          "maxEdges must be a non-negative safe integer",
+        ],
+      ] as const
+    ) {
+      let message = "";
+      try {
+        await operation();
+      } catch (error) {
+        message = String(error);
+      }
+      assert(message.includes(expectedMessage), message);
     }
     const resident = await frontend.ingestResident(residentUnits);
     let residentReuseMessage = "";

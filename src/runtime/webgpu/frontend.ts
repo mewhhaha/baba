@@ -118,19 +118,22 @@ export type GpuFrontendResult =
     readonly timings: GpuFrontendTimings;
   };
 
-export interface CpuFrontendOptions {
-  readonly maxTokens?: number;
+interface FrontendAllocationLimits {
   readonly maxNodes?: number;
   readonly maxEdges?: number;
 }
 
-export interface WebGpuFrontendOptions extends CpuFrontendOptions {
+export interface CpuFrontendOptions extends FrontendAllocationLimits {
+  readonly maxTokens?: number;
+}
+
+export interface WebGpuFrontendOptions extends FrontendAllocationLimits {
   readonly lexerCapacityRecords?: number;
   /** Collect per-dispatch GPU timestamps instead of batching dependent stages. */
   readonly stageTimings?: "collect";
 }
 
-export interface GpuResidentFrontendOptions extends CpuFrontendOptions {
+export interface GpuResidentFrontendOptions extends FrontendAllocationLimits {
   readonly lexerCapacityRecords?: number;
 }
 
@@ -212,6 +215,15 @@ export function ingestCpuFrontend(
   source: string,
   options: CpuFrontendOptions,
 ): GpuFrontendResult {
+  if (
+    options.maxTokens !== undefined &&
+    (!Number.isSafeInteger(options.maxTokens) || options.maxTokens < 0)
+  ) {
+    throw new TypeError(
+      `maxTokens must be a non-negative safe integer; received ${options.maxTokens}.`,
+    );
+  }
+  assertFrontendAllocationLimits(options);
   const started = performance.now();
   const units = new Uint16Array(source.length);
   for (let index = 0; index < source.length; index += 1) {
@@ -350,6 +362,18 @@ export class WebGpuFrontend {
     options: WebGpuFrontendOptions,
   ): Promise<GpuFrontendResult> {
     if (
+      options.lexerCapacityRecords !== undefined &&
+      (
+        !Number.isSafeInteger(options.lexerCapacityRecords) ||
+        options.lexerCapacityRecords < 1
+      )
+    ) {
+      throw new TypeError(
+        `lexerCapacityRecords must be a positive safe integer; received ${options.lexerCapacityRecords}.`,
+      );
+    }
+    assertFrontendAllocationLimits(options);
+    if (
       options.stageTimings !== undefined &&
       options.stageTimings !== "collect"
     ) {
@@ -452,6 +476,18 @@ export class WebGpuFrontend {
     source: string | Uint16Array,
     options: GpuResidentFrontendOptions,
   ): Promise<GpuResidentFrontendResult> {
+    if (
+      options.lexerCapacityRecords !== undefined &&
+      (
+        !Number.isSafeInteger(options.lexerCapacityRecords) ||
+        options.lexerCapacityRecords < 1
+      )
+    ) {
+      throw new TypeError(
+        `lexerCapacityRecords must be a positive safe integer; received ${options.lexerCapacityRecords}.`,
+      );
+    }
+    assertFrontendAllocationLimits(options);
     const started = performance.now();
     assertDeviceCapacity(source.length, this.plan, this.runtime);
     let units: Uint16Array;
@@ -555,6 +591,26 @@ export class WebGpuFrontend {
       );
     }
     this.#activeJobs += 1;
+  }
+}
+
+function assertFrontendAllocationLimits(
+  limits: FrontendAllocationLimits,
+): void {
+  for (
+    const [name, value] of [
+      ["maxNodes", limits.maxNodes],
+      ["maxEdges", limits.maxEdges],
+    ] as const
+  ) {
+    if (
+      value !== undefined &&
+      (!Number.isSafeInteger(value) || value < 0)
+    ) {
+      throw new TypeError(
+        `${name} must be a non-negative safe integer; received ${value}.`,
+      );
+    }
   }
 }
 
