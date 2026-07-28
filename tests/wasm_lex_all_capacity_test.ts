@@ -6,10 +6,9 @@
  * memory with no status code. It now takes `token_capacity` and a separate
  * `memo` buffer with its own capacity, rejects both when they are short, and
  * writes nothing outside them - the failure memo lives in the memo buffer, not
- * in the token records.
- *
- * The rejection codes are negative because the success value is a token count:
- * `-1` for a short token buffer, `-2` for a short memo buffer.
+ * in the token records. Ordinary calls pass no memo; `-2` asks the host to
+ * allocate the full memo and retry when discarded scanning crosses the
+ * activation threshold.
  */
 
 import { assert, assertEquals, compile } from "./helpers.ts";
@@ -18,7 +17,7 @@ import { wasmCoreRuntimeBytes } from "../src/targets/runtime/wasm_core_runtime_b
 const TOKEN_RECORD_I32_COUNT = 4;
 const WASM_PAGE_BYTES = 65_536;
 const LEX_STATUS_TOKEN_CAPACITY = -1;
-const LEX_STATUS_MEMO_CAPACITY = -2;
+const LEX_STATUS_MEMO_REQUIRED = -2;
 const PARSE_CURSOR_STATUS_CAPACITY = 3;
 
 interface RawLexExports {
@@ -163,7 +162,7 @@ Deno.test("lex_all rejects a token buffer smaller than the source", () => {
   );
 });
 
-Deno.test("lex_all rejects a memo buffer smaller than the engine's own requirement", () => {
+Deno.test("lex_all requests a complete memo when pathological scanning activates it", () => {
   const text = "a".repeat(64);
   const layout = place(planFor(HEX_GRAMMAR), text);
   assert(
@@ -181,7 +180,7 @@ Deno.test("lex_all rejects a memo buffer smaller than the engine's own requireme
         layout.memoPointer,
         capacity,
       ),
-      LEX_STATUS_MEMO_CAPACITY,
+      LEX_STATUS_MEMO_REQUIRED,
       `Expected a memo-capacity rejection at capacity ${capacity}.`,
     );
   }

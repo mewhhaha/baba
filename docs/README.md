@@ -52,7 +52,8 @@ The public parser instance surface is:
 
 - `parse(source, options?)`: returns a cursor parse result;
 - `lex(source, options?)`: returns a lazy token tape result;
-- `validate(source, options?)`: runs trace validation and returns diagnostics;
+- `validate(source, options?)`: runs output-free validation and returns
+  diagnostics;
 - `reset()`;
 - `dispose()`.
 

@@ -105,19 +105,15 @@ export class CpuReferenceLexer {
   #reserve(sourceLength: number): void {
     const tokenPointer = alignUp(this.#sourcePointer + sourceLength * 2, 4);
     const capacityRecords = Math.max(sourceLength, 1);
-    // The lexer's (position, state) failure memo is a caller-owned buffer, one
-    // bit per source position per DFA state. The engine reports the width.
     const memoPointer = alignUp(
       tokenPointer + capacityRecords * TOKEN_RECORD_I32_COUNT * 4,
       4,
     );
-    const memoCapacity = (sourceLength + 1) *
-      this.#exports.lex_memo_i32_per_position();
-    growTo(this.#exports.memory, memoPointer + memoCapacity * 4);
+    growTo(this.#exports.memory, memoPointer);
     this.#tokenPointer = tokenPointer;
     this.#capacityRecords = capacityRecords;
     this.#memoPointer = memoPointer;
-    this.#memoCapacity = memoCapacity;
+    this.#memoCapacity = 0;
   }
 
   /** Returns the raw 4 x i32 records exactly as `lex_all` wrote them. */
@@ -131,7 +127,7 @@ export class CpuReferenceLexer {
     )
       .set(source);
     const afterWrite = performance.now();
-    const count = this.#exports.lex_all(
+    let count = this.#exports.lex_all(
       this.#sourcePointer,
       source.length,
       0,
@@ -140,6 +136,23 @@ export class CpuReferenceLexer {
       this.#memoPointer,
       this.#memoCapacity,
     );
+    if (count === -2) {
+      this.#memoCapacity = (source.length + 1) *
+        this.#exports.lex_memo_i32_per_position();
+      growTo(
+        this.#exports.memory,
+        this.#memoPointer + this.#memoCapacity * 4,
+      );
+      count = this.#exports.lex_all(
+        this.#sourcePointer,
+        source.length,
+        0,
+        this.#tokenPointer,
+        this.#capacityRecords,
+        this.#memoPointer,
+        this.#memoCapacity,
+      );
+    }
     const afterLex = performance.now();
     if (count < 0 || count > this.#capacityRecords) {
       throw new Error(`lex_all returned an out-of-range count ${count}.`);

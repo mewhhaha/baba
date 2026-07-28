@@ -4,7 +4,7 @@ import {
 } from "./compact_plan_binary.ts";
 
 const CORE_PLAN_MAGIC = 0x31505742;
-const CORE_PLAN_FORMAT_VERSION = 4;
+const CORE_PLAN_FORMAT_VERSION = 5;
 const CORE_PLAN_VERSION = 2;
 const CORE_PLAN_HEADER_I32_COUNT = 36;
 const CORE_PLAN_HEADER_BYTES = CORE_PLAN_HEADER_I32_COUNT * 4;
@@ -13,7 +13,7 @@ const CORE_HEADER_FORMAT_VERSION = 1;
 const CORE_HEADER_PARSER_PLAN_VERSION = 2;
 const CORE_HEADER_DFA_STATE_COUNT = 3;
 const CORE_HEADER_PARSER_STATE_COUNT = 4;
-const CORE_HEADER_ACCEPTS = 5;
+const CORE_HEADER_FAST_SPECS = 5;
 const CORE_HEADER_ASCII_TRANSITIONS = 6;
 const CORE_HEADER_TRANSITION_ROWS = 7;
 const CORE_HEADER_TRANSITIONS = 8;
@@ -312,7 +312,7 @@ function validateCorePlan(planBytes: Uint8Array): {
     throw new Error("Wasm parser plan core byte length exceeds file length.");
   }
 
-  const accepts = readI32(planBytes, CORE_HEADER_ACCEPTS);
+  const fastSpecs = readI32(planBytes, CORE_HEADER_FAST_SPECS);
   const asciiTransitions = decodeOptionalCompactI16Offset(
     readI32(planBytes, CORE_HEADER_ASCII_TRANSITIONS),
     "ASCII transitions",
@@ -421,9 +421,9 @@ function validateCorePlan(planBytes: Uint8Array): {
   const alphabetRanges = readI32(planBytes, CORE_HEADER_ALPHABET_RANGES);
 
   validateSection(
-    "accepts",
-    accepts,
-    checkedMul(dfaStateCount, I32_BYTES, "accepts byte length"),
+    "lexer fast specs",
+    fastSpecs,
+    checkedMul(dfaStateCount, I32_BYTES, "lexer fast spec byte length"),
     coreByteLength,
   );
   if (asciiTransitions !== null) {
@@ -619,6 +619,59 @@ function validateCorePlan(planBytes: Uint8Array): {
     if (candidate < 0 || candidate >= specCount) {
       throw new Error(
         `Wasm parser plan lexer accept candidate ${candidate} is invalid.`,
+      );
+    }
+  }
+  for (let state = 0; state < dfaStateCount; state++) {
+    const fastSpec = readI32AtByteOffset(
+      planBytes,
+      fastSpecs + state * I32_BYTES,
+    );
+    if (fastSpec < -1 || fastSpec >= specCount) {
+      throw new Error(
+        `Wasm parser plan lexer fast spec ${fastSpec} for state ${state} is invalid.`,
+      );
+    }
+    if (fastSpec < 0) {
+      continue;
+    }
+    const candidateStart = readRowValue(
+      planBytes,
+      acceptCandidateRows,
+      state,
+    );
+    const candidateEnd = readRowValue(
+      planBytes,
+      acceptCandidateRows,
+      state + 1,
+    );
+    if (candidateEnd !== candidateStart + 1) {
+      throw new Error(
+        `Wasm parser plan lexer fast spec for state ${state} does not name a singleton candidate row.`,
+      );
+    }
+    const candidate = readI32AtByteOffset(
+      planBytes,
+      acceptCandidates + candidateStart * I32_BYTES,
+    );
+    if (candidate !== fastSpec) {
+      throw new Error(
+        `Wasm parser plan lexer fast spec ${fastSpec} for state ${state} does not match candidate ${candidate}.`,
+      );
+    }
+    const flags = readI32AtByteOffset(
+      planBytes,
+      specFlags + fastSpec * I32_BYTES,
+    );
+    const notFollowStart = readI32AtByteOffset(
+      planBytes,
+      specNotFollowStarts + fastSpec * I32_BYTES,
+    );
+    const wordStart = readRowValue(planBytes, specWordRows, fastSpec);
+    const wordEnd = readRowValue(planBytes, specWordRows, fastSpec + 1);
+    if ((flags & 6) !== 0 || notFollowStart >= 0 || wordStart !== wordEnd) {
+      throw new Error(
+        `Wasm parser plan lexer fast spec ${fastSpec} for state ${state} has a source guard.`,
       );
     }
   }

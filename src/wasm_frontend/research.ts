@@ -11,12 +11,12 @@ import {
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
   WASM_PARSE_CURSOR_RESULT_I32_COUNT,
-  WASM_PARSE_TRACE_RESULT_I32_COUNT,
   WASM_RESULT_LIFETIME_CALLER_BUFFER,
   WASM_SOURCE_ENCODING_UTF16,
   WASM_SPAN_UNIT_UTF16,
   WASM_TARGET_KIND,
   WASM_TOKEN_RECORD_I32_COUNT,
+  WASM_VALIDATE_RESULT_I32_COUNT,
 } from "../targets/runtime/wasm_abi.ts";
 
 export type WasmFrontendCandidateStatus =
@@ -62,7 +62,7 @@ export interface WasmFrontendRequirements {
   readonly resultLifetimeModel: number;
   readonly lexResultI32Count: number;
   readonly tokenRecordI32Count: number;
-  readonly parseTraceResultI32Count: number;
+  readonly validateResultI32Count: number;
   readonly parseCursorResultI32Count: number;
   readonly cursorRuleRecordI32Count: number;
   readonly cursorFieldRecordI32Count: number;
@@ -113,7 +113,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
   resultLifetimeModel: WASM_RESULT_LIFETIME_CALLER_BUFFER,
   lexResultI32Count: WASM_LEX_RESULT_I32_COUNT,
   tokenRecordI32Count: WASM_TOKEN_RECORD_I32_COUNT,
-  parseTraceResultI32Count: WASM_PARSE_TRACE_RESULT_I32_COUNT,
+  validateResultI32Count: WASM_VALIDATE_RESULT_I32_COUNT,
   parseCursorResultI32Count: WASM_PARSE_CURSOR_RESULT_I32_COUNT,
   cursorRuleRecordI32Count: WASM_CURSOR_RULE_RECORD_I32_COUNT,
   cursorFieldRecordI32Count: WASM_CURSOR_FIELD_RECORD_I32_COUNT,
@@ -127,7 +127,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "parser_action",
     "parser_actions",
     "parser_select_action",
-    "parse_trace",
+    "validate",
     "parse_cursor",
     "parse_cursor_records",
     "parser_goto",
@@ -145,6 +145,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "span_unit",
     "lex_result_i32_count",
     "token_record_i32_count",
+    "validate_result_i32_count",
     "host_ownership_model",
     "result_lifetime_model",
   ],

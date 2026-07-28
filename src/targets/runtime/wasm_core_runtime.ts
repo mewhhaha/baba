@@ -22,7 +22,7 @@ export interface WasmModuleImage {
 }
 
 interface PlanDataLayout {
-  accepts: number;
+  fastSpecs: number;
   asciiTransitions: number | null;
   transitionRows: number;
   transitions: number;
@@ -71,7 +71,7 @@ export interface WasmCoreLexerSpecMetadata {
 }
 
 const PLAN_MAGIC = 0x31505742;
-const PLAN_FORMAT_VERSION = 4;
+const PLAN_FORMAT_VERSION = 5;
 const PLAN_HEADER_I32_COUNT = 36;
 const PLAN_HEADER_BYTES = PLAN_HEADER_I32_COUNT * 4;
 const COMPACT_I16_OFFSET_TAG = 2;
@@ -164,9 +164,53 @@ function buildPlanDataLayout(
     return offset;
   };
 
-  const accepts = appendI32s(
-    dfa.states.map((state) => state.selectedAccept ?? -1),
-  );
+  const fastSpecs: number[] = [];
+  for (const state of dfa.states) {
+    const configuredCandidates = metadata.acceptCandidates[state.id];
+    let candidate = -1;
+    if (
+      configuredCandidates !== undefined &&
+      configuredCandidates.length === 1
+    ) {
+      const configuredCandidate = configuredCandidates[0];
+      if (configuredCandidate === undefined) {
+        throw new Error(
+          `Wasm core metadata accept candidate for DFA state ${state.id} is missing.`,
+        );
+      }
+      candidate = configuredCandidate;
+    } else if (
+      (
+        configuredCandidates === undefined ||
+        configuredCandidates.length === 0
+      ) &&
+      state.selectedAccept !== undefined &&
+      state.selectedAccept !== null
+    ) {
+      candidate = state.selectedAccept;
+    }
+    if (candidate < 0) {
+      fastSpecs.push(-1);
+      continue;
+    }
+    const spec = metadata.specs[candidate];
+    if (spec === undefined) {
+      throw new Error(
+        `Wasm core metadata accept candidate ${candidate} for DFA state ${state.id} is missing its lexer spec.`,
+      );
+    }
+    if (
+      spec.followedBy !== undefined ||
+      spec.followedByEof ||
+      spec.notFollowedBy !== undefined ||
+      spec.excludedWords.length !== 0
+    ) {
+      fastSpecs.push(-1);
+      continue;
+    }
+    fastSpecs.push(candidate);
+  }
+  const fastSpecsOffset = appendI32s(fastSpecs);
   const asciiTransitions = buildAsciiTransitions(dfa);
   let asciiTransitionsOffset: number | null = null;
   let encodedAsciiTransitionsOffset = -1;
@@ -389,7 +433,7 @@ function buildPlanDataLayout(
     parserPlanVersion,
     dfa.states.length,
     lr.states.length,
-    accepts,
+    fastSpecsOffset,
     encodedAsciiTransitionsOffset,
     transitionRowsOffset,
     transitionsOffset,
@@ -424,7 +468,7 @@ function buildPlanDataLayout(
   writeHeader(bytes, header);
 
   return {
-    accepts,
+    fastSpecs: fastSpecsOffset,
     asciiTransitions: asciiTransitionsOffset,
     transitionRows: transitionRowsOffset,
     transitions: transitionsOffset,

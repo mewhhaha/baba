@@ -50,7 +50,7 @@ const CORE_HEADER_ALPHABET_RANGES = 35;
 const COMPACT_I16_OFFSET_TAG = 2;
 const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 
-const EXPECTED_CORE_FORMAT_VERSION = 4;
+const EXPECTED_CORE_FORMAT_VERSION = 5;
 const EXPECTED_PARSER_PLAN_VERSION = 2;
 
 export const ASCII_CLASS_LIMIT = 128;
@@ -70,7 +70,7 @@ export interface PlanClassRange {
 
 /**
  * The alphabet equivalence classes exactly as the compiler computed them, read
- * out of core plan format version 4. Nothing here is re-derived: two code points
+ * out of core plan format version 5. Nothing here is re-derived: two code points
  * share a class because the compiler said so, which is what makes a dense
  * `(states x classes)` table built from this agree with the CSR rows the Wasm
  * engine walks.
@@ -320,8 +320,9 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
   // `selected_global_spec` walks the accept-candidate row and returns the first
   // spec whose guard matches. With no guards at all, `spec_guard_matches` is
   // unconditionally true, so this collapses to "first candidate in the row".
-  // Slot 5 (`CORE_HEADER_ACCEPTS` / selectedAccept) is deliberately NOT used:
-  // the shipping Rust runtime never reads it.
+  // Slot 5 only covers singleton guard-free rows. This GPU path accepts all
+  // guard-free rows, including rows with contextual alternatives, so it still
+  // derives the first candidate from the authoritative CSR row.
   const acceptSpecByState = new Int32Array(stateCount).fill(-1);
   for (let state = 0; state < stateCount; state += 1) {
     const start = acceptRows[state];

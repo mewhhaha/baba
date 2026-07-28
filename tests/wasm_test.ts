@@ -166,7 +166,7 @@ interface RawCursorWasmExports {
     memoPtr: number,
     memoCapacity: number,
     preserveTrivia: number,
-    maxTraceActions: number,
+    maxParserActions: number,
   ): number;
   lex_memo_i32_per_position(): number;
 }
@@ -544,7 +544,7 @@ Deno.test("combined parser plans round-trip runtime metadata v2 with exact secti
   );
 });
 
-// Core plan format version 4 header slots. Named here rather than imported
+// Core plan format version 5 header slots. Named here rather than imported
 // because the encoder and the validator both keep them module-private, and a
 // test that reads the bytes is exactly the place that should re-state them.
 const CORE_HEADER_DFA_STATE_COUNT = 3;
@@ -758,7 +758,7 @@ Deno.test("Wasm target emits typed cursor result surface", async () => {
   assertEquals(syntax.includes("ambiguityMode"), false);
   assertEquals(syntax.includes("PARSE_INVALID_TOKEN_STREAM"), false);
   assertEquals(syntax.includes("PARSER_BRANCH_LIMIT"), false);
-  assertEquals(syntax.includes("maxTraceActions"), true);
+  assertEquals(syntax.includes("maxParserActions"), true);
 
   const dir = await Deno.makeTempDir();
   try {
@@ -800,13 +800,13 @@ Deno.test("Wasm target emits typed cursor result surface", async () => {
         const typedResult: CursorParseResult<RootCursor> = result;
         parser.parse("let x = 42;", {
           preserveTrivia: true,
-          maxTraceActions: 1024,
+          maxParserActions: 1024,
         });
         const records = new Int32Array();
         const recordResult: CursorParseResult<RootCursor> =
           parser.parseRecords("", records);
         parser.validate("let x = 42;", {
-          maxTraceActions: 1024,
+          maxParserActions: 1024,
         });
         recordResult;
         if (typedResult.ok) {
@@ -1548,7 +1548,7 @@ Deno.test("shared Wasm adapter validates external plan bytes", async () => {
     ).setInt32(20, corruptOffset.byteLength + 4, true);
     assertThrowsIncludes(
       () => mod.createParser({ bytes, plan: corruptOffset }),
-      "accepts offset is not aligned",
+      "lexer fast specs offset is not aligned",
     );
 
     const corruptRuntimeMetadata = new Uint8Array(plan);

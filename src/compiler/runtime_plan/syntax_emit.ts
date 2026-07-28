@@ -375,7 +375,7 @@ function emitSyntaxModel(model: {
     "",
     "export interface ParseOptions {",
     "  preserveTrivia?: boolean;",
-    "  maxTraceActions?: number;",
+    "  maxParserActions?: number;",
     "}",
     "",
     "export type CursorParseResult<Root extends RuleCursor = RootCursor> =",

@@ -30,19 +30,19 @@ Generated-size limits cover the emitted Wasm bundle artifacts.
 
 ## Runtime Limits
 
-Generated parser options can bound trace work:
+Generated parser options can bound parser work:
 
-- `maxTraceActions`.
+- `maxParserActions`.
 
 Exhaustion reports the structured `PARSER_TRACE_LIMIT` diagnostic.
 
-The generated Wasm adapter grows its internal token, trace, stack, cursor, and
-lexer-memo buffers as needed within WebAssembly memory limits. The lexer memo is
+The generated Wasm adapter grows its internal token, stack, and cursor buffers
+as needed within WebAssembly memory limits. The lexer memo is
 `ceil(dfaStateCount / 32)` i32 per source position - 4 to 32 bytes per position
-across the grammars in this repo - and is the price of a lexer that stays linear
-on backtracking-heavy input (`docs/performance.md`). Invalid option values throw
-JavaScript errors at the adapter boundary. Expected parse exhaustion returns a
-parse result with diagnostics.
+across the grammars in this repo. It is allocated only after the lexer requests
+a retry on backtracking-heavy input (`docs/performance.md`). Invalid option
+values throw JavaScript errors at the adapter boundary. Expected parse
+exhaustion returns a parse result with diagnostics.
 
 ## Parse Memory Ceiling
 
@@ -72,13 +72,10 @@ diagnostic, naming the byte count the call would need, the address-space limit,
 and the source size. It is returned from `parse()`, `validate()` and `lex()`,
 never thrown. Split oversized inputs and process them separately.
 
-Note that `maxTraceActions` (default 1,000,000) usually binds first on a large
+Note that `maxParserActions` (default 1,000,000) usually binds first on a large
 source and reports `PARSER_TRACE_LIMIT`; raise it explicitly when parsing
-multi-megabyte inputs. `validate()` sizes its trace buffer as `maxTraceActions`
-i32 values, so raising it far enough makes the trace buffer the term that
-exceeds the address space even for a short source. When that happens
-`PARSER_INPUT_TOO_LARGE` names `maxTraceActions` and asks for a lower value
-instead of asking for a smaller input.
+multi-megabyte inputs. `validate()` counts actions without storing an action
+trace, so raising the limit does not reserve additional linear memory.
 
 ## Cursor Traversal Cost
 

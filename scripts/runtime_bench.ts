@@ -10,6 +10,11 @@ import { inspectCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
 
 export interface RuntimeBenchReport {
   readonly generatedAt: string;
+  readonly engine: {
+    readonly deno: string;
+    readonly v8: string;
+    readonly wasmCorePath: string | null;
+  };
   readonly fixtures: readonly FixtureReport[];
   readonly budget?: RuntimeBudgetResult;
 }
@@ -30,23 +35,40 @@ export interface TargetTiming {
   readonly writeBundleMs: number;
   readonly importMs: number;
   readonly createParserMs: number;
-  readonly lexTapeSmallMs: number;
-  readonly lexTapeMediumMs: number;
-  readonly lexTapeSmallCount: number;
-  readonly lexTapeSmallNsPerToken: number;
-  readonly lexTapeSmallNsPerCodeUnit: number;
-  readonly validateTraceSmallMs: number;
-  readonly validateTraceMediumMs: number;
-  readonly cursorParseFirstMs: number;
-  readonly cursorParseSecondMs: number;
-  readonly cursorParseMediumMs: number;
-  readonly cursorParseLargeMs: number;
+  readonly cold: {
+    readonly lexSmallMs: number;
+    readonly validateSmallMs: number;
+    readonly parseSmallMs: number;
+    readonly parseMediumMs: number;
+    readonly parseLargeMs: number;
+  };
+  readonly hot: {
+    readonly sourceCodeUnits: number;
+    readonly tokenCount: number;
+    readonly lex: SampleDistribution;
+    readonly validate: SampleDistribution;
+    readonly parse: SampleDistribution;
+    readonly validateEarlyError: SampleDistribution;
+    readonly validateLateError: SampleDistribution;
+  };
+  readonly memoryPages: {
+    readonly afterCreate: number;
+    readonly afterLex: number;
+    readonly afterValidate: number;
+    readonly afterParse: number;
+    readonly highWater: number;
+  };
 }
 
 export interface WasmTargetTiming extends TargetTiming {
   readonly wasmBytes: number;
   readonly compileModuleMs: number | null;
   readonly instantiateMs: number;
+}
+
+export interface SampleDistribution {
+  readonly p25Ms: number;
+  readonly medianMs: number;
 }
 
 export interface ArtifactSizes {
@@ -109,9 +131,15 @@ interface CliOptions {
   readonly jsonStdout: boolean;
   readonly budgetPath?: string;
   readonly compare?: readonly [string, string];
+  readonly wasmCorePath?: string;
 }
 
 const textEncoder = new TextEncoder();
+const pinnedDenoVersion = "2.9.4";
+const pinnedV8Version = "15.0.245.2-rusty";
+const hotSourceMinimumCodeUnits = 512 * 1024;
+const hotWarmupCount = 12;
+const hotSampleCount = 50;
 
 if (import.meta.main) {
   const options = parseArgs(Deno.args);
@@ -141,16 +169,24 @@ if (import.meta.main) {
 export async function buildRuntimeBenchReport(
   options: Partial<CliOptions> = {},
 ): Promise<RuntimeBenchReport> {
+  assertPinnedEngine();
   const fixturesRoot = options.fixturesRoot ?? "fixtures/perf";
   const fixtureNames = options.fixtureNames?.length
     ? options.fixtureNames
     : await discoverFixtures(fixturesRoot);
   const fixtures: FixtureReport[] = [];
   for (const name of fixtureNames) {
-    fixtures.push(await benchFixture(fixturesRoot, name));
+    fixtures.push(
+      await benchFixture(fixturesRoot, name, options.wasmCorePath),
+    );
   }
   return {
     generatedAt: new Date().toISOString(),
+    engine: {
+      deno: Deno.version.deno,
+      v8: Deno.version.v8,
+      wasmCorePath: optionalPath(options.wasmCorePath),
+    },
     fixtures,
   };
 }
@@ -158,6 +194,7 @@ export async function buildRuntimeBenchReport(
 async function benchFixture(
   fixturesRoot: string,
   name: string,
+  wasmCorePath: string | undefined,
 ): Promise<FixtureReport> {
   const fixturePath = `${fixturesRoot}/${name}`;
   const grammarSource = await Deno.readTextFile(`${fixturePath}/grammar.baba`);
@@ -186,6 +223,7 @@ async function benchFixture(
     smallInput,
     mediumInput,
     largeInput,
+    wasmCorePath,
   );
 
   return {
@@ -206,6 +244,7 @@ async function benchWasmTarget(
   smallInput: string,
   mediumInput: string,
   largeInput: string,
+  wasmCorePath: string | undefined,
 ): Promise<WasmTargetTiming> {
   const compileResult = time(() =>
     compile(grammarSource, {
@@ -223,7 +262,10 @@ async function benchWasmTarget(
   const imported = await timeAsync(() =>
     import(pathToFileUrl(`${tempDir}/wasm/mod.ts`).href)
   );
-  const wasmBytes = await Deno.readFile(`${tempDir}/wasm/parser.wasm`);
+  let wasmBytes = await Deno.readFile(`${tempDir}/wasm/parser.wasm`);
+  if (wasmCorePath !== undefined) {
+    wasmBytes = await Deno.readFile(wasmCorePath);
+  }
   const planBytes = await Deno.readFile(`${tempDir}/wasm/parser.plan`);
   const compileModule = time(() =>
     new WebAssembly.Module(
@@ -240,15 +282,23 @@ async function benchWasmTarget(
     ): RuntimeCursorParseLike;
     validate(source: string): RuntimeParseLike;
   };
-  const lexTapeSmall = time(() => parser.lex(smallInput));
-  const lexTapeMedium = time(() => parser.lex(mediumInput));
-  const lexTapeSmallCount = lexTapeSmall.value.tokenTape.length;
-  const validateTraceSmall = time(() => parser.validate(smallInput));
-  const validateTraceMedium = time(() => parser.validate(mediumInput));
-  const cursorFirst = time(() => parser.parse(smallInput));
-  const cursorSecond = time(() => parser.parse(smallInput));
-  const cursorMedium = time(() => parser.parse(mediumInput));
-  const cursorLarge = time(() => parser.parse(largeInput));
+  const afterCreate = runtimeMemoryPages(parser);
+  assertValidTimedInput(name, "small", parser, smallInput);
+  assertValidTimedInput(name, "medium", parser, mediumInput);
+  assertValidTimedInput(name, "large", parser, largeInput);
+
+  const coldLex = time(() => parser.lex(smallInput));
+  const afterLex = runtimeMemoryPages(parser);
+  const coldValidate = time(() => parser.validate(smallInput));
+  const afterValidate = runtimeMemoryPages(parser);
+  const coldParse = time(() => parser.parse(smallInput));
+  const coldParseMedium = time(() => parser.parse(mediumInput));
+  const coldParseLarge = time(() => parser.parse(largeInput));
+
+  const hotSource = repeatSource(smallInput, hotSourceMinimumCodeUnits);
+  assertValidTimedInput(name, "hot", parser, hotSource);
+  const hot = benchmarkHotPaths(parser, hotSource);
+  const afterParse = runtimeMemoryPages(parser);
   return {
     generatedBytes: generatedBytes(bundle.files),
     wasmBytes: wasmBytes.byteLength,
@@ -258,25 +308,27 @@ async function benchWasmTarget(
     createParserMs: create.ms,
     compileModuleMs: compileModule,
     instantiateMs: create.ms,
-    lexTapeSmallMs: lexTapeSmall.ms,
-    lexTapeMediumMs: lexTapeMedium.ms,
-    lexTapeSmallCount,
-    lexTapeSmallNsPerToken: nsPerUnit(lexTapeSmall.ms, lexTapeSmallCount),
-    lexTapeSmallNsPerCodeUnit: nsPerUnit(
-      lexTapeSmall.ms,
-      smallInput.length,
-    ),
-    validateTraceSmallMs: validateTraceSmall.ms,
-    validateTraceMediumMs: validateTraceMedium.ms,
-    cursorParseFirstMs: cursorFirst.ms,
-    cursorParseSecondMs: cursorSecond.ms,
-    cursorParseMediumMs: cursorMedium.ms,
-    cursorParseLargeMs: cursorLarge.ms,
+    cold: {
+      lexSmallMs: coldLex.ms,
+      validateSmallMs: coldValidate.ms,
+      parseSmallMs: coldParse.ms,
+      parseMediumMs: coldParseMedium.ms,
+      parseLargeMs: coldParseLarge.ms,
+    },
+    hot,
+    memoryPages: {
+      afterCreate,
+      afterLex,
+      afterValidate,
+      afterParse,
+      highWater: Math.max(afterCreate, afterLex, afterValidate, afterParse),
+    },
   };
 }
 
 interface RuntimeLexTapeLike {
   readonly tokenTape: { readonly length: number };
+  readonly diagnostics: readonly unknown[];
 }
 
 interface RuntimeCursorParseLike {
@@ -287,6 +339,165 @@ interface RuntimeCursorParseLike {
 
 interface RuntimeParseLike {
   readonly ok?: boolean;
+  readonly diagnostics?: readonly unknown[];
+}
+
+interface RuntimeParserLike {
+  lex(source: string): RuntimeLexTapeLike;
+  parse(source: string): RuntimeCursorParseLike;
+  validate(source: string): RuntimeParseLike;
+}
+
+function assertValidTimedInput(
+  fixture: string,
+  inputName: string,
+  parser: RuntimeParserLike,
+  source: string,
+): void {
+  const lexed = parser.lex(source);
+  if (lexed.diagnostics.length !== 0) {
+    throw new Error(
+      `Fixture ${fixture} ${inputName} input lexed with ${lexed.diagnostics.length} diagnostics.`,
+    );
+  }
+  const validated = parser.validate(source);
+  if (validated.ok !== true) {
+    throw new Error(
+      `Fixture ${fixture} ${inputName} input did not validate: ${
+        JSON.stringify(validated.diagnostics)
+      }.`,
+    );
+  }
+  const parsed = parser.parse(source);
+  if (parsed.ok !== true) {
+    throw new Error(
+      `Fixture ${fixture} ${inputName} input did not parse: ${
+        JSON.stringify(parsed.diagnostics)
+      }.`,
+    );
+  }
+}
+
+function repeatSource(source: string, minimumCodeUnits: number): string {
+  if (source.length === 0) {
+    throw new Error("A runtime benchmark fixture input must not be empty.");
+  }
+  let repeated = source;
+  while (repeated.length < minimumCodeUnits) {
+    repeated += source;
+  }
+  return repeated;
+}
+
+function benchmarkHotPaths(
+  parser: RuntimeParserLike,
+  source: string,
+): TargetTiming["hot"] {
+  const earlyError = `\u0000${source}`;
+  const lateError = `${source}\u0000`;
+  const earlyResult = parser.validate(earlyError);
+  if (earlyResult.ok !== false) {
+    throw new Error(
+      "Runtime benchmark early-error input unexpectedly validated.",
+    );
+  }
+  const lateResult = parser.validate(lateError);
+  if (lateResult.ok !== false) {
+    throw new Error(
+      "Runtime benchmark late-error input unexpectedly validated.",
+    );
+  }
+  const operations: readonly (() => unknown)[] = [
+    () => parser.lex(source),
+    () => parser.validate(source),
+    () => parser.parse(source),
+    () => parser.validate(earlyError),
+    () => parser.validate(lateError),
+  ];
+  for (let warmup = 0; warmup < hotWarmupCount; warmup++) {
+    for (let offset = 0; offset < operations.length; offset++) {
+      const operation = operations[(warmup + offset) % operations.length];
+      if (operation === undefined) {
+        throw new Error("Runtime benchmark operation disappeared.");
+      }
+      operation();
+    }
+  }
+
+  const samples = operations.map(() => [] as number[]);
+  for (let sample = 0; sample < hotSampleCount; sample++) {
+    for (let offset = 0; offset < operations.length; offset++) {
+      const operationIndex = (sample + offset) % operations.length;
+      const operation = operations[operationIndex];
+      const operationSamples = samples[operationIndex];
+      if (operation === undefined || operationSamples === undefined) {
+        throw new Error("Runtime benchmark sample operation disappeared.");
+      }
+      operationSamples.push(time(operation).ms);
+    }
+  }
+  const lexed = parser.lex(source);
+  return {
+    sourceCodeUnits: source.length,
+    tokenCount: lexed.tokenTape.length,
+    lex: sampleDistribution(samples[0]),
+    validate: sampleDistribution(samples[1]),
+    parse: sampleDistribution(samples[2]),
+    validateEarlyError: sampleDistribution(samples[3]),
+    validateLateError: sampleDistribution(samples[4]),
+  };
+}
+
+function sampleDistribution(
+  samples: readonly number[] | undefined,
+): SampleDistribution {
+  if (samples === undefined || samples.length !== hotSampleCount) {
+    let sampleCount = 0;
+    if (samples !== undefined) {
+      sampleCount = samples.length;
+    }
+    throw new Error(
+      `Expected ${hotSampleCount} runtime benchmark samples, received ${sampleCount}.`,
+    );
+  }
+  const sorted = [...samples].sort((left, right) => left - right);
+  const p25Index = Math.floor((sorted.length - 1) * 0.25);
+  const medianIndex = Math.floor((sorted.length - 1) * 0.5);
+  const p25 = sorted[p25Index];
+  const median = sorted[medianIndex];
+  if (p25 === undefined || median === undefined) {
+    throw new Error("Runtime benchmark distribution is empty.");
+  }
+  return { p25Ms: p25, medianMs: median };
+}
+
+function runtimeMemoryPages(parser: object): number {
+  const runtime = parser as {
+    readonly wasm?: { readonly memory?: WebAssembly.Memory };
+  };
+  const memory = runtime.wasm?.memory;
+  if (memory === undefined) {
+    throw new Error("Runtime benchmark could not inspect Wasm linear memory.");
+  }
+  return memory.buffer.byteLength / 65_536;
+}
+
+function assertPinnedEngine(): void {
+  if (
+    Deno.version.deno !== pinnedDenoVersion ||
+    Deno.version.v8 !== pinnedV8Version
+  ) {
+    throw new Error(
+      `Runtime benchmark requires Deno ${pinnedDenoVersion} / V8 ${pinnedV8Version}; received Deno ${Deno.version.deno} / V8 ${Deno.version.v8}.`,
+    );
+  }
+}
+
+function optionalPath(path: string | undefined): string | null {
+  if (path === undefined) {
+    return null;
+  }
+  return path;
 }
 
 function planStatsFromBundle(bundle: GeneratedBundle): PlanStats {
@@ -372,7 +583,7 @@ export async function applyRuntimeBudgets(
       checks,
       fixture.name,
       "smallParseMsMax",
-      wasm?.cursorParseFirstMs,
+      wasm?.cold.parseSmallMs,
       budget.smallParseMsMax,
     );
     addRuntimeBudgetCheck(
@@ -451,14 +662,19 @@ function renderTextReport(report: RuntimeBenchReport): string {
           formatBytes(wasm.wasmBytes)
         } wasm, import ${formatMs(wasm.importMs)}, instantiate ${
           formatMs(wasm.instantiateMs)
-        }, cursorParse ${formatMs(wasm.cursorParseFirstMs)}, validateTrace ${
-          formatMs(wasm.validateTraceSmallMs)
-        }, lexTape ${formatMs(wasm.lexTapeSmallMs)}`,
-        `    lexer: ${formatNumber(wasm.lexTapeSmallCount)} small tokens, ${
-          formatNumber(wasm.lexTapeSmallNsPerToken)
-        } ns/token, ${
-          formatNumber(wasm.lexTapeSmallNsPerCodeUnit)
-        } ns/code unit`,
+        }`,
+        `    cold: lex ${formatMs(wasm.cold.lexSmallMs)}, validate ${
+          formatMs(wasm.cold.validateSmallMs)
+        }, parse ${formatMs(wasm.cold.parseSmallMs)}`,
+        `    hot ${formatBytes(wasm.hot.sourceCodeUnits * 2)}: lex ${
+          formatDistribution(wasm.hot.lex)
+        }, validate ${formatDistribution(wasm.hot.validate)}, parse ${
+          formatDistribution(wasm.hot.parse)
+        }`,
+        `    validation errors: early ${
+          formatDistribution(wasm.hot.validateEarlyError)
+        }, late ${formatDistribution(wasm.hot.validateLateError)}`,
+        `    memory pages: create ${wasm.memoryPages.afterCreate}, lex ${wasm.memoryPages.afterLex}, validate ${wasm.memoryPages.afterValidate}, parse/high-water ${wasm.memoryPages.highWater}`,
       );
     }
   }
@@ -530,9 +746,25 @@ function renderComparison(
     pushDelta(
       lines,
       current.name,
-      "cursor parse",
-      previous.targets.wasm?.cursorParseFirstMs,
-      current.targets.wasm?.cursorParseFirstMs,
+      "hot lex p25",
+      previous.targets.wasm?.hot.lex.p25Ms,
+      current.targets.wasm?.hot.lex.p25Ms,
+      formatMs,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "hot validate p25",
+      previous.targets.wasm?.hot.validate.p25Ms,
+      current.targets.wasm?.hot.validate.p25Ms,
+      formatMs,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "hot parse p25",
+      previous.targets.wasm?.hot.parse.p25Ms,
+      current.targets.wasm?.hot.parse.p25Ms,
       formatMs,
     );
   }
@@ -667,6 +899,7 @@ function parseArgs(args: readonly string[]): CliOptions {
   let jsonStdout = false;
   let budgetPath: string | undefined;
   let compare: readonly [string, string] | undefined;
+  let wasmCorePath: string | undefined;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--") {
@@ -687,6 +920,11 @@ function parseArgs(args: readonly string[]): CliOptions {
       }
     } else if (arg === "--budget") {
       budgetPath = args[++index] ?? budgetPath;
+    } else if (arg === "--wasm-core") {
+      wasmCorePath = args[++index];
+      if (wasmCorePath === undefined) {
+        throw new Error("Expected a path after --wasm-core.");
+      }
     } else if (arg === "--compare") {
       const before = args[++index];
       const after = args[++index];
@@ -696,7 +934,7 @@ function parseArgs(args: readonly string[]): CliOptions {
       compare = [before, after];
     } else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: deno run --allow-read --allow-write scripts/runtime_bench.ts [--fixture NAME] [--json [PATH]] [--budget PATH]\n" +
+        "Usage: deno run --allow-read --allow-write scripts/runtime_bench.ts [--fixture NAME] [--json [PATH]] [--budget PATH] [--wasm-core PATH]\n" +
           "       deno run --allow-read scripts/runtime_bench.ts --compare before.json after.json",
       );
       Deno.exit(0);
@@ -711,6 +949,7 @@ function parseArgs(args: readonly string[]): CliOptions {
     jsonStdout,
     budgetPath,
     compare,
+    wasmCorePath,
   };
 }
 
@@ -729,6 +968,12 @@ function formatBytes(bytes: number): string {
 
 function formatMs(ms: number): string {
   return `${ms.toFixed(2)} ms`;
+}
+
+function formatDistribution(distribution: SampleDistribution): string {
+  return `${formatMs(distribution.p25Ms)} p25 / ${
+    formatMs(distribution.medianMs)
+  } median`;
 }
 
 function formatNumber(value: number): string {
