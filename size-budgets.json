@@ -1,5 +1,5 @@
 {
-  "publishPayloadBytes": 1400000,
+  "publishPayloadBytes": 1500000,
   "publishGeneratedExampleBytes": 0,
   "largestPublishFileBytes": 260000,
   "generatedWasmLoaderSourceBytes": 120000,

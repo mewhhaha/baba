@@ -979,7 +979,3 @@ function formatDistribution(distribution: SampleDistribution): string {
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
-
-function nsPerUnit(ms: number, count: number): number {
-  return count > 0 ? (ms * 1_000_000) / count : 0;
-}
