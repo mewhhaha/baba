@@ -66,7 +66,14 @@ const EXAMPLES: readonly ExampleConfig[] = [
 ];
 
 if (import.meta.main) {
-  const mode = Deno.args.includes("--write") ? "write" : "check";
+  let mode: "check" | "write" = "check";
+  if (Deno.args.length === 1 && Deno.args[0] === "--write") {
+    mode = "write";
+  } else if (Deno.args.length > 0) {
+    throw new Error(
+      `Unknown bootstrap arguments: ${Deno.args.join(" ")}.`,
+    );
+  }
   await runBootstrapCheck(mode);
 }
 
