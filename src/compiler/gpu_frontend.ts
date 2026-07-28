@@ -586,6 +586,43 @@ function compileExecutionPlan(
   capacity: GpuFrontendCapacityPlan,
   diagnostics: Diagnostic[],
 ): GpuFrontendExecutionPlan | undefined {
+  const closerByOpener = new Map<number, number>();
+  const closerTerminals = new Set<number>();
+  for (const boundary of boundaries) {
+    if (boundary.kind !== "paired" && boundary.kind !== "separated") {
+      continue;
+    }
+    const knownCloser = closerByOpener.get(boundary.openTerminal);
+    if (
+      knownCloser !== undefined &&
+      knownCloser !== boundary.closeTerminal
+    ) {
+      diagnostics.push({
+        code: "GPU_FRONTEND_AMBIGUOUS_STRUCTURAL_TERMINAL",
+        severity: "error",
+        backend: "webgpu",
+        message:
+          `GPU frontend opener terminal ${boundary.openTerminal} requires both closer ${knownCloser} and closer ${boundary.closeTerminal}.`,
+      });
+    }
+    closerByOpener.set(boundary.openTerminal, boundary.closeTerminal);
+    closerTerminals.add(boundary.closeTerminal);
+  }
+  for (const opener of closerByOpener.keys()) {
+    if (closerTerminals.has(opener)) {
+      diagnostics.push({
+        code: "GPU_FRONTEND_AMBIGUOUS_STRUCTURAL_TERMINAL",
+        severity: "error",
+        backend: "webgpu",
+        message:
+          `GPU frontend terminal ${opener} is both a structural opener and closer.`,
+      });
+    }
+  }
+  if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return undefined;
+  }
+
   const firstTerminals = new Map<number, readonly number[]>();
   const resolving = new Set<number>();
 

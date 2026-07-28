@@ -7,7 +7,7 @@ const HEADER_WORDS = 32;
 const TOKEN_WORDS = 4;
 const NODE_WORDS = 8;
 const EDGE_WORDS = 4;
-const CANDIDATE_WORDS = 14;
+const CANDIDATE_WORDS = 16;
 const MAX_CONTRACTION_ROUNDS = 33;
 const DISPATCH_PARAM_BYTES = 256;
 const MAX_EXECUTION_DISPATCHES = 256;
@@ -62,6 +62,7 @@ interface ExecutionSlot {
   arena: SizedExecutionBuffer | null;
   candidates: SizedExecutionBuffer | null;
   scratch: SizedExecutionBuffer | null;
+  deviceStaging: SizedExecutionBuffer | null;
   staging: SizedExecutionBuffer | null;
   params: SizedExecutionBuffer | null;
   readonly querySet: GPUQuerySet | null;
@@ -146,9 +147,11 @@ function structuralLayout(tokenCount: number): StructuralLayout {
 function islandDispatchLabels(
   rounds: number,
   tokenWorkgroups: number,
+  regionWorkgroups: number,
   candidateWorkgroups: number,
   allocationScan: ScanLayout,
   structural: StructuralLayout,
+  stagingWorkgroups: number,
 ): readonly IslandDispatch[] {
   const dispatches: IslandDispatch[] = [
     {
@@ -259,18 +262,60 @@ function islandDispatchLabels(
       workgroups: 1,
       params: [0],
     },
-    {
-      entryPoint: "regions",
-      label: "regions",
-      workgroups: candidateWorkgroups,
-      params: [0],
-    },
   );
+  for (let level = 0; level < structural.scan.levels.length; level += 1) {
+    const scanLevel = structural.scan.levels[level];
+    let scanMode = 2;
+    if (level === 0) {
+      scanMode = 4;
+    }
+    dispatches.push({
+      entryPoint: "scan_level",
+      label: `syntax_scan_${level}`,
+      workgroups: Math.max(1, Math.ceil(scanLevel.count / 256)),
+      params: [
+        0,
+        scanLevel.count,
+        scanLevel.inputOffset,
+        scanLevel.outputOffset,
+        scanLevel.blockSumsOffset,
+        scanMode,
+      ],
+    });
+  }
+  for (
+    let level = structural.scan.levels.length - 2;
+    level >= 0;
+    level -= 1
+  ) {
+    const scanLevel = structural.scan.levels[level];
+    const parent = structural.scan.levels[level + 1];
+    dispatches.push({
+      entryPoint: "add_scan_offsets",
+      label: `syntax_add_${level}`,
+      workgroups: Math.max(1, Math.ceil(scanLevel.count / 256)),
+      params: [
+        0,
+        scanLevel.count,
+        0,
+        scanLevel.outputOffset,
+        0,
+        4,
+        parent.outputOffset,
+      ],
+    });
+  }
+  dispatches.push({
+    entryPoint: "regions",
+    label: "regions",
+    workgroups: regionWorkgroups,
+    params: [0],
+  });
   for (let round = 0; round < rounds; round += 1) {
     dispatches.push({
       entryPoint: "contract_regions",
       label: `contraction_${round}`,
-      workgroups: candidateWorkgroups,
+      workgroups: regionWorkgroups,
       params: [round],
     });
   }
@@ -284,7 +329,7 @@ function islandDispatchLabels(
     dispatches.push({
       entryPoint: "reachability",
       label: `reachability_${round}`,
-      workgroups: candidateWorkgroups,
+      workgroups: regionWorkgroups,
       params: [rounds - 1],
     });
   }
@@ -359,7 +404,7 @@ function islandDispatchLabels(
     {
       entryPoint: "staging",
       label: "staging",
-      workgroups: 1,
+      workgroups: stagingWorkgroups,
       params: [rounds - 1],
     },
   );
@@ -403,6 +448,13 @@ export class GpuIslandExecutor {
     device: GPUDevice,
     plan: GpuFrontendPlan,
   ): Promise<GpuIslandExecutor> {
+    if (device.limits.maxStorageBuffersPerShaderStage < 8) {
+      throw new GpuFrontendCapacityError(
+        "storageBindings",
+        8,
+        device.limits.maxStorageBuffersPerShaderStage,
+      );
+    }
     const module = device.createShaderModule({ code: ISLAND_EXECUTOR_WGSL });
     const bindGroupLayout = device.createBindGroupLayout({
       entries: [
@@ -449,6 +501,11 @@ export class GpuIslandExecutor {
             hasDynamicOffset: true,
             minBindingSize: 32,
           },
+        },
+        {
+          binding: 8,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "storage" },
         },
       ],
     });
@@ -499,46 +556,63 @@ export class GpuIslandExecutor {
     maximumNodes: number | undefined,
     maximumEdges: number | undefined,
   ): Promise<GpuIslandExecution> {
-    const integratedLex = lexer.prepareIntegratedLex(sourceUnits, {
-      capacityRecords: maximumTokens,
-    });
+    let tokenCapacity = Math.max(1, sourceUnits.length);
+    if (maximumTokens !== undefined) {
+      if (!Number.isSafeInteger(maximumTokens) || maximumTokens < 1) {
+        throw new Error(
+          `capacityRecords must be a positive safe integer, got '${maximumTokens}'.`,
+        );
+      }
+      tokenCapacity = Math.max(
+        1,
+        Math.min(sourceUnits.length, maximumTokens),
+      );
+    }
     const layout = executionLayout(
-      integratedLex.capacityRecords,
+      tokenCapacity,
       this.plan,
       maximumNodes,
       maximumEdges,
     );
     const candidateMultiplicity = this.plan.execution.bounds.candidatesPerToken;
     const candidateCount = 1 +
-      integratedLex.capacityRecords * candidateMultiplicity;
-    const contractionRounds = Math.min(
-      MAX_CONTRACTION_ROUNDS,
-      Math.ceil(Math.log2(Math.max(1, candidateCount))) + 1,
-    );
+      tokenCapacity * candidateMultiplicity;
+    const contractionRounds = this.plan.statistics.contractionRounds;
+    if (
+      contractionRounds < 1 ||
+      contractionRounds > MAX_CONTRACTION_ROUNDS
+    ) {
+      throw new Error(
+        `GPU frontend contraction round bound ${contractionRounds} is outside [1, ${MAX_CONTRACTION_ROUNDS}].`,
+      );
+    }
     const tokenWorkgroups = Math.max(
       1,
-      Math.ceil(integratedLex.capacityRecords / 256),
+      Math.ceil(tokenCapacity / 256),
     );
-    const candidateWorkgroups = Math.max(1, Math.ceil(candidateCount / 256));
     const allocationScan = scanLayout(candidateCount);
-    const structural = structuralLayout(integratedLex.capacityRecords);
+    const candidateWorkgroups = Math.max(1, Math.ceil(candidateCount / 256));
+    const structural = structuralLayout(tokenCapacity);
     const dispatches = islandDispatchLabels(
       contractionRounds,
+      tokenWorkgroups,
       tokenWorkgroups,
       candidateWorkgroups,
       allocationScan,
       structural,
+      Math.max(1, Math.ceil(layout.stagingWords / 256)),
     );
     if (
-      integratedLex.stageCount + dispatches.length > MAX_EXECUTION_DISPATCHES
+      GPU_LEX_STAGE_LABELS.length + dispatches.length >
+        MAX_EXECUTION_DISPATCHES
     ) {
       throw new Error(
         `GPU frontend needs ${
-          integratedLex.stageCount + dispatches.length
+          GPU_LEX_STAGE_LABELS.length + dispatches.length
         } timestamped dispatches, exceeding internal bound ${MAX_EXECUTION_DISPATCHES}.`,
       );
     }
-    const queryCount = (integratedLex.stageCount + dispatches.length) * 2;
+    const queryCount = (GPU_LEX_STAGE_LABELS.length + dispatches.length) * 2;
     const maximumQueryCount = MAX_EXECUTION_DISPATCHES * 2;
     const timestampBytes = queryCount * BigUint64Array.BYTES_PER_ELEMENT;
     const arenaBytes = layout.arenaWords * Uint32Array.BYTES_PER_ELEMENT;
@@ -546,11 +620,14 @@ export class GpuIslandExecutor {
       Uint32Array.BYTES_PER_ELEMENT;
     const scratchWords = Math.max(allocationScan.words, structural.words);
     const scratchBytes = scratchWords * Uint32Array.BYTES_PER_ELEMENT;
+    const deviceStagingBytes = layout.stagingWords *
+      Uint32Array.BYTES_PER_ELEMENT;
     const stagingBytes = timestampBytes +
       layout.stagingWords * Uint32Array.BYTES_PER_ELEMENT;
     this.#assertBufferLimit("islandArena", arenaBytes, true);
     this.#assertBufferLimit("islandCandidates", candidateBytes, true);
     this.#assertBufferLimit("islandScan", scratchBytes, true);
+    this.#assertBufferLimit("deviceStaging", deviceStagingBytes, true);
     this.#assertBufferLimit("islandStaging", stagingBytes, false);
 
     let slot = this.#slots.get(lexer);
@@ -572,6 +649,7 @@ export class GpuIslandExecutor {
         arena: null,
         candidates: null,
         scratch: null,
+        deviceStaging: null,
         staging: null,
         params: null,
         querySet,
@@ -604,6 +682,12 @@ export class GpuIslandExecutor {
       GPUBufferUsage.STORAGE,
       "baba gpu frontend scan scratch",
     );
+    slot.deviceStaging = this.#ensureBuffer(
+      slot.deviceStaging,
+      deviceStagingBytes,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      "baba gpu frontend device staging",
+    );
     slot.staging = this.#ensureBuffer(
       slot.staging,
       stagingBytes,
@@ -613,10 +697,22 @@ export class GpuIslandExecutor {
     const arenaBuffer = slot.arena.buffer;
     const candidateBuffer = slot.candidates.buffer;
     const scratchBuffer = slot.scratch.buffer;
+    const deviceStagingBuffer = slot.deviceStaging.buffer;
     const paramsBuffer = slot.params.buffer;
     const stagingBuffer = slot.staging.buffer;
+    const integratedLex = lexer.prepareIntegratedLex(sourceUnits, {
+      capacityRecords: maximumTokens,
+    });
 
     try {
+      if (
+        integratedLex.capacityRecords !== tokenCapacity ||
+        integratedLex.stageCount !== GPU_LEX_STAGE_LABELS.length
+      ) {
+        throw new Error(
+          `Integrated lexer prepared ${integratedLex.capacityRecords} records and ${integratedLex.stageCount} stages; expected ${tokenCapacity} records and ${GPU_LEX_STAGE_LABELS.length} stages.`,
+        );
+      }
       const header = new Uint32Array(HEADER_WORDS);
       header[9] = integratedLex.capacityRecords;
       header[10] = layout.tokenCapacity;
@@ -631,6 +727,7 @@ export class GpuIslandExecutor {
       header[20] = candidateCount;
       header[21] = contractionRounds;
       header[22] = candidateMultiplicity;
+      header[23] = sourceUnits.length;
       this.device.queue.writeBuffer(arenaBuffer, 0, header);
       this.device.queue.writeBuffer(
         candidateBuffer,
@@ -668,14 +765,11 @@ export class GpuIslandExecutor {
             binding: 7,
             resource: { buffer: paramsBuffer, size: 32 },
           },
+          { binding: 8, resource: { buffer: deviceStagingBuffer } },
         ],
       });
       const encoder = this.device.createCommandEncoder();
       integratedLex.encode(encoder, slot.querySet, 0);
-      const candidateWorkgroups = Math.max(
-        1,
-        Math.ceil(candidateCount / 256),
-      );
       for (let index = 0; index < dispatches.length; index += 1) {
         const dispatch = dispatches[index];
         const descriptor: GPUComputePassDescriptor = {
@@ -693,41 +787,27 @@ export class GpuIslandExecutor {
         pass.setBindGroup(0, bindGroup, [
           index * DISPATCH_PARAM_BYTES,
         ]);
-        pass.dispatchWorkgroups(dispatch.workgroups);
+        const workgroupsX = Math.min(dispatch.workgroups, 65_535);
+        const workgroupsY = Math.ceil(dispatch.workgroups / workgroupsX);
+        if (
+          workgroupsY > this.device.limits.maxComputeWorkgroupsPerDimension
+        ) {
+          throw new GpuFrontendCapacityError(
+            `${dispatch.label}Workgroups`,
+            dispatch.workgroups,
+            this.device.limits.maxComputeWorkgroupsPerDimension ** 2,
+          );
+        }
+        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
         pass.end();
       }
 
-      let stagingOffset = timestampBytes;
       encoder.copyBufferToBuffer(
-        arenaBuffer,
+        deviceStagingBuffer,
         0,
         stagingBuffer,
-        stagingOffset,
-        HEADER_WORDS * 4,
-      );
-      stagingOffset += HEADER_WORDS * 4;
-      encoder.copyBufferToBuffer(
-        arenaBuffer,
-        layout.tokenOffset * 4,
-        stagingBuffer,
-        stagingOffset,
-        layout.tokenCapacity * TOKEN_WORDS * 4,
-      );
-      stagingOffset += layout.tokenCapacity * TOKEN_WORDS * 4;
-      encoder.copyBufferToBuffer(
-        arenaBuffer,
-        layout.nodeOffset * 4,
-        stagingBuffer,
-        stagingOffset,
-        layout.nodeCapacity * NODE_WORDS * 4,
-      );
-      stagingOffset += layout.nodeCapacity * NODE_WORDS * 4;
-      encoder.copyBufferToBuffer(
-        arenaBuffer,
-        layout.edgeOffset * 4,
-        stagingBuffer,
-        stagingOffset,
-        layout.edgeCapacity * EDGE_WORDS * 4,
+        timestampBytes,
+        deviceStagingBytes,
       );
       if (
         slot.querySet !== null &&
@@ -789,6 +869,9 @@ export class GpuIslandExecutor {
       }
       if (slot.scratch !== null) {
         slot.scratch.buffer.destroy();
+      }
+      if (slot.deviceStaging !== null) {
+        slot.deviceStaging.buffer.destroy();
       }
       if (slot.staging !== null) {
         slot.staging.buffer.destroy();
@@ -868,12 +951,32 @@ function decodeStageTimings(
   let contraction = 0;
   let reachability = 0;
   let allocation = 0;
+  let structure = 0;
+  let gpuTotal = lex;
   for (let index = 0; index < dispatches.length; index += 1) {
     const elapsed = Number(
       timestamps[(islandIndex + index) * 2 + 1] -
         timestamps[(islandIndex + index) * 2],
     ) / 1e6;
     stages[dispatches[index].label] = elapsed;
+    gpuTotal += elapsed;
+    if (
+      dispatches[index].entryPoint === "delimiter_flags" ||
+      dispatches[index].entryPoint === "structure_tree_leaves" ||
+      dispatches[index].entryPoint === "structure_tree_level" ||
+      dispatches[index].entryPoint === "match_delimiters" ||
+      dispatches[index].entryPoint === "validate_delimiters" ||
+      dispatches[index].entryPoint === "structure" ||
+      (
+        (
+          dispatches[index].entryPoint === "scan_level" ||
+          dispatches[index].entryPoint === "add_scan_offsets"
+        ) &&
+        dispatches[index].label.startsWith("structure_")
+      )
+    ) {
+      structure += elapsed;
+    }
     if (dispatches[index].entryPoint === "contract_regions") {
       contraction += elapsed;
     }
@@ -891,6 +994,8 @@ function decodeStageTimings(
   stages.contraction = contraction;
   stages.reachability = reachability;
   stages.allocation = allocation;
+  stages.structure = structure;
+  stages.total_gpu = gpuTotal;
   return stages;
 }
 
@@ -1123,8 +1228,8 @@ function decodeExecution(
         start: mapped[4],
         end: mapped[5],
         subjectId: mapped[6],
-        parameter0: mapped[7],
-        parameter1: mapped[8],
+        parameter0: mapped[7] | 0,
+        parameter1: mapped[8] | 0,
       },
       submitAndReadbackMs,
       stagesMs,
@@ -1193,7 +1298,16 @@ struct DispatchParams {
 
 @group(0) @binding(6) var<storage, read_write> scan_scratch: array<u32>;
 @group(0) @binding(7) var<uniform> dispatch_params: DispatchParams;
+@group(0) @binding(8) var<storage, read_write> staging_words: array<u32>;
 var<workgroup> scan_values: array<u32, 256>;
+
+fn linear_invocation_index(invocation: vec3<u32>) -> u32 {
+  return invocation.x + invocation.y * 65535u * 256u;
+}
+
+fn linear_workgroup_index(workgroup: vec3<u32>) -> u32 {
+  return workgroup.x + workgroup.y * 65535u;
+}
 
 fn candidate_word(candidate: u32, word: u32) -> u32 {
   return atomicLoad(&candidates[candidate * ${CANDIDATE_WORDS}u + word]);
@@ -1256,14 +1370,14 @@ fn fail(code: u32, start: u32, end: u32, subject: u32, p0: u32, p1: u32) {
 
 @compute @workgroup_size(256)
 fn classify(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  let compact_index = invocation.x;
+  let compact_index = linear_invocation_index(invocation);
   let compact_count = lex_metadata[0u];
   if (compact_index >= compact_count) {
     return;
   }
   if (lex_metadata[1u] == 1u) {
     if (compact_index == 0u) {
-      fail(4u, 0u, 0u, compact_count, compact_count, arena[9u]);
+      fail(4u, 0u, arena[23u], compact_count, compact_count, arena[9u]);
     }
     return;
   }
@@ -1282,11 +1396,13 @@ fn classify(@builtin(global_invocation_id) invocation: vec3<u32>) {
   if (spec_plus_one == 0u) {
     arena[token_base] = bitcast<u32>(-2i);
     arena[token_base + 3u] = 0xffffffffu;
+    atomicMin(&candidates[0u], compact_index * 4u + 1u);
   } else {
     let spec = spec_plus_one - 1u;
     arena[token_base + 3u] = spec;
     if (spec >= plan[0u]) {
       arena[token_base] = bitcast<u32>(-3i);
+      atomicMin(&candidates[0u], compact_index * 4u + 2u);
     } else {
       arena[token_base] = plan[plan[2u] + spec];
     }
@@ -1298,33 +1414,129 @@ fn classify(@builtin(global_invocation_id) invocation: vec3<u32>) {
 
 @compute @workgroup_size(256)
 fn delimiter_flags(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  if (invocation.x >= arena[1u]) {
+  let token_index = linear_invocation_index(invocation);
+  if (token_index >= arena[1u]) {
     return;
   }
+  var expected_close = 0xffffffffu;
+  var is_close = 0u;
+  let token_terminal = terminal(token_index);
+  if (token_terminal >= 0i) {
+    var island = 0u;
+    loop {
+      if (island >= plan[1u]) {
+        break;
+      }
+      let kind = island_word(island, 2u);
+      if (kind == 1u || kind == 3u) {
+        if (island_word(island, 3u) == u32(token_terminal)) {
+          expected_close = island_word(island, 4u);
+        }
+        if (island_word(island, 4u) == u32(token_terminal)) {
+          is_close = 1u;
+        }
+      }
+      island += 1u;
+    }
+  }
+  arena[arena[18u] + token_index] = expected_close;
+  arena[arena[19u] + token_index] = is_close;
 }
 
 @compute @workgroup_size(256)
 fn structure_tree_leaves(
   @builtin(global_invocation_id) invocation: vec3<u32>,
 ) {
-  if (invocation.x >= dispatch_params.count) {
+  let index = linear_invocation_index(invocation);
+  let tree_leaves = dispatch_params.block_sums_offset;
+  if (index >= tree_leaves) {
     return;
   }
+  var depth_after = 0xffffffffu;
+  if (index < arena[1u]) {
+    depth_after = scan_scratch[dispatch_params.input_offset + index];
+    if (arena[arena[18u] + index] != 0xffffffffu) {
+      depth_after += 1u;
+    } else if (arena[arena[19u] + index] == 1u) {
+      depth_after -= 1u;
+    }
+  }
+  scan_scratch[
+    dispatch_params.output_offset + tree_leaves + index
+  ] = depth_after;
 }
 
 @compute @workgroup_size(256)
 fn structure_tree_level(
   @builtin(global_invocation_id) invocation: vec3<u32>,
 ) {
-  if (invocation.x >= dispatch_params.count) {
+  let index = linear_invocation_index(invocation);
+  if (index >= dispatch_params.count) {
     return;
   }
+  let left = scan_scratch[dispatch_params.input_offset + index * 2u];
+  let right = scan_scratch[dispatch_params.input_offset + index * 2u + 1u];
+  scan_scratch[dispatch_params.output_offset + index] = min(left, right);
+}
+
+fn structure_range_min(begin: u32, end: u32) -> u32 {
+  let tree_offset = dispatch_params.output_offset;
+  let tree_leaves = dispatch_params.block_sums_offset;
+  var left = begin + tree_leaves;
+  var right = end + tree_leaves;
+  var result = 0xffffffffu;
+  loop {
+    if (left >= right) {
+      return result;
+    }
+    if ((left & 1u) == 1u) {
+      result = min(result, scan_scratch[tree_offset + left]);
+      left += 1u;
+    }
+    if ((right & 1u) == 1u) {
+      right -= 1u;
+      result = min(result, scan_scratch[tree_offset + right]);
+    }
+    left /= 2u;
+    right /= 2u;
+  }
+  return result;
 }
 
 @compute @workgroup_size(256)
 fn match_delimiters(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  if (invocation.x >= arena[1u]) {
+  let open_index = linear_invocation_index(invocation);
+  if (open_index >= arena[1u]) {
     return;
+  }
+  let expected_close = arena[arena[18u] + open_index];
+  if (expected_close == 0xffffffffu) {
+    return;
+  }
+  let depth = scan_scratch[dispatch_params.input_offset + open_index];
+  if (structure_range_min(open_index + 1u, arena[1u]) > depth) {
+    atomicMin(&candidates[0u], open_index * 4u + 3u);
+    return;
+  }
+  var low = open_index + 1u;
+  var high = arena[1u];
+  loop {
+    if (low >= high) {
+      break;
+    }
+    let middle = low + (high - low) / 2u;
+    if (structure_range_min(open_index + 1u, middle + 1u) <= depth) {
+      high = middle;
+    } else {
+      low = middle + 1u;
+    }
+  }
+  let close_index = low;
+  arena[arena[17u] + open_index] = close_index;
+  arena[arena[17u] + close_index] = open_index;
+  let actual_close = terminal(close_index);
+  if (actual_close < 0i || u32(actual_close) != expected_close) {
+    atomicMin(&candidates[0u], close_index * 4u + 3u);
   }
 }
 
@@ -1332,8 +1544,15 @@ fn match_delimiters(@builtin(global_invocation_id) invocation: vec3<u32>) {
 fn validate_delimiters(
   @builtin(global_invocation_id) invocation: vec3<u32>,
 ) {
-  if (invocation.x >= arena[1u]) {
+  let token_index = linear_invocation_index(invocation);
+  if (token_index >= arena[1u]) {
     return;
+  }
+  if (
+    arena[arena[19u] + token_index] == 1u &&
+    arena[arena[17u] + token_index] == 0xffffffffu
+  ) {
+    atomicMin(&candidates[0u], token_index * 4u + 3u);
   }
 }
 
@@ -1342,111 +1561,79 @@ fn structure() {
   if (arena[0u] != 0u) {
     return;
   }
-  let token_count = arena[1u];
-  var lexical_index = 0u;
-  loop {
-    if (lexical_index >= token_count) {
-      break;
-    }
-    let token_terminal = terminal(lexical_index);
-    if (token_terminal == -2i) {
-      let start = token_word(lexical_index, 1u);
-      var unit = 0u;
-      if ((start >> 1u) < arrayLength(&source_units)) {
-        unit = source_unit(start);
-      }
-      fail(
-        1u,
-        start,
-        token_word(lexical_index, 2u),
-        lexical_index,
-        unit,
-        0u,
-      );
-      return;
-    }
-    if (token_terminal == -3i) {
-      fail(
-        3u,
-        token_word(lexical_index, 1u),
-        token_word(lexical_index, 2u),
-        lexical_index,
-        token_word(lexical_index, 3u),
-        plan[0u],
-      );
-      return;
-    }
-    lexical_index += 1u;
-  }
-  var delimiter_depth = 0u;
-  var token_index = 0u;
-  loop {
-    token_index = next_syntax(token_index, token_count);
-    if (token_index >= token_count) {
-      break;
-    }
-    let token_terminal = u32(terminal(token_index));
-    var expected_close = 0xffffffffu;
-    var is_close = false;
-    var island_index = 0u;
-    loop {
-      if (island_index >= plan[1u]) {
-        break;
-      }
-      let kind = island_word(island_index, 2u);
-      if (kind == 1u || kind == 3u) {
-        if (island_word(island_index, 3u) == token_terminal) {
-          expected_close = island_word(island_index, 4u);
-        }
-        if (island_word(island_index, 4u) == token_terminal) {
-          is_close = true;
-        }
-      }
-      island_index += 1u;
-    }
-    if (expected_close != 0xffffffffu) {
-      arena[arena[18u] + delimiter_depth] = expected_close;
-      arena[arena[19u] + delimiter_depth] = token_index;
-      delimiter_depth += 1u;
-    } else if (is_close) {
-      if (delimiter_depth == 0u) {
-        fail(2u, token_word(token_index, 1u), token_word(token_index, 2u), token_index, 0xffffffffu, token_terminal);
-        return;
-      }
-      delimiter_depth -= 1u;
-      let expected = arena[arena[18u] + delimiter_depth];
-      let open_index = arena[arena[19u] + delimiter_depth];
-      if (expected != token_terminal) {
-        fail(2u, token_word(token_index, 1u), token_word(token_index, 2u), token_index, expected, token_terminal);
-        return;
-      }
-      arena[arena[17u] + open_index] = token_index;
-    }
-    token_index += 1u;
-  }
-  if (delimiter_depth > 0u) {
-    let open_index = arena[arena[19u] + delimiter_depth - 1u];
-    let expected = arena[arena[18u] + delimiter_depth - 1u];
-    fail(2u, token_word(open_index, 1u), token_word(open_index, 2u), open_index, expected, 0xffffffffu);
+  let packed_error = atomicLoad(&candidates[0u]);
+  if (packed_error == 0xffffffffu) {
     return;
   }
+  let token_index = packed_error / 4u;
+  let kind = packed_error & 3u;
+  if (kind == 1u) {
+    let start = token_word(token_index, 1u);
+    var unit = 0u;
+    if ((start >> 1u) < arrayLength(&source_units)) {
+      unit = source_unit(start);
+    }
+    fail(
+      1u,
+      start,
+      token_word(token_index, 2u),
+      start,
+      unit,
+      0u,
+    );
+    return;
+  }
+  if (kind == 2u) {
+    fail(
+      3u,
+      token_word(token_index, 1u),
+      token_word(token_index, 2u),
+      token_index,
+      token_word(token_index, 3u),
+      plan[0u],
+    );
+    return;
+  }
+  var expected = arena[arena[18u] + token_index];
+  var actual = 0xffffffffu;
+  let matched = arena[arena[17u] + token_index];
+  if (arena[arena[19u] + token_index] == 1u) {
+    actual = u32(terminal(token_index));
+    if (matched != 0xffffffffu) {
+      expected = arena[arena[18u] + matched];
+    }
+  } else if (matched != 0xffffffffu) {
+    actual = u32(terminal(matched));
+  }
+  fail(
+    2u,
+    token_word(token_index, 1u),
+    token_word(token_index, 2u),
+    token_index,
+    expected,
+    actual,
+  );
 }
 
 struct RegionSummary {
   accepted: u32,
   end: u32,
-  state: u32,
   events: u32,
+  diagnostic_position: u32,
+  diagnostic_context: u32,
 }
 
 fn summary_base(bank: u32) -> u32 {
-  return 5u + bank * 4u;
+  return 5u + bank * 5u;
 }
 
-fn candidate_for_island(
+fn diagnostic_value(island: u32, state: u32) -> u32 {
+  return (island << 16u) | (state - island_word(island, 1u));
+}
+
+fn located_candidate_for_island(
   island: u32,
   initial: u32,
-  bank: u32,
 ) -> u32 {
   let cursor = next_syntax(initial, arena[1u]);
   if (cursor >= arena[1u]) {
@@ -1470,13 +1657,24 @@ fn candidate_for_island(
       if (candidate >= arena[20u]) {
         return 0xffffffffu;
       }
-      let base = summary_base(bank);
-      if (candidate_word(candidate, base) == 1u) {
-        return candidate;
-      }
-      return 0xffffffffu;
+      return candidate;
     }
     slot += 1u;
+  }
+  return 0xffffffffu;
+}
+
+fn candidate_for_island(
+  island: u32,
+  initial: u32,
+  bank: u32,
+) -> u32 {
+  let candidate = located_candidate_for_island(island, initial);
+  if (
+    candidate != 0xffffffffu &&
+    candidate_word(candidate, summary_base(bank)) == 1u
+  ) {
+    return candidate;
   }
   return 0xffffffffu;
 }
@@ -1502,11 +1700,17 @@ fn region_limit(island: u32, start: u32) -> u32 {
 fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
   let island = candidate_word(candidate, 0u);
   var cursor = candidate_word(candidate, 1u);
-  let limit = candidate_word(candidate, 13u);
+  let limit = candidate_word(candidate, 15u);
   var state = island_word(island, 1u);
   var events = 0u;
+  var farthest = cursor;
+  var diagnostic_context = diagnostic_value(island, state);
   loop {
     cursor = next_syntax(cursor, limit);
+    if (cursor < limit && cursor >= farthest) {
+      farthest = cursor;
+      diagnostic_context = diagnostic_value(island, state);
+    }
     let transition_start = state_word(state, 1u);
     let transition_count = state_word(state, 2u);
     var transition_index = 0u;
@@ -1519,20 +1723,21 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
       let transition = transition_start + transition_index;
       if (transition_word(transition, 0u) == 1u) {
         let child_island = transition_word(transition, 1u);
-        let located = candidate_for_island(
-          child_island,
-          cursor,
-          read_bank,
-        );
+        let located = located_candidate_for_island(child_island, cursor);
         if (located != 0xffffffffu) {
-          let child_end = candidate_word(
-            located,
-            summary_base(read_bank) + 1u,
-          );
-          if (child_end > cursor && child_end <= limit) {
-            child_candidate = located;
-            child_target = transition_word(transition, 2u);
-            break;
+          let child_base = summary_base(read_bank);
+          let child_end = candidate_word(located, child_base + 1u);
+          let child_farthest = candidate_word(located, child_base + 3u);
+          if (child_farthest >= farthest) {
+            farthest = child_farthest;
+            diagnostic_context = candidate_word(located, child_base + 4u);
+          }
+          if (candidate_word(located, child_base) == 1u) {
+            if (child_end > cursor && child_end <= limit) {
+              child_candidate = located;
+              child_target = transition_word(transition, 2u);
+              break;
+            }
           }
         }
       }
@@ -1571,81 +1776,170 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
     ) {
       accepted = 0u;
     }
-    return RegionSummary(accepted, cursor, state, events);
+    if (accepted == 1u) {
+      return RegionSummary(
+        accepted,
+        cursor,
+        events,
+        farthest,
+        diagnostic_context,
+      );
+    }
+    return RegionSummary(
+      0u,
+      cursor,
+      events,
+      farthest,
+      diagnostic_context,
+    );
   }
-  return RegionSummary(0u, cursor, state, events);
+  return RegionSummary(0u, cursor, events, farthest, diagnostic_context);
 }
 
 @compute @workgroup_size(256)
 fn regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  let candidate = invocation.x;
-  if (candidate >= arena[20u]) {
+  let worker = linear_invocation_index(invocation);
+  if (worker >= arena[9u]) {
     return;
   }
-  var island = 0xffffffffu;
-  var start = arena[1u];
-  if (candidate == 0u) {
-    island = plan[6u];
-    start = next_syntax(0u, arena[1u]);
-  } else {
-    let multiplicity = arena[22u];
-    let token_index = (candidate - 1u) / multiplicity;
-    let slot = (candidate - 1u) % multiplicity;
-    if (token_index < arena[1u]) {
-      let token_terminal = terminal(token_index);
-      if (
-        token_terminal >= 0i &&
-        u32(token_terminal) < plan[11u]
-      ) {
-        let located = plan[
-          plan[12u] + u32(token_terminal) * multiplicity + slot
-        ];
-        if (located > 1u) {
-          island = located - 1u;
-          start = token_index;
+  let multiplicity = arena[22u];
+  var candidate = 1u + worker * multiplicity;
+  let candidate_end = candidate + multiplicity;
+  if (worker == 0u) {
+    candidate = 0u;
+  }
+  loop {
+    var island = 0xffffffffu;
+    var start = arena[1u];
+    if (candidate == 0u) {
+      island = plan[6u];
+      start = next_syntax(0u, arena[1u]);
+    } else {
+      let token_index = (candidate - 1u) / multiplicity;
+      let slot = (candidate - 1u) % multiplicity;
+      if (token_index < arena[1u]) {
+        let token_terminal = terminal(token_index);
+        if (
+          token_terminal >= 0i &&
+          u32(token_terminal) < plan[11u]
+        ) {
+          let located = plan[
+            plan[12u] + u32(token_terminal) * multiplicity + slot
+          ];
+          if (located > 1u) {
+            island = located - 1u;
+            start = token_index;
+          }
         }
       }
     }
-  }
-  set_candidate_word(candidate, 0u, island);
-  set_candidate_word(candidate, 1u, start);
-  set_candidate_word(candidate, 2u, 0u);
-  set_candidate_word(candidate, 3u, 0xffffffffu);
-  set_candidate_word(candidate, 4u, 0xffffffffu);
-  var word = 5u;
-  loop {
-    if (word >= 13u) {
-      break;
+    set_candidate_word(candidate, 0u, island);
+    set_candidate_word(candidate, 1u, start);
+    set_candidate_word(candidate, 2u, 0u);
+    set_candidate_word(candidate, 3u, 0xffffffffu);
+    set_candidate_word(candidate, 4u, 0xffffffffu);
+    var word = 5u;
+    loop {
+      if (word >= 15u) {
+        break;
+      }
+      set_candidate_word(candidate, word, 0u);
+      word += 1u;
     }
-    set_candidate_word(candidate, word, 0u);
-    word += 1u;
+    var limit = 0xffffffffu;
+    if (island != 0xffffffffu) {
+      limit = region_limit(island, start);
+    }
+    set_candidate_word(candidate, 15u, limit);
+    if (candidate == 0u) {
+      candidate = 1u;
+    } else {
+      candidate += 1u;
+    }
+    if (candidate >= candidate_end) {
+      return;
+    }
   }
-  var limit = 0xffffffffu;
-  if (island != 0xffffffffu) {
-    limit = region_limit(island, start);
-  }
-  set_candidate_word(candidate, 13u, limit);
 }
 
 @compute @workgroup_size(256)
 fn contract_regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  let candidate = invocation.x;
-  if (
-    arena[0u] != 0u ||
-    candidate >= arena[20u] ||
-    candidate_word(candidate, 0u) == 0xffffffffu ||
-    candidate_word(candidate, 13u) == 0xffffffffu
-  ) {
+  if (arena[0u] != 0u) {
     return;
+  }
+  let worker = linear_invocation_index(invocation);
+  if (worker >= arena[9u]) {
+    return;
+  }
+  let multiplicity = arena[22u];
+  var candidate = 1u + worker * multiplicity;
+  let candidate_end = candidate + multiplicity;
+  if (worker == 0u) {
+    candidate = 0u;
   }
   let read_bank = dispatch_params.round & 1u;
   let write_bank = 1u - read_bank;
-  let summary = summarize_region(candidate, read_bank);
-  let base = summary_base(write_bank);
-  set_candidate_word(candidate, base, summary.accepted);
-  set_candidate_word(candidate, base + 1u, summary.end);
-  set_candidate_word(candidate, base + 2u, summary.state);
-  set_candidate_word(candidate, base + 3u, summary.events);
+  loop {
+    if (
+      candidate_word(candidate, 0u) != 0xffffffffu &&
+      candidate_word(candidate, 15u) != 0xffffffffu
+    ) {
+      let read_base = summary_base(read_bank);
+      let base = summary_base(write_bank);
+      if (candidate_word(candidate, 4u) == 0xfffffffeu) {
+        var summary_word = 0u;
+        loop {
+          if (summary_word >= 5u) {
+            break;
+          }
+          set_candidate_word(
+            candidate,
+            base + summary_word,
+            candidate_word(candidate, read_base + summary_word),
+          );
+          summary_word += 1u;
+        }
+      } else {
+        let summary = summarize_region(candidate, read_bank);
+        set_candidate_word(candidate, base, summary.accepted);
+        set_candidate_word(candidate, base + 1u, summary.end);
+        set_candidate_word(candidate, base + 2u, summary.events);
+        set_candidate_word(candidate, base + 3u, summary.diagnostic_position);
+        set_candidate_word(candidate, base + 4u, summary.diagnostic_context);
+        if (summary.accepted == 1u) {
+          let island = candidate_word(candidate, 0u);
+          let boundary_kind = island_word(island, 2u);
+          var complete = summary.end == arena[1u];
+          if (boundary_kind == 1u || boundary_kind == 3u) {
+            complete = true;
+          } else if (boundary_kind == 2u && summary.end > 0u) {
+            var previous = summary.end - 1u;
+            loop {
+              if (terminal(previous) >= 0i) {
+                break;
+              }
+              if (previous == 0u) {
+                break;
+              }
+              previous -= 1u;
+            }
+            complete = u32(terminal(previous)) == island_word(island, 4u);
+          }
+          if (complete) {
+            set_candidate_word(candidate, 4u, 0xfffffffeu);
+          }
+        }
+      }
+    }
+    if (candidate == 0u) {
+      candidate = 1u;
+    } else {
+      candidate += 1u;
+    }
+    if (candidate >= candidate_end) {
+      return;
+    }
+  }
 }
 
 @compute @workgroup_size(1)
@@ -1663,7 +1957,7 @@ fn validate_root() {
   }
   var start = 0u;
   var finish = 0u;
-  let rejected = next_syntax(end, arena[1u]);
+  let rejected = candidate_word(0u, base + 3u);
   if (rejected < arena[1u]) {
     start = token_word(rejected, 1u);
     finish = token_word(rejected, 2u);
@@ -1672,16 +1966,16 @@ fn validate_root() {
     3u,
     start,
     finish,
-    rejected,
-    plan[6u],
-    candidate_word(0u, base + 2u),
+    scan_scratch[rejected],
+    candidate_word(0u, base + 4u) >> 16u,
+    candidate_word(0u, base + 4u) & 0xffffu,
   );
 }
 
 fn mark_region_children(candidate: u32, bank: u32) {
   let island = candidate_word(candidate, 0u);
   var cursor = candidate_word(candidate, 1u);
-  let limit = candidate_word(candidate, 13u);
+  let limit = candidate_word(candidate, 15u);
   var state = island_word(island, 1u);
   loop {
     cursor = next_syntax(cursor, limit);
@@ -1742,15 +2036,36 @@ fn mark_region_children(candidate: u32, bank: u32) {
 
 @compute @workgroup_size(256)
 fn reachability(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  let candidate = invocation.x;
-  if (
-    arena[0u] != 0u ||
-    candidate >= arena[20u] ||
-    candidate_word(candidate, 2u) == 0u
-  ) {
+  if (arena[0u] != 0u) {
     return;
   }
-  mark_region_children(candidate, arena[21u] & 1u);
+  let worker = linear_invocation_index(invocation);
+  if (worker >= arena[9u]) {
+    return;
+  }
+  let multiplicity = arena[22u];
+  var candidate = 1u + worker * multiplicity;
+  let candidate_end = candidate + multiplicity;
+  if (worker == 0u) {
+    candidate = 0u;
+  }
+  loop {
+    if (
+      candidate_word(candidate, 2u) == 1u &&
+      candidate_word(candidate, 3u) == 0xffffffffu
+    ) {
+      mark_region_children(candidate, arena[21u] & 1u);
+      set_candidate_word(candidate, 3u, 0xfffffffeu);
+    }
+    if (candidate == 0u) {
+      candidate = 1u;
+    } else {
+      candidate += 1u;
+    }
+    if (candidate >= candidate_end) {
+      return;
+    }
+  }
 }
 
 fn candidate_span_start(candidate: u32) -> u32 {
@@ -1783,7 +2098,7 @@ fn scan_level(
   if (arena[0u] != 0u) {
     return;
   }
-  let index = workgroup.x * 256u + lane;
+  let index = linear_workgroup_index(workgroup) * 256u + lane;
   var value = 0u;
   if (index < dispatch_params.count) {
     if (dispatch_params.mode == 0u) {
@@ -1792,11 +2107,21 @@ fn scan_level(
       if (candidate_word(index, 2u) == 1u) {
         value = candidate_word(
           index,
-          summary_base(arena[21u] & 1u) + 3u,
+          summary_base(arena[21u] & 1u) + 2u,
         );
       }
     } else if (dispatch_params.mode == 2u) {
       value = scan_scratch[dispatch_params.input_offset + index];
+    } else if (dispatch_params.mode == 3u && index < arena[1u]) {
+      if (arena[arena[18u] + index] != 0xffffffffu) {
+        value = 1u;
+      } else if (arena[arena[19u] + index] == 1u) {
+        value = 0xffffffffu;
+      }
+    } else if (dispatch_params.mode == 4u && index < arena[1u]) {
+      if (terminal(index) >= 0i) {
+        value = 1u;
+      }
     }
   }
   scan_values[lane] = value;
@@ -1846,7 +2171,7 @@ fn add_scan_offsets(@builtin(global_invocation_id) invocation: vec3<u32>) {
   if (arena[0u] != 0u) {
     return;
   }
-  let index = invocation.x;
+  let index = linear_invocation_index(invocation);
   if (index >= dispatch_params.count) {
     return;
   }
@@ -1863,7 +2188,7 @@ fn finalize_offsets(@builtin(global_invocation_id) invocation: vec3<u32>) {
   if (arena[0u] != 0u) {
     return;
   }
-  let candidate = invocation.x;
+  let candidate = linear_invocation_index(invocation);
   let total = scan_scratch[dispatch_params.block_sums_offset];
   if (candidate == 0u) {
     var capacity = arena[11u];
@@ -1905,7 +2230,7 @@ fn finalize_offsets(@builtin(global_invocation_id) invocation: vec3<u32>) {
 fn emit_region(candidate: u32, bank: u32) {
   let node = candidate_word(candidate, 3u);
   let island = candidate_word(candidate, 0u);
-  let event_count = candidate_word(candidate, summary_base(bank) + 3u);
+  let event_count = candidate_word(candidate, summary_base(bank) + 2u);
   let edge_offset = candidate_word(candidate, 4u);
   let node_base = arena[14u] + node * NODE_WORDS;
   arena[node_base] = island_word(island, 0u);
@@ -1918,7 +2243,7 @@ fn emit_region(candidate: u32, bank: u32) {
   arena[node_base + 7u] = 0xffffffffu;
 
   var cursor = candidate_word(candidate, 1u);
-  let limit = candidate_word(candidate, 13u);
+  let limit = candidate_word(candidate, 15u);
   var state = island_word(island, 1u);
   var ordinal = 0u;
   loop {
@@ -1988,7 +2313,7 @@ fn emit_region(candidate: u32, bank: u32) {
 
 @compute @workgroup_size(256)
 fn emit(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  let candidate = invocation.x;
+  let candidate = linear_invocation_index(invocation);
   if (
     arena[0u] != 0u ||
     candidate >= arena[20u] ||
@@ -1999,8 +2324,29 @@ fn emit(@builtin(global_invocation_id) invocation: vec3<u32>) {
   emit_region(candidate, arena[21u] & 1u);
 }
 
-@compute @workgroup_size(1)
-fn staging() {
-  arena[31u] = arena[0u];
+@compute @workgroup_size(256)
+fn staging(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let output = linear_invocation_index(invocation);
+  if (output < HEADER_WORDS) {
+    staging_words[output] = arena[output];
+    return;
+  }
+  var relative = output - HEADER_WORDS;
+  let token_words = arena[10u] * TOKEN_WORDS;
+  if (relative < token_words) {
+    staging_words[output] = arena[arena[13u] + relative];
+    return;
+  }
+  relative -= token_words;
+  let node_words = arena[11u] * NODE_WORDS;
+  if (relative < node_words) {
+    staging_words[output] = arena[arena[14u] + relative];
+    return;
+  }
+  relative -= node_words;
+  let edge_words = arena[12u] * EDGE_WORDS;
+  if (relative < edge_words) {
+    staging_words[output] = arena[arena[16u] + relative];
+  }
 }
 `;

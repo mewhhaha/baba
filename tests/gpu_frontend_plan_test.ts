@@ -228,7 +228,8 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
   assert(planFile);
   assert(planFile.encoding === "binary");
   const source = "let first = 1;\nlet second = 2;";
-  const cpu = CpuFrontend.create(planFile.content).ingest(source);
+  const cpuFrontend = CpuFrontend.create(planFile.content);
+  const cpu = cpuFrontend.ingest(source);
   assert(cpu.ok);
   const runtime = await WebGpuRuntime.create({ allowFallbackAdapter: true });
   try {
@@ -243,6 +244,28 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
     assertEquals(gpu.program.edges.join(","), cpu.program.edges.join(","));
     assertEquals(gpu.program.symbols.join(","), cpu.program.symbols.join(","));
     assertEquals(gpu.program.types.join(","), cpu.program.types.join(","));
+    const tokenCount = cpu.program.tokens.length / 4;
+    const nodeCount = cpu.program.nodes.length / 8;
+    const edgeCount = cpu.program.edges.length / 4;
+    for (
+      const [cpuOptions, gpuOptions] of [
+        [
+          { maxTokens: tokenCount - 1 },
+          { lexerCapacityRecords: tokenCount - 1 },
+        ],
+        [{ maxNodes: nodeCount - 1 }, { maxNodes: nodeCount - 1 }],
+        [{ maxEdges: edgeCount - 1 }, { maxEdges: edgeCount - 1 }],
+      ] as const
+    ) {
+      const cpuCapacity = cpuFrontend.ingest(source, cpuOptions);
+      const gpuCapacity = await frontend.ingest(source, gpuOptions);
+      assert(!cpuCapacity.ok);
+      assert(!gpuCapacity.ok);
+      assertEquals(
+        gpuCapacity.diagnostics[0].record.join(","),
+        cpuCapacity.diagnostics[0].record.join(","),
+      );
+    }
 
     const gpuDuckPlan = await Deno.readFile(
       new URL(
@@ -281,6 +304,112 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       gpuDuck.program.types.join(","),
       cpuDuck.program.types.join(","),
     );
+    for (
+      const malformed of [
+        gpuDuckSource.replace("return {", "return ["),
+        gpuDuckSource.trimEnd().slice(0, -1),
+        gpuDuckSource + "\n~",
+      ]
+    ) {
+      const cpuFailure = CpuFrontend.create(gpuDuckPlan).ingest(malformed);
+      const gpuFailure = await gpuDuckFrontend.ingest(malformed);
+      assert(!cpuFailure.ok);
+      assert(!gpuFailure.ok);
+      assertEquals(
+        gpuFailure.diagnostics[0].record.join(","),
+        cpuFailure.diagnostics[0].record.join(","),
+      );
+    }
+    const unicodeSource = gpuDuckSource.replace('"hello"', '"😀"');
+    const cpuUnicode = CpuFrontend.create(gpuDuckPlan).ingest(unicodeSource);
+    const gpuUnicode = await gpuDuckFrontend.ingest(unicodeSource);
+    assert(cpuUnicode.ok);
+    assert(gpuUnicode.ok);
+    assertEquals(
+      gpuUnicode.program.tokens.join(","),
+      cpuUnicode.program.tokens.join(","),
+    );
+    assertEquals(
+      gpuUnicode.program.nodes.join(","),
+      cpuUnicode.program.nodes.join(","),
+    );
+    assertEquals(
+      gpuUnicode.program.edges.join(","),
+      cpuUnicode.program.edges.join(","),
+    );
+
+    const funcfuckPlan = await Deno.readFile(
+      new URL(
+        "../examples/funcfuck/generated/wasm/parser.plan",
+        import.meta.url,
+      ),
+    );
+    const cpuFuncfuckFrontend = CpuFrontend.create(funcfuckPlan);
+    const gpuFuncfuckFrontend = await runtime.compileFrontend(funcfuckPlan);
+    for (
+      const source of [
+        await Deno.readTextFile(
+          new URL(
+            "../examples/funcfuck/programs/pipeline.ff",
+            import.meta.url,
+          ),
+        ),
+        await Deno.readTextFile(
+          new URL(
+            "../examples/funcfuck/programs/fanout.ff",
+            import.meta.url,
+          ),
+        ),
+        await Deno.readTextFile(
+          new URL(
+            "../examples/funcfuck/programs/window.ff",
+            import.meta.url,
+          ),
+        ),
+        `emit [1] => ${"(".repeat(16)}id${")".repeat(16)};`,
+      ]
+    ) {
+      const cpuFuncfuck = cpuFuncfuckFrontend.ingest(source);
+      const gpuFuncfuck = await gpuFuncfuckFrontend.ingest(source);
+      assert(cpuFuncfuck.ok);
+      assert(gpuFuncfuck.ok);
+      assertEquals(
+        gpuFuncfuck.program.tokens.join(","),
+        cpuFuncfuck.program.tokens.join(","),
+      );
+      assertEquals(
+        gpuFuncfuck.program.nodes.join(","),
+        cpuFuncfuck.program.nodes.join(","),
+      );
+      assertEquals(
+        gpuFuncfuck.program.edges.join(","),
+        cpuFuncfuck.program.edges.join(","),
+      );
+      assertEquals(
+        gpuFuncfuck.program.symbols.join(","),
+        cpuFuncfuck.program.symbols.join(","),
+      );
+      assertEquals(
+        gpuFuncfuck.program.types.join(","),
+        cpuFuncfuck.program.types.join(","),
+      );
+    }
+    for (
+      const malformed of [
+        "emit [1) => id;",
+        "emit [1 => id;",
+        "emit 1] => id;",
+      ]
+    ) {
+      const cpuFailure = cpuFuncfuckFrontend.ingest(malformed);
+      const gpuFailure = await gpuFuncfuckFrontend.ingest(malformed);
+      assert(!cpuFailure.ok);
+      assert(!gpuFailure.ok);
+      assertEquals(
+        gpuFailure.diagnostics[0].record.join(","),
+        cpuFailure.diagnostics[0].record.join(","),
+      );
+    }
   } finally {
     runtime.dispose();
   }
@@ -341,6 +470,30 @@ Deno.test("GPU frontend eligibility failures use stable diagnostics", () => {
         limits: { maxLexerStates: 1 },
       },
       code: "GPU_FRONTEND_LEXER_STATE_LIMIT",
+    },
+    {
+      source: `
+        module = first second ;
+        first = "(" ")" ;
+        second = ")" "]" ;
+      `,
+      gpuFrontend: {
+        version: 3,
+        root: "module",
+        islands: [
+          { rule: "module", boundary: { kind: "root" } },
+          {
+            rule: "first",
+            boundary: { kind: "paired", open: "(", close: ")" },
+          },
+          {
+            rule: "second",
+            boundary: { kind: "paired", open: ")", close: "]" },
+          },
+        ],
+        semantics: { rules: {} },
+      },
+      code: "GPU_FRONTEND_AMBIGUOUS_STRUCTURAL_TERMINAL",
     },
   ] as const;
   for (const testCase of cases) {

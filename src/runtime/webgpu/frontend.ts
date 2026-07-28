@@ -529,19 +529,18 @@ function lex(
       lexicalIdentity: acceptedSpec,
       outputIndex,
     });
-    if (maxTokens !== undefined && tokens.length > maxTokens) {
-      diagnostics.push({
-        code: DIAGNOSTIC_TOKEN_CAPACITY,
-        start: position,
-        end: acceptedEnd,
-        subjectId: outputIndex,
-        parameter0: maxTokens,
-        parameter1: 1,
-      });
-      return tokens;
-    }
     position = acceptedEnd;
     void acceptedState;
+  }
+  if (maxTokens !== undefined && tokens.length > maxTokens) {
+    diagnostics.push({
+      code: DIAGNOSTIC_TOKEN_CAPACITY,
+      start: 0,
+      end: source.length,
+      subjectId: tokens.length,
+      parameter0: tokens.length,
+      parameter1: maxTokens,
+    });
   }
   return tokens;
 }
