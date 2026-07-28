@@ -209,9 +209,9 @@ submission timing, and a separate per-stage timestamp profile when the adapter
 supports timestamp queries.
 
 The current broad GPU Duck corpus measured on an NVIDIA GeForce RTX 4080 SUPER
-with driver 610.43.03 as follows. Each cell is the median and full range of seven
-runs after two warmups. Parity was verified before every size. These are not
-portable crossover promises.
+with driver 610.43.03 as follows. Each cell is the median and full range of
+seven runs after two warmups. Parity was verified before every size. These are
+not portable crossover promises.
 
 | source | CPU oracle                    | owned `ingest()`           | owned speedup |
 | ------ | ----------------------------- | -------------------------- | ------------- |
@@ -222,10 +222,10 @@ portable crossover promises.
 The timestamped device work was 16.30, 22.54, and 91.10 ms respectively; queue
 completion, the single map, compact-array copies, and host semantics account for
 the rest of owned latency. Reusing one resident slot submitted in median 0.46,
-0.50, and 0.48 ms for 1, 4, and 16 MiB, with full ranges of [0.43, 0.58],
-[0.45, 0.68], and [0.45, 0.71] ms. Resident submission is not a full parse
-latency or CPU-oracle speedup because it deliberately stops before device
-completion, mapped readback, and host semantic recipes.
+0.50, and 0.48 ms for 1, 4, and 16 MiB, with full ranges of [0.43, 0.58], [0.45,
+0.68], and [0.45, 0.71] ms. Resident submission is not a full parse latency or
+CPU-oracle speedup because it deliberately stops before device completion,
+mapped readback, and host semantic recipes.
 
 ## Comparison with Parallel Parsers
 
