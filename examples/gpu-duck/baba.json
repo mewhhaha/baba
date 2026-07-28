@@ -1,0 +1,179 @@
+{
+  "version": 2,
+  "gpuFrontend": {
+    "version": 3,
+    "root": "module",
+    "islands": [
+      { "rule": "module", "boundary": { "kind": "root" } },
+      {
+        "rule": "operator_section",
+        "boundary": { "kind": "terminated", "terminal": ";" }
+      },
+      {
+        "rule": "declaration",
+        "boundary": { "kind": "terminated", "terminal": ";" }
+      },
+      { "rule": "expression", "boundary": { "kind": "root" } },
+      { "rule": "type_expression", "boundary": { "kind": "root" } },
+      { "rule": "type_operand", "boundary": { "kind": "root" } },
+      { "rule": "constructor_type", "boundary": { "kind": "root" } },
+      { "rule": "binding_pattern", "boundary": { "kind": "root" } },
+      {
+        "rule": "tuple_pattern",
+        "boundary": { "kind": "paired", "open": "(", "close": ")" }
+      },
+      {
+        "rule": "array_pattern",
+        "boundary": {
+          "kind": "separated",
+          "open": "[",
+          "close": "]",
+          "separator": ","
+        }
+      },
+      { "rule": "constructor_pattern", "boundary": { "kind": "root" } },
+      {
+        "rule": "shape_pattern",
+        "boundary": { "kind": "paired", "open": "{", "close": "}" }
+      },
+      {
+        "rule": "parenthesized_or_tuple_type",
+        "boundary": { "kind": "paired", "open": "(", "close": ")" }
+      },
+      {
+        "rule": "bracket_type",
+        "boundary": {
+          "kind": "separated",
+          "open": "[",
+          "close": "]",
+          "separator": ","
+        }
+      },
+      { "rule": "lambda", "boundary": { "kind": "root" } },
+      {
+        "rule": "parenthesized_or_tuple",
+        "boundary": { "kind": "paired", "open": "(", "close": ")" }
+      },
+      {
+        "rule": "array",
+        "boundary": {
+          "kind": "separated",
+          "open": "[",
+          "close": "]",
+          "separator": ","
+        }
+      },
+      {
+        "rule": "shape",
+        "boundary": { "kind": "paired", "open": "{", "close": "}" }
+      },
+      {
+        "rule": "conditional",
+        "boundary": { "kind": "terminated", "terminal": "end" }
+      },
+      {
+        "rule": "case_expression",
+        "boundary": { "kind": "terminated", "terminal": "end" }
+      },
+      {
+        "rule": "block",
+        "boundary": { "kind": "terminated", "terminal": "end" }
+      },
+      {
+        "rule": "for_statement",
+        "boundary": { "kind": "terminated", "terminal": "end" }
+      },
+      {
+        "rule": "bounded_lambda",
+        "boundary": { "kind": "terminated", "terminal": "end" }
+      }
+    ],
+    "semantics": {
+      "rules": {
+        "module": { "opcode": "module" },
+        "signature": {
+          "opcode": "signature",
+          "fields": { "name": "binder", "type": "type" }
+        },
+        "binding": {
+          "opcode": "binding",
+          "fields": { "pattern": "pattern", "value": "value" }
+        },
+        "assignment": {
+          "opcode": "assignment",
+          "fields": { "name": "reference", "value": "value" }
+        },
+        "shadowing": {
+          "opcode": "shadow",
+          "fields": { "name": "binder", "value": "value" }
+        },
+        "lambda": {
+          "opcode": "lambda",
+          "fields": { "parameter": "pattern", "body": "body" }
+        },
+        "expression": { "opcode": "fold-fixity" },
+        "array": { "opcode": "array" },
+        "shape": { "opcode": "shape" },
+        "union_type": { "opcode": "union" },
+        "interface_declaration": { "opcode": "interface" },
+        "associated_type": { "opcode": "associated-type" },
+        "effect_declaration": { "opcode": "effect" },
+        "case_expression": { "opcode": "case" },
+        "binding_pattern": { "opcode": "pattern" }
+      },
+      "primitives": {
+        "satisfies": "satisfaction",
+        "type.extend": "type-extend",
+        "type.range": "inclusive-range",
+        "type.unbounded": "unbounded"
+      },
+      "operators": {
+        "+": "add",
+        "-": "subtract",
+        "*": "multiply",
+        "/": "divide",
+        "==": "equal",
+        "<": "less",
+        "|": "union",
+        "|>": "pipe"
+      },
+      "scopes": [
+        "module",
+        "lambda",
+        "block",
+        "for_statement",
+        "case_arm"
+      ],
+      "namespaces": ["value", "type", "effect", "interface"],
+      "binders": [
+        "binding",
+        "shadowing",
+        "type_declaration",
+        "interface_declaration",
+        "effect_declaration"
+      ],
+      "patterns": ["binding_pattern", "case_arm"],
+      "typeEntries": [
+        "type_expression",
+        "type_declaration",
+        "signature",
+        "associated_type"
+      ]
+    }
+  },
+  "queries": {
+    "highlights": {
+      "entries": [
+        { "node": "IDENT", "capture": "variable" },
+        { "node": "TYPE_IDENT", "capture": "type" },
+        { "node": "INTEGER", "capture": "number" },
+        { "node": "STRING", "capture": "string" },
+        { "node": "operator", "capture": "operator" }
+      ]
+    },
+    "rainbows": {
+      "scopes": ["module", "operator_section", "shape", "array"],
+      "brackets": ["(", ")", "[", "]", "{", "}"]
+    }
+  }
+}

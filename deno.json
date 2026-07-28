@@ -6,7 +6,7 @@
     ".": "./src/mod.ts",
     "./cli": "./src/cli.ts",
     "./runtime/generated-wasm": "./src/runtime/generated_wasm.ts",
-    "./runtime/webgpu-lexer": "./src/runtime/webgpu/mod.ts"
+    "./runtime/webgpu": "./src/runtime/webgpu/mod.ts"
   },
   "publish": {
     "include": [
@@ -40,6 +40,7 @@
       "src/compiler/grammar_analysis.ts",
       "src/compiler/grammar_ir.ts",
       "src/compiler/grammar_wasm_analysis.ts",
+      "src/compiler/gpu_frontend.ts",
       "src/compiler/grammar_rs/Cargo.lock",
       "src/compiler/grammar_rs/Cargo.toml",
       "src/compiler/grammar_rs/src/lib.rs",
@@ -67,6 +68,9 @@
       "src/runtime/wasm_plan.ts",
       "src/runtime/webgpu/alphabet.ts",
       "src/runtime/webgpu/context.ts",
+      "src/runtime/webgpu/frontend.ts",
+      "src/runtime/webgpu/frontend_capacity.ts",
+      "src/runtime/webgpu/island_executor.ts",
       "src/runtime/webgpu/kernel_wgsl.ts",
       "src/runtime/webgpu/lexer.ts",
       "src/runtime/webgpu/mod.ts",
@@ -119,6 +123,7 @@
     "check": "deno check src scripts tests",
     "bench:runtime": "deno run --allow-read --allow-write scripts/runtime_bench.ts --budget size-budgets.json",
     "bench:webgpu-lexer": "deno run --unstable-webgpu --allow-read --allow-write scripts/webgpu_lexer_bench.ts",
+    "bench:webgpu-frontend": "deno run --unstable-webgpu --allow-read scripts/webgpu_frontend_bench.ts",
     "bench:webgpu-lexer:pathological": "deno run --unstable-webgpu --allow-read scripts/webgpu_lexer_pathological.ts",
     "parity:webgpu-lexer": "deno run --unstable-webgpu --allow-read scripts/webgpu_lexer_parity.ts",
     "build:wasm-engine": "deno run --allow-read --allow-write --allow-run scripts/build_wasm_engine.ts",

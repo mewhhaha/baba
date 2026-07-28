@@ -55,6 +55,8 @@ const STAGES: readonly KernelStage[] = [
   { label: "pass_f_emit", entryPoint: "pass_f" },
 ];
 
+export const GPU_LEX_STAGE_LABELS = STAGES.map((stage) => stage.label);
+
 const TIMESTAMP_COUNT = STAGES.length * 2;
 const STAGING_META_BYTES = 16;
 const STAGING_TIMESTAMP_BYTES = TIMESTAMP_COUNT * 8;
@@ -91,6 +93,36 @@ export interface GpuLexTimings {
 
 export interface GpuLexResult {
   readonly records: Int32Array;
+  readonly tokenCount: number;
+  readonly overflow: boolean;
+  readonly timings: GpuLexTimings;
+}
+
+/** Owned two-word records used by integrated frontend sessions. */
+export interface GpuCompactLexResult {
+  /** Pairs of `{ end, packedSpecAndAcceptingState }`. */
+  readonly records: Uint32Array;
+  readonly tokenCount: number;
+  readonly overflow: boolean;
+  readonly timings: GpuLexTimings;
+}
+
+export interface GpuIntegratedLexEncoding {
+  readonly sourceBuffer: GPUBuffer;
+  readonly recordsBuffer: GPUBuffer;
+  readonly metadataBuffer: GPUBuffer;
+  readonly capacityRecords: number;
+  readonly stageCount: number;
+  encode(
+    encoder: GPUCommandEncoder,
+    querySet: GPUQuerySet | null,
+    firstQuery: number,
+  ): void;
+  release(): void;
+}
+
+interface GpuLexExecutionResult {
+  readonly records: Int32Array | Uint32Array;
   readonly tokenCount: number;
   readonly overflow: boolean;
   readonly timings: GpuLexTimings;
@@ -889,7 +921,11 @@ export class WebGpuLexer {
       if (this.#runtime !== undefined) {
         runtimeLease = await this.#runtime.acquireLease();
       }
-      return await this.#lexInternal(units, options);
+      const result = await this.#lexInternal(units, "expanded", options);
+      if (!(result.records instanceof Int32Array)) {
+        throw new Error("Expanded GPU lex returned compact records.");
+      }
+      return { ...result, records: result.records };
     } finally {
       if (runtimeLease !== null) {
         runtimeLease.release();
@@ -898,10 +934,307 @@ export class WebGpuLexer {
     }
   }
 
-  async #lexInternal(
+  /** Execute lexing without expanding the GPU's owned two-word records. */
+  async lexCompact(
     units: Uint16Array,
     options: GpuLexerOptions = {},
-  ): Promise<GpuLexResult> {
+  ): Promise<GpuCompactLexResult> {
+    if (this.#destroyed) {
+      throw new Error("This WebGpuLexer has been destroyed.");
+    }
+    if (this.#runtime !== undefined) {
+      this.#runtime.assertUsable();
+    }
+    if (this.#deviceLost.reason !== null) {
+      throw new Error(`WebGPU device was lost: ${this.#deviceLost.reason}`);
+    }
+    if (options.borrowRecords === true) {
+      throw new TypeError(
+        "lexCompact() returns owned records and does not support borrowRecords.",
+      );
+    }
+    if (this.#lexInFlight) {
+      throw new Error(
+        "WebGpuLexer.lexCompact() does not support concurrent calls; await the previous lex call.",
+      );
+    }
+    this.#lexInFlight = true;
+    let runtimeLease: WebGpuRuntimeLease | null = null;
+    try {
+      if (this.#runtime !== undefined) {
+        runtimeLease = await this.#runtime.acquireLease();
+      }
+      const result = await this.#lexInternal(units, "compact", options);
+      if (!(result.records instanceof Uint32Array)) {
+        throw new Error("Compact GPU lex returned expanded records.");
+      }
+      return { ...result, records: result.records };
+    } finally {
+      if (runtimeLease !== null) {
+        runtimeLease.release();
+      }
+      this.#lexInFlight = false;
+    }
+  }
+
+  /**
+   * Prepare lexing for a caller-owned command encoder. The compact records and
+   * metadata remain device-resident so an integrated frontend can consume them
+   * without a submission, map, or upload between compiler stages.
+   */
+  prepareIntegratedLex(
+    units: Uint16Array,
+    options: GpuLexerOptions = {},
+  ): GpuIntegratedLexEncoding {
+    if (this.#destroyed) {
+      throw new Error("This WebGpuLexer has been destroyed.");
+    }
+    if (this.#runtime !== undefined) {
+      this.#runtime.assertUsable();
+    }
+    if (this.#deviceLost.reason !== null) {
+      throw new Error(`WebGPU device was lost: ${this.#deviceLost.reason}`);
+    }
+    if (this.#lexInFlight) {
+      throw new Error(
+        "WebGpuLexer.prepareIntegratedLex() does not support concurrent calls.",
+      );
+    }
+    let requestedCapacity: number | undefined;
+    if (options.capacityRecords !== undefined) {
+      requestedCapacity = requirePositiveSafeInteger(
+        options.capacityRecords,
+        "capacityRecords",
+      );
+    }
+    let debugWorkgroupLimit: number | undefined;
+    if (options.debugMaxWorkgroupsPerDimension !== undefined) {
+      debugWorkgroupLimit = requirePositiveSafeInteger(
+        options.debugMaxWorkgroupsPerDimension,
+        "debugMaxWorkgroupsPerDimension",
+      );
+    }
+
+    this.#lexInFlight = true;
+    try {
+      const n = units.length;
+      const numChunks = Math.ceil(n / this.chunkSize);
+      const numBlocks = Math.ceil(numChunks / SCAN_WORKGROUP);
+      const numChunksAlloc = Math.max(1, numChunks);
+      const numBlocksAlloc = Math.max(1, numBlocks);
+      const numSeg = Math.ceil(n / SEG_SIZE);
+      const numSegAlloc = Math.max(1, numSeg);
+      let capacityRecords = n;
+      if (requestedCapacity !== undefined) {
+        capacityRecords = Math.min(n, requestedCapacity);
+      }
+      capacityRecords = Math.max(1, capacityRecords);
+
+      const srcBytes = Math.max(4, Math.ceil(n / 2) * 4);
+      const posBytes = Math.max(4, n * 4);
+      const segSumOff = AUX_HEADER_U32 + 2 * numChunksAlloc +
+        2 * numBlocksAlloc;
+      const auxU32 = segSumOff +
+        numSegAlloc * this.plan.stateCount * SEG_SUMMARY_U32_PER_STATE;
+      const compactRecordBytes = capacityRecords * COMPACT_RECORD_BYTES;
+
+      let perDimension = this.limits.maxComputeWorkgroupsPerDimension;
+      if (debugWorkgroupLimit !== undefined) {
+        perDimension = Math.max(1, Math.min(perDimension, debugWorkgroupLimit));
+      }
+      const passXWorkgroups = Math.min(perDimension, Math.max(1, numSeg));
+      const passZWorkgroups = Math.min(
+        perDimension,
+        Math.max(1, Math.ceil(n / PASS_Z_WORKGROUP)),
+      );
+      const passBWorkgroups = Math.min(
+        perDimension,
+        Math.max(1, numChunks),
+      );
+      const passDfWorkgroups = Math.min(
+        perDimension,
+        Math.max(1, Math.ceil(numChunks / SCAN_WORKGROUP)),
+      );
+      const passE1Workgroups = Math.max(1, numBlocks);
+      this.#checkLimits(
+        n,
+        capacityRecords,
+        {
+          srcBytes,
+          posBytes,
+          auxBytes: auxU32 * 4,
+          compactRecordBytes,
+          stagingBytes: 0,
+        },
+        {
+          passX: passXWorkgroups,
+          passZ: passZWorkgroups,
+          passB: passBWorkgroups,
+          passDf: passDfWorkgroups,
+          passE1: passE1Workgroups,
+        },
+      );
+
+      this.#src = this.#ensure(
+        this.#src,
+        srcBytes,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        "src",
+      );
+      this.#nextPos = this.#ensure(
+        this.#nextPos,
+        posBytes,
+        GPUBufferUsage.STORAGE,
+        "nextPos",
+      );
+      this.#packedRec = this.#ensure(
+        this.#packedRec,
+        posBytes,
+        GPUBufferUsage.STORAGE,
+        "packedRec",
+      );
+      this.#exitPos = this.#ensure(
+        this.#exitPos,
+        posBytes,
+        GPUBufferUsage.STORAGE,
+        "exitPos",
+      );
+      this.#aux = this.#ensure(
+        this.#aux,
+        auxU32 * 4,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        "aux",
+      );
+      this.#records = this.#ensure(
+        this.#records,
+        compactRecordBytes,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        "compactRecords",
+      );
+
+      const key = [
+        this.#bufferGeneration,
+        this.#src.size,
+        this.#nextPos.size,
+        this.#packedRec.size,
+        this.#exitPos.size,
+        this.#aux.size,
+        this.#records.size,
+      ].join(":");
+      if (this.#bindGroup === null || this.#bindGroupKey !== key) {
+        this.#bindGroup = this.device.createBindGroup({
+          layout: this.#layout,
+          entries: [
+            { binding: 0, resource: { buffer: this.#paramsBuffer } },
+            { binding: 1, resource: { buffer: this.#src.buffer } },
+            { binding: 2, resource: { buffer: this.#tablesBuffer } },
+            { binding: 3, resource: { buffer: this.#nextPos.buffer } },
+            { binding: 4, resource: { buffer: this.#packedRec.buffer } },
+            { binding: 5, resource: { buffer: this.#exitPos.buffer } },
+            { binding: 6, resource: { buffer: this.#aux.buffer } },
+            { binding: 7, resource: { buffer: this.#records.buffer } },
+          ],
+        });
+        this.#bindGroupKey = key;
+      }
+
+      const wholeWords = n >> 1;
+      if (wholeWords > 0) {
+        this.device.queue.writeBuffer(
+          this.#src.buffer,
+          0,
+          units.buffer as ArrayBuffer,
+          units.byteOffset,
+          wholeWords * 4,
+        );
+      }
+      if ((n & 1) === 1) {
+        this.device.queue.writeBuffer(
+          this.#src.buffer,
+          wholeWords * 4,
+          new Uint32Array([units[n - 1]]),
+        );
+      }
+      const params = new Uint32Array([
+        n,
+        numChunks,
+        numBlocks,
+        capacityRecords,
+        AUX_HEADER_U32,
+        AUX_HEADER_U32 + numChunksAlloc,
+        AUX_HEADER_U32 + 2 * numChunksAlloc,
+        numSeg,
+        segSumOff,
+        passXWorkgroups,
+        passZWorkgroups * PASS_Z_WORKGROUP,
+        passBWorkgroups,
+        passDfWorkgroups * SCAN_WORKGROUP,
+      ]);
+      this.device.queue.writeBuffer(this.#paramsBuffer, 0, params);
+
+      const bindGroup = this.#bindGroup;
+      const sourceBuffer = this.#src.buffer;
+      const recordsBuffer = this.#records.buffer;
+      const metadataBuffer = this.#aux.buffer;
+      const dispatches: readonly [string, number][] = [
+        ["pass_x_sweep", passXWorkgroups],
+        ["pass_y_segscan", 1],
+        ["pass_z_finalize", passZWorkgroups],
+        ["pass_b_double", passBWorkgroups],
+        ["pass_c_entries", 1],
+        ["pass_d_counts", passDfWorkgroups],
+        ["pass_e1_blockscan", passE1Workgroups],
+        ["pass_e2_blockoffsets", 1],
+        ["pass_f_emit", passDfWorkgroups],
+      ];
+      let released = false;
+      return {
+        sourceBuffer,
+        recordsBuffer,
+        metadataBuffer,
+        capacityRecords,
+        stageCount: dispatches.length,
+        encode: (encoder, querySet, firstQuery) => {
+          for (let index = 0; index < dispatches.length; index += 1) {
+            const [stage, workgroups] = dispatches[index];
+            const pipeline = this.#pipelines.get(stage);
+            if (pipeline === undefined) {
+              throw new Error(`Missing compute pipeline for stage ${stage}.`);
+            }
+            const descriptor: GPUComputePassDescriptor = { label: stage };
+            if (querySet !== null) {
+              descriptor.timestampWrites = {
+                querySet,
+                beginningOfPassWriteIndex: firstQuery + index * 2,
+                endOfPassWriteIndex: firstQuery + index * 2 + 1,
+              };
+            }
+            const pass = encoder.beginComputePass(descriptor);
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.dispatchWorkgroups(workgroups);
+            pass.end();
+          }
+        },
+        release: () => {
+          if (released) {
+            return;
+          }
+          released = true;
+          this.#lexInFlight = false;
+        },
+      };
+    } catch (error) {
+      this.#lexInFlight = false;
+      throw error;
+    }
+  }
+
+  async #lexInternal(
+    units: Uint16Array,
+    recordFormat: "expanded" | "compact",
+    options: GpuLexerOptions = {},
+  ): Promise<GpuLexExecutionResult> {
     let requestedCapacity: number | undefined;
     if (options.capacityRecords !== undefined) {
       requestedCapacity = requirePositiveSafeInteger(
@@ -1275,7 +1608,12 @@ export class WebGpuLexer {
     }
 
     const emitted = Math.min(tokenCount, capacityRecords);
-    let records = new Int32Array(0);
+    let records: Int32Array | Uint32Array;
+    if (recordFormat === "compact") {
+      records = new Uint32Array(0);
+    } else {
+      records = new Int32Array(0);
+    }
     let mapRangeMs = 0;
     let copyOutMs = 0;
     try {
@@ -1293,18 +1631,22 @@ export class WebGpuLexer {
           0,
           emitted * COMPACT_RECORD_U32_COUNT,
         );
-        records = new Int32Array(emitted * HOST_RECORD_I32_COUNT);
-        let start = 0;
-        for (let index = 0; index < emitted; index += 1) {
-          const compactOffset = index * COMPACT_RECORD_U32_COUNT;
-          const end = compactRecords[compactOffset];
-          const packedSpecAndState = compactRecords[compactOffset + 1];
-          const hostOffset = index * HOST_RECORD_I32_COUNT;
-          records[hostOffset] = (packedSpecAndState & 0xFFFF) - 1;
-          records[hostOffset + 1] = start;
-          records[hostOffset + 2] = end;
-          records[hostOffset + 3] = (packedSpecAndState >>> 16) - 1;
-          start = end;
+        if (recordFormat === "compact") {
+          records = new Uint32Array(compactRecords);
+        } else {
+          records = new Int32Array(emitted * HOST_RECORD_I32_COUNT);
+          let start = 0;
+          for (let index = 0; index < emitted; index += 1) {
+            const compactOffset = index * COMPACT_RECORD_U32_COUNT;
+            const end = compactRecords[compactOffset];
+            const packedSpecAndState = compactRecords[compactOffset + 1];
+            const hostOffset = index * HOST_RECORD_I32_COUNT;
+            records[hostOffset] = (packedSpecAndState & 0xFFFF) - 1;
+            records[hostOffset + 1] = start;
+            records[hostOffset + 2] = end;
+            records[hostOffset + 3] = (packedSpecAndState >>> 16) - 1;
+            start = end;
+          }
         }
         copyOutMs = performance.now() - mapEnd;
       }

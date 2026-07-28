@@ -1,5 +1,76 @@
 {
   "version": 2,
+  "gpuFrontend": {
+    "version": 3,
+    "root": "module",
+    "islands": [
+      { "rule": "module", "boundary": { "kind": "root" } },
+      {
+        "rule": "definition",
+        "boundary": { "kind": "terminated", "terminal": ";" }
+      },
+      {
+        "rule": "emit",
+        "boundary": { "kind": "terminated", "terminal": ";" }
+      },
+      {
+        "rule": "group",
+        "boundary": { "kind": "paired", "open": "(", "close": ")" }
+      },
+      {
+        "rule": "fanout",
+        "boundary": {
+          "kind": "separated",
+          "open": "[",
+          "close": "]",
+          "separator": ","
+        }
+      },
+      {
+        "rule": "repeat",
+        "boundary": { "kind": "terminated", "terminal": ")" }
+      },
+      { "rule": "reference", "boundary": { "kind": "root" } }
+    ],
+    "semantics": {
+      "rules": {
+        "module": { "opcode": "module" },
+        "definition": {
+          "opcode": "define",
+          "fields": { "name": "binder", "body": "value" }
+        },
+        "reference": {
+          "opcode": "reference",
+          "fields": { "name": "name" }
+        },
+        "repeat": {
+          "opcode": "repeat-limit",
+          "fields": { "count": "count", "body": "value" }
+        }
+      },
+      "primitives": {
+        "id": "identity",
+        "inc": "increment",
+        "dec": "decrement",
+        "double": "double",
+        "square": "square",
+        "neg": "negate",
+        "sum": "sum",
+        "product": "product",
+        "first": "first",
+        "last": "last",
+        "add": "add",
+        "mul": "multiply",
+        "take": "take",
+        "drop": "drop"
+      },
+      "operators": { ">>": "compose" },
+      "scopes": ["module"],
+      "namespaces": ["function"],
+      "binders": ["definition"],
+      "references": ["reference"]
+    }
+  },
   "queries": {
     "highlights": {
       "entries": [

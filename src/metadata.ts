@@ -1,5 +1,11 @@
 import type {
   BabaMetadata,
+  GpuFrontendBoundaryMetadata,
+  GpuFrontendIslandMetadata,
+  GpuFrontendLimitMetadata,
+  GpuFrontendMetadata,
+  GpuFrontendRuleSemanticMetadata,
+  GpuFrontendSemanticMetadata,
   ParserConflictDeclarationMetadata,
   ParserConflictResolutionMetadata,
   ParserRuntimeMetadata,
@@ -53,6 +59,7 @@ function parseMetadataObject(
     "queries",
     "rules",
     "parser",
+    "gpuFrontend",
   ]);
 
   const metadata: BabaMetadata = {};
@@ -107,8 +114,207 @@ function parseMetadataObject(
       `${path}.parser`,
     );
   }
+  if (hasKey(object, "gpuFrontend")) {
+    metadata.gpuFrontend = parseGpuFrontendMetadata(
+      object.gpuFrontend,
+      `${path}.gpuFrontend`,
+    );
+  }
 
   return metadata;
+}
+
+function parseGpuFrontendMetadata(
+  value: unknown,
+  path: string,
+): GpuFrontendMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, [
+    "version",
+    "root",
+    "islands",
+    "semantics",
+    "limits",
+  ]);
+  const version = expectInteger(object.version, `${path}.version`);
+  if (version !== 3) {
+    throwMetadataShape(`Unsupported ${path}.version ${version}`);
+  }
+  const metadata: GpuFrontendMetadata = {
+    version: 3,
+    root: expectString(object.root, `${path}.root`),
+    islands: expectArray(object.islands, `${path}.islands`).map((
+      island,
+      index,
+    ) => parseGpuFrontendIsland(island, `${path}.islands[${index}]`)),
+    semantics: parseGpuFrontendSemantics(
+      object.semantics,
+      `${path}.semantics`,
+    ),
+  };
+  if (hasKey(object, "limits")) {
+    metadata.limits = parseGpuFrontendLimits(
+      object.limits,
+      `${path}.limits`,
+    );
+  }
+  return metadata;
+}
+
+function parseGpuFrontendIsland(
+  value: unknown,
+  path: string,
+): GpuFrontendIslandMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, ["rule", "boundary"]);
+  return {
+    rule: expectString(object.rule, `${path}.rule`),
+    boundary: parseGpuFrontendBoundary(object.boundary, `${path}.boundary`),
+  };
+}
+
+function parseGpuFrontendBoundary(
+  value: unknown,
+  path: string,
+): GpuFrontendBoundaryMetadata {
+  const object = expectObject(value, path);
+  const kind = expectString(object.kind, `${path}.kind`);
+  if (kind === "root") {
+    assertKnownKeys(object, path, ["kind"]);
+    return { kind };
+  }
+  if (kind === "paired") {
+    assertKnownKeys(object, path, ["kind", "open", "close"]);
+    return {
+      kind,
+      open: expectString(object.open, `${path}.open`),
+      close: expectString(object.close, `${path}.close`),
+    };
+  }
+  if (kind === "terminated") {
+    assertKnownKeys(object, path, ["kind", "terminal"]);
+    return {
+      kind,
+      terminal: expectString(object.terminal, `${path}.terminal`),
+    };
+  }
+  if (kind === "separated") {
+    assertKnownKeys(object, path, ["kind", "open", "close", "separator"]);
+    return {
+      kind,
+      open: expectString(object.open, `${path}.open`),
+      close: expectString(object.close, `${path}.close`),
+      separator: expectString(object.separator, `${path}.separator`),
+    };
+  }
+  throwMetadataShape(
+    `Invalid ${path}.kind '${kind}', expected 'root', 'paired', 'terminated', or 'separated'`,
+  );
+}
+
+function parseGpuFrontendSemantics(
+  value: unknown,
+  path: string,
+): GpuFrontendSemanticMetadata {
+  const object = expectObject(value, path);
+  assertKnownKeys(object, path, [
+    "rules",
+    "primitives",
+    "operators",
+    "scopes",
+    "namespaces",
+    "binders",
+    "references",
+    "patterns",
+    "typeEntries",
+  ]);
+  const rulesObject = expectObject(object.rules, `${path}.rules`);
+  const rules: Record<string, GpuFrontendRuleSemanticMetadata> = {};
+  for (const [ruleName, ruleValue] of Object.entries(rulesObject)) {
+    const rulePath = `${path}.rules.${ruleName}`;
+    const ruleObject = expectObject(ruleValue, rulePath);
+    assertKnownKeys(ruleObject, rulePath, ["opcode", "fields"]);
+    const rule: GpuFrontendRuleSemanticMetadata = {
+      opcode: expectString(ruleObject.opcode, `${rulePath}.opcode`),
+    };
+    if (hasKey(ruleObject, "fields")) {
+      rule.fields = parseStringRecord(
+        ruleObject.fields,
+        `${rulePath}.fields`,
+      );
+    }
+    rules[ruleName] = rule;
+  }
+  const semantics: GpuFrontendSemanticMetadata = { rules };
+  if (hasKey(object, "primitives")) {
+    semantics.primitives = parseStringRecord(
+      object.primitives,
+      `${path}.primitives`,
+    );
+  }
+  if (hasKey(object, "operators")) {
+    semantics.operators = parseStringRecord(
+      object.operators,
+      `${path}.operators`,
+    );
+  }
+  for (
+    const key of [
+      "scopes",
+      "namespaces",
+      "binders",
+      "references",
+      "patterns",
+      "typeEntries",
+    ] as const
+  ) {
+    if (hasKey(object, key)) {
+      semantics[key] = expectStringArray(object[key], `${path}.${key}`);
+    }
+  }
+  return semantics;
+}
+
+function parseStringRecord(
+  value: unknown,
+  path: string,
+): Record<string, string> {
+  const object = expectObject(value, path);
+  const record: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(object)) {
+    record[key] = expectString(entry, `${path}.${key}`);
+  }
+  return record;
+}
+
+function parseGpuFrontendLimits(
+  value: unknown,
+  path: string,
+): GpuFrontendLimitMetadata {
+  const object = expectObject(value, path);
+  const keys = [
+    "maxLexerStates",
+    "maxIslandStates",
+    "maxIslandTransitions",
+    "maxSemanticOpcodes",
+    "maxPlanBytes",
+    "maxNodesPerToken",
+    "maxEdgesPerToken",
+    "maxConstraintsPerNode",
+  ] as const;
+  assertKnownKeys(object, path, [...keys]);
+  const limits: GpuFrontendLimitMetadata = {};
+  for (const key of keys) {
+    if (!hasKey(object, key)) {
+      continue;
+    }
+    const limit = expectInteger(object[key], `${path}.${key}`);
+    if (limit < 1) {
+      throwMetadataShape(`${path}.${key} must be a positive integer`);
+    }
+    limits[key] = limit;
+  }
+  return limits;
 }
 
 function parseTreeSitterExtra(value: unknown, path: string): TreeSitterExtra {

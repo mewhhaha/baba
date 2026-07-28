@@ -1,0 +1,199 @@
+module Demo where
+
+declare operators {
+  infixl 70 (*) = numeric.multiply;
+  infixl 60 (+) = numeric.add;
+  infixl 45 (|) = type.union;
+  infix 40 (==) = equality.equal;
+  infix 40 (<) = ordering.less;
+  infixl 20 (|>) = function.pipe;
+};
+
+const range = bounds => @type.range bounds;
+
+type I32 = range (-2147483648, 2147483647);
+type String = range ("", @type.unbounded);
+type Small = 1 | 2 | 3 | 4 | #Woop | "hello";
+type SignedUnit = -1 | 1;
+
+effect Console {
+  write: String -> Unit;
+};
+
+const extend = (base, additions) => @type.extend (base, additions);
+
+const struct = shape => do
+  let product_type = [];
+  for field in shape do
+    product_type := [...product_type, field.value];
+  end
+  for (index, field) in shape do
+    product_type := extend (product_type, {
+      .name = field.name;
+      .value = value => get (value, index) end;
+    });
+  end
+  return product_type;
+end;
+
+type Message = | #Ready | #Progress I32 | #Failed String;
+type Report = struct {
+  .code = I32;
+  .text = String;
+};
+
+type Counter = struct {
+  .current = I32;
+  .limit = I32;
+};
+
+interface Render Subject Output = {
+  .render = Subject -> Output;
+};
+
+interface Iterator Self = {
+  type Item;
+  .has_next = Self -> Bool;
+  .next = Self -> (Item, Self);
+};
+
+interface IntoIterator Self = {
+  type Cursor;
+  .iterator = Self -> Cursor;
+};
+
+Report := extend (Report, {
+  .render = report => report.text end;
+});
+
+let identity = value => value;
+let scalar_application = identity 1;
+let shape_application = identity {
+  .h = 1;
+};
+let tuple_application = identity (1, 2);
+let array_application = identity [1, 2];
+let unwrap_progress = #Progress amount => amount;
+let from_unit = () => 1;
+
+sig x = 1 | 2 | 3 | 4 | #Woop | "hello";
+let x = 1;
+
+sig describe_literal = (1 | 2 | 3 | 4 | #Woop | "hello") -> String;
+let describe_literal = value => case value of
+  1 => "one",
+  2 => "two",
+  3 => "three",
+  4 => "four",
+  #Woop => "woop",
+  "hello" => "greeting"
+end;
+
+let literal_description = describe_literal x;
+
+sig classify_signed = (-1 | 1) -> (1 | 2);
+let classify_signed = value => case value of
+  -1 => 1,
+  1 => 2
+end;
+
+let signed_classification = classify_signed (-1);
+
+sig repeated_array_identity = [I32; N] -> [I32; N];
+let repeated_array_identity = value => value;
+
+sig expanded_array_identity = [I32, ...[I32; N]] -> [I32, ...[I32; N]];
+let expanded_array_identity = value => value;
+
+sig repeated_tuple_identity = (I32; N) -> (I32; N);
+let repeated_tuple_identity = value => value;
+
+sig expanded_tuple_identity = (I32, ...(I32; N)) -> (I32, ...(I32; N));
+let expanded_tuple_identity = value => value;
+
+sig double = I32 -> I32;
+let double = value => value * 2;
+
+sig increment = I32 -> I32;
+let increment = value => value + 1;
+
+sig tuple_first = (I32, I32) -> I32;
+let tuple_first = (first, second) => first;
+
+sig array_first = [I32] -> I32;
+let array_first = [first, second] => first;
+
+sig ready_code = I32;
+const ready_code = comptime (20 * 2 + 1);
+
+sig values = [I32];
+let values = [20, 21, 22];
+
+sig answer = I32;
+let answer = double (get (values, 0)) |> increment;
+let inferred_answer = increment answer;
+
+sig increment_counter = Counter -> Counter;
+let increment_counter = counter => {
+  .current = counter.current + 1;
+  .limit = counter.limit;
+};
+
+Counter := extend (Counter, {
+  type Item = I32;
+  .has_next = counter => counter.current < counter.limit end;
+  .next = counter => (
+    counter.current,
+    increment_counter counter
+  ) end;
+});
+
+let checked_counter = {
+  type Item = I32;
+  .current = @satisfies (1, Item);
+  .test = @satisfies (2, Item);
+};
+
+sig label = String;
+let label = if answer == ready_code then "ready"
+  else if answer == 0 then "zero"
+  else if answer == 1 then "one"
+  else "unexpected"
+end;
+
+sig describe = Message -> String;
+let describe = current => case current of
+  #Ready => "ready",
+  #Progress amount => do
+    let doubled = double amount;
+    return if doubled == 0 then "idle" else "working" end;
+  end,
+  #Failed reason => reason
+end;
+
+sig demonstration = Report;
+let demonstration = do
+  const first = tuple_first (40, 2);
+  let second = array_first [first, 2];
+  discard describe (#Progress second);
+  return {
+    .code = second;
+    .text = label;
+  };
+end;
+
+return {
+  .answer = answer;
+  .literal_description = literal_description;
+  .signed_classification = signed_classification;
+  .inferred_answer = inferred_answer;
+  .label = label;
+  .scalar_application = scalar_application;
+  .shape_application = shape_application;
+  .tuple_application = tuple_application;
+  .array_application = array_application;
+  .progress = unwrap_progress (#Progress 2);
+  .unit_value = from_unit ();
+  .counter = checked_counter;
+  .report = demonstration;
+};

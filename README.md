@@ -217,7 +217,7 @@ method. The CPU path is usually better for small or one-off inputs.
 import {
   WebGpuLexerContext,
   WebGpuRuntime,
-} from "@mewhhaha/baba/runtime/webgpu-lexer";
+} from "@mewhhaha/baba/runtime/webgpu";
 import { createParser } from "./generated/wasm/mod.ts";
 
 const wasm = await Deno.readFile("generated/wasm/parser.wasm");
@@ -226,7 +226,7 @@ const parser = createParser({ bytes: wasm, plan });
 const runtime = await WebGpuRuntime.create({
   powerPreference: "high-performance",
 });
-const lexer = await runtime.compile(plan);
+const lexer = await runtime.compileLexer(plan);
 
 const source = await Deno.readTextFile("input.txt");
 const units = new Uint16Array(source.length);

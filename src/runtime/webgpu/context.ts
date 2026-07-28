@@ -15,11 +15,17 @@ import {
 } from "./kernel_wgsl.ts";
 import { decodeLexerPlanTables, type LexerPlanTables } from "./plan_tables.ts";
 import type {
+  GpuCompactLexResult,
   GpuLexerOptions,
   GpuLexResult,
   WebGpuLexer,
   WebGpuLexerCreateOptions,
 } from "./lexer.ts";
+
+export interface WebGpuIntegratedLexerLease {
+  readonly lexer: WebGpuLexer;
+  release(): void;
+}
 
 /** Limits fixed when the runtime acquires its device. */
 export interface WebGpuRuntimeLimits {
@@ -237,7 +243,7 @@ export class WebGpuRuntime {
   }
 
   /** Compile and cache immutable plan data. Equivalent plan bytes share one context. */
-  async compile(
+  async compileLexer(
     planBytes: Uint8Array,
     options: WebGpuLexerContextOptions = {},
   ): Promise<WebGpuLexerContext> {
@@ -275,6 +281,15 @@ export class WebGpuRuntime {
     } finally {
       this.#compilingPlans -= 1;
     }
+  }
+
+  /** Compile a device-resident frontend session from an opt-in parser plan. */
+  async compileFrontend(
+    planBytes: Uint8Array,
+  ): Promise<import("./frontend.ts").WebGpuFrontend> {
+    this.#assertUsable();
+    const module = await import("./frontend.ts");
+    return await module.WebGpuFrontend.create(this, planBytes);
   }
 
   /**
@@ -514,6 +529,58 @@ export class WebGpuLexerContext {
         this.#returnWorker(worker);
       }
     }
+  }
+
+  /** Execute with owned compact GPU pairs for an integrated frontend session. */
+  async lexCompact(
+    units: Uint16Array,
+    options: GpuLexerOptions = {},
+  ): Promise<GpuCompactLexResult> {
+    if (this.#disposed) {
+      throw new Error("WebGpuLexerContext has been disposed.");
+    }
+    if (options.borrowRecords === true) {
+      throw new Error(
+        "WebGpuLexerContext.lexCompact() returns owned records and does not support borrowRecords.",
+      );
+    }
+    let worker: WebGpuLexer | undefined;
+    this.#activeJobs += 1;
+    try {
+      worker = await this.#takeWorker();
+      return await worker.lexCompact(units, options);
+    } finally {
+      this.#activeJobs -= 1;
+      if (worker !== undefined) {
+        this.#returnWorker(worker);
+      }
+    }
+  }
+
+  async acquireIntegratedLexer(): Promise<WebGpuIntegratedLexerLease> {
+    if (this.#disposed) {
+      throw new Error("WebGpuLexerContext has been disposed.");
+    }
+    this.#activeJobs += 1;
+    let lexer: WebGpuLexer;
+    try {
+      lexer = await this.#takeWorker();
+    } catch (error) {
+      this.#activeJobs -= 1;
+      throw error;
+    }
+    let released = false;
+    return {
+      lexer,
+      release: () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        this.#activeJobs -= 1;
+        this.#returnWorker(lexer);
+      },
+    };
   }
 
   async #takeWorker(): Promise<WebGpuLexer> {

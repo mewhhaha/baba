@@ -1,5 +1,5 @@
 /**
- * Experimental WebGPU lexer backend.
+ * Experimental WebGPU lexer and island-frontend backends.
  *
  * This is a second implementation of the shipping Rust/Wasm `lex_all`, not a new
  * generate target and not a new artifact. It consumes an existing `parser.plan`
@@ -25,6 +25,7 @@
 
 export { GpuLexerCapacityError, WebGpuLexer } from "./lexer.ts";
 export type {
+  GpuCompactLexResult,
   GpuLexerLimits,
   GpuLexerOptions,
   GpuLexResult,
@@ -53,3 +54,20 @@ export type { CompactSection, LexerPlanTables } from "./plan_tables.ts";
 
 export type { AlphabetTables, ClassRange } from "./alphabet.ts";
 export type { PackedTables } from "./kernel_wgsl.ts";
+
+export {
+  CpuFrontend,
+  decodeGpuFrontendPlan,
+  GpuFrontendCapacityError,
+  inspectGpuFrontendPlan,
+  WebGpuFrontend,
+} from "./frontend.ts";
+export type {
+  CompactFrontendProgram,
+  CpuFrontendOptions,
+  FrontendDiagnostic,
+  GpuFrontendPlanInspection,
+  GpuFrontendResult,
+  GpuFrontendTimings,
+  WebGpuFrontendOptions,
+} from "./frontend.ts";

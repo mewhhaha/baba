@@ -61,8 +61,8 @@ Deno.test({
     });
     try {
       const [firstContext, secondContext] = await Promise.all([
-        runtime.compile(plan),
-        runtime.compile(plan.slice()),
+        runtime.compileLexer(plan),
+        runtime.compileLexer(plan.slice()),
       ]);
       assert(
         firstContext === secondContext,
@@ -79,8 +79,31 @@ Deno.test({
       assert(first.tokenCount > 0, "Expected tokens from the first job.");
       assert(second.tokenCount > 0, "Expected tokens from the second job.");
 
+      const compact = await firstContext.lexCompact(
+        utf16Units("alpha 1 beta 2"),
+      );
+      assertEquals(compact.tokenCount, first.tokenCount);
+      const reconstructed = new Int32Array(compact.tokenCount * 4);
+      let start = 0;
+      for (let index = 0; index < compact.tokenCount; index += 1) {
+        const compactOffset = index * 2;
+        const end = compact.records[compactOffset];
+        const packed = compact.records[compactOffset + 1];
+        reconstructed.set(
+          [
+            (packed & 0xFFFF) - 1,
+            start,
+            end,
+            (packed >>> 16) - 1,
+          ],
+          index * 4,
+        );
+        start = end;
+      }
+      assertEquals(reconstructed.join(","), first.records.join(","));
+
       firstContext.dispose();
-      const replacementContext = await runtime.compile(plan);
+      const replacementContext = await runtime.compileLexer(plan);
       assert(
         replacementContext !== firstContext,
         "Disposing a context must evict it from the compiled-plan cache.",
