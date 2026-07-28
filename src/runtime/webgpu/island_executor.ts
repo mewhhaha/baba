@@ -87,7 +87,7 @@ export interface GpuResidentIslandExecution {
   readonly tokenOffsetWords: number;
   readonly nodeOffsetWords: number;
   readonly edgeOffsetWords: number;
-  readonly submitAndCompletionMs: number;
+  readonly submitMs: number;
   release(): void;
 }
 
@@ -106,6 +106,7 @@ interface ExecutionSlot {
   params: SizedExecutionBuffer | null;
   indirect: SizedExecutionBuffer | null;
   residentHeld: boolean;
+  pendingCompletion: Promise<Error | null> | null;
   readonly querySet: GPUQuerySet | null;
   readonly queryResolve: GPUBuffer | null;
 }
@@ -755,7 +756,12 @@ export class GpuIslandExecutor {
     maximumTokens: number | undefined,
     maximumNodes: number | undefined,
     maximumEdges: number | undefined,
+    stageTimings: "collect" | undefined,
   ): Promise<GpuIslandExecution> {
+    let timingMode: "collect" | "omit" = "omit";
+    if (stageTimings === "collect") {
+      timingMode = "collect";
+    }
     const execution = await this.#execute(
       lexer,
       sourceUnits,
@@ -763,6 +769,7 @@ export class GpuIslandExecutor {
       maximumNodes,
       maximumEdges,
       "host",
+      timingMode,
     );
     if ("buffer" in execution) {
       throw new Error(
@@ -786,6 +793,7 @@ export class GpuIslandExecutor {
       maximumNodes,
       maximumEdges,
       "device",
+      "omit",
     );
     if (!("buffer" in execution)) {
       throw new Error("GPU frontend resident execution returned host records.");
@@ -800,6 +808,7 @@ export class GpuIslandExecutor {
     maximumNodes: number | undefined,
     maximumEdges: number | undefined,
     resultLocation: "host" | "device",
+    timingMode: "collect" | "omit",
   ): Promise<GpuIslandExecution | GpuResidentIslandExecution> {
     let tokenCapacity = Math.max(1, sourceUnits.length);
     if (maximumTokens !== undefined) {
@@ -924,6 +933,7 @@ export class GpuIslandExecutor {
         params: null,
         indirect: null,
         residentHeld: false,
+        pendingCompletion: null,
         querySet,
         queryResolve,
       };
@@ -933,6 +943,13 @@ export class GpuIslandExecutor {
       throw new Error(
         "GPU frontend resident result must be disposed before reusing its execution slot.",
       );
+    }
+    if (slot.pendingCompletion !== null) {
+      const completionError = await slot.pendingCompletion;
+      slot.pendingCompletion = null;
+      if (completionError !== null) {
+        throw completionError;
+      }
     }
     slot.arena = this.#ensureBuffer(
       slot.arena,
@@ -1083,23 +1100,38 @@ export class GpuIslandExecutor {
       });
       const encoder = this.device.createCommandEncoder();
       let executionQuerySet: GPUQuerySet | null = null;
-      if (resultLocation === "host") {
+      if (resultLocation === "host" && timingMode === "collect") {
         executionQuerySet = slot.querySet;
       }
       integratedLex.encode(encoder, executionQuerySet, 0);
+      let pass: GPUComputePassEncoder | null = null;
+      // Compute dispatches have separate WebGPU usage scopes, so dependent
+      // storage-buffer stages retain their barriers without a pass boundary.
       for (let index = 0; index < dispatches.length; index += 1) {
         const dispatch = dispatches[index];
-        const descriptor: GPUComputePassDescriptor = {
-          label: dispatch.label,
-        };
         if (executionQuerySet !== null) {
+          const descriptor: GPUComputePassDescriptor = {
+            label: dispatch.label,
+          };
           descriptor.timestampWrites = {
             querySet: executionQuerySet,
             beginningOfPassWriteIndex: (integratedLex.stageCount + index) * 2,
             endOfPassWriteIndex: (integratedLex.stageCount + index) * 2 + 1,
           };
+          pass = encoder.beginComputePass(descriptor);
+        } else if (pass === null) {
+          pass = encoder.beginComputePass({
+            label: "baba GPU frontend islands",
+          });
         }
-        const pass = encoder.beginComputePass(descriptor);
+        if (pass === null) {
+          throw new Error(
+            `GPU frontend dispatch '${dispatch.label}' has no compute pass.`,
+          );
+        }
+        if (executionQuerySet === null) {
+          pass.pushDebugGroup(dispatch.label);
+        }
         pass.setPipeline(this.#islandPipeline(dispatch.entryPoint));
         let dispatchBindGroup = bindGroup;
         if (dispatch.entryPoint === "staging") {
@@ -1134,8 +1166,17 @@ export class GpuIslandExecutor {
           }
           pass.dispatchWorkgroups(workgroupsX, workgroupsY);
         }
-        pass.end();
+        if (executionQuerySet === null) {
+          pass.popDebugGroup();
+        } else {
+          pass.end();
+          pass = null;
+        }
         if (dispatch.entryPoint === "regions") {
+          if (pass !== null) {
+            pass.end();
+            pass = null;
+          }
           encoder.copyBufferToBuffer(
             arenaBuffer,
             32 * Uint32Array.BYTES_PER_ELEMENT,
@@ -1144,6 +1185,9 @@ export class GpuIslandExecutor {
             6 * Uint32Array.BYTES_PER_ELEMENT,
           );
         }
+      }
+      if (pass !== null) {
+        pass.end();
       }
 
       if (resultLocation === "host") {
@@ -1155,11 +1199,11 @@ export class GpuIslandExecutor {
           deviceStagingBytes,
         );
         if (
-          slot.querySet !== null &&
+          executionQuerySet !== null &&
           slot.queryResolve !== null
         ) {
           encoder.resolveQuerySet(
-            slot.querySet,
+            executionQuerySet,
             0,
             queryCount,
             slot.queryResolve,
@@ -1178,9 +1222,13 @@ export class GpuIslandExecutor {
       const started = performance.now();
       this.device.queue.submit([encoder.finish()]);
       if (resultLocation === "device") {
-        await this.device.queue.onSubmittedWorkDone();
         const finished = performance.now();
         slot.residentHeld = true;
+        slot.pendingCompletion = this.device.queue.onSubmittedWorkDone().then(
+          () => null,
+          (cause) =>
+            new Error("GPU frontend resident submission failed.", { cause }),
+        );
         let released = false;
         return {
           buffer: deviceStagingBuffer,
@@ -1195,7 +1243,7 @@ export class GpuIslandExecutor {
           edgeOffsetWords: HEADER_WORDS +
             layout.tokenCapacity * TOKEN_WORDS +
             layout.nodeCapacity * NODE_WORDS,
-          submitAndCompletionMs: finished - started,
+          submitMs: finished - started,
           release: () => {
             if (released) {
               return;
@@ -1209,7 +1257,7 @@ export class GpuIslandExecutor {
       const finished = performance.now();
       const mappedRange = stagingBuffer.getMappedRange(0, stagingBytes);
       let stagesMs: Readonly<Record<string, number>> | null = null;
-      if (slot.querySet !== null) {
+      if (executionQuerySet !== null) {
         stagesMs = decodeStageTimings(
           new BigUint64Array(mappedRange, 0, queryCount),
           dispatches,

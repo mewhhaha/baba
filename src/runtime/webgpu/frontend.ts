@@ -83,13 +83,15 @@ export interface GpuResidentFrontendLayout {
 
 export interface GpuResidentFrontendTimings {
   readonly uploadMs: number;
-  readonly submitAndCompletionMs: number;
+  /** CPU time spent submitting; this does not wait for device completion. */
+  readonly submitMs: number;
   readonly totalMs: number;
 }
 
 /**
- * Device-resident syntax IR. Counts and status remain in the buffer header so
- * a downstream GPU pass can consume the result without a mapped readback.
+ * Device-resident syntax IR. Counts and status remain in the buffer header.
+ * Submit consumers to the same queue before disposal; queue ordering makes the
+ * result visible without waiting for device completion on the host.
  */
 export interface GpuResidentFrontendResult {
   readonly buffer: GPUBuffer;
@@ -119,6 +121,12 @@ export interface CpuFrontendOptions {
 }
 
 export interface WebGpuFrontendOptions extends CpuFrontendOptions {
+  readonly lexerCapacityRecords?: number;
+  /** Collect per-dispatch GPU timestamps instead of batching dependent stages. */
+  readonly stageTimings?: "collect";
+}
+
+export interface GpuResidentFrontendOptions extends CpuFrontendOptions {
   readonly lexerCapacityRecords?: number;
 }
 
@@ -326,6 +334,14 @@ export class WebGpuFrontend {
     source: string,
     options: WebGpuFrontendOptions = {},
   ): Promise<GpuFrontendResult> {
+    if (
+      options.stageTimings !== undefined &&
+      options.stageTimings !== "collect"
+    ) {
+      throw new TypeError(
+        `stageTimings must be 'collect' when provided, got '${options.stageTimings}'.`,
+      );
+    }
     const started = performance.now();
     assertDeviceCapacity(source.length, this.plan, this.runtime);
     const units = new Uint16Array(source.length);
@@ -353,6 +369,7 @@ export class WebGpuFrontend {
         options.lexerCapacityRecords,
         options.maxNodes,
         options.maxEdges,
+        options.stageTimings,
       );
     } finally {
       runtimeLease.release();
@@ -372,10 +389,8 @@ export class WebGpuFrontend {
     const afterIslands = performance.now();
     let program: CompactFrontendProgram | null = null;
     if (gpuProgram !== null && rawDiagnostics.length === 0) {
-      const pending = decodePendingProgram(gpuProgram, this.plan);
-      const symbols = executeSemanticRecipes(
-        pending.nodes,
-        pending.tokens,
+      const symbols = executeCompactSemanticRecipes(
+        gpuProgram,
         this.plan,
         source,
         rawDiagnostics,
@@ -407,14 +422,19 @@ export class WebGpuFrontend {
   }
 
   async ingestResident(
-    source: string,
-    options: WebGpuFrontendOptions = {},
+    source: string | Uint16Array,
+    options: GpuResidentFrontendOptions = {},
   ): Promise<GpuResidentFrontendResult> {
     const started = performance.now();
     assertDeviceCapacity(source.length, this.plan, this.runtime);
-    const units = new Uint16Array(source.length);
-    for (let index = 0; index < source.length; index += 1) {
-      units[index] = source.charCodeAt(index);
+    let units: Uint16Array;
+    if (typeof source === "string") {
+      units = new Uint16Array(source.length);
+      for (let index = 0; index < source.length; index += 1) {
+        units[index] = source.charCodeAt(index);
+      }
+    } else {
+      units = source;
     }
     const afterUpload = performance.now();
     const lexerLease = await this.#lexer.acquireIntegratedLexer();
@@ -460,7 +480,7 @@ export class WebGpuFrontend {
       },
       timings: {
         uploadMs: afterUpload - started,
-        submitAndCompletionMs: execution.submitAndCompletionMs,
+        submitMs: execution.submitMs,
         totalMs: finished - started,
       },
       dispose: () => {
@@ -1144,97 +1164,6 @@ function materializeProgram(
   };
 }
 
-function decodePendingProgram(
-  program: CompactFrontendProgram,
-  plan: GpuFrontendPlan,
-): { readonly nodes: PendingNode[]; readonly tokens: Token[] } {
-  const tokens: Token[] = [];
-  for (
-    let offset = 0;
-    offset < program.tokens.length;
-    offset += TOKEN_WORDS
-  ) {
-    tokens.push({
-      terminal: program.tokens[offset],
-      start: program.tokens[offset + 1],
-      end: program.tokens[offset + 2],
-      lexicalIdentity: program.tokens[offset + 3],
-      outputIndex: offset / TOKEN_WORDS,
-    });
-  }
-  const islandByRule = new Map<number, number>();
-  for (const island of plan.islands) {
-    islandByRule.set(island.ruleId, island.id);
-  }
-  const nodes: PendingNode[] = [];
-  for (let offset = 0; offset < program.nodes.length; offset += NODE_WORDS) {
-    const ruleId = program.nodes[offset];
-    const island = islandByRule.get(ruleId);
-    if (island === undefined) {
-      throw new Error(
-        `GPU island output node ${
-          offset / NODE_WORDS
-        } has unknown rule ${ruleId}.`,
-      );
-    }
-    nodes.push({
-      island,
-      start: program.nodes[offset + 2],
-      end: program.nodes[offset + 3],
-      sourceOrder: offset / NODE_WORDS,
-      edges: [],
-      id: offset / NODE_WORDS,
-    });
-  }
-  for (let nodeId = 0; nodeId < nodes.length; nodeId += 1) {
-    const nodeOffset = nodeId * NODE_WORDS;
-    const edgeStart = program.nodes[nodeOffset + 4];
-    const edgeCount = program.nodes[nodeOffset + 5];
-    for (let ordinal = 0; ordinal < edgeCount; ordinal += 1) {
-      const edgeOffset = (edgeStart + ordinal) * EDGE_WORDS;
-      const field = program.edges[edgeOffset];
-      const targetCategory = program.edges[edgeOffset + 2];
-      const targetId = program.edges[edgeOffset + 3];
-      let token: Token | undefined;
-      let child: PendingNode | undefined;
-      let emitKind: "token" | "placeholder" = "token";
-      if (targetCategory === 0) {
-        token = tokens[targetId];
-        if (token === undefined) {
-          throw new Error(
-            `GPU island output edge ${
-              edgeStart + ordinal
-            } has unknown token ${targetId}.`,
-          );
-        }
-      } else if (targetCategory === 1) {
-        emitKind = "placeholder";
-        child = nodes[targetId];
-        if (child === undefined) {
-          throw new Error(
-            `GPU island output edge ${
-              edgeStart + ordinal
-            } has unknown node ${targetId}; ${nodes.length} nodes were allocated.`,
-          );
-        }
-      } else {
-        throw new Error(
-          `GPU island output edge ${
-            edgeStart + ordinal
-          } has target category ${targetCategory}.`,
-        );
-      }
-      nodes[nodeId].edges.push({
-        emit: { kind: emitKind, field },
-        token,
-        child,
-        ordinal: program.edges[edgeOffset + 1],
-      });
-    }
-  }
-  return { nodes, tokens };
-}
-
 function collectNodes(node: PendingNode, nodes: PendingNode[]): void {
   nodes.push(node);
   for (const edge of node.edges) {
@@ -1378,6 +1307,244 @@ function materializeDiagnostic(raw: RawDiagnostic): FrontendDiagnostic {
   };
 }
 
+interface SemanticDefinition {
+  readonly start: number;
+  readonly end: number;
+  readonly nodeId: number;
+  readonly symbol: number;
+}
+
+function executeCompactSemanticRecipes(
+  program: CompactFrontendProgram,
+  plan: GpuFrontendPlan,
+  source: string,
+  diagnostics: RawDiagnostic[],
+): Int32Array {
+  const recipeByRule = new Map(
+    plan.semanticRecipes.map((recipe) => [recipe.ruleId, recipe]),
+  );
+  const definitions: SemanticDefinition[] = [];
+  const definitionByName = new Map<string, number>();
+  const symbolWords: number[] = [];
+  const nodeCount = program.nodes.length / NODE_WORDS;
+  for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
+    const nodeOffset = nodeId * NODE_WORDS;
+    const recipe = recipeByRule.get(program.nodes[nodeOffset]);
+    if (recipe?.opcode !== "define") {
+      continue;
+    }
+    const nameField = recipe.fields.find((field) =>
+      field.target === "binder" || field.target === "name"
+    );
+    if (nameField === undefined) {
+      continue;
+    }
+    const tokenIndex = compactTokenForField(
+      program,
+      nodeId,
+      nameField.field,
+    );
+    if (tokenIndex === undefined) {
+      continue;
+    }
+    const tokenOffset = tokenIndex * TOKEN_WORDS;
+    const tokenStart = program.tokens[tokenOffset + 1];
+    const tokenEnd = program.tokens[tokenOffset + 2];
+    const name = source.slice(tokenStart, tokenEnd);
+    const previous = definitionByName.get(name);
+    if (previous !== undefined) {
+      diagnostics.push({
+        code: DIAGNOSTIC_DUPLICATE_BINDING,
+        start: tokenStart,
+        end: tokenEnd,
+        subjectId: nodeId,
+        parameter0: previous,
+        parameter1: 0,
+      });
+      continue;
+    }
+    const symbol = definitions.length;
+    definitionByName.set(name, symbol);
+    definitions.push({
+      start: program.nodes[nodeOffset + 2],
+      end: program.nodes[nodeOffset + 3],
+      nodeId,
+      symbol,
+    });
+    symbolWords.push(0, 0, tokenIndex, -1, -1, nodeId);
+  }
+
+  const primitiveNames = new Set(
+    plan.primitives.map((primitive) => primitive.source),
+  );
+  const referencesByDefinition = new Map<number, number[]>();
+  for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
+    const nodeOffset = nodeId * NODE_WORDS;
+    const recipe = recipeByRule.get(program.nodes[nodeOffset]);
+    if (recipe?.opcode !== "reference") {
+      continue;
+    }
+    const nameField = recipe.fields.find((field) =>
+      field.target === "name" || field.target === "reference"
+    );
+    if (nameField === undefined) {
+      continue;
+    }
+    const tokenIndex = compactTokenForField(
+      program,
+      nodeId,
+      nameField.field,
+    );
+    if (tokenIndex === undefined) {
+      continue;
+    }
+    const tokenOffset = tokenIndex * TOKEN_WORDS;
+    const tokenStart = program.tokens[tokenOffset + 1];
+    const tokenEnd = program.tokens[tokenOffset + 2];
+    const name = source.slice(tokenStart, tokenEnd);
+    const target = definitionByName.get(name);
+    if (target === undefined) {
+      if (!primitiveNames.has(name)) {
+        diagnostics.push({
+          code: DIAGNOSTIC_UNKNOWN_REFERENCE,
+          start: tokenStart,
+          end: tokenEnd,
+          subjectId: nodeId,
+          parameter0: 0,
+          parameter1: 0,
+        });
+      }
+      continue;
+    }
+    const nodeStart = program.nodes[nodeOffset + 2];
+    const nodeEnd = program.nodes[nodeOffset + 3];
+    const owner = definitions.find((definition) =>
+      nodeStart >= definition.start && nodeEnd <= definition.end
+    );
+    if (owner === undefined) {
+      continue;
+    }
+    const references = referencesByDefinition.get(owner.symbol);
+    if (references === undefined) {
+      referencesByDefinition.set(owner.symbol, [target]);
+    } else {
+      references.push(target);
+    }
+  }
+  reportReferenceCycles(
+    definitions,
+    referencesByDefinition,
+    diagnostics,
+  );
+
+  const tokenCount = program.tokens.length / TOKEN_WORDS;
+  for (let tokenIndex = 0; tokenIndex < tokenCount; tokenIndex += 1) {
+    const tokenOffset = tokenIndex * TOKEN_WORDS;
+    const tokenStart = program.tokens[tokenOffset + 1];
+    const tokenEnd = program.tokens[tokenOffset + 2];
+    if (!isDecimalIntegerSpan(source, tokenStart, tokenEnd)) {
+      continue;
+    }
+    const integer = BigInt(source.slice(tokenStart, tokenEnd));
+    const isI32MinimumMagnitude = integer === 2147483648n &&
+      tokenStart > 0 &&
+      source[tokenStart - 1] === "-";
+    if (
+      integer < -2147483648n ||
+      (integer > 2147483647n && !isI32MinimumMagnitude)
+    ) {
+      diagnostics.push({
+        code: DIAGNOSTIC_INTEGER_BOUNDS,
+        start: tokenStart,
+        end: tokenEnd,
+        subjectId: tokenIndex,
+        parameter0: 0,
+        parameter1: 0,
+      });
+    }
+  }
+
+  for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
+    const nodeOffset = nodeId * NODE_WORDS;
+    const recipe = recipeByRule.get(program.nodes[nodeOffset]);
+    if (recipe?.opcode !== "repeat-limit") {
+      continue;
+    }
+    const countField = recipe.fields.find((field) => field.target === "count");
+    if (countField === undefined) {
+      continue;
+    }
+    const tokenIndex = compactTokenForField(
+      program,
+      nodeId,
+      countField.field,
+    );
+    if (tokenIndex === undefined) {
+      continue;
+    }
+    const tokenOffset = tokenIndex * TOKEN_WORDS;
+    const tokenStart = program.tokens[tokenOffset + 1];
+    const tokenEnd = program.tokens[tokenOffset + 2];
+    const count = BigInt(source.slice(tokenStart, tokenEnd));
+    if (count < 0n || count > 1_000_000n) {
+      diagnostics.push({
+        code: DIAGNOSTIC_REPEAT_LIMIT,
+        start: tokenStart,
+        end: tokenEnd,
+        subjectId: nodeId,
+        parameter0: 1_000_000,
+        parameter1: 0,
+      });
+    }
+  }
+  return new Int32Array(symbolWords);
+}
+
+function compactTokenForField(
+  program: CompactFrontendProgram,
+  nodeId: number,
+  field: number,
+): number | undefined {
+  const nodeOffset = nodeId * NODE_WORDS;
+  const edgeStart = program.nodes[nodeOffset + 4];
+  const edgeCount = program.nodes[nodeOffset + 5];
+  for (let ordinal = 0; ordinal < edgeCount; ordinal += 1) {
+    const edgeOffset = (edgeStart + ordinal) * EDGE_WORDS;
+    if (
+      program.edges[edgeOffset] === field &&
+      program.edges[edgeOffset + 2] === 0
+    ) {
+      return program.edges[edgeOffset + 3];
+    }
+  }
+  return undefined;
+}
+
+function isDecimalIntegerSpan(
+  source: string,
+  start: number,
+  end: number,
+): boolean {
+  if (start >= end) {
+    return false;
+  }
+  let cursor = start;
+  if (source.charCodeAt(cursor) === 45) {
+    cursor += 1;
+  }
+  if (cursor >= end) {
+    return false;
+  }
+  while (cursor < end) {
+    const code = source.charCodeAt(cursor);
+    if (code < 48 || code > 57) {
+      return false;
+    }
+    cursor += 1;
+  }
+  return true;
+}
+
 function executeSemanticRecipes(
   nodes: readonly PendingNode[],
   tokens: readonly Token[],
@@ -1388,12 +1555,7 @@ function executeSemanticRecipes(
   const recipeByRule = new Map(
     plan.semanticRecipes.map((recipe) => [recipe.ruleId, recipe]),
   );
-  const definitions: {
-    readonly node: PendingNode;
-    readonly name: string;
-    readonly token: Token;
-    readonly symbol: number;
-  }[] = [];
+  const definitions: SemanticDefinition[] = [];
   const definitionByName = new Map<string, number>();
   const symbolWords: number[] = [];
   for (const node of nodes) {
@@ -1429,7 +1591,12 @@ function executeSemanticRecipes(
     }
     const symbol = definitions.length;
     definitionByName.set(name, symbol);
-    definitions.push({ node, name, token, symbol });
+    definitions.push({
+      start: node.start,
+      end: node.end,
+      nodeId: node.id,
+      symbol,
+    });
     symbolWords.push(0, 0, token.outputIndex, -1, -1, node.id);
   }
 
@@ -1472,7 +1639,7 @@ function executeSemanticRecipes(
       continue;
     }
     const owner = definitions.find((definition) =>
-      node.start >= definition.node.start && node.end <= definition.node.end
+      node.start >= definition.start && node.end <= definition.end
     );
     if (owner === undefined) {
       continue;
@@ -1542,10 +1709,7 @@ function executeSemanticRecipes(
 }
 
 function reportReferenceCycles(
-  definitions: readonly {
-    readonly node: PendingNode;
-    readonly symbol: number;
-  }[],
+  definitions: readonly SemanticDefinition[],
   referencesByDefinition: ReadonlyMap<number, readonly number[]>,
   diagnostics: RawDiagnostic[],
 ): void {
@@ -1561,9 +1725,9 @@ function reportReferenceCycles(
         const definition = definitions[symbol];
         diagnostics.push({
           code: DIAGNOSTIC_REFERENCE_CYCLE,
-          start: definition.node.start,
-          end: definition.node.end,
-          subjectId: definition.node.id,
+          start: definition.start,
+          end: definition.end,
+          subjectId: definition.nodeId,
           parameter0: symbol,
           parameter1: 0,
         });

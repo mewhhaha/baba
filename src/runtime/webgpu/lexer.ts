@@ -1195,6 +1195,26 @@ export class WebGpuLexer {
         capacityRecords,
         stageCount: dispatches.length,
         encode: (encoder, querySet, firstQuery) => {
+          if (querySet === null) {
+            // Each compute dispatch has its own WebGPU usage scope, which keeps
+            // dependent storage-buffer stages ordered inside this pass.
+            const pass = encoder.beginComputePass({
+              label: "baba integrated lexer",
+            });
+            for (const [stage, workgroups] of dispatches) {
+              const pipeline = this.#pipelines.get(stage);
+              if (pipeline === undefined) {
+                throw new Error(`Missing compute pipeline for stage ${stage}.`);
+              }
+              pass.pushDebugGroup(stage);
+              pass.setPipeline(pipeline);
+              pass.setBindGroup(0, bindGroup);
+              pass.dispatchWorkgroups(workgroups);
+              pass.popDebugGroup();
+            }
+            pass.end();
+            return;
+          }
           for (let index = 0; index < dispatches.length; index += 1) {
             const [stage, workgroups] = dispatches[index];
             const pipeline = this.#pipelines.get(stage);

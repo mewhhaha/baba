@@ -191,6 +191,10 @@ console.log(JSON.stringify({
 try {
   for (const mebibytes of options.sizes) {
     const source = gpuDuckCorpus(mebibytes * MIB);
+    const sourceUnits = new Uint16Array(source.length);
+    for (let index = 0; index < source.length; index += 1) {
+      sourceUnits[index] = source.charCodeAt(index);
+    }
     console.error(`${mebibytes} MiB parity`);
     const parityCpuResult = cpu.ingest(source);
     const parityProgram = requireProgram(parityCpuResult, "CPU");
@@ -209,7 +213,7 @@ try {
       });
       assertProgramParity(cpuResult, gpuResult);
       if (options.resident) {
-        const resident = await frontend.ingestResident(source, {
+        const resident = await frontend.ingestResident(sourceUnits, {
           lexerCapacityRecords,
         });
         resident.dispose();
@@ -218,7 +222,11 @@ try {
 
     const cpuSamples: number[] = [];
     const gpuSamples: number[] = [];
-    const residentGpuSamples: number[] = [];
+    const residentSubmitSamples: number[] = [];
+    const residentTotalSamples: number[] = [];
+    const sourceEncodingSamples: number[] = [];
+    const gpuRoundTripSamples: number[] = [];
+    const semanticSamples: number[] = [];
     let tokenCount = 0;
     let nodeCount = 0;
     let edgeCount = 0;
@@ -235,7 +243,9 @@ try {
         lexerCapacityRecords,
       });
       gpuSamples.push(performance.now() - gpuStart);
-      stagesMs = gpuResult.timings.stagesMs;
+      sourceEncodingSamples.push(gpuResult.timings.uploadMs);
+      gpuRoundTripSamples.push(gpuResult.timings.lexMs);
+      semanticSamples.push(gpuResult.timings.semanticsMs);
 
       assertProgramParity(cpuResult, gpuResult);
       const program = requireProgram(gpuResult, "GPU");
@@ -249,22 +259,29 @@ try {
         program.types.byteLength;
 
       if (options.resident) {
-        const residentStart = performance.now();
-        const resident = await frontend.ingestResident(source, {
+        const resident = await frontend.ingestResident(sourceUnits, {
           lexerCapacityRecords,
         });
-        residentGpuSamples.push(performance.now() - residentStart);
+        residentSubmitSamples.push(resident.timings.submitMs);
+        residentTotalSamples.push(resident.timings.totalMs);
         resident.dispose();
       }
     }
+    console.error(`${mebibytes} MiB stage profile`);
+    const profiledGpuResult = await frontend.ingest(source, {
+      lexerCapacityRecords,
+      stageTimings: "collect",
+    });
+    assertProgramParity(parityCpuResult, profiledGpuResult);
+    stagesMs = profiledGpuResult.timings.stagesMs;
 
     const cpuMs = distribution(cpuSamples);
     const gpuMs = distribution(gpuSamples);
-    let residentGpuMs: Distribution | null = null;
-    let residentSpeedup: number | null = null;
-    if (residentGpuSamples.length > 0) {
-      residentGpuMs = distribution(residentGpuSamples);
-      residentSpeedup = cpuMs.median / residentGpuMs.median;
+    let residentSubmitMs: Distribution | null = null;
+    let residentTotalMs: Distribution | null = null;
+    if (residentSubmitSamples.length > 0) {
+      residentSubmitMs = distribution(residentSubmitSamples);
+      residentTotalMs = distribution(residentTotalSamples);
     }
     console.log(JSON.stringify({
       mebibytes,
@@ -276,8 +293,13 @@ try {
       cpuMs,
       gpuMs,
       speedup: cpuMs.median / gpuMs.median,
-      residentGpuMs,
-      residentSpeedup,
+      ownedPhasesMs: {
+        sourceEncoding: distribution(sourceEncodingSamples),
+        gpuRoundTrip: distribution(gpuRoundTripSamples),
+        semantics: distribution(semanticSamples),
+      },
+      residentTotalMs,
+      residentSubmitMs,
       stagesMs,
     }));
   }

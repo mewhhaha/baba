@@ -61,11 +61,12 @@ allow a caller with tighter proven bounds to avoid worst-case allocation.
 ### Keeping the Syntax IR on the GPU
 
 Use the resident surface only when a downstream GPU pass understands Baba's flat
-buffer layout:
+buffer layout. Pass UTF-16 units directly when the caller already owns them:
 
 ```ts
-const resident = await frontend.ingestResident(source);
+const resident = await frontend.ingestResident(sourceUnits);
 try {
+  const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setBindGroup(
     0,
@@ -78,6 +79,7 @@ try {
   );
   pass.dispatchWorkgroups(workgroups);
   pass.end();
+  device.queue.submit([encoder.finish()]);
 } finally {
   resident.dispose();
 }
@@ -89,7 +91,16 @@ device values; the host does not learn whether syntax succeeded. Semantic
 recipes, symbols, types, and diagnostics are therefore not materialized on the
 host. The result holds its execution slot and runtime lease until `dispose()`,
 which prevents its buffer from being overwritten or its device from being
-destroyed while a caller owns it.
+destroyed while a caller owns it. `ingestResident()` returns after queue
+submission rather than completion. Submit consumers to the same queue before
+`dispose()`; a reused slot waits for its pending submission before recycling or
+growing buffers.
+
+Default ingestion batches dependent kernels into one lexer pass and two island
+passes around the device-written indirect-dispatch copy. Set
+`stageTimings: "collect"` on `ingest()` to restore per-dispatch timestamp
+queries for profiling. Timestamp collection deliberately stays outside measured
+benchmark runs because its pass boundaries change the workload being measured.
 
 ## Grammar Requirements
 
@@ -180,12 +191,14 @@ Add `--resident` to time the no-map resident surface alongside owned `ingest()`.
 
 The benchmark verifies byte parity before timing, prints progress to stderr, and
 emits JSON containing adapter limits, plan expansion factors, actual compact
-output bytes, full sample ranges, and per-stage device timestamps when the
-adapter supports timestamp queries.
+output bytes, full sample ranges, owned source/GPU/semantic phases, resident
+submission timing, and a separate per-stage timestamp profile when the adapter
+supports timestamp queries.
 
-One NVIDIA GeForce RTX 4080 SUPER run with driver 610.43.03 measured the broad
-GPU Duck corpus as follows. Each cell is the median and full range of seven runs
-after two warmups. These are not portable crossover promises.
+The merged pre-batching implementation measured the broad GPU Duck corpus on an
+NVIDIA GeForce RTX 4080 SUPER with driver 610.43.03 as follows. Each cell is the
+median and full range of seven runs after two warmups. These are not portable
+crossover promises.
 
 | source | CPU oracle                     | owned `ingest()`              | resident `ingestResident()` | owned speedup |
 | ------ | ------------------------------ | ----------------------------- | --------------------------- | ------------- |
@@ -197,12 +210,18 @@ Resident latency is not a full CPU-oracle speedup: it stops before mapped
 readback and host semantic recipes by design. It measures when the next consumer
 stays on the device.
 
-At 16 MiB, one timestamp sample attributed 34.52 ms to lexing, 0.91 ms to
-structure, 7.00 ms to candidate compaction, 12.95 ms to contraction, 8.51 ms to
-reachability, 8.45 ms to allocation, and 2.24 ms to staging, with 87.88 ms total
-device work. Device work and owned end-to-end time differ because upload,
-mapping, typed-array ownership, host semantic validation, and driver scheduling
-are outside those timestamps.
+After dispatch batching and compact host semantics, a seven-run 1 MiB
+measurement produced 34.43 ms owned ingestion [32.32, 39.66] against a 343.75 ms
+CPU oracle [281.79, 355.92], a 9.98x median speedup. Compact semantic validation
+fell from roughly 71.5 ms in the object-materializing path to 5.62 ms. Reusing
+one resident slot measured 8.17 ms total [7.71, 11.50], of which queue
+submission was 0.47 ms [0.43, 0.53]; callers with several in-flight slots can
+overlap that device work.
+
+The current 4 and 16 MiB matrix could not be rerun because an unrelated process
+held 12.55 GiB of the 16 GiB adapter. The table above remains the last verified
+large-input measurement rather than mixing an OOM-contended run into the
+comparison.
 
 ## Comparison with Parallel Parsers
 
@@ -214,8 +233,8 @@ parity workload.
 | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [PAPAGENO](https://pradella.faculty.polimi.it/papers/cc2014.pdf)                 | Generates multicore parsers for operator-precedence grammars whose local parsability permits independent substring reductions.                                                                                                            | A stricter locally parsable grammar class can remove candidate search and make arbitrary partitions safe. Baba's declared islands retain broader grammar freedom but pay for locator candidates and contraction. |
 | [ParPaRaw](https://www.vldb.org/pvldb/vol13/p616-stehle.pdf)                     | Splits delimiter-separated input into equal chunks, simulates DFA context in parallel, accumulates metadata, and streams transfers around GPU work.                                                                                       | Baba now applies bounded all-entry-state chunk summaries to compiler-selected long islands. Streaming remains a different API because it requires multiple submissions and readbacks.                            |
-| [Pareas](https://futhark-lang.org/student-projects/robin-voetter-msc-thesis.pdf) | Runs lexing, LLP parsing, tree construction, and semantic analysis on the GPU for a deliberately restricted C-like language. Its grammar is reshaped for parallel parsing, including explicit braces and later tree-restructuring passes. | Baba's strict throughput profile similarly turns a grammar restriction into a compiler proof, while preserving the general island profile for other roots.                                                       |
-| [RAPIDS cuDF](https://github.com/rapidsai/cudf)                                  | Parses format-specific tabular input into data that subsequent operators continue to consume on the GPU; [GPUDirect Storage](https://developer.nvidia.com/blog/?p=47682) can bypass CPU staging for storage-to-GPU transfers.             | `ingestResident()` now removes compulsory host readback for external GPU consumers. Moving Baba's own semantic recipes and lowering to the device remains the next resident-pipeline step.                       |
+| [Pareas](https://futhark-lang.org/student-projects/robin-voetter-msc-thesis.pdf) | Runs lexing, LLP parsing, tree construction, and semantic analysis on the GPU for a deliberately restricted C-like language. Its grammar is reshaped for parallel parsing, including explicit braces and later tree-restructuring passes. | Baba's strict throughput profile similarly turns a grammar restriction into a compiler proof. Owned results now validate recipes directly over compact arrays; moving that catalog to the GPU remains optional.  |
+| [RAPIDS cuDF](https://github.com/rapidsai/cudf)                                  | Parses format-specific tabular input into data that subsequent operators continue to consume on the GPU; [GPUDirect Storage](https://developer.nvidia.com/blog/?p=47682) can bypass CPU staging for storage-to-GPU transfers.             | `ingestResident()` accepts upload-ready UTF-16 units and returns after submission, so same-queue consumers no longer pay a host completion fence or compulsory readback.                                         |
 
 PAPAGENO targets CPU threads, ParPaRaw and cuDF parse data formats rather than
 programming languages, and the Pareas evaluation does not provide a like-for-
@@ -239,8 +258,16 @@ choices; it does not establish a cross-system speed ranking.
    187 to 175 lexer states; contextual candidate behavior remains observable.
 5. **Strict root throughput.** The optional strict profile proves and persists
    one non-self-nesting repeated root island with an explicit boundary.
+6. **Batched dispatches.** Normal ingestion uses three dependent compute passes.
+   Per-dispatch pass boundaries remain an explicit profiling mode.
+7. **Compact host semantics.** Owned ingestion validates recipes directly over
+   the eight-word nodes and four-word edges without rebuilding an object graph.
+8. **Queue-ordered resident work.** Resident ingestion returns after submit and
+   accepts pre-encoded UTF-16 units. Slot reuse waits for completion before
+   recycling its buffers.
 
 Transfer streaming and device semantic/lowering passes remain separate future
-work. Streaming conflicts with the current whole-program one-submission
-contract; device semantics require GPU implementations of the shared recipe
-catalog rather than a hidden change to `ingest()`.
+work. The principal owned-result cost is now the required one-map round trip and
+copy into caller-owned arrays. Reducing it generally requires tighter
+caller-proven capacities, a disposable mapped-result API, or relaxing the
+one-map whole-program contract.
