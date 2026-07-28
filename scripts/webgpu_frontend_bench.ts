@@ -191,10 +191,6 @@ console.log(JSON.stringify({
 try {
   for (const mebibytes of options.sizes) {
     const source = gpuDuckCorpus(mebibytes * MIB);
-    const sourceUnits = new Uint16Array(source.length);
-    for (let index = 0; index < source.length; index += 1) {
-      sourceUnits[index] = source.charCodeAt(index);
-    }
     console.error(`${mebibytes} MiB parity`);
     const parityCpuResult = cpu.ingest(source);
     const parityProgram = requireProgram(parityCpuResult, "CPU");
@@ -212,12 +208,6 @@ try {
         lexerCapacityRecords,
       });
       assertProgramParity(cpuResult, gpuResult);
-      if (options.resident) {
-        const resident = await frontend.ingestResident(sourceUnits, {
-          lexerCapacityRecords,
-        });
-        resident.dispose();
-      }
     }
 
     const cpuSamples: number[] = [];
@@ -257,15 +247,6 @@ try {
         program.edges.byteLength +
         program.symbols.byteLength +
         program.types.byteLength;
-
-      if (options.resident) {
-        const resident = await frontend.ingestResident(sourceUnits, {
-          lexerCapacityRecords,
-        });
-        residentSubmitSamples.push(resident.timings.submitMs);
-        residentTotalSamples.push(resident.timings.totalMs);
-        resident.dispose();
-      }
     }
     console.error(`${mebibytes} MiB stage profile`);
     const profiledGpuResult = await frontend.ingest(source, {
@@ -274,6 +255,36 @@ try {
     });
     assertProgramParity(parityCpuResult, profiledGpuResult);
     stagesMs = profiledGpuResult.timings.stagesMs;
+
+    if (options.resident) {
+      const sourceUnits = new Uint16Array(source.length);
+      for (let index = 0; index < source.length; index += 1) {
+        sourceUnits[index] = source.charCodeAt(index);
+      }
+      await runtime.device.queue.onSubmittedWorkDone();
+      for (let warmup = 0; warmup < options.warmup; warmup += 1) {
+        console.error(
+          `${mebibytes} MiB resident warmup ${warmup + 1}/${options.warmup}`,
+        );
+        const resident = await frontend.ingestResident(sourceUnits, {
+          lexerCapacityRecords,
+        });
+        resident.dispose();
+        await runtime.device.queue.onSubmittedWorkDone();
+      }
+      for (let run = 0; run < options.runs; run += 1) {
+        console.error(
+          `${mebibytes} MiB resident run ${run + 1}/${options.runs}`,
+        );
+        const resident = await frontend.ingestResident(sourceUnits, {
+          lexerCapacityRecords,
+        });
+        residentSubmitSamples.push(resident.timings.submitMs);
+        residentTotalSamples.push(resident.timings.totalMs);
+        resident.dispose();
+        await runtime.device.queue.onSubmittedWorkDone();
+      }
+    }
 
     const cpuMs = distribution(cpuSamples);
     const gpuMs = distribution(gpuSamples);
