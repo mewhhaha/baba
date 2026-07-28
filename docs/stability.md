@@ -69,8 +69,23 @@ Generated `parser.plan` files currently use runtime metadata subsection version
 `2` and portable parser-plan version `2`. The loader accepts only this current
 contract; regenerate plans produced by earlier Baba releases.
 
+These numbers version independent contracts, not concurrently supported parser
+generations. Baba emits and accepts one combination:
+
+| Contract                         | Current version |
+| -------------------------------- | --------------: |
+| Portable parser plan             |               2 |
+| Wasm core table encoding         |               5 |
+| Wasm runtime metadata subsection |               2 |
+| Compact metadata container       |               1 |
+| Optional GPU frontend section    |               3 |
+
+There are no migrations or compatibility readers for older versions. The
+compiler always emits the versions above, and each loader rejects a different
+version at its input boundary.
+
 The binary core table section that `load_plan` reads carries its own format
-version, currently `4`. It is an internal encoding, not part of the
+version, currently `5`. It is an internal encoding, not part of the
 `PortableParserPlan` contract: hosts are expected to validate a plan through
 `wasm/abi.json` and `load_plan` rather than to decode the tables themselves.
 Adding, removing, or reordering a header slot or a section changes that version,

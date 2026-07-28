@@ -192,8 +192,9 @@ state, source buffers, and disposal lifecycle.
 
 `createParser()` does not load defaults: both the plan and exactly one Wasm
 module source are required. Parser plans use runtime metadata version 2;
-regenerate plans produced by earlier Baba versions. Breaking changes for each
-release are listed in [CHANGELOG.md](CHANGELOG.md).
+regenerate plans produced by earlier Baba versions. Baba emits and accepts only
+the current parser-plan contract; it does not migrate older plans. Breaking
+changes for each release are listed in [CHANGELOG.md](CHANGELOG.md).
 
 Parser instances expose a Wasm-first runtime surface:
 

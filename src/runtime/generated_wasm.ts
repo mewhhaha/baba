@@ -9,6 +9,12 @@ import {
   validateCombinedWasmParserPlan,
 } from "./wasm_plan.ts";
 import {
+  COMPACT_PLAN_VERSION,
+  PARSER_PLAN_FORMAT,
+  PARSER_PLAN_SEMANTICS,
+  PARSER_PLAN_VERSION,
+} from "../targets/runtime/parser_plan_contract.ts";
+import {
   PARSER_DIAGNOSTIC_CODE_AMBIGUOUS_PARSE as parserDiagnosticCodeAmbiguousParse,
   PARSER_DIAGNOSTIC_CODE_INPUT_TOO_LARGE as parserDiagnosticCodeInputTooLarge,
   PARSER_DIAGNOSTIC_CODE_INTERNAL_ERROR as parserDiagnosticCodeInternalError,
@@ -341,10 +347,10 @@ export const wasmLexResultI32Count = WASM_LEX_RESULT_I32_COUNT;
 export const wasmTokenRecordI32Count = WASM_TOKEN_RECORD_I32_COUNT;
 export const wasmHostOwnershipModel = WASM_HOST_OWNERSHIP_CALLER_MANAGED;
 export const wasmResultLifetimeModel = WASM_RESULT_LIFETIME_CALLER_BUFFER;
-export const parserPlanFormat = "baba-parser-plan" as const;
-export const parserPlanVersion = 2;
+export const parserPlanFormat = PARSER_PLAN_FORMAT;
+export const parserPlanVersion = PARSER_PLAN_VERSION;
 export { parserPlanRuntimeMetadataVersion };
-export const parserPlanSemantics = "baba-portable-v2" as const;
+export const parserPlanSemantics = PARSER_PLAN_SEMANTICS;
 export const runtimeImplementationFormat = RUNTIME_IMPLEMENTATION_METADATA
   .format;
 export const runtimeImplementationVersion = RUNTIME_IMPLEMENTATION_METADATA
@@ -691,7 +697,6 @@ const EXTERNAL_COMPACT_PLAN_MAGIC = new Uint8Array([
   78,
   0,
 ]);
-const EXTERNAL_COMPACT_PLAN_VERSION = 1;
 
 function decodeExternalRuntimeMetadata(
   planBytes: Uint8Array,
@@ -967,7 +972,7 @@ function decodeExternalCompactRuntimeMetadata(
     }
   }
   const version = reader.u16();
-  if (version !== EXTERNAL_COMPACT_PLAN_VERSION) {
+  if (version !== COMPACT_PLAN_VERSION) {
     throw new Error(`Unsupported compact plan version ${version}.`);
   }
   const stringCount = reader.varUint();

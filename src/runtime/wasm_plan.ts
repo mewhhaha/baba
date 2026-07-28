@@ -2,10 +2,14 @@ import {
   decodeCompactPlanBinary,
   encodeCompactPlanBinary,
 } from "./compact_plan_binary.ts";
+import {
+  PARSER_PLAN_FORMAT,
+  PARSER_PLAN_RUNTIME_METADATA_VERSION,
+  PARSER_PLAN_VERSION,
+  WASM_CORE_PLAN_FORMAT_VERSION,
+  WASM_CORE_PLAN_MAGIC,
+} from "../targets/runtime/parser_plan_contract.ts";
 
-const CORE_PLAN_MAGIC = 0x31505742;
-const CORE_PLAN_FORMAT_VERSION = 5;
-const CORE_PLAN_VERSION = 2;
 const CORE_PLAN_HEADER_I32_COUNT = 36;
 const CORE_PLAN_HEADER_BYTES = CORE_PLAN_HEADER_I32_COUNT * 4;
 const CORE_HEADER_MAGIC = 0;
@@ -71,7 +75,9 @@ const WASM_PLAN_RUNTIME_SECTION_MAGIC = new Uint8Array([
   84,
   0,
 ]);
-export const parserPlanRuntimeMetadataVersion = 2 as const;
+export {
+  PARSER_PLAN_RUNTIME_METADATA_VERSION as parserPlanRuntimeMetadataVersion,
+};
 
 export interface DecodedWasmParserPlan {
   readonly coreByteLength: number;
@@ -90,7 +96,7 @@ export interface ValidatedWasmParserPlan {
 }
 
 export interface WasmParserPlanInfo {
-  readonly format: "baba-parser-plan";
+  readonly format: typeof PARSER_PLAN_FORMAT;
   readonly coreFormatVersion: number;
   readonly parserPlanVersion: number;
   readonly runtimeMetadataVersion: number;
@@ -133,7 +139,7 @@ export function encodeCombinedWasmParserPlan(
   let offset = corePlanBytes.byteLength;
   combined.set(WASM_PLAN_RUNTIME_SECTION_MAGIC, offset);
   offset += WASM_PLAN_RUNTIME_SECTION_MAGIC.byteLength;
-  writeU32(combined, offset, parserPlanRuntimeMetadataVersion);
+  writeU32(combined, offset, PARSER_PLAN_RUNTIME_METADATA_VERSION);
   offset += I32_BYTES;
   writeU32(combined, offset, compactBytes.byteLength);
   offset += I32_BYTES;
@@ -179,7 +185,7 @@ export function validateCombinedWasmParserPlan(
   offset += WASM_PLAN_RUNTIME_SECTION_MAGIC.byteLength;
   const sectionVersion = readU32(planBytes, offset);
   offset += I32_BYTES;
-  if (sectionVersion !== parserPlanRuntimeMetadataVersion) {
+  if (sectionVersion !== PARSER_PLAN_RUNTIME_METADATA_VERSION) {
     throw new Error(
       `Unsupported Wasm parser plan runtime metadata version ${sectionVersion}.`,
     );
@@ -225,8 +231,8 @@ export function inspectCombinedWasmParserPlan(
     "lexer accept candidate rows",
   );
   return {
-    format: "baba-parser-plan",
-    coreFormatVersion: CORE_PLAN_FORMAT_VERSION,
+    format: PARSER_PLAN_FORMAT,
+    coreFormatVersion: WASM_CORE_PLAN_FORMAT_VERSION,
     parserPlanVersion: validated.parserPlanVersion,
     runtimeMetadataVersion: validated.runtimeMetadataVersion,
     totalBytes: planBytes.byteLength,
@@ -274,11 +280,11 @@ function validateCorePlan(planBytes: Uint8Array): {
     throw new Error("Wasm parser plan is truncated.");
   }
   const magic = readI32(planBytes, CORE_HEADER_MAGIC);
-  if (magic !== CORE_PLAN_MAGIC) {
+  if (magic !== WASM_CORE_PLAN_MAGIC) {
     throw new Error("Wasm parser plan magic is invalid.");
   }
   const formatVersion = readI32(planBytes, CORE_HEADER_FORMAT_VERSION);
-  if (formatVersion !== CORE_PLAN_FORMAT_VERSION) {
+  if (formatVersion !== WASM_CORE_PLAN_FORMAT_VERSION) {
     throw new Error(
       `Unsupported Wasm parser plan core format version ${formatVersion}.`,
     );
@@ -287,7 +293,7 @@ function validateCorePlan(planBytes: Uint8Array): {
     planBytes,
     CORE_HEADER_PARSER_PLAN_VERSION,
   );
-  if (parserPlanVersion !== CORE_PLAN_VERSION) {
+  if (parserPlanVersion !== PARSER_PLAN_VERSION) {
     throw new Error(`Unsupported parser plan version ${parserPlanVersion}.`);
   }
   const dfaStateCount = readNonNegativeI32(

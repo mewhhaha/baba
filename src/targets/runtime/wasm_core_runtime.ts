@@ -13,6 +13,11 @@ import {
   WASM_MAX_PAGES as MAX_WASM_PAGES,
   WASM_PAGE_BYTES as PAGE_SIZE,
 } from "./wasm_abi.ts";
+import {
+  PARSER_PLAN_VERSION,
+  WASM_CORE_PLAN_FORMAT_VERSION,
+  WASM_CORE_PLAN_MAGIC,
+} from "./parser_plan_contract.ts";
 import { wasmCoreRuntimeBytes } from "./wasm_core_runtime_bytes.ts";
 
 export interface WasmModuleImage {
@@ -70,8 +75,6 @@ export interface WasmCoreLexerSpecMetadata {
   readonly excludedWords: readonly string[];
 }
 
-const PLAN_MAGIC = 0x31505742;
-const PLAN_FORMAT_VERSION = 5;
 const PLAN_HEADER_I32_COUNT = 36;
 const PLAN_HEADER_BYTES = PLAN_HEADER_I32_COUNT * 4;
 const COMPACT_I16_OFFSET_TAG = 2;
@@ -80,7 +83,6 @@ const COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 export function emitWasmModule(
   dfa: Dfa,
   lr: LrTable,
-  parserPlanVersion = 2,
   metadata: WasmCoreRuntimeMetadata = {
     eofTerminal: -1,
     terminalBySpec: [],
@@ -89,7 +91,7 @@ export function emitWasmModule(
     productions: [],
   },
 ): WasmModuleImage {
-  const layout = buildPlanDataLayout(dfa, lr, parserPlanVersion, metadata);
+  const layout = buildPlanDataLayout(dfa, lr, metadata);
   const bytes = emitGenericWasmModule();
   const inputBase = align(layout.bytes.length, 8);
   const initialPages = Math.max(1, Math.ceil(inputBase / PAGE_SIZE));
@@ -112,7 +114,6 @@ function emitGenericWasmModule(): Uint8Array {
 function buildPlanDataLayout(
   dfa: Dfa,
   lr: LrTable,
-  parserPlanVersion: number,
   metadata: WasmCoreRuntimeMetadata,
 ): PlanDataLayout {
   if (metadata.specs.length !== metadata.terminalBySpec.length) {
@@ -428,9 +429,9 @@ function buildPlanDataLayout(
 
   const bytes = Uint8Array.from(data);
   const header = [
-    PLAN_MAGIC,
-    PLAN_FORMAT_VERSION,
-    parserPlanVersion,
+    WASM_CORE_PLAN_MAGIC,
+    WASM_CORE_PLAN_FORMAT_VERSION,
+    PARSER_PLAN_VERSION,
     dfa.states.length,
     lr.states.length,
     fastSpecsOffset,

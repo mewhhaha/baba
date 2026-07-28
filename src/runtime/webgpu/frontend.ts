@@ -1,7 +1,10 @@
-import type {
-  GpuFrontendBoundaryPlan,
-  GpuFrontendPlan,
-  GpuIslandEmitPlan,
+import {
+  GPU_FRONTEND_FORMAT,
+  GPU_FRONTEND_PLAN_VERSION,
+  GPU_FRONTEND_SEMANTICS,
+  type GpuFrontendBoundaryPlan,
+  type GpuFrontendPlan,
+  type GpuIslandEmitPlan,
 } from "../../compiler/gpu_frontend.ts";
 import { decodeCombinedWasmParserPlan } from "../wasm_plan.ts";
 import { decodeLexerPlanTables, type LexerPlanTables } from "./plan_tables.ts";
@@ -131,7 +134,7 @@ export interface GpuResidentFrontendOptions extends CpuFrontendOptions {
 }
 
 export interface GpuFrontendPlanInspection {
-  readonly version: 3;
+  readonly version: typeof GPU_FRONTEND_PLAN_VERSION;
   readonly throughput: "general" | "strict";
   readonly rootLoopIsland: number | null;
   readonly parallelLongRegionIslands: number;
@@ -536,17 +539,17 @@ export function decodeGpuFrontendPlan(planBytes: Uint8Array): GpuFrontendPlan {
       `gpuFrontend runtime section has invalid throughput profile '${throughput}'.`,
     );
   }
-  if (plan.format !== "baba-gpu-frontend") {
+  if (plan.format !== GPU_FRONTEND_FORMAT) {
     throw new Error(
       `Unsupported GPU frontend format '${String(plan.format)}'.`,
     );
   }
-  if (plan.version !== 3) {
+  if (plan.version !== GPU_FRONTEND_PLAN_VERSION) {
     throw new Error(
       `Unsupported GPU frontend plan version ${String(plan.version)}.`,
     );
   }
-  if (plan.semantics !== "baba-gpu-frontend-v3") {
+  if (plan.semantics !== GPU_FRONTEND_SEMANTICS) {
     throw new Error(
       `Unsupported GPU frontend semantics '${String(plan.semantics)}'.`,
     );

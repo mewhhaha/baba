@@ -26,10 +26,12 @@ import {
   stringProperty,
   visitJson,
 } from "../../compiler/portable_plan_shared.ts";
+import {
+  PARSER_PLAN_FORMAT,
+  PARSER_PLAN_SEMANTICS,
+  PARSER_PLAN_VERSION,
+} from "./parser_plan_contract.ts";
 
-const PORTABLE_PLAN_FORMAT = "baba-parser-plan";
-const PORTABLE_PLAN_VERSION = 2;
-const PORTABLE_PLAN_SEMANTICS = "baba-portable-v2";
 const PORTABLE_REDUCER_SEMANTICS = "baba-reducer-v1";
 const PORTABLE_DIAGNOSTIC_SEMANTICS = "baba-runtime-diagnostics-v1";
 const PORTABLE_SOURCE_SPAN_UNIT = "utf16-code-units";
@@ -42,9 +44,9 @@ const PORTABLE_UNICODE_SEMANTICS = "unicode-code-point-v1";
  * by older tools after validation succeeds.
  */
 export interface PortableParserPlan {
-  readonly format: "baba-parser-plan";
-  readonly version: 2;
-  readonly semantics: "baba-portable-v2";
+  readonly format: typeof PARSER_PLAN_FORMAT;
+  readonly version: typeof PARSER_PLAN_VERSION;
+  readonly semantics: typeof PARSER_PLAN_SEMANTICS;
   readonly rootRule: number;
   readonly symbols: SymbolPlan;
   readonly lexer: LexerPlan;
@@ -342,9 +344,9 @@ export function createPortableParserPlan(
   const expectedTerminals = expectedTerminalRows(lr.actions);
   const parserStatistics = { ...lr.stats };
   const planWithoutStatistics = {
-    format: PORTABLE_PLAN_FORMAT,
-    version: PORTABLE_PLAN_VERSION,
-    semantics: PORTABLE_PLAN_SEMANTICS,
+    format: PARSER_PLAN_FORMAT,
+    version: PARSER_PLAN_VERSION,
+    semantics: PARSER_PLAN_SEMANTICS,
     rootRule: analyzed.rootRule,
     symbols: {
       grammarName: analyzed.name,
@@ -915,14 +917,14 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
       fail("$", "plan must be an object.");
       return diagnostics;
     }
-    if (plan.format !== PORTABLE_PLAN_FORMAT) {
-      fail("$.format", `expected ${PORTABLE_PLAN_FORMAT}.`);
+    if (plan.format !== PARSER_PLAN_FORMAT) {
+      fail("$.format", `expected ${PARSER_PLAN_FORMAT}.`);
     }
-    if (plan.version !== PORTABLE_PLAN_VERSION) {
-      fail("$.version", `expected ${PORTABLE_PLAN_VERSION}.`);
+    if (plan.version !== PARSER_PLAN_VERSION) {
+      fail("$.version", `expected ${PARSER_PLAN_VERSION}.`);
     }
-    if (plan.semantics !== PORTABLE_PLAN_SEMANTICS) {
-      fail("$.semantics", `expected ${PORTABLE_PLAN_SEMANTICS}.`);
+    if (plan.semantics !== PARSER_PLAN_SEMANTICS) {
+      fail("$.semantics", `expected ${PARSER_PLAN_SEMANTICS}.`);
     }
     if (plan.reducerSemantics !== PORTABLE_REDUCER_SEMANTICS) {
       fail("$.reducerSemantics", `expected ${PORTABLE_REDUCER_SEMANTICS}.`);

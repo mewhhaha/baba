@@ -19,6 +19,7 @@ import type {
   TerminalPlan,
 } from "../targets/runtime/portable_plan.ts";
 
+export const GPU_FRONTEND_FORMAT = "baba-gpu-frontend" as const;
 export const GPU_FRONTEND_PLAN_VERSION = 3 as const;
 export const GPU_FRONTEND_SEMANTICS = "baba-gpu-frontend-v3" as const;
 
@@ -63,9 +64,9 @@ const SEMANTIC_OPCODE_CATALOG = new Set([
 ]);
 
 export interface GpuFrontendPlan {
-  readonly format: "baba-gpu-frontend";
-  readonly version: 3;
-  readonly semantics: "baba-gpu-frontend-v3";
+  readonly format: typeof GPU_FRONTEND_FORMAT;
+  readonly version: typeof GPU_FRONTEND_PLAN_VERSION;
+  readonly semantics: typeof GPU_FRONTEND_SEMANTICS;
   readonly throughput: "general" | "strict";
   readonly rootIsland: number;
   readonly terminalClassification: readonly number[];
@@ -541,7 +542,7 @@ export function compileGpuFrontendPlan(
     namespaces = metadata.semantics.namespaces;
   }
   const planWithoutStatistics = {
-    format: "baba-gpu-frontend" as const,
+    format: GPU_FRONTEND_FORMAT,
     version: GPU_FRONTEND_PLAN_VERSION,
     semantics: GPU_FRONTEND_SEMANTICS,
     throughput,
