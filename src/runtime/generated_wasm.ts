@@ -1217,6 +1217,13 @@ function lexExternalWasmTape(
 ): LexTapeResult {
   let preserveTrivia = metadata.defaultPreserveTrivia;
   if (options.preserveTrivia !== undefined) {
+    if (typeof options.preserveTrivia !== "boolean") {
+      throw new TypeError(
+        `preserveTrivia must be a boolean, got '${
+          String(options.preserveTrivia)
+        }'.`,
+      );
+    }
     preserveTrivia = options.preserveTrivia;
   }
   const lexed = lexExternalRecords(wasm, planByteLength, source);
@@ -1544,6 +1551,13 @@ function parseExternalCursorWithWasm(
 ): CursorParseResult<RuleCursor> {
   let preserveTrivia = metadata.defaultPreserveTrivia;
   if (options !== undefined && options.preserveTrivia !== undefined) {
+    if (typeof options.preserveTrivia !== "boolean") {
+      throw new TypeError(
+        `preserveTrivia must be a boolean, got '${
+          String(options.preserveTrivia)
+        }'.`,
+      );
+    }
     preserveTrivia = options.preserveTrivia;
   }
   const maxParserActions = externalPositiveLimit(
@@ -2814,10 +2828,15 @@ function externalPositiveLimit(
 ): number {
   if (options === undefined) return fallback;
   const value = options[key];
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-    return value;
+  if (value === undefined) {
+    return fallback;
   }
-  return fallback;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(
+      `${key} must be a positive safe integer, got '${String(value)}'.`,
+    );
+  }
+  return value;
 }
 
 function externalLexMemoCapacity(
