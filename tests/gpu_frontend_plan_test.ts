@@ -3,6 +3,7 @@ import {
   CpuFrontend,
   decodeGpuFrontendPlan,
   inspectGpuFrontendPlan,
+  type WebGpuFrontendOptions,
   WebGpuRuntime,
 } from "../src/runtime/webgpu/mod.ts";
 
@@ -240,6 +241,22 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
   const runtime = await WebGpuRuntime.create({ allowFallbackAdapter: true });
   try {
     const frontend = await runtime.compileFrontend(planFile.content);
+    let invalidTimingMessage = "";
+    try {
+      await frontend.ingest(source, {
+        stageTimings: "invalid",
+      } as unknown as WebGpuFrontendOptions);
+    } catch (error) {
+      if (error instanceof Error) {
+        invalidTimingMessage = error.message;
+      }
+    }
+    assert(
+      invalidTimingMessage.includes(
+        "stageTimings must be 'collect' when provided",
+      ),
+      invalidTimingMessage,
+    );
     const gpu = await frontend.ingest(source);
     assert(
       gpu.ok,
@@ -250,7 +267,23 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
     assertEquals(gpu.program.edges.join(","), cpu.program.edges.join(","));
     assertEquals(gpu.program.symbols.join(","), cpu.program.symbols.join(","));
     assertEquals(gpu.program.types.join(","), cpu.program.types.join(","));
-    const resident = await frontend.ingestResident(source);
+    assertEquals(gpu.timings.stagesMs, null);
+    const profiledGpu = await frontend.ingest(source, {
+      stageTimings: "collect",
+    });
+    assert(profiledGpu.ok);
+    assertEquals(
+      profiledGpu.program.tokens.join(","),
+      cpu.program.tokens.join(","),
+    );
+    if (runtime.capabilities.hasTimestampQueries) {
+      assert(profiledGpu.timings.stagesMs);
+    }
+    const residentUnits = new Uint16Array(source.length);
+    for (let index = 0; index < source.length; index += 1) {
+      residentUnits[index] = source.charCodeAt(index);
+    }
+    const resident = await frontend.ingestResident(residentUnits);
     let residentReuseMessage = "";
     try {
       await frontend.ingest(source);
@@ -301,6 +334,14 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       resident.dispose();
       residentHeader.destroy();
     }
+    const queuedResident = await frontend.ingestResident(residentUnits);
+    queuedResident.dispose();
+    const afterResidentReuse = await frontend.ingest(source);
+    assert(afterResidentReuse.ok);
+    assertEquals(
+      afterResidentReuse.program.tokens.join(","),
+      cpu.program.tokens.join(","),
+    );
 
     const longGrammar = String.raw`
       skip WS = /[ \t\r\n]+/ ;
@@ -556,6 +597,26 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       assertEquals(
         gpuFailure.diagnostics[0].record.join(","),
         cpuFailure.diagnostics[0].record.join(","),
+      );
+    }
+    for (
+      const source of [
+        "def a = id; def a = id; emit [1] => a;",
+        "emit [1] => missing;",
+        "def a = b; def b = a; emit [1] => a;",
+        "emit [2147483648] => id;",
+        "emit [1] => repeat(-1, id);",
+      ]
+    ) {
+      const cpuFailure = cpuFuncfuckFrontend.ingest(source);
+      const gpuFailure = await gpuFuncfuckFrontend.ingest(source);
+      assert(!cpuFailure.ok);
+      assert(!gpuFailure.ok);
+      assertEquals(
+        gpuFailure.diagnostics.map((diagnostic) => diagnostic.record.join(","))
+          .join("|"),
+        cpuFailure.diagnostics.map((diagnostic) => diagnostic.record.join(","))
+          .join("|"),
       );
     }
   } finally {

@@ -71,6 +71,7 @@ export type {
   GpuFrontendResult,
   GpuFrontendTimings,
   GpuResidentFrontendLayout,
+  GpuResidentFrontendOptions,
   GpuResidentFrontendResult,
   GpuResidentFrontendTimings,
   WebGpuFrontendOptions,
