@@ -1350,7 +1350,7 @@ export class GpuIslandExecutor {
     if (storageBinding) {
       limit = Math.min(limit, this.device.limits.maxStorageBufferBindingSize);
     }
-    if (bytes > limit) {
+    if (!Number.isSafeInteger(bytes) || bytes > limit) {
       throw new GpuFrontendCapacityError(name, bytes, limit);
     }
   }

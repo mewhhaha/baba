@@ -1,4 +1,15 @@
-import { assert, assertEquals, compile, parseMetadata } from "./helpers.ts";
+import {
+  assert,
+  assertEquals,
+  assertThrowsIncludes,
+  compile,
+  parseMetadata,
+} from "./helpers.ts";
+import {
+  decodeCombinedWasmParserPlan,
+  encodeCombinedWasmParserPlan,
+  validateCombinedWasmParserPlan,
+} from "../src/runtime/wasm_plan.ts";
 import {
   CpuFrontend,
   decodeGpuFrontendPlan,
@@ -82,6 +93,21 @@ Deno.test("GPU frontend v3 is persisted and interpreted by the CPU oracle", () =
   assertEquals(plan.execution.rootLoop?.island, 1);
   assertEquals(plan.execution.longRegions.length, 1);
   assertEquals(plan.statistics.contractionRounds, 1);
+
+  const validated = validateCombinedWasmParserPlan(planFile.content);
+  const decoded = decodeCombinedWasmParserPlan(planFile.content);
+  const compact = decoded.compactRuntimePlan as {
+    g: { capacity: { nodesPerToken: number } };
+  };
+  compact.g.capacity.nodesPerToken = 0;
+  const corruptedCapacity = encodeCombinedWasmParserPlan(
+    planFile.content.subarray(0, validated.coreByteLength),
+    compact,
+  );
+  assertThrowsIncludes(
+    () => decodeGpuFrontendPlan(corruptedCapacity),
+    "GPU frontend capacity nodesPerToken must be a positive safe integer",
+  );
 
   const frontend = CpuFrontend.create(planFile.content);
   for (
