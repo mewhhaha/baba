@@ -574,9 +574,53 @@ export function compileGpuFrontendPlan(
     typeEntries: ruleIds(metadata.semantics.typeEntries, ruleByName),
     capacity,
   };
-  const packedBytes = new TextEncoder().encode(
-    JSON.stringify(planWithoutStatistics),
-  ).length;
+  const statisticsWithoutPackedBytes = {
+    lexerStates: portable.lexer.states.length,
+    islandStates,
+    islandTransitions,
+    semanticOpcodes,
+    maxNodesPerToken: nodesPerToken,
+    maxEdgesPerToken: edgesPerToken,
+    maxConstraintsPerNode: constraintsPerNode,
+    locatorCount: execution.locators.length,
+    denseTransitionBytes: execution.denseTransitions.targets.length *
+      Uint32Array.BYTES_PER_ELEMENT *
+      3,
+    maxCandidateMultiplicity: execution.bounds.candidatesPerToken,
+    contractionRounds,
+    regionScratchPerToken: execution.bounds.regionsPerToken,
+    candidateScratchPerToken: execution.bounds.candidatesPerToken,
+    summaryScratchPerToken: execution.bounds.summariesPerCandidate,
+    nodeScratchPerToken: execution.bounds.nodesPerToken,
+    edgeScratchPerToken: execution.bounds.edgesPerToken,
+    diagnosticScratchPerToken: execution.bounds.diagnosticsPerToken,
+  };
+  let packedBytes = 0;
+  let completePlan: GpuFrontendPlan = {
+    ...planWithoutStatistics,
+    statistics: {
+      ...statisticsWithoutPackedBytes,
+      packedBytes,
+    },
+  };
+  // packedBytes measures the object containing itself, so its decimal width
+  // must settle before the final size and limit can be reported.
+  while (true) {
+    const actualPackedBytes = new TextEncoder().encode(
+      JSON.stringify(completePlan),
+    ).length;
+    if (actualPackedBytes === packedBytes) {
+      break;
+    }
+    packedBytes = actualPackedBytes;
+    completePlan = {
+      ...completePlan,
+      statistics: {
+        ...completePlan.statistics,
+        packedBytes,
+      },
+    };
+  }
   if (packedBytes > maxPlanBytes) {
     return {
       diagnostics: [limitDiagnostic(
@@ -587,31 +631,7 @@ export function compileGpuFrontendPlan(
       )],
     };
   }
-  return {
-    ...planWithoutStatistics,
-    statistics: {
-      lexerStates: portable.lexer.states.length,
-      islandStates,
-      islandTransitions,
-      semanticOpcodes,
-      maxNodesPerToken: nodesPerToken,
-      maxEdgesPerToken: edgesPerToken,
-      maxConstraintsPerNode: constraintsPerNode,
-      locatorCount: execution.locators.length,
-      denseTransitionBytes: execution.denseTransitions.targets.length *
-        Uint32Array.BYTES_PER_ELEMENT *
-        3,
-      maxCandidateMultiplicity: execution.bounds.candidatesPerToken,
-      contractionRounds,
-      regionScratchPerToken: execution.bounds.regionsPerToken,
-      candidateScratchPerToken: execution.bounds.candidatesPerToken,
-      summaryScratchPerToken: execution.bounds.summariesPerCandidate,
-      nodeScratchPerToken: execution.bounds.nodesPerToken,
-      edgeScratchPerToken: execution.bounds.edgesPerToken,
-      diagnosticScratchPerToken: execution.bounds.diagnosticsPerToken,
-      packedBytes,
-    },
-  };
+  return completePlan;
 }
 
 function compileExecutionPlan(

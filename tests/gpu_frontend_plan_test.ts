@@ -82,6 +82,10 @@ Deno.test("GPU frontend v3 is persisted and interpreted by the CPU oracle", () =
   assertEquals(plan.execution.rootLoop?.island, 1);
   assertEquals(plan.execution.longRegions.length, 1);
   assertEquals(plan.statistics.contractionRounds, 1);
+  assertEquals(
+    plan.statistics.packedBytes,
+    new TextEncoder().encode(JSON.stringify(plan)).length,
+  );
 
   const frontend = CpuFrontend.create(planFile.content);
   for (
