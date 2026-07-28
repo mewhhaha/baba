@@ -3,11 +3,14 @@ import type { CompactFrontendProgram } from "./frontend.ts";
 import { GpuFrontendCapacityError } from "./frontend_capacity.ts";
 import { GPU_LEX_STAGE_LABELS, type WebGpuLexer } from "./lexer.ts";
 
-const HEADER_WORDS = 32;
+const HEADER_WORDS = 40;
 const TOKEN_WORDS = 4;
 const NODE_WORDS = 8;
 const EDGE_WORDS = 4;
 const CANDIDATE_WORDS = 16;
+// This must match the compiler eligibility bound and the shader's 16 KiB
+// workgroup-storage budget.
+const MAX_PARALLEL_CHUNK_STATES = 7;
 const MAX_CONTRACTION_ROUNDS = 33;
 const DISPATCH_PARAM_BYTES = 256;
 const MAX_EXECUTION_DISPATCHES = 256;
@@ -21,6 +24,7 @@ const PIPELINE_ENTRY_POINTS = [
   "structure",
   "regions",
   "contract_regions",
+  "contract_long_regions",
   "root_chain_init",
   "root_chain_start",
   "root_chain_link",
@@ -36,8 +40,19 @@ const PIPELINE_ENTRY_POINTS = [
   "finalize_offsets",
   "emit_root_events",
   "emit",
+  "emit_long_regions",
   "staging",
 ] as const;
+const CANDIDATE_DOMAIN_ENTRY_POINTS = new Set<string>([
+  "contract_regions",
+  "reachability",
+  "finalize_offsets",
+  "emit",
+]);
+const CANDIDATE_WORKGROUP_ENTRY_POINTS = new Set<string>([
+  "contract_long_regions",
+  "emit_long_regions",
+]);
 
 const STATUS_SUCCESS = 0;
 const STATUS_LEXICAL = 1;
@@ -62,6 +77,20 @@ export interface GpuIslandExecution {
   readonly stagesMs: Readonly<Record<string, number>> | null;
 }
 
+export interface GpuResidentIslandExecution {
+  readonly buffer: GPUBuffer;
+  readonly byteLength: number;
+  readonly headerWords: number;
+  readonly tokenCapacity: number;
+  readonly nodeCapacity: number;
+  readonly edgeCapacity: number;
+  readonly tokenOffsetWords: number;
+  readonly nodeOffsetWords: number;
+  readonly edgeOffsetWords: number;
+  readonly submitAndCompletionMs: number;
+  release(): void;
+}
+
 interface SizedExecutionBuffer {
   readonly buffer: GPUBuffer;
   readonly bytes: number;
@@ -75,6 +104,8 @@ interface ExecutionSlot {
   deviceStaging: SizedExecutionBuffer | null;
   staging: SizedExecutionBuffer | null;
   params: SizedExecutionBuffer | null;
+  indirect: SizedExecutionBuffer | null;
+  residentHeld: boolean;
   readonly querySet: GPUQuerySet | null;
   readonly queryResolve: GPUBuffer | null;
 }
@@ -154,12 +185,34 @@ function structuralLayout(tokenCount: number): StructuralLayout {
   };
 }
 
+function offsetScanLayout(scan: ScanLayout, offset: number): ScanLayout {
+  return {
+    levels: scan.levels.map((level) => {
+      let inputOffset = level.inputOffset;
+      if (inputOffset >= 0) {
+        inputOffset += offset;
+      }
+      return {
+        count: level.count,
+        inputOffset,
+        outputOffset: level.outputOffset + offset,
+        blockSumsOffset: level.blockSumsOffset + offset,
+      };
+    }),
+    firstOutputOffset: scan.firstOutputOffset + offset,
+    totalOffset: scan.totalOffset + offset,
+    words: scan.words + offset,
+  };
+}
+
 function islandDispatchLabels(
   rounds: number,
   chainRounds: number,
   tokenWorkgroups: number,
   regionWorkgroups: number,
   candidateWorkgroups: number,
+  longRegionIslandCount: number,
+  candidateScan: ScanLayout,
   allocationScan: ScanLayout,
   structural: StructuralLayout,
   stagingWorkgroups: number,
@@ -316,12 +369,68 @@ function islandDispatchLabels(
       ],
     });
   }
+  for (let level = 0; level < candidateScan.levels.length; level += 1) {
+    const scanLevel = candidateScan.levels[level];
+    let scanMode = 2;
+    if (level === 0) {
+      scanMode = 5;
+    }
+    dispatches.push({
+      entryPoint: "scan_level",
+      label: `candidate_scan_${level}`,
+      workgroups: Math.max(1, Math.ceil(scanLevel.count / 256)),
+      params: [
+        0,
+        scanLevel.count,
+        scanLevel.inputOffset,
+        scanLevel.outputOffset,
+        scanLevel.blockSumsOffset,
+        scanMode,
+      ],
+    });
+  }
+  for (
+    let level = candidateScan.levels.length - 2;
+    level >= 0;
+    level -= 1
+  ) {
+    const scanLevel = candidateScan.levels[level];
+    const parent = candidateScan.levels[level + 1];
+    dispatches.push({
+      entryPoint: "add_scan_offsets",
+      label: `candidate_add_${level}`,
+      workgroups: Math.max(1, Math.ceil(scanLevel.count / 256)),
+      params: [
+        0,
+        scanLevel.count,
+        0,
+        scanLevel.outputOffset,
+        0,
+        5,
+        parent.outputOffset,
+      ],
+    });
+  }
   dispatches.push({
     entryPoint: "regions",
     label: "regions",
     workgroups: regionWorkgroups,
-    params: [0],
+    params: [
+      0,
+      candidateScan.levels[0].count,
+      0,
+      candidateScan.firstOutputOffset,
+      candidateScan.totalOffset,
+    ],
   });
+  if (longRegionIslandCount > 0) {
+    dispatches.push({
+      entryPoint: "contract_long_regions",
+      label: "long_contraction",
+      workgroups: regionWorkgroups,
+      params: [0],
+    });
+  }
   for (let round = 0; round < rounds; round += 1) {
     dispatches.push({
       entryPoint: "contract_regions",
@@ -470,6 +579,16 @@ function islandDispatchLabels(
       workgroups: candidateWorkgroups,
       params: [rounds - 1],
     },
+  );
+  if (longRegionIslandCount > 0) {
+    dispatches.push({
+      entryPoint: "emit_long_regions",
+      label: "emit_long_regions",
+      workgroups: regionWorkgroups,
+      params: [rounds - 1],
+    });
+  }
+  dispatches.push(
     {
       entryPoint: "staging",
       label: "staging",
@@ -491,6 +610,8 @@ interface ExecutionLayout {
   readonly delimiterTerminalStackOffset: number;
   readonly delimiterIndexStackOffset: number;
   readonly rootFieldOffset: number;
+  readonly candidateLookupOffset: number;
+  readonly syntaxPrefixOffset: number;
   readonly arenaWords: number;
   readonly stagingWords: number;
 }
@@ -619,6 +740,15 @@ export class GpuIslandExecutor {
     return new GpuIslandExecutor(device, plan, pipelines, planBuffer);
   }
 
+  assertExecutionSlotAvailable(lexer: WebGpuLexer): void {
+    const slot = this.#slots.get(lexer);
+    if (slot !== undefined && slot.residentHeld) {
+      throw new Error(
+        "GPU frontend resident result must be disposed before reusing its execution slot.",
+      );
+    }
+  }
+
   async execute(
     lexer: WebGpuLexer,
     sourceUnits: Uint16Array,
@@ -626,6 +756,51 @@ export class GpuIslandExecutor {
     maximumNodes: number | undefined,
     maximumEdges: number | undefined,
   ): Promise<GpuIslandExecution> {
+    const execution = await this.#execute(
+      lexer,
+      sourceUnits,
+      maximumTokens,
+      maximumNodes,
+      maximumEdges,
+      "host",
+    );
+    if ("buffer" in execution) {
+      throw new Error(
+        "GPU frontend host execution returned a resident buffer.",
+      );
+    }
+    return execution;
+  }
+
+  async executeResident(
+    lexer: WebGpuLexer,
+    sourceUnits: Uint16Array,
+    maximumTokens: number | undefined,
+    maximumNodes: number | undefined,
+    maximumEdges: number | undefined,
+  ): Promise<GpuResidentIslandExecution> {
+    const execution = await this.#execute(
+      lexer,
+      sourceUnits,
+      maximumTokens,
+      maximumNodes,
+      maximumEdges,
+      "device",
+    );
+    if (!("buffer" in execution)) {
+      throw new Error("GPU frontend resident execution returned host records.");
+    }
+    return execution;
+  }
+
+  async #execute(
+    lexer: WebGpuLexer,
+    sourceUnits: Uint16Array,
+    maximumTokens: number | undefined,
+    maximumNodes: number | undefined,
+    maximumEdges: number | undefined,
+    resultLocation: "host" | "device",
+  ): Promise<GpuIslandExecution | GpuResidentIslandExecution> {
     let tokenCapacity = Math.max(1, sourceUnits.length);
     if (maximumTokens !== undefined) {
       if (!Number.isSafeInteger(maximumTokens) || maximumTokens < 1) {
@@ -645,8 +820,8 @@ export class GpuIslandExecutor {
       maximumEdges,
     );
     const candidateMultiplicity = this.plan.execution.bounds.candidatesPerToken;
-    const candidateCount = 1 +
-      tokenCapacity * candidateMultiplicity;
+    const candidateSlots = tokenCapacity * candidateMultiplicity;
+    const candidateCount = 1 + candidateSlots;
     const contractionRounds = this.plan.statistics.contractionRounds;
     if (
       contractionRounds < 1 ||
@@ -662,15 +837,21 @@ export class GpuIslandExecutor {
     );
     const chainRounds = Math.ceil(Math.log2(Math.max(1, tokenCapacity)) / 2) +
       1;
+    const structural = structuralLayout(tokenCapacity);
+    const candidateScan = offsetScanLayout(
+      scanLayout(Math.max(1, candidateSlots)),
+      structural.words,
+    );
     const allocationScan = scanLayout(candidateCount);
     const candidateWorkgroups = Math.max(1, Math.ceil(candidateCount / 256));
-    const structural = structuralLayout(tokenCapacity);
     const dispatches = islandDispatchLabels(
       contractionRounds,
       chainRounds,
       tokenWorkgroups,
-      tokenWorkgroups,
+      Math.max(1, Math.ceil(Math.max(1, candidateSlots) / 256)),
       candidateWorkgroups,
+      this.plan.execution.longRegions.length,
+      candidateScan,
       allocationScan,
       structural,
       Math.max(1, Math.ceil(layout.stagingWords / 256)),
@@ -697,7 +878,11 @@ export class GpuIslandExecutor {
       (candidateCount - candidateSplit) * CANDIDATE_WORDS *
         Uint32Array.BYTES_PER_ELEMENT,
     );
-    const scratchWords = Math.max(allocationScan.words, structural.words);
+    const scratchWords = Math.max(
+      candidateScan.words,
+      allocationScan.words,
+      structural.words,
+    );
     const scratchBytes = scratchWords * Uint32Array.BYTES_PER_ELEMENT;
     const deviceStagingBytes = layout.stagingWords *
       Uint32Array.BYTES_PER_ELEMENT;
@@ -737,10 +922,17 @@ export class GpuIslandExecutor {
         deviceStaging: null,
         staging: null,
         params: null,
+        indirect: null,
+        residentHeld: false,
         querySet,
         queryResolve,
       };
       this.#slots.set(lexer, slot);
+    }
+    if (slot.residentHeld) {
+      throw new Error(
+        "GPU frontend resident result must be disposed before reusing its execution slot.",
+      );
     }
     slot.arena = this.#ensureBuffer(
       slot.arena,
@@ -767,6 +959,12 @@ export class GpuIslandExecutor {
       GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       "baba gpu frontend dispatch params",
     );
+    slot.indirect = this.#ensureBuffer(
+      slot.indirect,
+      6 * Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.COPY_DST | GPUBufferUsage.INDIRECT,
+      "baba gpu frontend candidate dispatch",
+    );
     slot.scratch = this.#ensureBuffer(
       slot.scratch,
       scratchBytes,
@@ -791,6 +989,7 @@ export class GpuIslandExecutor {
     const scratchBuffer = slot.scratch.buffer;
     const deviceStagingBuffer = slot.deviceStaging.buffer;
     const paramsBuffer = slot.params.buffer;
+    const indirectBuffer = slot.indirect.buffer;
     const stagingBuffer = slot.staging.buffer;
     const integratedLex = lexer.prepareIntegratedLex(sourceUnits, {
       capacityRecords: maximumTokens,
@@ -822,6 +1021,9 @@ export class GpuIslandExecutor {
       header[23] = sourceUnits.length;
       header[24] = candidateSplit;
       header[25] = layout.rootFieldOffset;
+      header[26] = layout.candidateLookupOffset;
+      header[27] = candidateSlots;
+      header[28] = layout.syntaxPrefixOffset;
       this.device.queue.writeBuffer(arenaBuffer, 0, header);
       this.device.queue.writeBuffer(
         candidateBuffer,
@@ -880,15 +1082,19 @@ export class GpuIslandExecutor {
         ],
       });
       const encoder = this.device.createCommandEncoder();
-      integratedLex.encode(encoder, slot.querySet, 0);
+      let executionQuerySet: GPUQuerySet | null = null;
+      if (resultLocation === "host") {
+        executionQuerySet = slot.querySet;
+      }
+      integratedLex.encode(encoder, executionQuerySet, 0);
       for (let index = 0; index < dispatches.length; index += 1) {
         const dispatch = dispatches[index];
         const descriptor: GPUComputePassDescriptor = {
           label: dispatch.label,
         };
-        if (slot.querySet !== null) {
+        if (executionQuerySet !== null) {
           descriptor.timestampWrites = {
-            querySet: slot.querySet,
+            querySet: executionQuerySet,
             beginningOfPassWriteIndex: (integratedLex.stageCount + index) * 2,
             endOfPassWriteIndex: (integratedLex.stageCount + index) * 2 + 1,
           };
@@ -902,50 +1108,103 @@ export class GpuIslandExecutor {
         pass.setBindGroup(0, dispatchBindGroup, [
           index * DISPATCH_PARAM_BYTES,
         ]);
-        const workgroupsX = Math.min(dispatch.workgroups, 65_535);
-        const workgroupsY = Math.ceil(dispatch.workgroups / workgroupsX);
-        if (
-          workgroupsY > this.device.limits.maxComputeWorkgroupsPerDimension
+        if (CANDIDATE_DOMAIN_ENTRY_POINTS.has(dispatch.entryPoint)) {
+          pass.dispatchWorkgroupsIndirect(
+            indirectBuffer,
+            0,
+          );
+        } else if (
+          CANDIDATE_WORKGROUP_ENTRY_POINTS.has(dispatch.entryPoint)
         ) {
-          throw new GpuFrontendCapacityError(
-            `${dispatch.label}Workgroups`,
-            dispatch.workgroups,
-            this.device.limits.maxComputeWorkgroupsPerDimension ** 2,
+          pass.dispatchWorkgroupsIndirect(
+            indirectBuffer,
+            3 * Uint32Array.BYTES_PER_ELEMENT,
+          );
+        } else {
+          const workgroupsX = Math.min(dispatch.workgroups, 65_535);
+          const workgroupsY = Math.ceil(dispatch.workgroups / workgroupsX);
+          if (
+            workgroupsY > this.device.limits.maxComputeWorkgroupsPerDimension
+          ) {
+            throw new GpuFrontendCapacityError(
+              `${dispatch.label}Workgroups`,
+              dispatch.workgroups,
+              this.device.limits.maxComputeWorkgroupsPerDimension ** 2,
+            );
+          }
+          pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+        }
+        pass.end();
+        if (dispatch.entryPoint === "regions") {
+          encoder.copyBufferToBuffer(
+            arenaBuffer,
+            32 * Uint32Array.BYTES_PER_ELEMENT,
+            indirectBuffer,
+            0,
+            6 * Uint32Array.BYTES_PER_ELEMENT,
           );
         }
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
-        pass.end();
       }
 
-      encoder.copyBufferToBuffer(
-        deviceStagingBuffer,
-        0,
-        stagingBuffer,
-        timestampBytes,
-        deviceStagingBytes,
-      );
-      if (
-        slot.querySet !== null &&
-        slot.queryResolve !== null
-      ) {
-        encoder.resolveQuerySet(
-          slot.querySet,
-          0,
-          queryCount,
-          slot.queryResolve,
-          0,
-        );
+      if (resultLocation === "host") {
         encoder.copyBufferToBuffer(
-          slot.queryResolve,
+          deviceStagingBuffer,
           0,
           stagingBuffer,
-          0,
           timestampBytes,
+          deviceStagingBytes,
         );
+        if (
+          slot.querySet !== null &&
+          slot.queryResolve !== null
+        ) {
+          encoder.resolveQuerySet(
+            slot.querySet,
+            0,
+            queryCount,
+            slot.queryResolve,
+            0,
+          );
+          encoder.copyBufferToBuffer(
+            slot.queryResolve,
+            0,
+            stagingBuffer,
+            0,
+            timestampBytes,
+          );
+        }
       }
 
       const started = performance.now();
       this.device.queue.submit([encoder.finish()]);
+      if (resultLocation === "device") {
+        await this.device.queue.onSubmittedWorkDone();
+        const finished = performance.now();
+        slot.residentHeld = true;
+        let released = false;
+        return {
+          buffer: deviceStagingBuffer,
+          byteLength: deviceStagingBytes,
+          headerWords: HEADER_WORDS,
+          tokenCapacity: layout.tokenCapacity,
+          nodeCapacity: layout.nodeCapacity,
+          edgeCapacity: layout.edgeCapacity,
+          tokenOffsetWords: HEADER_WORDS,
+          nodeOffsetWords: HEADER_WORDS +
+            layout.tokenCapacity * TOKEN_WORDS,
+          edgeOffsetWords: HEADER_WORDS +
+            layout.tokenCapacity * TOKEN_WORDS +
+            layout.nodeCapacity * NODE_WORDS,
+          submitAndCompletionMs: finished - started,
+          release: () => {
+            if (released) {
+              return;
+            }
+            released = true;
+            slot.residentHeld = false;
+          },
+        };
+      }
       await stagingBuffer.mapAsync(GPUMapMode.READ);
       const finished = performance.now();
       const mappedRange = stagingBuffer.getMappedRange(0, stagingBytes);
@@ -996,6 +1255,9 @@ export class GpuIslandExecutor {
       }
       if (slot.params !== null) {
         slot.params.buffer.destroy();
+      }
+      if (slot.indirect !== null) {
+        slot.indirect.buffer.destroy();
       }
       if (slot.queryResolve !== null) {
         slot.queryResolve.destroy();
@@ -1070,6 +1332,7 @@ function decodeStageTimings(
   let reachability = 0;
   let allocation = 0;
   let structure = 0;
+  let candidateCompaction = 0;
   let gpuTotal = lex;
   for (let index = 0; index < dispatches.length; index += 1) {
     const elapsed = Number(
@@ -1095,24 +1358,32 @@ function decodeStageTimings(
     ) {
       structure += elapsed;
     }
-    if (dispatches[index].entryPoint === "contract_regions") {
+    if (
+      dispatches[index].entryPoint === "contract_regions" ||
+      dispatches[index].entryPoint === "contract_long_regions"
+    ) {
       contraction += elapsed;
     }
     if (dispatches[index].entryPoint === "reachability") {
       reachability += elapsed;
     }
     if (
-      dispatches[index].entryPoint === "scan_level" ||
-      dispatches[index].entryPoint === "add_scan_offsets" ||
-      dispatches[index].entryPoint === "finalize_offsets"
+      dispatches[index].label.startsWith("allocation_")
     ) {
       allocation += elapsed;
+    }
+    if (
+      dispatches[index].label.startsWith("candidate_") ||
+      dispatches[index].entryPoint === "regions"
+    ) {
+      candidateCompaction += elapsed;
     }
   }
   stages.contraction = contraction;
   stages.reachability = reachability;
   stages.allocation = allocation;
   stages.structure = structure;
+  stages.candidate_compaction = candidateCompaction;
   stages.total_gpu = gpuTotal;
   return stages;
 }
@@ -1139,7 +1410,11 @@ function executionLayout(
   const delimiterIndexStackOffset = delimiterTerminalStackOffset +
     tokenCapacity;
   const rootFieldOffset = delimiterIndexStackOffset + tokenCapacity;
-  const arenaWords = rootFieldOffset + tokenCapacity;
+  const candidateLookupOffset = rootFieldOffset + tokenCapacity;
+  const candidateMultiplicity = plan.execution.bounds.candidatesPerToken;
+  const candidateSlots = tokenCapacity * candidateMultiplicity;
+  const syntaxPrefixOffset = candidateLookupOffset + candidateSlots;
+  const arenaWords = syntaxPrefixOffset + tokenCapacity;
   const stagingWords = HEADER_WORDS +
     tokenCapacity * TOKEN_WORDS +
     nodeCapacity * NODE_WORDS +
@@ -1155,6 +1430,8 @@ function executionLayout(
     delimiterTerminalStackOffset,
     delimiterIndexStackOffset,
     rootFieldOffset,
+    candidateLookupOffset,
+    syntaxPrefixOffset,
     arenaWords,
     stagingWords,
   };
@@ -1162,7 +1439,7 @@ function executionLayout(
 
 function packPlan(plan: GpuFrontendPlan): Uint32Array {
   const headerWords = 16;
-  const islandWords = 7;
+  const islandWords = 8;
   const stateWords = 3;
   const transitionWords = 4;
   const classificationOffset = headerWords;
@@ -1198,22 +1475,13 @@ function packPlan(plan: GpuFrontendPlan): Uint32Array {
   words[11] = plan.execution.denseTransitions.terminalSymbols;
   words[12] = locatorOffset;
   words[13] = plan.execution.bounds.candidatesPerToken;
-  const root = plan.islands[plan.rootIsland];
-  if (root === undefined) {
-    throw new Error(`GPU frontend plan has no root island ${plan.rootIsland}.`);
-  }
-  const rootSelfLoops = root.states.flatMap((state) =>
-    state.transitions.filter((transition) =>
-      transition.inputKind === "island" && transition.target === state.id
-    ).map((transition) => ({ state: state.id, island: transition.input }))
-  );
-  if (rootSelfLoops.length === 1) {
+  if (plan.execution.rootLoop !== null) {
     let rootStateOffset = 0;
     for (let island = 0; island < plan.rootIsland; island += 1) {
       rootStateOffset += plan.islands[island].states.length;
     }
-    words[14] = rootSelfLoops[0].island + 1;
-    words[15] = rootStateOffset + rootSelfLoops[0].state;
+    words[14] = plan.execution.rootLoop.island + 1;
+    words[15] = rootStateOffset + plan.execution.rootLoop.state;
   } else {
     words[14] = 0;
     words[15] = 0xffffffff;
@@ -1230,6 +1498,10 @@ function packPlan(plan: GpuFrontendPlan): Uint32Array {
 
   let globalState = 0;
   let globalTransition = 0;
+  const longRegionStateCounts = new Uint32Array(plan.islands.length);
+  for (const longRegion of plan.execution.longRegions) {
+    longRegionStateCounts[longRegion.island] = longRegion.stateCount;
+  }
   for (const island of plan.islands) {
     const islandStateOffset = globalState;
     const boundary = plan.boundaries[island.id];
@@ -1263,6 +1535,7 @@ function packPlan(plan: GpuFrontendPlan): Uint32Array {
         closeTerminal,
         globalState,
         island.states.length,
+        longRegionStateCounts[island.id],
       ],
       islandBase,
     );
@@ -1413,7 +1686,7 @@ export {
 };
 
 const ISLAND_EXECUTOR_WGSL = String.raw`
-const HEADER_WORDS: u32 = 32u;
+const HEADER_WORDS: u32 = 40u;
 const TOKEN_WORDS: u32 = 4u;
 const NODE_WORDS: u32 = 8u;
 const EDGE_WORDS: u32 = 4u;
@@ -1440,6 +1713,9 @@ struct DispatchParams {
 @group(0) @binding(7) var<uniform> dispatch_params: DispatchParams;
 @group(0) @binding(8) var<storage, read_write> candidate_tail: array<atomic<u32>>;
 var<workgroup> scan_values: array<u32, 256>;
+var<workgroup> long_targets: array<u32, 1792>;
+var<workgroup> long_ends: array<u32, 1792>;
+var<workgroup> long_entries: array<u32, 256>;
 
 fn linear_invocation_index(invocation: vec3<u32>) -> u32 {
   return invocation.x + invocation.y * 65535u * 256u;
@@ -1530,7 +1806,7 @@ fn next_syntax(initial: u32, limit: u32) -> u32 {
 }
 
 fn island_word(island: u32, word: u32) -> u32 {
-  return plan[plan[3u] + island * 7u + word];
+  return plan[plan[3u] + island * 8u + word];
 }
 
 fn state_word(state: u32, word: u32) -> u32 {
@@ -1841,11 +2117,11 @@ fn located_candidate_for_island(
       plan[12u] + u32(token_terminal) * multiplicity + slot
     ];
     if (located == island + 1u) {
-      let candidate = 1u + cursor * multiplicity + slot;
-      if (candidate >= arena[20u]) {
+      let candidate_slot = cursor * multiplicity + slot;
+      if (candidate_slot >= arena[27u]) {
         return 0xffffffffu;
       }
-      return candidate;
+      return arena[arena[26u] + candidate_slot];
     }
     slot += 1u;
   }
@@ -1870,7 +2146,11 @@ fn candidate_at_token_for_island(island: u32, token_index: u32) -> u32 {
       plan[12u] + u32(token_terminal) * multiplicity + slot
     ];
     if (located == island + 1u) {
-      return 1u + token_index * multiplicity + slot;
+      let candidate_slot = token_index * multiplicity + slot;
+      if (candidate_slot >= arena[27u]) {
+        return 0xffffffffu;
+      }
+      return arena[arena[26u] + candidate_slot];
     }
     slot += 1u;
   }
@@ -2053,77 +2333,91 @@ fn summarize_region(candidate: u32, read_bank: u32) -> RegionSummary {
   );
 }
 
+fn is_parallel_long_candidate(candidate: u32) -> bool {
+  if (candidate == 0u || candidate_word(candidate, 15u) == 0xffffffffu) {
+    return false;
+  }
+  let island = candidate_word(candidate, 0u);
+  if (island_word(island, 7u) == 0u) {
+    return false;
+  }
+  return candidate_word(candidate, 15u) - candidate_word(candidate, 1u) > 256u;
+}
+
 @compute @workgroup_size(256)
 fn regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  let worker = linear_invocation_index(invocation);
-  if (worker >= arena[9u]) {
+  let candidate_slot = linear_invocation_index(invocation);
+  if (candidate_slot >= dispatch_params.count) {
     return;
   }
-  if (worker == 0u) {
+  if (candidate_slot == 0u) {
     arena[30u] = 0xffffffffu;
     arena[31u] = 0u;
-  }
-  arena[arena[18u] + worker] = 0xffffffffu;
-  arena[arena[19u] + worker] = 0xffffffffu;
-  arena[arena[25u] + worker] = 0xffffffffu;
-  let multiplicity = arena[22u];
-  var candidate = 1u + worker * multiplicity;
-  let candidate_end = candidate + multiplicity;
-  if (worker == 0u) {
-    candidate = 0u;
-  }
-  loop {
-    var island = 0xffffffffu;
-    var start = arena[1u];
-    if (candidate == 0u) {
-      island = plan[6u];
-      start = next_syntax(0u, arena[1u]);
-    } else {
-      let token_index = (candidate - 1u) / multiplicity;
-      let slot = (candidate - 1u) % multiplicity;
-      if (token_index < arena[1u]) {
-        let token_terminal = terminal(token_index);
-        if (
-          token_terminal >= 0i &&
-          u32(token_terminal) < plan[11u]
-        ) {
-          let located = plan[
-            plan[12u] + u32(token_terminal) * multiplicity + slot
-          ];
-          if (located > 1u) {
-            island = located - 1u;
-            start = token_index;
-          }
-        }
-      }
-    }
-    set_candidate_word(candidate, 0u, island);
-    set_candidate_word(candidate, 1u, start);
-    set_candidate_word(candidate, 2u, 0u);
-    set_candidate_word(candidate, 3u, 0xffffffffu);
-    set_candidate_word(candidate, 4u, 0xffffffffu);
-    var word = 5u;
+    arena[20u] = scan_scratch[dispatch_params.block_sums_offset] + 1u;
+    arena[32u] = (arena[20u] + 255u) / 256u;
+    arena[33u] = 1u;
+    arena[34u] = 1u;
+    arena[35u] = arena[20u];
+    arena[36u] = 1u;
+    arena[37u] = 1u;
+    let root_start = next_syntax(0u, arena[1u]);
+    set_candidate_word(0u, 0u, plan[6u]);
+    set_candidate_word(0u, 1u, root_start);
+    set_candidate_word(0u, 2u, 0u);
+    set_candidate_word(0u, 3u, 0xffffffffu);
+    set_candidate_word(0u, 4u, 0xffffffffu);
+    var root_word = 5u;
     loop {
-      if (word >= 15u) {
+      if (root_word >= 15u) {
         break;
       }
-      set_candidate_word(candidate, word, 0u);
-      word += 1u;
+      set_candidate_word(0u, root_word, 0u);
+      root_word += 1u;
     }
-    var limit = 0xffffffffu;
-    if (island != 0xffffffffu) {
-      limit = region_limit(island, start);
-    }
-    set_candidate_word(candidate, 15u, limit);
-    if (candidate == 0u) {
-      candidate = 1u;
-    } else {
-      candidate += 1u;
-    }
-    if (candidate >= candidate_end) {
-      return;
-    }
+    set_candidate_word(0u, 15u, arena[1u]);
   }
+  if (candidate_slot < arena[9u]) {
+    arena[arena[18u] + candidate_slot] = 0xffffffffu;
+    arena[arena[19u] + candidate_slot] = 0xffffffffu;
+    arena[arena[25u] + candidate_slot] = 0xffffffffu;
+    arena[arena[28u] + candidate_slot] = scan_scratch[candidate_slot];
+  }
+  arena[arena[26u] + candidate_slot] = 0xffffffffu;
+  let multiplicity = arena[22u];
+  let token_index = candidate_slot / multiplicity;
+  let slot = candidate_slot % multiplicity;
+  if (token_index >= arena[1u]) {
+    return;
+  }
+  let token_terminal = terminal(token_index);
+  if (token_terminal < 0i || u32(token_terminal) >= plan[11u]) {
+    return;
+  }
+  let located = plan[
+    plan[12u] + u32(token_terminal) * multiplicity + slot
+  ];
+  if (located <= 1u) {
+    return;
+  }
+  let candidate = scan_scratch[
+    dispatch_params.output_offset + candidate_slot
+  ] + 1u;
+  arena[arena[26u] + candidate_slot] = candidate;
+  let island = located - 1u;
+  set_candidate_word(candidate, 0u, island);
+  set_candidate_word(candidate, 1u, token_index);
+  set_candidate_word(candidate, 2u, 0u);
+  set_candidate_word(candidate, 3u, 0xffffffffu);
+  set_candidate_word(candidate, 4u, 0xffffffffu);
+  var word = 5u;
+  loop {
+    if (word >= 15u) {
+      break;
+    }
+    set_candidate_word(candidate, word, 0u);
+    word += 1u;
+  }
+  set_candidate_word(candidate, 15u, region_limit(island, token_index));
 }
 
 @compute @workgroup_size(256)
@@ -2137,24 +2431,17 @@ fn contract_regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
   ) {
     return;
   }
-  let worker = linear_invocation_index(invocation);
-  if (worker >= arena[9u]) {
+  let candidate = linear_invocation_index(invocation);
+  if (candidate >= arena[20u]) {
     return;
-  }
-  let multiplicity = arena[22u];
-  var candidate = 1u + worker * multiplicity;
-  let candidate_end = candidate + multiplicity;
-  if (worker == 0u) {
-    candidate = 0u;
   }
   let read_bank = dispatch_params.round & 1u;
   let write_bank = 1u - read_bank;
-  loop {
-    if (
-      candidate != 0u &&
-      candidate_word(candidate, 0u) != 0xffffffffu &&
-      candidate_word(candidate, 15u) != 0xffffffffu
-    ) {
+  if (
+    candidate != 0u &&
+    candidate_word(candidate, 15u) != 0xffffffffu &&
+    !is_parallel_long_candidate(candidate)
+  ) {
       let read_base = summary_base(read_bank);
       let base = summary_base(write_bank);
       let stable = candidate_word(candidate, 4u);
@@ -2209,16 +2496,137 @@ fn contract_regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
           max_candidate_word(0u, 9u, dispatch_params.round + 1u);
         }
       }
-    }
-    if (candidate == 0u) {
-      candidate = 1u;
-    } else {
-      candidate += 1u;
-    }
-    if (candidate >= candidate_end) {
-      return;
-    }
   }
+}
+
+@compute @workgroup_size(256)
+fn contract_long_regions(
+  @builtin(local_invocation_index) lane: u32,
+  @builtin(workgroup_id) workgroup: vec3<u32>,
+) {
+  if (arena[0u] != 0u) {
+    return;
+  }
+  let candidate = linear_workgroup_index(workgroup);
+  if (candidate >= arena[20u] || !is_parallel_long_candidate(candidate)) {
+    return;
+  }
+  let island = candidate_word(candidate, 0u);
+  let state_count = island_word(island, 7u);
+  let state_offset = island_word(island, 5u);
+  let start = candidate_word(candidate, 1u);
+  let limit = candidate_word(candidate, 15u);
+  let region_length = limit - start;
+  let chunk_size = (region_length + 255u) / 256u;
+  let chunk_start = min(limit, start + lane * chunk_size);
+  let chunk_end = min(limit, chunk_start + chunk_size);
+
+  var local_state = 0u;
+  loop {
+    if (local_state >= state_count) {
+      break;
+    }
+    var state = state_offset + local_state;
+    var cursor = chunk_start;
+    var events = 0u;
+    var outcome = local_state;
+    loop {
+      cursor = next_syntax(cursor, chunk_end);
+      if (cursor >= chunk_end) {
+        outcome = state - state_offset;
+        break;
+      }
+      let token_terminal = terminal(cursor);
+      if (
+        token_terminal >= 0i &&
+        u32(token_terminal) < plan[11u] &&
+        dense_transition_word(state, u32(token_terminal), 9u) == 1u
+      ) {
+        state = dense_transition_word(state, u32(token_terminal), 7u);
+        cursor += 1u;
+        events += 1u;
+        continue;
+      }
+      let failure_state = state - state_offset;
+      if (state_word(state, 0u) == 1u) {
+        outcome = 0x40u | failure_state;
+      } else {
+        outcome = 0x80u | failure_state;
+      }
+      break;
+    }
+    let index = lane * ${MAX_PARALLEL_CHUNK_STATES}u + local_state;
+    long_targets[index] = (events << 8u) | (outcome & 0xffu);
+    long_ends[index] = cursor;
+    local_state += 1u;
+  }
+  workgroupBarrier();
+
+  if (lane != 0u) {
+    return;
+  }
+  var state = island_word(island, 1u);
+  var end = start;
+  var events = 0u;
+  var accepted = 0u;
+  var diagnostic_position = start;
+  var diagnostic_context = diagnostic_value(island, state);
+  var finished = false;
+  var chunk = 0u;
+  loop {
+    if (chunk >= 256u || start + chunk * chunk_size >= limit) {
+      break;
+    }
+    let state_local = state - state_offset;
+    let index = chunk * ${MAX_PARALLEL_CHUNK_STATES}u + state_local;
+    let packed_outcome = long_targets[index];
+    let outcome = packed_outcome & 0xffu;
+    end = long_ends[index];
+    events += packed_outcome >> 8u;
+    if ((outcome & 0x80u) != 0u) {
+      state = state_offset + (outcome & 0x3fu);
+      diagnostic_position = end;
+      diagnostic_context = diagnostic_value(island, state);
+      finished = true;
+      break;
+    }
+    if ((outcome & 0x40u) != 0u) {
+      state = state_offset + (outcome & 0x3fu);
+      accepted = 1u;
+      let kind = island_word(island, 2u);
+      if (
+        (kind == 1u || kind == 3u) &&
+        next_syntax(end, limit) != limit
+      ) {
+        accepted = 0u;
+      }
+      diagnostic_position = end;
+      diagnostic_context = diagnostic_value(island, state);
+      finished = true;
+      break;
+    }
+    state = state_offset + outcome;
+    diagnostic_position = end;
+    diagnostic_context = diagnostic_value(island, state);
+    chunk += 1u;
+  }
+  if (!finished) {
+    accepted = state_word(state, 0u);
+  }
+  var bank = 0u;
+  loop {
+    let base = summary_base(bank);
+    set_candidate_word(candidate, base, accepted);
+    set_candidate_word(candidate, base + 1u, end);
+    set_candidate_word(candidate, base + 2u, events);
+    set_candidate_word(candidate, base + 3u, diagnostic_position);
+    set_candidate_word(candidate, base + 4u, diagnostic_context);
+    if (bank == 1u) {
+      break;
+    }
+    bank += 1u;
+  }
+  set_candidate_word(candidate, 4u, 0xfffffffdu);
 }
 
 fn root_chain_candidate(invocation: vec3<u32>) -> u32 {
@@ -2582,36 +2990,20 @@ fn reachability(@builtin(global_invocation_id) invocation: vec3<u32>) {
   ) {
     return;
   }
-  let worker = linear_invocation_index(invocation);
-  if (worker >= arena[9u]) {
+  let candidate = linear_invocation_index(invocation);
+  if (candidate >= arena[20u]) {
     return;
   }
-  let multiplicity = arena[22u];
-  var candidate = 1u + worker * multiplicity;
-  let candidate_end = candidate + multiplicity;
-  if (worker == 0u) {
-    candidate = 0u;
-  }
-  loop {
-    if (
-      candidate_word(candidate, 2u) == 1u &&
-      candidate_word(candidate, 3u) == 0xffffffffu
-    ) {
-      mark_region_children(
-        candidate,
-        arena[21u] & 1u,
-        dispatch_params.round,
-      );
-      set_candidate_word(candidate, 3u, 0xfffffffeu);
-    }
-    if (candidate == 0u) {
-      candidate = 1u;
-    } else {
-      candidate += 1u;
-    }
-    if (candidate >= candidate_end) {
-      return;
-    }
+  if (
+    candidate_word(candidate, 2u) == 1u &&
+    candidate_word(candidate, 3u) == 0xffffffffu
+  ) {
+    mark_region_children(
+      candidate,
+      arena[21u] & 1u,
+      dispatch_params.round,
+    );
+    set_candidate_word(candidate, 3u, 0xfffffffeu);
   }
 }
 
@@ -2649,9 +3041,11 @@ fn scan_level(
   var value = 0u;
   if (index < dispatch_params.count) {
     if (dispatch_params.mode == 0u) {
-      value = candidate_word(index, 2u);
+      if (index < arena[20u]) {
+        value = candidate_word(index, 2u);
+      }
     } else if (dispatch_params.mode == 1u) {
-      if (candidate_word(index, 2u) == 1u) {
+      if (index < arena[20u] && candidate_word(index, 2u) == 1u) {
         value = candidate_word(
           index,
           summary_base(arena[21u] & 1u) + 2u,
@@ -2668,6 +3062,21 @@ fn scan_level(
     } else if (dispatch_params.mode == 4u && index < arena[1u]) {
       if (terminal(index) >= 0i) {
         value = 1u;
+      }
+    } else if (dispatch_params.mode == 5u && index < arena[27u]) {
+      let multiplicity = arena[22u];
+      let token_index = index / multiplicity;
+      let slot = index % multiplicity;
+      if (token_index < arena[1u]) {
+        let token_terminal = terminal(token_index);
+        if (token_terminal >= 0i && u32(token_terminal) < plan[11u]) {
+          let located = plan[
+            plan[12u] + u32(token_terminal) * multiplicity + slot
+          ];
+          if (located > 1u) {
+            value = 1u;
+          }
+        }
       }
     }
   }
@@ -2897,11 +3306,148 @@ fn emit(@builtin(global_invocation_id) invocation: vec3<u32>) {
   if (
     arena[0u] != 0u ||
     candidate >= arena[20u] ||
-    candidate_word(candidate, 2u) == 0u
+    candidate_word(candidate, 2u) == 0u ||
+    is_parallel_long_candidate(candidate)
   ) {
     return;
   }
   emit_region(candidate, arena[21u] & 1u);
+}
+
+@compute @workgroup_size(256)
+fn emit_long_regions(
+  @builtin(local_invocation_index) lane: u32,
+  @builtin(workgroup_id) workgroup: vec3<u32>,
+) {
+  if (arena[0u] != 0u) {
+    return;
+  }
+  let candidate = linear_workgroup_index(workgroup);
+  if (
+    candidate >= arena[20u] ||
+    candidate_word(candidate, 2u) == 0u ||
+    !is_parallel_long_candidate(candidate)
+  ) {
+    return;
+  }
+
+  let island = candidate_word(candidate, 0u);
+  let state_count = island_word(island, 7u);
+  let state_offset = island_word(island, 5u);
+  let start = candidate_word(candidate, 1u);
+  let limit = candidate_word(candidate, 15u);
+  let region_length = limit - start;
+  let chunk_size = (region_length + 255u) / 256u;
+  let chunk_start = min(limit, start + lane * chunk_size);
+  let chunk_end = min(limit, chunk_start + chunk_size);
+
+  var local_state = 0u;
+  loop {
+    if (local_state >= state_count) {
+      break;
+    }
+    var state = state_offset + local_state;
+    var cursor = chunk_start;
+    var outcome = local_state;
+    loop {
+      cursor = next_syntax(cursor, chunk_end);
+      if (cursor >= chunk_end) {
+        outcome = state - state_offset;
+        break;
+      }
+      let token_terminal = terminal(cursor);
+      if (
+        token_terminal >= 0i &&
+        u32(token_terminal) < plan[11u] &&
+        dense_transition_word(state, u32(token_terminal), 9u) == 1u
+      ) {
+        state = dense_transition_word(state, u32(token_terminal), 7u);
+        cursor += 1u;
+        continue;
+      }
+      let stopped_state = state - state_offset;
+      if (state_word(state, 0u) == 1u) {
+        outcome = 0x40u | stopped_state;
+      } else {
+        outcome = 0x80u | stopped_state;
+      }
+      break;
+    }
+    let index = lane * ${MAX_PARALLEL_CHUNK_STATES}u + local_state;
+    long_targets[index] = outcome;
+    local_state += 1u;
+  }
+  long_entries[lane] = 0xffffffffu;
+  workgroupBarrier();
+
+  if (lane == 0u) {
+    var state = island_word(island, 1u);
+    var chunk = 0u;
+    loop {
+      if (chunk >= 256u || start + chunk * chunk_size >= limit) {
+        break;
+      }
+      let state_local = state - state_offset;
+      long_entries[chunk] = state_local;
+      let index = chunk * ${MAX_PARALLEL_CHUNK_STATES}u + state_local;
+      let outcome = long_targets[index];
+      if ((outcome & 0xc0u) != 0u) {
+        break;
+      }
+      state = state_offset + outcome;
+      chunk += 1u;
+    }
+
+    let node = candidate_word(candidate, 3u);
+    let bank = arena[21u] & 1u;
+    let event_count = candidate_word(candidate, summary_base(bank) + 2u);
+    let edge_offset = candidate_word(candidate, 4u);
+    let node_base = arena[14u] + node * NODE_WORDS;
+    arena[node_base] = island_word(island, 0u);
+    arena[node_base + 1u] = 0u;
+    arena[node_base + 2u] = candidate_span_start(candidate);
+    arena[node_base + 3u] = candidate_span_end(candidate, bank);
+    arena[node_base + 4u] = edge_offset;
+    arena[node_base + 5u] = event_count;
+    arena[node_base + 6u] = 0xffffffffu;
+    arena[node_base + 7u] = 0xffffffffu;
+  }
+  workgroupBarrier();
+
+  let entry_state = long_entries[lane];
+  if (entry_state == 0xffffffffu || chunk_start >= chunk_end) {
+    return;
+  }
+  let edge_offset = candidate_word(candidate, 4u);
+  let start_ordinal = arena[arena[28u] + start];
+  var state = state_offset + entry_state;
+  var cursor = chunk_start;
+  loop {
+    cursor = next_syntax(cursor, chunk_end);
+    if (cursor >= chunk_end) {
+      return;
+    }
+    let token_terminal = terminal(cursor);
+    if (
+      token_terminal < 0i ||
+      u32(token_terminal) >= plan[11u] ||
+      dense_transition_word(state, u32(token_terminal), 9u) != 1u
+    ) {
+      return;
+    }
+    let ordinal = arena[arena[28u] + cursor] - start_ordinal;
+    let edge_base = arena[16u] + (edge_offset + ordinal) * EDGE_WORDS;
+    arena[edge_base] = dense_transition_word(
+      state,
+      u32(token_terminal),
+      8u,
+    );
+    arena[edge_base + 1u] = ordinal;
+    arena[edge_base + 2u] = 0u;
+    arena[edge_base + 3u] = cursor;
+    state = dense_transition_word(state, u32(token_terminal), 7u);
+    cursor += 1u;
+  }
 }
 
 @compute @workgroup_size(256)

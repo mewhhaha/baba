@@ -38,6 +38,8 @@ export interface BabaMetadata {
 export interface GpuFrontendMetadata {
   /** GPU frontend runtime-section version. */
   version: 3;
+  /** Selects additional compiler proofs for the root-segment fast path. */
+  throughput?: "strict";
   /** Root island rule. Must match the generated parser root rule. */
   root: string;
   /** Rules compiled as independently executable syntax islands. */

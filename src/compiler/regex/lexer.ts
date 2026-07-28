@@ -1,5 +1,5 @@
 import type { RegexAst } from "./ast.ts";
-import { buildDfa, type Dfa } from "./dfa.ts";
+import { buildDfa, type Dfa, minimizeDfa } from "./dfa.ts";
 import type { RegexCompilerLimits } from "./limits.ts";
 import { buildCombinedNfa } from "./nfa.ts";
 
@@ -19,7 +19,12 @@ export function buildLexerDfa(
     specs.map((spec, index) => ({ ast: spec.ast, accept: index })),
     limits,
   );
-  return buildDfa(nfa, (accepts) => chooseAccept(specs, accepts), limits);
+  const dfa = buildDfa(
+    nfa,
+    (accepts) => chooseAccept(specs, accepts),
+    limits,
+  );
+  return minimizeDfa(dfa);
 }
 
 function chooseAccept(

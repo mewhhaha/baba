@@ -131,6 +131,7 @@ function parseGpuFrontendMetadata(
   const object = expectObject(value, path);
   assertKnownKeys(object, path, [
     "version",
+    "throughput",
     "root",
     "islands",
     "semantics",
@@ -152,6 +153,18 @@ function parseGpuFrontendMetadata(
       `${path}.semantics`,
     ),
   };
+  if (hasKey(object, "throughput")) {
+    const throughput = expectString(
+      object.throughput,
+      `${path}.throughput`,
+    );
+    if (throughput !== "strict") {
+      throwMetadataShape(
+        `Invalid ${path}.throughput '${throughput}', expected 'strict'`,
+      );
+    }
+    metadata.throughput = throughput;
+  }
   if (hasKey(object, "limits")) {
     metadata.limits = parseGpuFrontendLimits(
       object.limits,

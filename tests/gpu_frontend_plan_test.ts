@@ -19,6 +19,7 @@ const METADATA = parseMetadata(JSON.stringify({
   version: 2,
   gpuFrontend: {
     version: 3,
+    throughput: "strict",
     root: "module",
     islands: [
       { rule: "module", boundary: { kind: "root" } },
@@ -62,6 +63,7 @@ Deno.test("GPU frontend v3 is persisted and interpreted by the CPU oracle", () =
 
   const plan = decodeGpuFrontendPlan(planFile.content);
   assertEquals(plan.version, 3);
+  assertEquals(plan.throughput, "strict");
   assertEquals(
     plan.islands.map((island) => island.ruleName).join(","),
     "module,statement",
@@ -73,6 +75,8 @@ Deno.test("GPU frontend v3 is persisted and interpreted by the CPU oracle", () =
   assertEquals(plan.execution.locators.length, 2);
   assert(plan.execution.denseTransitions.targets.length > 0);
   assertEquals(plan.execution.contractions.length, 2);
+  assertEquals(plan.execution.rootLoop?.island, 1);
+  assertEquals(plan.execution.longRegions.length, 1);
 
   const frontend = CpuFrontend.create(planFile.content);
   for (
@@ -165,6 +169,8 @@ Deno.test("Funcfuck reuses the GPU frontend transducer and semantic catalog", as
   );
   const inspection = inspectGpuFrontendPlan(planFile.content);
   assert(inspection);
+  assertEquals(inspection.throughput, "general");
+  assertEquals(inspection.rootLoopIsland, null);
   assertEquals(inspection.islandCount, 7);
   assert(inspection.islandTransitions > 0);
   assertEquals(inspection.locatorCount, 7);
@@ -244,6 +250,119 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
     assertEquals(gpu.program.edges.join(","), cpu.program.edges.join(","));
     assertEquals(gpu.program.symbols.join(","), cpu.program.symbols.join(","));
     assertEquals(gpu.program.types.join(","), cpu.program.types.join(","));
+    const resident = await frontend.ingestResident(source);
+    let residentReuseMessage = "";
+    try {
+      await frontend.ingest(source);
+    } catch (error) {
+      if (error instanceof Error) {
+        residentReuseMessage = error.message;
+      } else {
+        residentReuseMessage = String(error);
+      }
+    }
+    assert(
+      residentReuseMessage.includes(
+        "resident result must be disposed",
+      ),
+      residentReuseMessage,
+    );
+    const residentHeader = runtime.device.createBuffer({
+      size: resident.layout.headerWords * Uint32Array.BYTES_PER_ELEMENT,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+    try {
+      const encoder = runtime.device.createCommandEncoder();
+      encoder.copyBufferToBuffer(
+        resident.buffer,
+        0,
+        residentHeader,
+        0,
+        resident.layout.headerWords * Uint32Array.BYTES_PER_ELEMENT,
+      );
+      runtime.device.queue.submit([encoder.finish()]);
+      await residentHeader.mapAsync(GPUMapMode.READ);
+      const header = new Uint32Array(residentHeader.getMappedRange());
+      assertEquals(header[resident.layout.statusWord], 0);
+      assertEquals(
+        header[resident.layout.tokenCountWord],
+        cpu.program.tokens.length / 4,
+      );
+      assertEquals(
+        header[resident.layout.nodeCountWord],
+        cpu.program.nodes.length / 8,
+      );
+      assertEquals(
+        header[resident.layout.edgeCountWord],
+        cpu.program.edges.length / 4,
+      );
+      residentHeader.unmap();
+    } finally {
+      resident.dispose();
+      residentHeader.destroy();
+    }
+
+    const longGrammar = String.raw`
+      skip WS = /[ \t\r\n]+/ ;
+      module = chunks:chunk* ;
+      chunk = values:"x"* ";" ;
+    `;
+    const longMetadata = parseMetadata(JSON.stringify({
+      version: 2,
+      gpuFrontend: {
+        version: 3,
+        throughput: "strict",
+        root: "module",
+        islands: [
+          { rule: "module", boundary: { kind: "root" } },
+          {
+            rule: "chunk",
+            boundary: { kind: "terminated", terminal: ";" },
+          },
+        ],
+        semantics: { rules: {} },
+      },
+    }));
+    const longBuilt = compile(longGrammar, {
+      name: "gpu_long_region_test",
+      rootRule: "module",
+      metadata: longMetadata,
+      targets: ["wasm"],
+    });
+    assert(
+      longBuilt.bundle,
+      longBuilt.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    );
+    const longPlanFile = longBuilt.bundle.files.find((file) =>
+      file.path === "wasm/parser.plan"
+    );
+    assert(longPlanFile);
+    assert(longPlanFile.encoding === "binary");
+    const longInspection = inspectGpuFrontendPlan(longPlanFile.content);
+    assert(longInspection);
+    assertEquals(longInspection.parallelLongRegionIslands, 1);
+    const longSource = `${"x ".repeat(4096)};`;
+    const cpuLong = CpuFrontend.create(longPlanFile.content).ingest(longSource);
+    assert(cpuLong.ok);
+    const longFrontend = await runtime.compileFrontend(longPlanFile.content);
+    const gpuLong = await longFrontend.ingest(longSource);
+    assert(
+      gpuLong.ok,
+      gpuLong.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    );
+    assertEquals(
+      gpuLong.program.tokens.join(","),
+      cpuLong.program.tokens.join(","),
+    );
+    assertEquals(
+      gpuLong.program.nodes.join(","),
+      cpuLong.program.nodes.join(","),
+    );
+    assertEquals(
+      gpuLong.program.edges.join(","),
+      cpuLong.program.edges.join(","),
+    );
+
     const tokenCount = cpu.program.tokens.length / 4;
     const nodeCount = cpu.program.nodes.length / 8;
     const edgeCount = cpu.program.edges.length / 4;
@@ -276,6 +395,10 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
     const gpuDuckSource = await Deno.readTextFile(
       new URL("../examples/gpu-duck/programs/example.duck", import.meta.url),
     );
+    const gpuDuckInspection = inspectGpuFrontendPlan(gpuDuckPlan);
+    assert(gpuDuckInspection);
+    assertEquals(gpuDuckInspection.throughput, "strict");
+    assertEquals(gpuDuckInspection.rootLoopIsland, 2);
     const cpuDuck = CpuFrontend.create(gpuDuckPlan).ingest(gpuDuckSource);
     assert(cpuDuck.ok);
     const gpuDuckFrontend = await runtime.compileFrontend(gpuDuckPlan);
@@ -495,6 +618,17 @@ Deno.test("GPU frontend eligibility failures use stable diagnostics", () => {
         limits: { maxLexerStates: 1 },
       },
       code: "GPU_FRONTEND_LEXER_STATE_LIMIT",
+    },
+    {
+      source: `module = "x" ;`,
+      gpuFrontend: {
+        version: 3,
+        throughput: "strict",
+        root: "module",
+        islands: [{ rule: "module", boundary: { kind: "root" } }],
+        semantics: { rules: {} },
+      },
+      code: "GPU_FRONTEND_STRICT_ROOT_LOOP",
     },
     {
       source: `

@@ -134,6 +134,105 @@ export function buildDfa(
 }
 
 /**
+ * Merges states that have identical accepting candidates and future behavior.
+ *
+ * The complete `accepts` set is observable because contextual-token resolution
+ * consumes it after lexing. Partitioning only by `selectedAccept` would therefore
+ * change parser behavior even when ordinary maximal-munch lexing stayed intact.
+ */
+export function minimizeDfa(dfa: Dfa): Dfa {
+  if (dfa.states.length < 2) {
+    return dfa;
+  }
+
+  const representatives = alphabetRepresentatives(dfa.alphabet);
+  let partitionByState = partitionStates(
+    dfa.states,
+    (state) => acceptingSignature(state),
+  );
+
+  while (true) {
+    const refined = partitionStates(dfa.states, (state) => {
+      const targets: number[] = [];
+      for (const codePoint of representatives) {
+        const target = transitionTargetAt(state, codePoint);
+        if (target < 0) {
+          targets.push(-1);
+          continue;
+        }
+        targets.push(partitionByState[target]);
+      }
+      return `${acceptingSignature(state)}|${targets.join(",")}`;
+    });
+    if (samePartitions(partitionByState, refined)) {
+      break;
+    }
+    partitionByState = refined;
+  }
+
+  let partitionCount = 0;
+  for (const partition of partitionByState) {
+    partitionCount = Math.max(partitionCount, partition + 1);
+  }
+  if (partitionCount === dfa.states.length) {
+    return dfa;
+  }
+
+  const members: number[][] = Array.from(
+    { length: partitionCount },
+    () => [],
+  );
+  for (let state = 0; state < dfa.states.length; state += 1) {
+    members[partitionByState[state]].push(state);
+  }
+
+  const states: DfaState[] = [];
+  for (let partition = 0; partition < members.length; partition += 1) {
+    const representativeId = members[partition][0];
+    const representative = dfa.states[representativeId];
+    if (representative === undefined) {
+      throw new Error(`DFA partition ${partition} has no representative.`);
+    }
+    const nfaStates = [
+      ...new Set(
+        members[partition].flatMap((state) => dfa.states[state].nfaStates),
+      ),
+    ].sort((left, right) => left - right);
+    const transitions: DfaTransition[] = [];
+    for (const transition of representative.transitions) {
+      const target = partitionByState[transition.target];
+      const previous = transitions[transitions.length - 1];
+      if (
+        previous !== undefined &&
+        previous.target === target &&
+        previous.end + 1 === transition.start
+      ) {
+        previous.end = transition.end;
+        continue;
+      }
+      transitions.push({
+        start: transition.start,
+        end: transition.end,
+        target,
+      });
+    }
+    states.push({
+      id: partition,
+      nfaStates,
+      accepts: representative.accepts,
+      selectedAccept: representative.selectedAccept,
+      transitions,
+    });
+  }
+
+  return {
+    start: partitionByState[dfa.start],
+    states,
+    alphabet: computeDfaAlphabet(states),
+  };
+}
+
+/**
  * Computes the alphabet equivalence classes of an already-built DFA.
  *
  * The boundaries come from the DFA's own coalesced transition ranges rather than
@@ -243,6 +342,72 @@ function transitionTargetAt(state: DfaState, codePoint: number): number {
     }
   }
   return -1;
+}
+
+function alphabetRepresentatives(alphabet: DfaAlphabet): number[] {
+  const representatives = new Array<number>(alphabet.classCount).fill(-1);
+  for (
+    let codePoint = 0;
+    codePoint < alphabet.asciiClasses.length;
+    codePoint += 1
+  ) {
+    const classId = alphabet.asciiClasses[codePoint];
+    if (representatives[classId] < 0) {
+      representatives[classId] = codePoint;
+    }
+  }
+  for (const range of alphabet.aboveAsciiRanges) {
+    if (representatives[range.classId] < 0) {
+      representatives[range.classId] = range.start;
+    }
+  }
+  for (let classId = 0; classId < representatives.length; classId += 1) {
+    if (representatives[classId] < 0) {
+      throw new Error(`DFA alphabet class ${classId} has no representative.`);
+    }
+  }
+  return representatives;
+}
+
+function acceptingSignature(state: DfaState): string {
+  let selected = "none";
+  if (state.selectedAccept !== null) {
+    selected = String(state.selectedAccept);
+  }
+  return `${selected}:${state.accepts.join(",")}`;
+}
+
+function partitionStates(
+  states: readonly DfaState[],
+  signature: (state: DfaState) => string,
+): number[] {
+  const partitionBySignature = new Map<string, number>();
+  const partitionByState: number[] = [];
+  for (const state of states) {
+    const key = signature(state);
+    let partition = partitionBySignature.get(key);
+    if (partition === undefined) {
+      partition = partitionBySignature.size;
+      partitionBySignature.set(key, partition);
+    }
+    partitionByState[state.id] = partition;
+  }
+  return partitionByState;
+}
+
+function samePartitions(
+  left: readonly number[],
+  right: readonly number[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function defaultAccept(accepts: readonly number[]): number | null {
