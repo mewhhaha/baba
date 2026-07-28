@@ -80,8 +80,8 @@ The parser instance returned by `createParser({ bytes, plan })` or
   TypeScript consumers.
 - `lex(source, options?)`: lazy token tape result. Use `tokenTape.token(index)`
   for indexed access to token records.
-- `validate(source, options?)`: Wasm trace validation with structured
-  diagnostics and no object-tree construction.
+- `validate(source, options?)`: output-free Wasm validation with structured
+  diagnostics and lazy lexing.
 - `reset()` and `dispose()`.
 
 Generated Wasm parser instances expose only the methods listed above.

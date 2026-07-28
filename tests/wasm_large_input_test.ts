@@ -27,6 +27,18 @@ const DENSE_GRAMMAR = `
   module = digits:DIGIT+ ;
 `;
 
+const BACKTRACKING_GRAMMAR = `
+  token X = /([0-9a-f][0-9a-f])+;/ ;
+  skip WS = /[ \\t\\r\\n]+/ ;
+
+  module = statement* ;
+  statement = X ;
+`;
+
+const NULLABLE_SEQUENCE_GRAMMAR = `
+  module = "a"? "b"? "c"? "d"? "e"? "f"? "g"? "h"? ;
+`;
+
 interface CursorTokenLike {
   readonly type: "token";
   readonly kind: string;
@@ -103,7 +115,7 @@ Deno.test("Wasm cursor parser materializes long repetitions far above the old me
       `Expected a source above the old 768 KiB ceiling, got ${source.length}.`,
     );
 
-    const result = parser.parse(source, { maxTraceActions: 100_000_000 });
+    const result = parser.parse(source, { maxParserActions: 100_000_000 });
     assertEquals(
       result.diagnostics.map((diagnostic) => diagnostic.code).join(","),
       "",
@@ -193,7 +205,7 @@ Deno.test("Wasm cursor children stay reachable in reverse and random order", asy
     }
     const source = lines.join("\n");
 
-    const result = parser.parse(source, { maxTraceActions: 100_000_000 });
+    const result = parser.parse(source, { maxParserActions: 100_000_000 });
     assertEquals(result.ok, true);
     assert(result.cursor);
     const root = result.cursor;
@@ -264,23 +276,52 @@ Deno.test("Wasm cursor children stay reachable in reverse and random order", asy
   }
 });
 
-Deno.test("Wasm validate blames maxTraceActions when the trace arena is what cannot fit", async () => {
+Deno.test("Wasm validate reports maxParserActions exhaustion without reserving a trace arena", async () => {
   const { dir, parser } = await materialize(LIST_GRAMMAR);
   try {
     const source = "let a = 1;";
     assertEquals(parser.validate(source).ok, true);
 
-    // The trace arena is sized purely by `maxTraceActions`, so a ten-character
-    // source can exceed the address space. Advising a split would be wrong.
     const result = parser.validate(source, {
-      maxTraceActions: 1_500_000_000,
+      maxParserActions: 1,
     });
     assertEquals(result.ok, false);
     assertEquals(result.diagnostics.length, 1);
     const diagnostic = result.diagnostics[0];
-    assertEquals(diagnostic.code, "PARSER_INPUT_TOO_LARGE");
-    assertIncludes(diagnostic.message, "maxTraceActions is 1500000000");
-    assertIncludes(diagnostic.message, "Lower maxTraceActions");
+    assertEquals(diagnostic.code, "PARSER_TRACE_LIMIT");
+    assertIncludes(diagnostic.message, "parser action limit");
+  } finally {
+    parser.dispose();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm validate retries with a memo and preserves parse diagnostics", async () => {
+  const { dir, parser } = await materialize(BACKTRACKING_GRAMMAR);
+  try {
+    const source = "a".repeat(4096);
+    const parsed = parser.parse(source);
+    const validated = parser.validate(source);
+
+    assertEquals(parsed.ok, false);
+    assertEquals(validated.ok, false);
+    assertEquals(validated.diagnostics.length, 1);
+    assertEquals(validated.diagnostics[0].code, "PARSE_LEXICAL_ERROR");
+    assertEquals(
+      JSON.stringify(validated.diagnostics),
+      JSON.stringify(parsed.diagnostics),
+    );
+  } finally {
+    parser.dispose();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm validate accepts empty input with many nullable symbols", async () => {
+  const { dir, parser } = await materialize(NULLABLE_SEQUENCE_GRAMMAR);
+  try {
+    assertEquals(parser.parse("").ok, true);
+    assertEquals(parser.validate("").ok, true);
   } finally {
     parser.dispose();
     await Deno.remove(dir, { recursive: true });

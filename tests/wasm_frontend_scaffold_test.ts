@@ -41,7 +41,7 @@ interface GeneratedAbiDescriptor {
       readonly tokenRecord: {
         readonly i32Count: number;
       };
-      readonly parseTraceResult: {
+      readonly validateResult: {
         readonly i32Count: number;
       };
       readonly parseCursorResult: {
@@ -71,7 +71,7 @@ interface GeneratedAbiDescriptor {
 
 Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.abiName, "baba-wasm-abi");
-  assertEquals(babaWasmFrontendRequirements.abiVersion, 10);
+  assertEquals(babaWasmFrontendRequirements.abiVersion, 11);
   assertEquals(
     babaWasmFrontendRequirements.targetKind,
     "javascript-hosted-core-wasm",
@@ -86,7 +86,7 @@ Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.resultLifetimeModel, 1);
   assertEquals(babaWasmFrontendRequirements.lexResultI32Count, 2);
   assertEquals(babaWasmFrontendRequirements.tokenRecordI32Count, 4);
-  assertEquals(babaWasmFrontendRequirements.parseTraceResultI32Count, 6);
+  assertEquals(babaWasmFrontendRequirements.validateResultI32Count, 5);
   assertEquals(babaWasmFrontendRequirements.parseCursorResultI32Count, 10);
   assertEquals(babaWasmFrontendRequirements.cursorRuleRecordI32Count, 9);
   assertEquals(babaWasmFrontendRequirements.cursorFieldRecordI32Count, 2);
@@ -96,7 +96,7 @@ Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.cursorFragmentRecordI32Count, 10);
   assertEquals(
     babaWasmFrontendRequirements.requiredExports.join(","),
-    "memory,lex_one,parser_action,parser_actions,parser_select_action,parse_trace,parse_cursor,parse_cursor_records,parser_goto,lex_all,lex_memo_i32_per_position,load_plan,abi_version,plan_version,semantics_version,reset,plan_buffer_base,input_base,max_pages,source_encoding,span_unit,lex_result_i32_count,token_record_i32_count,host_ownership_model,result_lifetime_model",
+    "memory,lex_one,parser_action,parser_actions,parser_select_action,validate,parse_cursor,parse_cursor_records,parser_goto,lex_all,lex_memo_i32_per_position,load_plan,abi_version,plan_version,semantics_version,reset,plan_buffer_base,input_base,max_pages,source_encoding,span_unit,lex_result_i32_count,token_record_i32_count,validate_result_i32_count,host_ownership_model,result_lifetime_model",
   );
   assertIncludes(
     babaWasmFrontendRequirements.forbiddenDefaultDependencies.join(","),
@@ -260,8 +260,8 @@ Deno.test("Wasm frontend scaffold stays aligned with generated artifacts", () =>
     babaWasmFrontendRequirements.tokenRecordI32Count,
   );
   assertEquals(
-    abi.core.layouts.parseTraceResult.i32Count,
-    babaWasmFrontendRequirements.parseTraceResultI32Count,
+    abi.core.layouts.validateResult.i32Count,
+    babaWasmFrontendRequirements.validateResultI32Count,
   );
   assertEquals(
     abi.core.layouts.parseCursorResult.i32Count,

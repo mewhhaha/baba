@@ -2,7 +2,7 @@
 
 use core::panic::PanicInfo;
 
-const WASM_ABI_VERSION: i32 = 10;
+const WASM_ABI_VERSION: i32 = 11;
 const RUNTIME_IMPLEMENTATION_VERSION: i32 = 2;
 const MAX_WASM_PAGES: i32 = 65_535;
 const SOURCE_ENCODING_UTF16: i32 = 1;
@@ -11,12 +11,13 @@ const HOST_OWNERSHIP_CALLER_MANAGED: i32 = 1;
 const RESULT_LIFETIME_CALLER_BUFFER: i32 = 1;
 
 const PLAN_MAGIC: i32 = 0x3150_5742;
-const PLAN_FORMAT_VERSION: i32 = 4;
+const PLAN_FORMAT_VERSION: i32 = 5;
 const PLAN_HEADER_MAGIC: i32 = 0;
 const PLAN_HEADER_FORMAT_VERSION: i32 = 1;
 const PLAN_HEADER_PARSER_PLAN_VERSION: i32 = 2;
 const PLAN_HEADER_DFA_STATE_COUNT: i32 = 3;
 const PLAN_HEADER_PARSER_STATE_COUNT: i32 = 4;
+const PLAN_HEADER_FAST_SPECS: i32 = 5;
 const PLAN_HEADER_ASCII_TRANSITIONS: i32 = 6;
 const PLAN_HEADER_TRANSITION_ROWS: i32 = 7;
 const PLAN_HEADER_TRANSITIONS: i32 = 8;
@@ -52,6 +53,7 @@ const COMPACT_U16_OFFSET_BASE: i32 = 0x4000_0000;
 
 const LEX_RESULT_I32_COUNT: i32 = 2;
 const TOKEN_RECORD_I32_COUNT: i32 = 4;
+const VALIDATE_RESULT_I32_COUNT: i32 = 5;
 const PARSE_CURSOR_RESULT_I32_COUNT: i32 = 10;
 const CURSOR_RULE_RECORD_I32_COUNT: i32 = 9;
 const CURSOR_FIELD_RECORD_I32_COUNT: i32 = 2;
@@ -67,14 +69,20 @@ const ACTION_PAYLOAD_MASK: i32 = 0x00ff_ffff;
 
 // `lex_all` returns a token count, so its failures are the negative values.
 const LEX_STATUS_TOKEN_CAPACITY: i32 = -1;
-const LEX_STATUS_MEMO_CAPACITY: i32 = -2;
+const LEX_STATUS_MEMO_REQUIRED: i32 = -2;
 
 const PARSE_STATUS_OK: i32 = 0;
 const PARSE_STATUS_UNEXPECTED: i32 = 1;
 const PARSE_STATUS_INTERNAL: i32 = 2;
 const PARSE_CURSOR_STATUS_CAPACITY: i32 = 3;
 const PARSE_STATUS_TRACE_LIMIT: i32 = 4;
-const PARSE_STATUS_AMBIGUOUS: i32 = 5;
+const PARSE_STATUS_MEMO_REQUIRED: i32 = 6;
+
+const VALIDATE_RESULT_ACTION_COUNT: i32 = 0;
+const VALIDATE_RESULT_ERROR_STATE: i32 = 1;
+const VALIDATE_RESULT_ERROR_SPEC: i32 = 2;
+const VALIDATE_RESULT_ERROR_START: i32 = 3;
+const VALIDATE_RESULT_ERROR_END: i32 = 4;
 
 const CURSOR_RESULT_TOKEN_COUNT: i32 = 0;
 const CURSOR_RESULT_RULE_COUNT: i32 = 1;
@@ -274,6 +282,11 @@ pub extern "C" fn token_record_i32_count() -> i32 {
 }
 
 #[no_mangle]
+pub extern "C" fn validate_result_i32_count() -> i32 {
+    VALIDATE_RESULT_I32_COUNT
+}
+
+#[no_mangle]
 pub extern "C" fn host_ownership_model() -> i32 {
     HOST_OWNERSHIP_CALLER_MANAGED
 }
@@ -469,111 +482,156 @@ pub extern "C" fn lex_all(
     memo: i32,
     memo_capacity: i32,
 ) -> i32 {
-    // One record per code point is the worst case - an unrecognisable code
-    // point becomes its own error token - so `len` records is the requirement.
     if token_capacity < len {
         return LEX_STATUS_TOKEN_CAPACITY;
     }
-    let memo_required = memo_i32_count(len);
-    if memo_required < 0 {
-        return LEX_STATUS_MEMO_CAPACITY;
-    }
-    if memo_capacity < memo_required {
-        return LEX_STATUS_MEMO_CAPACITY;
-    }
-
-    let memo_words = lex_memo_i32_per_position();
-    let mut memo_enabled = false;
-    let mut wasted: i64 = 0;
-
-    let mut offset = 0;
+    let mut cursor = RawLexerCursor::new(len, memo, memo_capacity);
     let mut count = 0;
+    let mut token = EMPTY_RAW_TOKEN;
+    loop {
+        let status = next_raw_token(&mut cursor, src, len, &mut token);
+        if status == 0 {
+            return count;
+        }
+        if status == LEX_STATUS_MEMO_REQUIRED {
+            return LEX_STATUS_MEMO_REQUIRED;
+        }
+        store_token_record(
+            tokens,
+            count,
+            token.spec,
+            token.start,
+            token.end,
+            token.accepting_state,
+        );
+        count += 1;
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RawToken {
+    spec: i32,
+    start: i32,
+    end: i32,
+    accepting_state: i32,
+}
+
+const EMPTY_RAW_TOKEN: RawToken = RawToken {
+    spec: -2,
+    start: 0,
+    end: 0,
+    accepting_state: -1,
+};
+
+struct RawLexerCursor {
+    offset: i32,
+    memo: i32,
+    memo_words: i32,
+    memo_required: i32,
+    memo_enabled: bool,
+    wasted: i64,
+}
+
+impl RawLexerCursor {
+    #[inline]
+    fn new(len: i32, memo: i32, memo_capacity: i32) -> RawLexerCursor {
+        let memo_required = memo_i32_count(len);
+        let memo_words = lex_memo_i32_per_position();
+        let mut memo_enabled = false;
+        if memo > 0 && memo_required > 0 && memo_capacity >= memo_required {
+            memo_clear(memo, memo_required);
+            memo_enabled = true;
+        }
+        RawLexerCursor {
+            offset: 0,
+            memo,
+            memo_words,
+            memo_required,
+            memo_enabled,
+            wasted: 0,
+        }
+    }
+}
+
+#[inline]
+fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut RawToken) -> i32 {
+    if cursor.offset >= len {
+        return 0;
+    }
 
     let start_state = header(PLAN_HEADER_DFA_START_STATE);
-    while offset < len {
-        let mut state = start_state;
-        let mut index = offset;
-        let mut best_spec = -1;
-        let mut best_end = offset;
-        let mut best_state = -1;
+    let start = cursor.offset;
+    let mut state = start_state;
+    let mut index = start;
+    let mut best_spec = -1;
+    let mut best_end = start;
+    let mut best_state = -1;
+    let mut memo_floor = len;
+    if cursor.memo_enabled {
+        memo_floor = start;
+    }
 
-        // Positions at or below `memo_floor` are never consulted. While the
-        // memo is off it sits at `len`, which no `index` can exceed, so the
-        // whole memo path costs one never-taken compare per DFA step. While it
-        // is on it tracks `best_end`: a pair at or below the last accept cannot
-        // be in the memo, because the memo only holds pairs that fail.
-        let mut memo_floor = len;
-        if memo_enabled {
-            memo_floor = offset;
+    while index < len {
+        let decoded = decode_code_point(src, index, len);
+        let target = transition(state, decoded.code_point);
+        if target < 0 {
+            break;
         }
+        index += decoded.width;
+        state = target;
+        if index > memo_floor && memo_is_set(cursor.memo, cursor.memo_words, index, state) {
+            break;
+        }
+        let accept = selected_global_spec(src, len, index, state);
+        if accept >= 0 {
+            best_spec = accept;
+            best_end = index;
+            best_state = state;
+            if cursor.memo_enabled {
+                memo_floor = index;
+            }
+        }
+    }
 
-        while index < len {
-            let decoded = decode_code_point(src, index, len);
-            let target = transition(state, decoded.code_point);
+    let scan_end = index;
+    if cursor.memo_enabled {
+        let mut memo_index = best_end;
+        let mut memo_state = start_state;
+        if best_spec >= 0 {
+            memo_state = best_state;
+        }
+        while memo_index < scan_end {
+            let decoded = decode_code_point(src, memo_index, len);
+            let target = transition(memo_state, decoded.code_point);
             if target < 0 {
                 break;
             }
-            index += decoded.width;
-            state = target;
-            if index > memo_floor && memo_is_set(memo, memo_words, index, state) {
-                break;
-            }
-            let accept = selected_global_spec(src, len, index, state);
-            if accept >= 0 {
-                best_spec = accept;
-                best_end = index;
-                best_state = state;
-                if memo_enabled {
-                    memo_floor = index;
-                }
-            }
+            memo_index += decoded.width;
+            memo_state = target;
+            memo_set(cursor.memo, cursor.memo_words, memo_index, memo_state);
         }
-
-        // `index` is now where the scan stopped: dead transition, memo hit or
-        // end of input. Everything in `(best_end, index]` was visited without
-        // accepting and cannot accept later, so it is memo-able.
-        let scan_end = index;
-        if memo_enabled {
-            let mut memo_index = best_end;
-            let mut memo_state = start_state;
-            if best_spec >= 0 {
-                memo_state = best_state;
-            }
-            while memo_index < scan_end {
-                let decoded = decode_code_point(src, memo_index, len);
-                let target = transition(memo_state, decoded.code_point);
-                if target < 0 {
-                    break;
-                }
-                memo_index += decoded.width;
-                memo_state = target;
-                memo_set(memo, memo_words, memo_index, memo_state);
-            }
-        } else {
-            wasted += (scan_end - best_end) as i64;
-            if memo_words > 0 && wasted > len as i64 {
-                memo_clear(memo, memo_required);
-                memo_enabled = true;
-            }
+    } else {
+        cursor.wasted += (scan_end - best_end) as i64;
+        if cursor.memo_required < 0 || cursor.memo_words > 0 && cursor.wasted > len as i64 {
+            return LEX_STATUS_MEMO_REQUIRED;
         }
-
-        let spec;
-        let end;
-        if best_spec >= 0 {
-            spec = best_spec;
-            end = best_end;
-        } else {
-            let decoded = decode_code_point(src, offset, len);
-            spec = -1;
-            end = offset + decoded.width;
-        }
-
-        store_token_record(tokens, count, spec, offset, end, best_state);
-        offset = end;
-        count += 1;
     }
 
-    count
+    let mut spec = best_spec;
+    let mut end = best_end;
+    if best_spec < 0 {
+        let decoded = decode_code_point(src, start, len);
+        spec = -1;
+        end = start + decoded.width;
+    }
+    *token = RawToken {
+        spec,
+        start,
+        end,
+        accepting_state: best_state,
+    };
+    cursor.offset = end;
+    1
 }
 
 struct DecodedCodePoint {
@@ -651,6 +709,10 @@ fn transition(state: i32, code_point: i32) -> i32 {
 }
 
 fn selected_global_spec(src: i32, len: i32, end: i32, accepting_state: i32) -> i32 {
+    let fast_spec = header_table_value(PLAN_HEADER_FAST_SPECS, accepting_state);
+    if fast_spec >= 0 {
+        return fast_spec;
+    }
     let rows = header(PLAN_HEADER_ACCEPT_CANDIDATE_ROWS);
     let mut index = table_value(rows, accepting_state);
     let stop = table_value(rows, accepting_state + 1);
@@ -821,10 +883,27 @@ fn table_lookup(
     let mut index = table_value(rows, state);
     let end = table_value(rows, state + 1);
     let pairs = header(pairs_header);
-    while index < end {
-        if pair_key(pairs, index) == key {
-            return pair_value(pairs, index, decode_action);
+    if is_compact_u16_offset(pairs) {
+        let mut address = plan_addr(compact_u16_offset(pairs)) + index * 4;
+        while index < end {
+            if unsafe { load_u16_i32(address) } == key {
+                let value = unsafe { load_u16_i32(address + 2) };
+                if decode_action {
+                    return decode_compact_action(value);
+                }
+                return value;
+            }
+            address += 4;
+            index += 1;
         }
+        return missing;
+    }
+    let mut address = plan_addr(pairs) + index * 8;
+    while index < end {
+        if unsafe { load_i32(address) } == key {
+            return unsafe { load_i32(address + 4) };
+        }
+        address += 8;
         index += 1;
     }
     missing
@@ -840,35 +919,33 @@ pub extern "C" fn parser_actions(state: i32, terminal: i32, output: i32, capacit
     let end = table_value(rows, state + 1);
     let pairs = header(PLAN_HEADER_ACTION_PAIRS);
     let mut count = 0;
+    if is_compact_u16_offset(pairs) {
+        let mut address = plan_addr(compact_u16_offset(pairs)) + index * 4;
+        while index < end {
+            if unsafe { load_u16_i32(address) } == terminal {
+                if count < capacity {
+                    let raw = unsafe { load_u16_i32(address + 2) };
+                    unsafe { store_i32(output + count * 4, decode_compact_action(raw)) };
+                }
+                count += 1;
+            }
+            address += 4;
+            index += 1;
+        }
+        return count;
+    }
+    let mut address = plan_addr(pairs) + index * 8;
     while index < end {
-        if pair_key(pairs, index) == terminal {
+        if unsafe { load_i32(address) } == terminal {
             if count < capacity {
-                unsafe { store_i32(output + count * 4, pair_value(pairs, index, true)) };
+                unsafe { store_i32(output + count * 4, load_i32(address + 4)) };
             }
             count += 1;
         }
+        address += 8;
         index += 1;
     }
     count
-}
-
-fn pair_key(encoded_pairs: i32, index: i32) -> i32 {
-    if is_compact_u16_offset(encoded_pairs) {
-        return unsafe { load_u16_i32(plan_addr(compact_u16_offset(encoded_pairs)) + index * 4) };
-    }
-    unsafe { load_i32(plan_addr(encoded_pairs) + index * 8) }
-}
-
-fn pair_value(encoded_pairs: i32, index: i32, decode_action: bool) -> i32 {
-    if is_compact_u16_offset(encoded_pairs) {
-        let raw =
-            unsafe { load_u16_i32(plan_addr(compact_u16_offset(encoded_pairs)) + index * 4 + 2) };
-        if decode_action {
-            return decode_compact_action(raw);
-        }
-        return raw;
-    }
-    unsafe { load_i32(plan_addr(encoded_pairs) + index * 8 + 4) }
 }
 
 fn decode_compact_action(raw: i32) -> i32 {
@@ -890,14 +967,14 @@ fn decode_compact_action(raw: i32) -> i32 {
 pub extern "C" fn parser_select_action(
     state: i32,
     accepting_state: i32,
-    _fallback_spec: i32,
+    fallback_spec: i32,
     result: i32,
 ) -> i32 {
     if accepting_state < 0 || accepting_state >= header(PLAN_HEADER_DFA_STATE_COUNT) {
         return -1;
     }
 
-    let selection = select_action(state, accepting_state, false, -1, 0, 0);
+    let selection = select_action(state, accepting_state, fallback_spec, false, -1, 0, 0);
     unsafe {
         store_i32(result, selection.checked_count);
     }
@@ -925,6 +1002,7 @@ struct Selection {
 fn select_action(
     state: i32,
     accepting_state: i32,
+    fallback_spec: i32,
     include_trivia: bool,
     src: i32,
     len: i32,
@@ -947,7 +1025,9 @@ fn select_action(
         let spec = table_value(header(PLAN_HEADER_ACCEPT_CANDIDATES), index);
         selection.checked_count += 1;
         if spec >= 0 && spec < header(PLAN_HEADER_SPEC_COUNT) {
-            if !spec_guard_matches(spec, src, len, end_offset) {
+            let lexer_already_accepted =
+                end == index + 1 && fallback_spec >= 0 && spec == fallback_spec;
+            if !lexer_already_accepted && !spec_guard_matches(spec, src, len, end_offset) {
                 index += 1;
                 continue;
             }
@@ -976,391 +1056,226 @@ fn select_action(
     }
     selection
 }
-
-fn select_trace_action(
-    state: i32,
-    accepting_state: i32,
-    _fallback_spec: i32,
-    src: i32,
-    len: i32,
-    end_offset: i32,
-    result: i32,
-) -> i32 {
-    if accepting_state < 0 || accepting_state >= header(PLAN_HEADER_DFA_STATE_COUNT) {
-        return -1;
-    }
-    let selection = select_action(state, accepting_state, true, src, len, end_offset);
-    unsafe {
-        store_i32(result, selection.checked_count);
-        store_i32(result + 16, selection.trivia_spec);
-        store_i32(result + 20, selection.ordinary_main_candidate_count);
-    }
-    if selection.choice_count == 0 {
-        return 0;
-    }
-    unsafe {
-        store_i32(result + 4, selection.selected_spec);
-        store_i32(result + 8, selection.selected_terminal);
-        store_i32(result + 12, selection.selected_action);
-    }
-    1
-}
-
 #[no_mangle]
-pub extern "C" fn parse_trace(
+pub extern "C" fn validate(
     src: i32,
     len: i32,
-    token_ptr: i32,
-    token_capacity: i32,
-    trace_ptr: i32,
-    trace_capacity: i32,
     result: i32,
     stack_ptr: i32,
     stack_capacity: i32,
     memo_ptr: i32,
     memo_capacity: i32,
-    preserve_trivia: i32,
-    max_trace_actions: i32,
+    max_parser_actions: i32,
 ) -> i32 {
-    let mut token_read = 0;
-    let mut token_write = 0;
-    let mut trace_count = 0;
+    let mut action_count = 0;
     let mut current_state = 0;
+    let mut token = EMPTY_RAW_TOKEN;
+    let mut has_lookahead = false;
+    let mut lexer = RawLexerCursor::new(len, memo_ptr, memo_capacity);
 
-    if token_capacity < len {
-        return return_parse_trace_status(
-            PARSE_STATUS_INTERNAL,
-            result,
-            token_write,
-            trace_count,
-            len,
-            current_state,
-            token_read,
-        );
-    }
     if stack_capacity < 1 {
-        return return_parse_trace_status(
+        return return_validate_status(
             PARSE_STATUS_INTERNAL,
             result,
-            token_write,
-            trace_count,
-            len,
+            action_count,
             current_state,
-            token_read,
-        );
-    }
-    let memo_required = memo_i32_count(len);
-    if memo_required < 0 || memo_capacity < memo_required {
-        return return_parse_trace_status(
-            PARSE_STATUS_INTERNAL,
-            result,
-            token_write,
-            trace_count,
-            len,
-            current_state,
-            token_read,
-        );
-    }
-
-    let raw_token_count = lex_all(
-        src,
-        len,
-        0,
-        token_ptr,
-        token_capacity,
-        memo_ptr,
-        memo_capacity,
-    );
-    if raw_token_count < 0 || raw_token_count > token_capacity {
-        return return_parse_trace_status(
-            PARSE_STATUS_INTERNAL,
-            result,
-            token_write,
-            trace_count,
-            len,
-            current_state,
-            token_read,
+            token,
         );
     }
 
     unsafe { store_i32(stack_ptr, 0) };
     let mut state_count = 1;
-
     loop {
         if state_count < 1 {
-            return return_parse_trace_status(
+            return return_validate_status(
                 PARSE_STATUS_INTERNAL,
                 result,
-                token_write,
-                trace_count,
-                len,
+                action_count,
                 current_state,
-                token_read,
+                token,
             );
         }
         current_state = load_stack_value(stack_ptr, state_count);
-        let action: i32;
-        let start: i32;
-        let accepting_state;
-        let mut selected_spec = -1;
 
-        if token_read < raw_token_count {
-            let record = token_record_address(token_ptr, token_read);
-            let spec = unsafe { load_i32(record) };
-            start = unsafe { load_i32(record + 4) };
-            let end = unsafe { load_i32(record + 8) };
-            accepting_state = unsafe { load_i32(record + 12) };
-            if spec < 0 {
-                return return_parse_trace_status(
-                    PARSE_STATUS_UNEXPECTED,
+        if !has_lookahead && lexer.offset < len {
+            let lex_status = next_raw_token(&mut lexer, src, len, &mut token);
+            if lex_status == LEX_STATUS_MEMO_REQUIRED {
+                token.start = lexer.offset;
+                token.end = lexer.offset;
+                return return_validate_status(
+                    PARSE_STATUS_MEMO_REQUIRED,
                     result,
-                    token_write,
-                    trace_count,
-                    start,
+                    action_count,
                     current_state,
-                    token_read,
+                    token,
                 );
             }
-
-            let status =
-                select_trace_action(current_state, accepting_state, spec, src, len, end, result);
-            if status == 1 {
-                selected_spec = unsafe { load_i32(result + 4) };
-                action = unsafe { load_i32(result + 12) };
-            } else if status == 2 {
-                return return_parse_trace_status(
-                    PARSE_STATUS_AMBIGUOUS,
-                    result,
-                    token_write,
-                    trace_count,
-                    start,
-                    current_state,
-                    token_read,
-                );
-            } else if status == 0 {
-                let trivia_spec = unsafe { load_i32(result + 16) };
-                let ordinary_main_candidate_count = unsafe { load_i32(result + 20) };
-                if ordinary_main_candidate_count == 0 {
-                    if trivia_spec >= 0 {
-                        if preserve_trivia != 0 {
-                            store_token_record(
-                                token_ptr,
-                                token_write,
-                                trivia_spec,
-                                start,
-                                end,
-                                accepting_state,
-                            );
-                            token_write += 1;
-                        }
-                        token_read += 1;
-                        continue;
-                    }
-                    return return_parse_trace_status(
-                        PARSE_STATUS_UNEXPECTED,
-                        result,
-                        token_write,
-                        trace_count,
-                        start,
-                        current_state,
-                        token_read,
-                    );
-                }
-                return return_parse_trace_status(
-                    PARSE_STATUS_UNEXPECTED,
-                    result,
-                    token_write,
-                    trace_count,
-                    start,
-                    current_state,
-                    token_read,
-                );
-            } else {
-                return return_parse_trace_status(
+            if lex_status != 1 {
+                return return_validate_status(
                     PARSE_STATUS_INTERNAL,
                     result,
-                    token_write,
-                    trace_count,
-                    start,
+                    action_count,
                     current_state,
-                    token_read,
+                    token,
                 );
             }
-        } else {
-            start = len;
-            accepting_state = -1;
-            action = parser_action(current_state, header(PLAN_HEADER_EOF_TERMINAL));
-            if action <= 0 {
-                return return_parse_trace_status(
+            has_lookahead = true;
+        }
+
+        let action: i32;
+        if has_lookahead {
+            if token.spec < 0 {
+                return return_validate_status(
                     PARSE_STATUS_UNEXPECTED,
                     result,
-                    token_write,
-                    trace_count,
-                    start,
+                    action_count,
                     current_state,
-                    token_read,
+                    token,
+                );
+            }
+            let selection = select_action(
+                current_state,
+                token.accepting_state,
+                token.spec,
+                true,
+                src,
+                len,
+                token.end,
+            );
+            if selection.choice_count == 0 {
+                if selection.ordinary_main_candidate_count == 0 && selection.trivia_spec >= 0 {
+                    has_lookahead = false;
+                    continue;
+                }
+                return return_validate_status(
+                    PARSE_STATUS_UNEXPECTED,
+                    result,
+                    action_count,
+                    current_state,
+                    token,
+                );
+            }
+            action = selection.selected_action;
+        } else {
+            token = RawToken {
+                spec: -2,
+                start: len,
+                end: len,
+                accepting_state: -1,
+            };
+            action = parser_action(current_state, header(PLAN_HEADER_EOF_TERMINAL));
+            if action <= 0 {
+                return return_validate_status(
+                    PARSE_STATUS_UNEXPECTED,
+                    result,
+                    action_count,
+                    current_state,
+                    token,
                 );
             }
         }
 
-        if action == 0 {
-            break;
-        }
-        if trace_count >= trace_capacity || trace_count >= max_trace_actions {
-            return return_parse_trace_status(
+        if action_count >= max_parser_actions {
+            return return_validate_status(
                 PARSE_STATUS_TRACE_LIMIT,
                 result,
-                token_write,
-                trace_count,
-                start,
+                action_count,
                 current_state,
-                token_read,
+                token,
             );
         }
-        unsafe { store_i32(trace_ptr + trace_count * 4, action) };
-        trace_count += 1;
+        action_count += 1;
 
         let kind = action & ACTION_KIND_MASK;
         let payload = action & ACTION_PAYLOAD_MASK;
         if kind == ACTION_SHIFT {
-            if token_read >= raw_token_count {
-                return return_parse_trace_status(
+            if !has_lookahead || state_count >= stack_capacity {
+                return return_validate_status(
                     PARSE_STATUS_INTERNAL,
                     result,
-                    token_write,
-                    trace_count,
-                    start,
+                    action_count,
                     current_state,
-                    token_read,
-                );
-            }
-            let record = token_record_address(token_ptr, token_read);
-            let end = unsafe { load_i32(record + 8) };
-            store_token_record(
-                token_ptr,
-                token_write,
-                selected_spec,
-                start,
-                end,
-                accepting_state,
-            );
-            token_write += 1;
-            token_read += 1;
-            if state_count >= stack_capacity {
-                return return_parse_trace_status(
-                    PARSE_STATUS_INTERNAL,
-                    result,
-                    token_write,
-                    trace_count,
-                    start,
-                    current_state,
-                    token_read,
+                    token,
                 );
             }
             store_stack_value(stack_ptr, state_count, payload);
             state_count += 1;
+            has_lookahead = false;
             continue;
         }
-
         if kind == ACTION_REDUCE {
             if payload < 0 || payload >= header(PLAN_HEADER_PRODUCTION_COUNT) {
-                return return_parse_trace_status(
+                return return_validate_status(
                     PARSE_STATUS_INTERNAL,
                     result,
-                    token_write,
-                    trace_count,
-                    start,
+                    action_count,
                     current_state,
-                    token_read,
+                    token,
                 );
             }
             let production = plan_addr(header(PLAN_HEADER_PRODUCTIONS)) + payload * 16;
             let lhs = unsafe { load_i32(production) };
             let rhs_length = unsafe { load_i32(production + 4) };
             if state_count < rhs_length {
-                return return_parse_trace_status(
+                return return_validate_status(
                     PARSE_STATUS_INTERNAL,
                     result,
-                    token_write,
-                    trace_count,
-                    start,
+                    action_count,
                     current_state,
-                    token_read,
+                    token,
                 );
             }
             state_count -= rhs_length;
             let goto_source_state = load_stack_value(stack_ptr, state_count);
             let goto_state = parser_goto(goto_source_state, lhs);
             if goto_state < 0 || state_count >= stack_capacity {
-                return return_parse_trace_status(
+                return return_validate_status(
                     PARSE_STATUS_INTERNAL,
                     result,
-                    token_write,
-                    trace_count,
-                    start,
+                    action_count,
                     current_state,
-                    token_read,
+                    token,
                 );
             }
             store_stack_value(stack_ptr, state_count, goto_state);
             state_count += 1;
             continue;
         }
-
         if kind == ACTION_ACCEPT {
-            return return_parse_trace_status(
+            return return_validate_status(
                 PARSE_STATUS_OK,
                 result,
-                token_write,
-                trace_count,
-                start,
+                action_count,
                 current_state,
-                token_read,
+                token,
             );
         }
-
-        return return_parse_trace_status(
+        return return_validate_status(
             PARSE_STATUS_INTERNAL,
             result,
-            token_write,
-            trace_count,
-            start,
+            action_count,
             current_state,
-            token_read,
+            token,
         );
     }
-
-    return_parse_trace_status(
-        PARSE_STATUS_INTERNAL,
-        result,
-        token_write,
-        trace_count,
-        len,
-        current_state,
-        token_read,
-    )
 }
 
-fn return_parse_trace_status(
+fn return_validate_status(
     status: i32,
     result: i32,
-    token_count: i32,
-    trace_count: i32,
-    offset: i32,
+    action_count: i32,
     state: i32,
-    token_read: i32,
+    token: RawToken,
 ) -> i32 {
     unsafe {
-        store_i32(result, token_count);
-        store_i32(result + 4, trace_count);
-        store_i32(result + 8, offset);
-        store_i32(result + 12, state);
-        store_i32(result + 16, token_read);
-        store_i32(result + 20, 0);
+        store_i32(result + VALIDATE_RESULT_ACTION_COUNT * 4, action_count);
+        store_i32(result + VALIDATE_RESULT_ERROR_STATE * 4, state);
+        store_i32(result + VALIDATE_RESULT_ERROR_SPEC * 4, token.spec);
+        store_i32(result + VALIDATE_RESULT_ERROR_START * 4, token.start);
+        store_i32(result + VALIDATE_RESULT_ERROR_END * 4, token.end);
     }
     status
 }
-
 #[inline]
 fn token_record_address(token_ptr: i32, index: i32) -> i32 {
     token_ptr + index * TOKEN_RECORD_I32_COUNT * 4
@@ -1416,7 +1331,7 @@ pub extern "C" fn parse_cursor(
     memo_ptr: i32,
     memo_capacity: i32,
     preserve_trivia: i32,
-    max_trace_actions: i32,
+    max_parser_actions: i32,
 ) -> i32 {
     let ctx = CursorCtx {
         token_ptr,
@@ -1481,7 +1396,7 @@ pub extern "C" fn parse_cursor(
         fragment_ptr,
         fragment_capacity,
         preserve_trivia,
-        max_trace_actions,
+        max_parser_actions,
     )
 }
 
@@ -1507,7 +1422,7 @@ pub extern "C" fn parse_cursor_records(
     fragment_ptr: i32,
     fragment_capacity: i32,
     preserve_trivia: i32,
-    max_trace_actions: i32,
+    max_parser_actions: i32,
 ) -> i32 {
     parse_cursor_records_impl(
         src,
@@ -1530,7 +1445,7 @@ pub extern "C" fn parse_cursor_records(
         fragment_ptr,
         fragment_capacity,
         preserve_trivia,
-        max_trace_actions,
+        max_parser_actions,
     )
 }
 
@@ -1555,7 +1470,7 @@ fn parse_cursor_records_impl(
     fragment_ptr: i32,
     fragment_capacity: i32,
     preserve_trivia: i32,
-    max_trace_actions: i32,
+    max_parser_actions: i32,
 ) -> i32 {
     let ctx = CursorCtx {
         token_ptr,
@@ -1640,7 +1555,8 @@ fn parse_cursor_records_impl(
                 );
             }
 
-            let selection = select_action(current_state, accepting_state, true, src, len, end);
+            let selection =
+                select_action(current_state, accepting_state, spec, true, src, len, end);
             if selection.choice_count == 0 {
                 if selection.ordinary_main_candidate_count == 0 {
                     if selection.trivia_spec >= 0 {
@@ -1701,7 +1617,7 @@ fn parse_cursor_records_impl(
         if action == 0 {
             continue;
         }
-        if action_count >= max_trace_actions {
+        if action_count >= max_parser_actions {
             return return_parse_cursor_status(
                 PARSE_STATUS_TRACE_LIMIT,
                 result,
@@ -2135,8 +2051,8 @@ impl CursorCtx {
         self.append_value(CURSOR_VALUE_ARRAY, list.tail, list.head, list.count)
     }
 
-    fn append_array_copy_plus(&self, old_value_id: i32, add_value_id: i32, flatten: i32) -> i32 {
-        let old_list = self.array_value_list(old_value_id);
+    fn extend_array_value(&self, value_id: i32, add_value_id: i32, flatten: i32) -> i32 {
+        let old_list = self.array_value_list(value_id);
         if old_list.count < 0 {
             return -2;
         }
@@ -2159,7 +2075,13 @@ impl CursorCtx {
         if combined.count < 0 {
             return -1;
         }
-        self.append_array_value(combined)
+        let record = cursor_value_record_address(self.value_ptr, value_id);
+        unsafe {
+            store_i32(record + 4, combined.tail);
+            store_i32(record + 8, combined.head);
+            store_i32(record + 12, combined.count);
+        }
+        value_id
     }
 
     fn create_single_value_array(&self, item_value: i32) -> i32 {
@@ -2197,7 +2119,7 @@ impl CursorCtx {
                         cursor_value_record_address(self.value_ptr, target_value_id);
                     if unsafe { load_i32(target_value_record) } == CURSOR_VALUE_ARRAY {
                         let new_value_id =
-                            self.append_array_copy_plus(target_value_id, source_value_id, 1);
+                            self.extend_array_value(target_value_id, source_value_id, 1);
                         if new_value_id < 0 {
                             return new_value_id;
                         }
@@ -2551,7 +2473,7 @@ fn reduce_cursor_sequence(
     let mut index = 0;
     while index < rhs_length {
         let item_value = fragment_field(ctx, rhs_start + index, FRAGMENT_VALUE);
-        value = ctx.append_array_copy_plus(value, item_value, 0);
+        value = ctx.extend_array_value(value, item_value, 0);
         if value < 0 {
             return capacity_result(rhs_start);
         }
@@ -2627,7 +2549,7 @@ fn reduce_cursor_first_repeated(
     if value < 0 {
         return capacity_result(rhs_start);
     }
-    value = ctx.append_array_copy_plus(value, item_value, 0);
+    value = ctx.extend_array_value(value, item_value, 0);
     if value < 0 {
         return capacity_result(rhs_start);
     }
@@ -2664,7 +2586,7 @@ fn reduce_cursor_append(
     let item_index_offset = if separated == 1 { 2 } else { 1 };
     let mut value = fragment_field(ctx, rhs_start, FRAGMENT_VALUE);
     let item_value = fragment_field(ctx, rhs_start + item_index_offset, FRAGMENT_VALUE);
-    value = ctx.append_array_copy_plus(value, item_value, 0);
+    value = ctx.extend_array_value(value, item_value, 0);
     if value < 0 {
         return capacity_result(rhs_start);
     }

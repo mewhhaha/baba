@@ -106,7 +106,7 @@ runtime helper internals.
 ## Wasm ABI
 
 The generated Wasm core ABI is versioned separately from package and parser-plan
-versions. ABI version `9` is documented in `docs/wasm-abi.md` and described by
+versions. ABI version `11` is documented in `docs/wasm-abi.md` and described by
 each generated `wasm/abi.json`. Changes to exported core functions, record
 layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.
@@ -116,8 +116,9 @@ and so is the capacity argument that bounds it. Every buffer-writing export now
 takes an explicit capacity and rejects an undersized buffer with a status rather
 than writing past it: `lex_all` gained `tokenCapacity` plus a separate `memoPtr`
 and `memoCapacity` for its failure memo, and no longer writes anything into the
-token records it does not return. `parse_trace` and `parse_cursor` carry the
-same memo arguments. That is the `8 -> 9` bump. Narrowing what an export may
+token records it does not return. ABI version 11 replaces `parse_trace` with
+output-free `validate`, makes failure-memo allocation demand-driven, and renames
+the public action limit to `maxParserActions`. Narrowing what an export may
 write is additive; widening it is not, and needs a version change.
 
 The TypeScript Wasm adapter API is stable at the generated module entrypoint.

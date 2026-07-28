@@ -33,12 +33,12 @@ Source-only generated parsers do not expose `PARSE_INVALID_TOKEN_STREAM` or
 
 `PARSER_INPUT_TOO_LARGE` reports a source whose runtime buffers cannot fit in
 the WebAssembly address space. Its message names the requested byte count, the
-address-space limit, and the source size, and it ends with the remedy that
-actually applies: splitting the input, or lowering `maxTraceActions` when the
-trace buffer alone is what does not fit. It is returned, never thrown, by
-`parse()`, `validate()` and `lex()`; on `lex()` it arrives in `diagnostics`
-alongside `LEX_UNEXPECTED_CHARACTER` and the returned tape holds only the
-synthetic end-of-file token. See `docs/limits.md` for the ceiling itself.
+address-space limit, and the source size, and it recommends splitting the input.
+The action-only `validate()` path does not allocate an action trace. The
+diagnostic is returned, never thrown, by `parse()`, `validate()` and `lex()`; on
+`lex()` it arrives in `diagnostics` alongside `LEX_UNEXPECTED_CHARACTER` and the
+returned tape holds only the synthetic end-of-file token. See `docs/limits.md`
+for the ceiling itself.
 
 Generated `syntax.ts` includes the public diagnostic types for TypeScript
 consumers. `wasm/abi.json` records the numeric runtime diagnostic schemas for

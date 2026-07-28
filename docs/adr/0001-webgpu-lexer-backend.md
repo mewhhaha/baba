@@ -108,11 +108,11 @@ tuning problem.
    same `acceptingState` resolves to different terminals in different parse
    states. Identity therefore cannot be computed ahead of the parse at all, on
    any device.
-2. **Canonical LR(1) over a sequential stack.** `parse_trace` and `parse_cursor`
-   drive a single stack through `load_stack_value`/`store_stack_value` (lib.rs
-   ~lines 1160-1166). Each shift/reduce depends on the immediately preceding
-   one. There is no parallel prefix formulation of an LR stack without changing
-   the algorithm.
+2. **Canonical LR(1) over a sequential stack.** `validate` and
+   `parse_cursor_records` drive a single stack through
+   `load_stack_value`/`store_stack_value` (lib.rs ~lines 1160-1166). Each
+   shift/reduce depends on the immediately preceding one. There is no parallel
+   prefix formulation of an LR stack without changing the algorithm.
 3. **Branch search is bounded backtracking DFS, not GLR.** The declared-conflict
    policy is `deterministic-or-declared-branching`
    (`src/targets/runtime/portable_plan.ts:249`); the contract in
