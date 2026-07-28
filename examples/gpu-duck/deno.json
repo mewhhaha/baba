@@ -1,0 +1,14 @@
+{
+  "imports": {
+    "@mewhhaha/baba/runtime/generated-wasm": "../../src/runtime/generated_wasm.ts",
+    "@mewhhaha/baba/runtime/webgpu": "../../src/runtime/webgpu/mod.ts"
+  },
+  "tasks": {
+    "generate": "deno run --allow-read --allow-write ../../src/cli.ts grammar.baba --out generated --name gpu_duck --root module --metadata baba.json --target wasm",
+    "check": "deno check demo.ts",
+    "run": "deno run --unstable-webgpu --allow-read demo.ts programs/example.duck",
+    "run:fallback": "deno run --unstable-webgpu --allow-read demo.ts --allow-fallback-adapter programs/example.duck",
+    "cpu": "deno run --allow-read demo.ts --cpu programs/example.duck",
+    "test": "deno task check && deno task cpu"
+  }
+}

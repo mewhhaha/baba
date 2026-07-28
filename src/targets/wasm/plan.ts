@@ -69,6 +69,10 @@ import {
   encodeCombinedWasmParserPlan,
   parserPlanRuntimeMetadataVersion,
 } from "../../runtime/wasm_plan.ts";
+import {
+  compileGpuFrontendPlan,
+  type GpuFrontendPlan,
+} from "../../compiler/gpu_frontend.ts";
 
 export interface WasmRuntimeMetadata {
   readonly portablePlan: PortableParserPlanMetadata;
@@ -82,6 +86,7 @@ export interface WasmRuntimeMetadata {
   readonly acceptCandidates: readonly (readonly number[])[];
   readonly terminals: readonly WasmRuntimeTerminal[];
   readonly fields: readonly RuleFieldSchema[];
+  readonly gpuFrontend: GpuFrontendPlan | undefined;
 }
 
 export interface WasmRuntimeNamedToken {
@@ -122,6 +127,7 @@ export interface WasmPlan {
   portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
   runtimeMetadata: WasmRuntimeMetadata;
+  gpuFrontend: GpuFrontendPlan | undefined;
   wasm: WasmModuleImage;
   parserPlanBytes: Uint8Array;
   directory: string;
@@ -154,10 +160,27 @@ export function planWasmTarget(
   if (options.preserveTrivia !== undefined) {
     preserveTrivia = options.preserveTrivia;
   }
+  let gpuFrontend: GpuFrontendPlan | undefined;
+  if (metadata.gpuFrontend !== undefined) {
+    const compiledGpuFrontend = compileGpuFrontendPlan(
+      analyzed,
+      runtimePlan.portable,
+      metadata.gpuFrontend,
+    );
+    if ("diagnostics" in compiledGpuFrontend) {
+      diagnostics.push(...compiledGpuFrontend.diagnostics);
+    } else {
+      gpuFrontend = compiledGpuFrontend;
+    }
+  }
+  if (hasErrors(diagnostics)) {
+    return { diagnostics };
+  }
   const runtimeMetadata = createWasmRuntimeMetadata(
     analyzed,
     runtimePlan,
     preserveTrivia,
+    gpuFrontend,
   );
   const wasm = emitWasmModule(
     portableDfa,
@@ -204,6 +227,7 @@ export function planWasmTarget(
     portable: runtimePlan.portable,
     portableMetadata: runtimePlan.portableMetadata,
     runtimeMetadata,
+    gpuFrontend,
     wasm,
     parserPlanBytes,
     directory: options.directory ?? "wasm",
@@ -749,6 +773,7 @@ function createWasmRuntimeMetadata(
   analyzed: AnalyzedGrammar,
   runtime: RuntimeParserPlan,
   preserveTrivia: boolean,
+  gpuFrontend: GpuFrontendPlan | undefined,
 ): WasmRuntimeMetadata {
   const namedTokens: WasmRuntimeNamedToken[] = [];
   const lexerSpecs: WasmRuntimeLexerSpec[] = [];
@@ -859,6 +884,7 @@ function createWasmRuntimeMetadata(
     acceptCandidates,
     terminals,
     fields: collectRuleFieldSchemas(analyzed),
+    gpuFrontend,
   };
 }
 
@@ -941,6 +967,7 @@ function compactWasmRuntimeMetadata(
         }),
       ]),
     ],
+    g: metadata.gpuFrontend,
   };
 }
 

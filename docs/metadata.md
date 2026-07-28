@@ -33,6 +33,52 @@ runtime behavior. External scanner metadata remains unsupported. Use contextual
 tokens for syntax-sensitive lexing and account for the target-specific trailing
 guard limitation described in the grammar guide.
 
+### GPU Frontend Profile
+
+`gpuFrontend` opts a grammar into the separately versioned island-regular
+runtime section stored in `parser.plan`:
+
+```json
+{
+  "version": 2,
+  "gpuFrontend": {
+    "version": 3,
+    "root": "module",
+    "islands": [
+      { "rule": "module", "boundary": { "kind": "root" } },
+      {
+        "rule": "statement",
+        "boundary": { "kind": "terminated", "terminal": ";" }
+      }
+    ],
+    "semantics": {
+      "rules": {
+        "module": { "opcode": "module" },
+        "statement": {
+          "opcode": "binding",
+          "fields": { "name": "binder", "value": "value" }
+        }
+      },
+      "scopes": ["module"],
+      "binders": ["statement"]
+    }
+  }
+}
+```
+
+Boundary kinds are `root`, `paired`, `terminated`, and `separated`. Boundary
+terminals must resolve to one lexical terminal. The compiler rejects contextual
+terminal identity, unresolved parser conflicts, residual recursion after nested
+islands become placeholders, ambiguous transducer output, invalid semantic
+recipes, zero-width repetition cycles, and configured plan limits.
+
+The semantic `opcode` is selected from Baba's shared catalog; metadata cannot
+inject WGSL. `primitives` and `operators` map source spellings to shared runtime
+operations. `scopes`, `namespaces`, `binders`, `references`, `patterns`, and
+`typeEntries` identify the grammar rules that participate in semantic passes.
+The profile is ignored only when it is absent. A malformed or ineligible profile
+fails generation with a `GPU_FRONTEND_*` diagnostic.
+
 ### Parser Conflict Policy
 
 The optional `parser` block controls standalone parser conflict handling:

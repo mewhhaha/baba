@@ -2,7 +2,7 @@
 
 Status: experimental. See [Stability](stability.md#experimental-surfaces).
 
-`@mewhhaha/baba/runtime/webgpu-lexer` is a second implementation of the
+`@mewhhaha/baba/runtime/webgpu` includes a second implementation of the
 generated parser's tokenizer that runs on the GPU. It is a **runtime backend,
 not a generate target**: it consumes a `parser.plan` that ships today, produces
 the identical token records, and emits no artifacts of its own.
@@ -35,7 +35,7 @@ it.** There is no drop-in switch on the generated parser; you drive the backend
 yourself and get raw records rather than a token tape.
 
 ```ts
-import { WebGpuLexer } from "@mewhhaha/baba/runtime/webgpu-lexer";
+import { WebGpuLexer } from "@mewhhaha/baba/runtime/webgpu";
 
 // `plan` is the bytes of the generated wasm/parser.plan.
 const lexer = await WebGpuLexer.create(plan);
@@ -92,7 +92,7 @@ depends on. Guarded plans are refused loudly at `create()`, never mislexed. To
 check without acquiring a device:
 
 ```ts
-import { decodeLexerPlanTables } from "@mewhhaha/baba/runtime/webgpu-lexer";
+import { decodeLexerPlanTables } from "@mewhhaha/baba/runtime/webgpu";
 
 const tables = decodeLexerPlanTables(plan);
 if (!tables.guardFree) {

@@ -27,7 +27,7 @@ list is the complete set of exceptions. Any export not on it is stable.
 
 ## Experimental Surfaces
 
-- `@mewhhaha/baba/runtime/webgpu-lexer`.
+- `@mewhhaha/baba/runtime/webgpu`.
 
 This module does not carry the Public Library API guarantees above. Its option
 shapes and its result shapes may change in any minor release, and it may be

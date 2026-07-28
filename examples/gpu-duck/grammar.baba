@@ -1,0 +1,460 @@
+grammar GpuDuck
+
+token IDENT = /[a-z_][A-Za-z0-9_]*/ ;
+token TYPE_IDENT = /[A-Z][A-Za-z0-9_]*/ ;
+token INTEGER = /[0-9]+/ ;
+token STRING = /"([^"\\]|\\[ntr"\\])*"/ ;
+token ELSE_IF priority 2 = /else[ \t\r\n]+if/ ;
+token INTRINSIC = /@(satisfies|type\.(extend|range|unbounded))/ ;
+skip WHITESPACE = /[ \t\r\n]+/ ;
+skip COMMENT = /\/\/[^\r\n]*/ ;
+
+module = (
+  "module"
+  name:TYPE_IDENT
+  "where"
+  operators:operator_section
+  declarations:declaration*
+  "return"
+  exports:shape
+  ";"
+) ;
+
+operator_section = (
+  "declare"
+  "operators"
+  "{"
+  declarations:fixity_declaration*
+  "}"
+  ";"
+) ;
+
+fixity_declaration = (
+  associativity:("infixl" | "infixr" | "infix")
+  precedence:INTEGER
+  "("
+  operator:operator
+  ")"
+  "="
+  target:qualified_name
+  ";"
+) ;
+
+declaration = (
+  type_declaration
+  | signature
+  | binding
+  | shadowing
+  | interface_declaration
+  | effect_declaration
+) ;
+
+type_declaration = (
+  "type"
+  name:TYPE_IDENT
+  parameters:IDENT*
+  "="
+  value:type_definition
+  ";"
+) ;
+
+type_definition = union_type | expression ;
+
+signature = (
+  "sig"
+  name:IDENT
+  "="
+  type:type_expression
+  ";"
+) ;
+
+union_type = (
+  "|"
+  first:type_variant
+  rest:("|" type_variant)*
+) ;
+
+type_variant = (
+  "#"
+  name:TYPE_IDENT
+  payload:type_operand?
+) ;
+
+binding = (
+  kind:("let" | "const")
+  pattern:binding_pattern
+  "="
+  value:binding_value
+  ";"
+) ;
+
+binding_value = lambda | expression ;
+
+shadowing = (
+  name:(IDENT | TYPE_IDENT)
+  ":="
+  value:binding_value
+  ";"
+) ;
+
+binding_pattern = (
+  IDENT
+  | literal_pattern
+  | "_"
+  | unit_pattern
+  | tuple_pattern
+  | array_pattern
+  | constructor_pattern
+  | shape_pattern
+) ;
+
+literal_pattern = negative_integer | INTEGER | STRING ;
+
+unit_pattern = ("(" ")") ;
+
+tuple_pattern = (
+  "("
+  first:binding_pattern
+  ","
+  rest:(binding_pattern % ",")
+  ")"
+) ;
+
+array_pattern = (
+  "["
+  elements:(binding_pattern % ",")?
+  "]"
+) ;
+
+constructor_pattern = (
+  "#"
+  constructor:TYPE_IDENT
+  payload:binding_pattern?
+) ;
+
+shape_pattern = (
+  "{"
+  fields:(shape_pattern_field % ",")?
+  "}"
+) ;
+
+shape_pattern_field = (
+  "."
+  name:IDENT
+  value:("=" binding_pattern)?
+) ;
+
+interface_declaration = (
+  "interface"
+  name:TYPE_IDENT
+  roles:TYPE_IDENT+
+  "="
+  "{"
+  members:interface_member*
+  "}"
+  ";"
+) ;
+
+interface_member = associated_type | interface_method ;
+
+associated_type = (
+  "type"
+  name:TYPE_IDENT
+  ";"
+) ;
+
+interface_method = (
+  "."
+  name:IDENT
+  "="
+  type:type_expression
+  ";"
+) ;
+
+effect_declaration = (
+  "effect"
+  name:TYPE_IDENT
+  "{"
+  operations:effect_operation*
+  "}"
+  ";"
+) ;
+
+effect_operation = (
+  name:IDENT
+  ":"
+  type:type_expression
+  ";"
+) ;
+
+type_expression = (
+  first:type_operand
+  rest:type_operation*
+) ;
+
+type_operation = (
+  operator:("->" | "|" | ":|" | ":&")
+  operand:type_operand
+) ;
+
+type_operand = (
+  IDENT
+  | TYPE_IDENT
+  | negative_integer
+  | INTEGER
+  | STRING
+  | constructor_type
+  | parenthesized_or_tuple_type
+  | bracket_type
+) ;
+
+negative_integer = ("-" value:INTEGER) ;
+
+constructor_type = (
+  "#"
+  constructor:TYPE_IDENT
+  payload:type_operand?
+) ;
+
+parenthesized_or_tuple_type = (
+  "("
+  first:type_expression
+  tail:type_sequence_tail?
+  ")"
+) ;
+
+bracket_type = (
+  "["
+  first:type_expression
+  tail:type_sequence_tail?
+  "]"
+) ;
+
+type_sequence_tail = repeated_type_tail | expanded_type_tail ;
+
+repeated_type_tail = (
+  ";"
+  length:expression
+) ;
+
+expanded_type_tail = (
+  ","
+  rest:(type_sequence_element % ",")
+) ;
+
+type_sequence_element = (
+  spread:"..."?
+  value:type_expression
+) ;
+
+expression = (
+  first:operand
+  rest:infix_operation*
+) ;
+
+infix_operation = (
+  operator:operator
+  right:operand
+) ;
+
+operator = ("+" | "-" | "*" | "/" | "==" | "<" | "|" | "|>") ;
+
+operand = (
+  postfix_expression
+  | prefixes:prefix_operator+ value:postfix_expression
+) ;
+
+prefix_operator = ("!" | "-" | "&" | "..." | "comptime" | "freeze") ;
+
+postfix_expression = (
+  value:primary_expression
+  suffixes:postfix_suffix*
+  arguments:application_argument*
+) ;
+
+application_argument = (
+  value:application_primary
+  suffixes:field_suffix*
+) ;
+
+application_primary = (
+  IDENT
+  | TYPE_IDENT
+  | INTEGER
+  | STRING
+  | intrinsic
+  | constructor_expression
+  | unit
+  | array
+  | shape
+  | parenthesized_or_tuple
+) ;
+
+postfix_suffix = field_suffix ;
+
+field_suffix = ("." field:IDENT) ;
+
+primary_expression = (
+  IDENT
+  | TYPE_IDENT
+  | INTEGER
+  | STRING
+  | intrinsic
+  | constructor_expression
+  | unit
+  | conditional
+  | case_expression
+  | block
+  | array
+  | shape
+  | parenthesized_or_tuple
+) ;
+
+intrinsic = (
+  name:INTRINSIC
+) ;
+
+constructor_expression = (
+  "#"
+  constructor:TYPE_IDENT
+) ;
+
+unit = ("(" ")") ;
+
+parenthesized_or_tuple = (
+  "("
+  first:expression
+  tail:("," rest:(expression % ","))?
+  ")"
+) ;
+
+lambda = (
+  parameter:postfix_expression
+  "=>"
+  body:expression
+) ;
+
+conditional = (
+  "if"
+  condition:expression
+  "then"
+  consequence:expression
+  alternatives:else_if_clause*
+  fallback:else_clause?
+  "end"
+) ;
+
+else_if_clause = (
+  ELSE_IF
+  condition:expression
+  "then"
+  consequence:expression
+) ;
+
+else_clause = (
+  "else"
+  alternative:expression
+) ;
+
+case_expression = (
+  "case"
+  target:expression
+  "of"
+  first:case_arm
+  rest:("," case_arm)*
+  "end"
+) ;
+
+case_arm = (
+  pattern:binding_pattern
+  "=>"
+  body:expression
+) ;
+
+block = (
+  "do"
+  statements:statement*
+  "end"
+) ;
+
+statement = (
+  binding
+  | assignment
+  | shadowing
+  | for_statement
+  | return_statement
+  | discard_statement
+) ;
+
+assignment = (
+  name:IDENT
+  "="
+  value:expression
+  ";"
+) ;
+
+for_statement = (
+  "for"
+  pattern:binding_pattern
+  "in"
+  collection:expression
+  "do"
+  statements:statement*
+  "end"
+) ;
+
+return_statement = (
+  "return"
+  value:expression
+  ";"
+) ;
+
+discard_statement = (
+  "discard"
+  value:expression
+  ";"
+) ;
+
+array = ("[" elements:(expression % ",")? "]") ;
+
+shape = (
+  "{"
+  members:shape_member*
+  "}"
+) ;
+
+shape_member = shape_type | shape_field ;
+
+shape_type = (
+  "type"
+  name:TYPE_IDENT
+  "="
+  value:type_expression
+  ";"
+) ;
+
+shape_field = (
+  "."
+  name:IDENT
+  "="
+  value:shape_value
+  ";"
+) ;
+
+shape_value = bounded_lambda | expression ;
+
+bounded_lambda = (
+  parameter:postfix_expression
+  "=>"
+  body:expression
+  "end"
+) ;
+
+qualified_name = (
+  qualified_identifier
+  rest:qualified_name_part*
+) ;
+
+qualified_name_part = ("." name:qualified_identifier) ;
+
+qualified_identifier = IDENT | "type" ;

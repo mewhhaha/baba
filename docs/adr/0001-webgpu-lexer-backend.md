@@ -1,7 +1,7 @@
 # ADR 0001: WebGPU Lexer Runtime Backend
 
 Status: accepted. The backend is implemented in `src/runtime/webgpu/` and
-exported as the experimental module `@mewhhaha/baba/runtime/webgpu-lexer`. It is
+exported as the experimental module `@mewhhaha/baba/runtime/webgpu`. It is
 opt-in, nothing selects it automatically, and Phase 4 integration remains
 blocked on the Phase 0 gate below.
 

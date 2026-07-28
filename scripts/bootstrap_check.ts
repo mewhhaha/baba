@@ -52,6 +52,12 @@ const EXAMPLES: readonly ExampleConfig[] = [
     metadataPath: "baba.json",
   },
   {
+    dir: "examples/gpu-duck",
+    name: "gpu_duck",
+    rootRule: "module",
+    metadataPath: "baba.json",
+  },
+  {
     dir: "examples/thunkwasm",
     name: "thunkwasm",
     rootRule: "module",

@@ -30,6 +30,66 @@ export interface BabaMetadata {
   rules?: Record<string, TreeSitterRuleMetadata>;
   /** Standalone parser runtime conflict policy. */
   parser?: ParserRuntimeMetadata;
+  /** Opt-in deterministic island frontend compiled into parser.plan. */
+  gpuFrontend?: GpuFrontendMetadata;
+}
+
+/** Versioned metadata for the island-regular GPU frontend runtime section. */
+export interface GpuFrontendMetadata {
+  /** GPU frontend runtime-section version. */
+  version: 3;
+  /** Root island rule. Must match the generated parser root rule. */
+  root: string;
+  /** Rules compiled as independently executable syntax islands. */
+  islands: GpuFrontendIslandMetadata[];
+  /** Shared semantic recipes interpreted by both CPU and GPU backends. */
+  semantics: GpuFrontendSemanticMetadata;
+  /** Optional compiler and runtime-plan limits. */
+  limits?: GpuFrontendLimitMetadata;
+}
+
+export interface GpuFrontendIslandMetadata {
+  rule: string;
+  boundary: GpuFrontendBoundaryMetadata;
+}
+
+export type GpuFrontendBoundaryMetadata =
+  | { kind: "root" }
+  | { kind: "paired"; open: string; close: string }
+  | { kind: "terminated"; terminal: string }
+  | {
+    kind: "separated";
+    open: string;
+    close: string;
+    separator: string;
+  };
+
+export interface GpuFrontendSemanticMetadata {
+  rules: Record<string, GpuFrontendRuleSemanticMetadata>;
+  primitives?: Record<string, string>;
+  operators?: Record<string, string>;
+  scopes?: string[];
+  namespaces?: string[];
+  binders?: string[];
+  references?: string[];
+  patterns?: string[];
+  typeEntries?: string[];
+}
+
+export interface GpuFrontendRuleSemanticMetadata {
+  opcode: string;
+  fields?: Record<string, string>;
+}
+
+export interface GpuFrontendLimitMetadata {
+  maxLexerStates?: number;
+  maxIslandStates?: number;
+  maxIslandTransitions?: number;
+  maxSemanticOpcodes?: number;
+  maxPlanBytes?: number;
+  maxNodesPerToken?: number;
+  maxEdgesPerToken?: number;
+  maxConstraintsPerNode?: number;
 }
 
 /** A structured baba diagnostic. */

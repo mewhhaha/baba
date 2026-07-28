@@ -14,6 +14,8 @@ They are the runnable examples for the current package.
   Wasm artifact loading.
 - `funcfuck/`: generates parser artifacts for a small functional stream language
   based on composition, fanout, and named function definitions.
+- `gpu-duck/`: a constrained Duck-like grammar with explicit structural islands,
+  flat operator chains, and a runnable WebGPU-lexer-to-Wasm-parser handoff.
 - `thunkwasm/`: generates parser artifacts for a thunk-based functional
   language, then ahead-of-time compiles programs to Wasm binaries with explicit
   heap thunks and closures.
