@@ -81,6 +81,9 @@ Run with a hardware WebGPU adapter:
 WGPU_BACKENDS=vulkan WGPU_POWER_PREF=high deno task run
 ```
 
+This executes lexing, delimiter matching, island parsing, and compact IR
+allocation through `WebGpuFrontend`.
+
 Software adapters are rejected unless explicitly requested:
 
 ```sh
@@ -94,6 +97,6 @@ deno task cpu
 ```
 
 The example program keeps fixities source-defined for a fixed operator set while
-placing them before all executable declarations. A future parallel parser can
-load that small table once, segment statements at `;`, parse each flat
-expression chain independently, and merge the explicitly delimited structures.
+placing them before all executable declarations. The GPU frontend loads that
+small table once, segments statements at `;`, parses each flat expression chain
+independently, and merges the explicitly delimited structures.
