@@ -95,8 +95,7 @@
       "examples/brainfuck/generated",
       "examples/feature-tour/generated",
       "examples/funcfuck/generated",
-      "examples/thunkwasm/generated",
-      "src/runtime_language/SPEC.md"
+      "examples/thunkwasm/generated"
     ]
   },
   "lint": {
@@ -111,7 +110,6 @@
     "test": "deno test --allow-read --allow-write --allow-run tests",
     "test:fast": "deno test --allow-read --allow-write --allow-run tests/wasm_test.ts tests/wasm_frontend_scaffold_test.ts",
     "test:wasm-scaffold": "deno test --allow-read --allow-write --allow-run tests/wasm_frontend_scaffold_test.ts",
-    "test:brl-conformance": "deno test --allow-read --allow-write --allow-run tests/runtime_language_conformance_test.ts tests/runtime_language_frontend_test.ts tests/runtime_language_wasm_test.ts",
     "test:fuzz": "deno run --allow-read --allow-write scripts/fuzz.ts",
     "check": "deno check src scripts tests",
     "bench:runtime": "deno run --allow-read --allow-write scripts/runtime_bench.ts --budget size-budgets.json",

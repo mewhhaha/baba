@@ -1,7 +1,0 @@
-fn choose(flag: bool, left: u32, right: u32) -> u32 {
-  if flag {
-    return left;
-  } else {
-    return right;
-  }
-}
