@@ -67,10 +67,10 @@ export interface PlanClassRange {
 
 /**
  * The alphabet equivalence classes exactly as the compiler computed them, read
- * out of core plan format version 5. Nothing here is re-derived: two code points
+ * out of core plan format version 6. Nothing here is re-derived: two code points
  * share a class because the compiler said so, which is what makes a dense
- * `(states x classes)` table built from this agree with the CSR rows the Wasm
- * engine walks.
+ * `(states x classes)` table built from this agree with the transition
+ * sections the Wasm engine walks.
  */
 export interface PlanAlphabet {
   readonly classCount: number;
@@ -86,6 +86,11 @@ export interface LexerPlanTables {
   /** Explicit DFA start state from the plan header, never assumed to be 0. */
   readonly startState: number;
   readonly alphabet: PlanAlphabet;
+  /**
+   * Complete `(state x ASCII code point)` transitions when the plan carries
+   * them. Plans without this table retain ASCII transitions in the CSR rows.
+   */
+  readonly asciiTransitions: Int32Array | null;
   /** CSR row starts into `transitions`, in units of triples. Length stateCount + 1. */
   readonly transitionRows: Int32Array;
   /** Flat (start, end, target) i32 triples. Length 3 * transitionCount. */
@@ -175,6 +180,48 @@ function readPlainI32Array(
   );
 }
 
+function readAsciiTransitions(
+  bytes: Uint8Array,
+  encoded: number,
+  stateCount: number,
+): Int32Array | null {
+  if (encoded === -1) {
+    return null;
+  }
+  if (encoded === 0) {
+    throw new Error(
+      "Plan ASCII transition slot is 0, which is never a valid encoding.",
+    );
+  }
+  let offset = encoded;
+  let cellBytes = 4;
+  if (encoded < -1) {
+    offset = -encoded - COMPACT_I16_OFFSET_TAG;
+    cellBytes = 2;
+  }
+  if (offset < CORE_PLAN_HEADER_BYTES) {
+    throw new Error(`Plan ASCII transition offset ${offset} is invalid.`);
+  }
+  const length = stateCount * ASCII_CLASS_LIMIT;
+  if (offset + length * cellBytes > bytes.byteLength) {
+    throw new Error("Plan ASCII transitions run past the end of the plan.");
+  }
+  const view = new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  );
+  const transitions = new Int32Array(length);
+  for (let index = 0; index < length; index += 1) {
+    if (cellBytes === 2) {
+      transitions[index] = view.getInt16(offset + index * cellBytes, true);
+    } else {
+      transitions[index] = view.getInt32(offset + index * cellBytes, true);
+    }
+  }
+  return transitions;
+}
+
 export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
   // Validates magic + versions and throws on mismatch. This is the guard that
   // keeps the duplicated header constants below honest.
@@ -203,6 +250,21 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
   const specCount = headerI32(planBytes, CORE_HEADER_SPEC_COUNT);
   if (specCount <= 0) {
     throw new Error(`Plan reports ${specCount} lexer specifications.`);
+  }
+  const asciiTransitions = readAsciiTransitions(
+    planBytes,
+    headerI32(planBytes, CORE_HEADER_ASCII_TRANSITIONS),
+    stateCount,
+  );
+  if (asciiTransitions !== null) {
+    for (let index = 0; index < asciiTransitions.length; index += 1) {
+      const target = asciiTransitions[index];
+      if (target < -1 || target >= stateCount) {
+        throw new Error(
+          `ASCII transition ${index} targets state ${target}, which is outside [-1, ${stateCount}).`,
+        );
+      }
+    }
   }
 
   // Slot 7 is routed through the compact decoder (the validator does), slot 8 is
@@ -340,13 +402,6 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
     }
   }
 
-  const asciiEncoded = headerI32(planBytes, CORE_HEADER_ASCII_TRANSITIONS);
-  if (asciiEncoded === 0) {
-    throw new Error(
-      "Plan ASCII transition slot is 0, which is never a valid encoding.",
-    );
-  }
-
   const startState = headerI32(planBytes, CORE_HEADER_DFA_START_STATE);
   if (startState < 0 || startState >= stateCount) {
     throw new Error(
@@ -388,6 +443,7 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
     specCount,
     startState,
     alphabet: { classCount, asciiClass, aboveAsciiRanges },
+    asciiTransitions,
     transitionRows,
     transitions,
     acceptSpecByState,
@@ -398,7 +454,7 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
 }
 
 /**
- * Reference sparse-CSR transition lookup, mirroring `fn transition` in lib.rs.
+ * Reference plan transition lookup, mirroring `fn transition` in lib.rs.
  *
  * `-1` is the plan's own "no transition from this state on this codepoint"
  * value, so it is a fact rather than a default. A state id that is not in the
@@ -406,7 +462,7 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
  * "no transition" because it range-checks defensively on a hot path, but here it
  * can only mean the caller built a state id the plan never described.
  */
-export function sparseTransition(
+export function planTransition(
   tables: LexerPlanTables,
   state: number,
   codePoint: number,
@@ -415,6 +471,13 @@ export function sparseTransition(
     throw new Error(
       `Lexer DFA state ${state} is outside [0, ${tables.stateCount}).`,
     );
+  }
+  if (
+    codePoint >= 0 &&
+    codePoint < ASCII_CLASS_LIMIT &&
+    tables.asciiTransitions !== null
+  ) {
+    return tables.asciiTransitions[state * ASCII_CLASS_LIMIT + codePoint];
   }
   const lo = tables.transitionRows[state];
   const hi = tables.transitionRows[state + 1];

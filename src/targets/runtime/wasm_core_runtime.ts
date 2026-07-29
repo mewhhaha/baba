@@ -229,7 +229,16 @@ function buildPlanDataLayout(
   for (const state of dfa.states) {
     transitionRows.push(transitions.length / 3);
     for (const transition of state.transitions) {
-      transitions.push(transition.start, transition.end, transition.target);
+      let start = transition.start;
+      if (asciiTransitions !== null) {
+        if (transition.end < ASCII_CLASS_LIMIT) {
+          continue;
+        }
+        if (start < ASCII_CLASS_LIMIT) {
+          start = ASCII_CLASS_LIMIT;
+        }
+      }
+      transitions.push(start, transition.end, transition.target);
     }
   }
   transitionRows.push(transitions.length / 3);

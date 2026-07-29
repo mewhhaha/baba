@@ -1,30 +1,18 @@
 /**
- * Pins the invariant that `fn transition` in
- * `src/targets/runtime/wasm_engine_rs/src/lib.rs` relies on for its ASCII
- * early return: when a plan carries a dense ASCII transition table, that table
- * is COMPLETE and AUTHORITATIVE for code points 0..127.
- *
- * The engine consults the dense table first and, on a negative cell, returns
- * -1 immediately instead of falling through to the sparse CSR range scan. That
- * is only correct while a negative dense cell means exactly what the range scan
- * would have concluded: "no transition from this state on this code point".
- *
- * `buildAsciiTransitions` (`src/targets/runtime/wasm_core_runtime.ts`) makes it
- * true by construction - it walks every transition of every state and fills
- * each ASCII code point of each range - but "true by construction" is a
- * property of code that can be edited. If the table is ever made partial (a
- * sparse encoding, a range threshold, a skipped state) while keeping the same
- * plan header field, the engine would silently emit wrong tokens and nothing
- * else in the suite would notice: the WebGPU parity gate is the only other
- * check that covers it, it needs a GPU adapter, and it is skipped in CI.
- *
- * So this test compares the two tables cell by cell, over every ASCII code
- * point of every DFA state of every grammar in the repo that compiles.
+ * Dense-eligible plans store ASCII transitions only in their authoritative
+ * direct table. Their CSR rows begin at U+0080; plans too large for the dense
+ * table retain complete CSR rows instead.
  */
 
-import { assert, assertEquals, compile } from "./helpers.ts";
-import { decodeLexerPlanTables } from "../src/runtime/webgpu/plan_tables.ts";
-import { sparseTransition } from "../src/runtime/webgpu/plan_tables.ts";
+import { assert, compile } from "./helpers.ts";
+import type { Dfa } from "../src/compiler/regex/dfa.ts";
+import type { LrTable } from "../src/compiler/runtime_plan/lr1.ts";
+import { encodeCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
+import {
+  decodeLexerPlanTables,
+  planTransition,
+} from "../src/runtime/webgpu/plan_tables.ts";
+import { emitWasmModule } from "../src/targets/runtime/wasm_core_runtime.ts";
 
 /** Header slot holding the ASCII transition section, mirrored from lib.rs. */
 const CORE_HEADER_ASCII_TRANSITIONS = 6;
@@ -136,11 +124,12 @@ function planBytesFor(directory: string): Uint8Array | null {
   return plan.content;
 }
 
-Deno.test("dense ASCII transitions agree with the sparse CSR rows", () => {
+Deno.test("dense ASCII plans keep only above-ASCII CSR transitions", () => {
   let grammarsChecked = 0;
   let denseEligible = 0;
   let denseTables = 0;
   let cellsChecked = 0;
+  let sparseRangesChecked = 0;
 
   for (const directory of GRAMMAR_PATHS) {
     const planBytes = planBytesFor(directory);
@@ -164,17 +153,30 @@ Deno.test("dense ASCII transitions agree with the sparse CSR rows", () => {
       continue;
     }
     denseTables += 1;
+    assert(
+      tables.asciiTransitions !== null,
+      `${directory}: plan decoder did not expose the dense ASCII table.`,
+    );
 
     for (let state = 0; state < tables.stateCount; state += 1) {
       for (let codePoint = 0; codePoint < 128; codePoint += 1) {
         const dense = ascii.cell(state * 128 + codePoint);
-        const sparse = sparseTransition(tables, state, codePoint);
-        assertEquals(
-          dense,
-          sparse,
-          `${directory}: dense ASCII cell for state ${state} code point ${codePoint} is ${dense}, but the sparse CSR rows say ${sparse}. The engine's ASCII early return in fn transition is now unsound.`,
+        const decoded = tables.asciiTransitions[state * 128 + codePoint];
+        assert(
+          dense === decoded,
+          `${directory}: decoded ASCII cell for state ${state} code point ${codePoint} is ${decoded}, expected ${dense}.`,
         );
         cellsChecked += 1;
+      }
+      const start = tables.transitionRows[state];
+      const end = tables.transitionRows[state + 1];
+      for (let index = start; index < end; index += 1) {
+        const rangeStart = tables.transitions[index * 3];
+        assert(
+          rangeStart >= 128,
+          `${directory}: state ${state} retains sparse ASCII range ${rangeStart}.`,
+        );
+        sparseRangesChecked += 1;
       }
     }
   }
@@ -198,6 +200,87 @@ Deno.test("dense ASCII transitions agree with the sparse CSR rows", () => {
   );
   assert(
     cellsChecked > 0,
-    `Expected dense ASCII cells to be compared, checked ${cellsChecked}.`,
+    `Expected dense ASCII cells to be decoded, checked ${cellsChecked}.`,
   );
+  assert(
+    sparseRangesChecked > 0,
+    `Expected above-ASCII CSR ranges to be checked, checked ${sparseRangesChecked}.`,
+  );
+});
+
+Deno.test("plans above the dense ASCII limit retain complete CSR transitions", () => {
+  const stateCount = ASCII_DENSE_MAX_STATES + 1;
+  const states: Dfa["states"][number][] = [];
+  for (let id = 0; id < stateCount; id++) {
+    const transitions: Array<{
+      readonly start: number;
+      readonly end: number;
+      readonly target: number;
+    }> = [];
+    if (id === 0) {
+      transitions.push({ start: 65, end: 65, target: 0 });
+    }
+    states.push({
+      id,
+      nfaStates: [],
+      accepts: [],
+      selectedAccept: null,
+      transitions,
+    });
+  }
+  const asciiClasses = new Array(128).fill(0);
+  asciiClasses[65] = 1;
+  const dfa: Dfa = {
+    start: 0,
+    states,
+    alphabet: {
+      classCount: 2,
+      asciiClasses,
+      aboveAsciiRanges: [{
+        start: 128,
+        end: 0x10ffff,
+        classId: 0,
+      }],
+    },
+  };
+  const lr: LrTable = {
+    states: [{ id: 0, items: [] }],
+    actions: new Map(),
+    gotos: new Map(),
+    stats: {
+      bnfProductions: 0,
+      states: 1,
+      coreItems: 0,
+      items: 0,
+      closureWork: 0,
+      actionEntries: 0,
+      gotoEntries: 0,
+      tableEntries: 0,
+    },
+    diagnostics: [],
+  };
+  const acceptCandidates: number[][] = [];
+  for (let state = 0; state < stateCount; state++) {
+    acceptCandidates.push([]);
+  }
+  const image = emitWasmModule(dfa, lr, {
+    eofTerminal: 0,
+    terminalBySpec: [0],
+    acceptCandidates,
+    specs: [{
+      contextual: false,
+      followedBy: undefined,
+      followedByEof: false,
+      notFollowedBy: undefined,
+      excludedWords: [],
+    }],
+    productions: [],
+  });
+  const plan = encodeCombinedWasmParserPlan(image.planBytes, {});
+  const tables = decodeLexerPlanTables(plan);
+
+  assert(tables.asciiTransitions === null);
+  assert(tables.transitions[0] === 65);
+  assert(planTransition(tables, 0, 65) === 0);
+  assert(planTransition(tables, 0, 66) === -1);
 });

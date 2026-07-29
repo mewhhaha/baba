@@ -11,7 +11,7 @@ const HOST_OWNERSHIP_CALLER_MANAGED: i32 = 1;
 const RESULT_LIFETIME_CALLER_BUFFER: i32 = 1;
 
 const PLAN_MAGIC: i32 = 0x3150_5742;
-const PLAN_FORMAT_VERSION: i32 = 5;
+const PLAN_FORMAT_VERSION: i32 = 6;
 const PLAN_HEADER_MAGIC: i32 = 0;
 const PLAN_HEADER_FORMAT_VERSION: i32 = 1;
 const PLAN_HEADER_PARSER_PLAN_VERSION: i32 = 2;
@@ -662,17 +662,10 @@ fn transition(state: i32, code_point: i32) -> i32 {
     }
 
     // INVARIANT: when the plan carries a dense ASCII transition table it is
-    // COMPLETE and AUTHORITATIVE for code points 0..127, so a negative cell
-    // means "no transition" and the sparse CSR rows cannot add an answer.
-    // `buildAsciiTransitions` (src/targets/runtime/wasm_core_runtime.ts)
-    // materialises every ASCII code point of every transition of every state,
-    // so an unset cell is exactly the range scan's own -1. Returning early here
-    // skips a scan that provably cannot succeed; it is one wasted scan per
-    // token on ASCII input (the maximal-munch failure step) and is worth
-    // 6-11% of lex time. If that table is ever made partial while keeping this
-    // header field, this early return silently produces wrong tokens - the
-    // equivalence is pinned by "dense ASCII transitions agree with the sparse
-    // CSR rows" in tests/wasm_lexer_ascii_table_test.ts.
+    // COMPLETE and AUTHORITATIVE for code points 0..127. Core plan format 6
+    // removes ASCII ranges from the CSR rows in that case, so falling through
+    // cannot add an answer. Plans above the dense-table size limit carry -1 in
+    // this header slot and retain complete CSR rows.
     if code_point >= 0 && code_point < 128 {
         let ascii_offset = header(PLAN_HEADER_ASCII_TRANSITIONS);
         if ascii_offset >= 0 {

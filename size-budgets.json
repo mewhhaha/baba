@@ -18,7 +18,7 @@
         "targetBudget": 2
       },
       "parserPlanBinaryBytesMax": {
-        "currentBudget": 125000,
+        "currentBudget": 100000,
         "targetBudget": 100000
       },
       "runtimeMetadataBinaryBytesMax": {

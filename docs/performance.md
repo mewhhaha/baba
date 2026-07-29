@@ -67,6 +67,11 @@ one wasted scan per token, the maximal-munch failure step - and it could never
 succeed, because `buildAsciiTransitions` materialises every ASCII code point of
 every transition, so a negative cell already means "no transition".
 
+Core plan format 6 makes that ownership explicit: when the dense table is
+present, sparse rows contain only U+0080 and above. On `large-runtime`, this
+removes 1,256 duplicated ASCII ranges and reduces `parser.plan` from 112,904 to
+97,832 bytes without changing the engine's transition loop.
+
 Raw `lex_all` on 200,000 code units, before vs after, two trials:
 
 | grammar                       |        before |         after |          delta |
@@ -80,9 +85,9 @@ Raw `lex_all` on 200,000 code units, before vs after, two trials:
 Cost: +9 bytes of Wasm. Token tapes are byte-identical on every grammar above,
 and a differential over 20 grammars x 84 corpus inputs (1680 record-tape
 comparisons, including lone surrogates and astral code points) found no
-difference. The equivalence the early return depends on is pinned by
-`tests/wasm_lexer_ascii_table_test.ts`, which compares the dense table against
-the sparse rows for every ASCII code point of every DFA state.
+difference. The storage split is pinned by
+`tests/wasm_lexer_ascii_table_test.ts`, including the complete-CSR fallback for
+DFAs above the dense-table limit.
 
 ### Binary search in the table scans (rejected)
 

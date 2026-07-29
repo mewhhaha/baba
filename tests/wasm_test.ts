@@ -591,7 +591,7 @@ Deno.test("combined parser plans round-trip current runtime metadata with exact 
   );
 });
 
-// Core plan format version 5 header slots. Named here rather than imported
+// Core plan format version 6 header slots. Named here rather than imported
 // because the encoder and the validator both keep them module-private, and a
 // test that reads the bytes is exactly the place that should re-state them.
 const CORE_HEADER_DFA_STATE_COUNT = 3;

@@ -42,7 +42,7 @@ import { WebGpuLexer } from "../src/runtime/webgpu/mod.ts";
 import { decodeLexerPlanTables } from "../src/runtime/webgpu/plan_tables.ts";
 import {
   buildAlphabetTables,
-  verifyAlphabetAgainstSparse,
+  verifyAlphabetAgainstPlan,
 } from "../src/runtime/webgpu/alphabet.ts";
 import { SEG_SIZE } from "../src/runtime/webgpu/kernel_wgsl.ts";
 
@@ -736,7 +736,7 @@ Deno.test("WebGPU lexer validates create options before accessing WebGPU", async
   }
 });
 
-Deno.test("WebGPU lexer plan decoding builds a dense alphabet that agrees with the plan CSR tables", () => {
+Deno.test("WebGPU lexer plan decoding builds a dense alphabet that agrees with plan transitions", () => {
   const { plan } = compileArtifacts(PARITY_GRAMMAR);
   const tables = decodeLexerPlanTables(plan);
   assert(tables.stateCount > 0, "Expected a non-empty lexer DFA.");
@@ -755,7 +755,7 @@ Deno.test("WebGPU lexer plan decoding builds a dense alphabet that agrees with t
     "The grammar has classes above ASCII; expected a real range list.",
   );
 
-  const verification = verifyAlphabetAgainstSparse(tables, alphabet);
+  const verification = verifyAlphabetAgainstPlan(tables, alphabet);
   assert(verification.checked > 0, "Expected the cross-check to probe cells.");
   assertEquals(
     verification.mismatches,

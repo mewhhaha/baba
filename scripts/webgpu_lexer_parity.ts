@@ -23,7 +23,7 @@ import {
 } from "../src/runtime/webgpu/lexer.ts";
 import {
   buildAlphabetTables,
-  verifyAlphabetAgainstSparse,
+  verifyAlphabetAgainstPlan,
 } from "../src/runtime/webgpu/alphabet.ts";
 import { decodeLexerPlanTables } from "../src/runtime/webgpu/plan_tables.ts";
 import {
@@ -121,7 +121,7 @@ async function main(): Promise<number> {
     return 2;
   }
   const alphabet = buildAlphabetTables(plan);
-  const check = verifyAlphabetAgainstSparse(plan, alphabet);
+  const check = verifyAlphabetAgainstPlan(plan, alphabet);
   console.log(
     `alphabet: classes=${alphabet.classCount} aboveAsciiRanges=${alphabet.aboveAsciiRanges.length} denseCells=${alphabet.dense.length} sparseCrossCheck=${check.checked} mismatches=${check.mismatches}`,
   );
@@ -132,7 +132,7 @@ async function main(): Promise<number> {
     const first = check.firstMismatch;
     if (first !== null) {
       console.error(
-        `  first: codePoint=${first.codePoint} class=${first.classId} state=${first.state} sparse=${first.sparseTarget} dense=${first.denseTarget}`,
+        `  first: codePoint=${first.codePoint} class=${first.classId} state=${first.state} plan=${first.planTarget} dense=${first.denseTarget}`,
       );
     }
     return 2;

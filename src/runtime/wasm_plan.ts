@@ -878,6 +878,7 @@ function validateCorePlan(planBytes: Uint8Array): {
     planBytes,
     {
       dfaStateCount,
+      asciiTransitions,
       transitionRows,
       transitions,
       classCount: alphabetClassCount,
@@ -891,6 +892,7 @@ function validateCorePlan(planBytes: Uint8Array): {
 
 interface AlphabetPartitionInput {
   readonly dfaStateCount: number;
+  readonly asciiTransitions: CompactSectionOffset | null;
   readonly transitionRows: CompactSectionOffset;
   readonly transitions: number;
   readonly classCount: number;
@@ -1044,10 +1046,57 @@ function validateAlphabetPartition(
     for (let segment = 0; segment < segmentCount; segment++) {
       const start = segmentStarts[segment];
       let target = -1;
-      while (cursor < rowEnd) {
+      if (
+        start < ASCII_CLASS_LIMIT &&
+        input.asciiTransitions !== null
+      ) {
+        target = readSignedTableValue(
+          bytes,
+          input.asciiTransitions,
+          state * ASCII_CLASS_LIMIT + start,
+        );
+        if (target < -1 || target >= input.dfaStateCount) {
+          throw new Error(
+            `Wasm parser plan ASCII transition for state ${state} and code point ${start} targets ${target}.`,
+          );
+        }
+        for (
+          let codePoint = start + 1;
+          codePoint <= segmentEnds[segment];
+          codePoint++
+        ) {
+          const nextTarget = readSignedTableValue(
+            bytes,
+            input.asciiTransitions,
+            state * ASCII_CLASS_LIMIT + codePoint,
+          );
+          if (nextTarget !== target) {
+            throw new Error(
+              `Wasm parser plan ASCII class segment [${start}, ${
+                segmentEnds[segment]
+              }] has targets ${target} and ${nextTarget} in state ${state}.`,
+            );
+          }
+        }
+      }
+      while (
+        (
+          start >= ASCII_CLASS_LIMIT ||
+          input.asciiTransitions === null
+        ) &&
+        cursor < rowEnd
+      ) {
         const base = input.transitions + cursor * 3 * I32_BYTES;
         const rangeStart = readI32AtByteOffset(bytes, base);
         const rangeEnd = readI32AtByteOffset(bytes, base + I32_BYTES);
+        if (
+          input.asciiTransitions !== null &&
+          rangeStart < ASCII_CLASS_LIMIT
+        ) {
+          throw new Error(
+            `Wasm parser plan lexer state ${state} retains ASCII range [${rangeStart}, ${rangeEnd}] alongside a dense ASCII table.`,
+          );
+        }
         if (rangeStart > rangeEnd || rangeStart <= previousEnd) {
           throw new Error(
             `Wasm parser plan lexer state ${state} has transitions that are not ascending and disjoint.`,
@@ -1182,6 +1231,18 @@ function readRowValue(
   return readI32AtByteOffset(bytes, byteOffset);
 }
 
+function readSignedTableValue(
+  bytes: Uint8Array,
+  section: CompactSectionOffset,
+  index: number,
+): number {
+  const byteOffset = section.offset + index * section.cellBytes;
+  if (section.cellBytes === 2) {
+    return readI16AtByteOffset(bytes, byteOffset);
+  }
+  return readI32AtByteOffset(bytes, byteOffset);
+}
+
 function readNonNegativeI32(
   bytes: Uint8Array,
   headerIndex: number,
@@ -1220,6 +1281,14 @@ function readU16AtByteOffset(bytes: Uint8Array, byteOffset: number): number {
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return view.getUint16(byteOffset, true);
+}
+
+function readI16AtByteOffset(bytes: Uint8Array, byteOffset: number): number {
+  if (byteOffset + 2 > bytes.byteLength) {
+    throw new Error("Wasm parser plan is truncated.");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return view.getInt16(byteOffset, true);
 }
 
 function writeU32(bytes: Uint8Array, byteOffset: number, value: number): void {

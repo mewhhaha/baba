@@ -3,14 +3,11 @@
  * (states x classes) transition table.
  *
  * The classes are no longer derived here. `computeDfaAlphabet` in
- * `src/compiler/regex/dfa.ts` computes them, core plan format version 5
+ * `src/compiler/regex/dfa.ts` computes them, core plan format version 6
  * persists them, and this module reads them back. What is still built at load
- * time is the dense `(states x classes)` table, which is deliberately not in the
- * plan: it is a pure function of the persisted classes and the CSR rows, and
- * measured against the four example grammars and `fixtures/perf/large-runtime`
- * it costs between 1.4x and 3.9x the CSR bytes it would duplicate - 66516 B on
- * large-runtime, whose whole plan is 118231 B against a 125000 B budget. See
- * `docs/stability.md`.
+ * time is the dense `(states x classes)` table, which is deliberately not in
+ * the plan: it is a pure function of the persisted classes and transition
+ * sections and would duplicate those sections.
  *
  * ## Why this shape for the codepoint -> class lookup
  *
@@ -37,15 +34,15 @@
  *     segment partition), which removes the "not found" branch from the search.
  *
  * The dense table is `stateCount * classCount` i32, with -1 meaning "no
- * transition" (dead). It replaces the CSR linear scan entirely; the equivalence
- * is exact because the CSR rows are disjoint and ascending.
+ * transition" (dead). It replaces plan transition lookup entirely in the
+ * kernel; the persisted alphabet makes the result exact.
  */
 
 import type { LexerPlanTables, PlanClassRange } from "./plan_tables.ts";
 import {
   ASCII_CLASS_LIMIT as ASCII_LIMIT,
   CODE_POINT_LIMIT,
-  sparseTransition,
+  planTransition,
 } from "./plan_tables.ts";
 
 export { ASCII_LIMIT, CODE_POINT_LIMIT };
@@ -145,15 +142,13 @@ export function buildAlphabetTables(tables: LexerPlanTables): AlphabetTables {
     }
   }
 
-  // 3. Dense (state x class) table, filled from the CSR rows at one codepoint
-  //    per class. This table is not persisted: measured on the four example
-  //    grammars and large-runtime it is 1.4x to 3.9x the CSR bytes it would
-  //    duplicate, and it is derivable in exactly this many lookups.
+  // 3. Dense (state x class) table, filled from the plan at one codepoint
+  //    per class. It is derivable in exactly this many lookups.
   const dense = new Int32Array(stateCount * classCount);
   for (let classId = 0; classId < classCount; classId += 1) {
     const codePoint = representative[classId];
     for (let state = 0; state < stateCount; state += 1) {
-      dense[state * classCount + classId] = sparseTransition(
+      dense[state * classCount + classId] = planTransition(
         tables,
         state,
         codePoint,
@@ -201,8 +196,8 @@ export interface AlphabetMismatch {
   readonly codePoint: number;
   readonly classId: number;
   readonly state: number;
-  /** Target state the plan's sparse CSR rows give. */
-  readonly sparseTarget: number;
+  /** Target state the plan's dense-ASCII/CSR lookup gives. */
+  readonly planTarget: number;
   /** Target state the dense (state x class) table gives. */
   readonly denseTarget: number;
 }
@@ -215,15 +210,15 @@ export interface AlphabetVerification {
 }
 
 /**
- * Exhaustive-ish verification that the dense class table agrees with the sparse
- * CSR table the shipping runtime uses. Checks every ASCII codepoint plus every
- * range boundary (and its neighbours) above ASCII, for every state.
+ * Exhaustive-ish verification that the dense class table agrees with the plan
+ * transitions the shipping runtime uses. Checks every ASCII codepoint plus
+ * every range boundary (and its neighbours) above ASCII, for every state.
  *
  * This returns a structured result rather than throwing because the caller is a
  * gate that wants to report the cell, not a subsystem boundary that wants to
  * abort.
  */
-export function verifyAlphabetAgainstSparse(
+export function verifyAlphabetAgainstPlan(
   tables: LexerPlanTables,
   alphabet: AlphabetTables,
 ): AlphabetVerification {
@@ -258,10 +253,10 @@ export function verifyAlphabetAgainstSparse(
     }
     const classId = classifyCodePoint(alphabet, codePoint);
     for (let state = 0; state < tables.stateCount; state += 1) {
-      const sparseTarget = sparseTransition(tables, state, codePoint);
+      const planTarget = planTransition(tables, state, codePoint);
       const denseTarget = alphabet.dense[state * alphabet.classCount + classId];
       checked += 1;
-      if (sparseTarget === denseTarget) {
+      if (planTarget === denseTarget) {
         continue;
       }
       mismatches += 1;
@@ -270,7 +265,7 @@ export function verifyAlphabetAgainstSparse(
           codePoint,
           classId,
           state,
-          sparseTarget,
+          planTarget,
           denseTarget,
         };
       }
