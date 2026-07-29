@@ -11,9 +11,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      DENO_WEBGPU_BACKEND: vulkan
-      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
     steps:
       - uses: actions/checkout@v4
 
@@ -41,21 +38,6 @@ jobs:
 
       - name: Install Tree-sitter CLI
         run: npm install --global tree-sitter-cli@0.25.8
-
-      - name: Install software WebGPU adapter
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes mesa-vulkan-drivers
-
-      - name: Check software WebGPU adapter
-        run: |
-          deno eval '
-            const adapter = await navigator.gpu.requestAdapter();
-            if (adapter === null) {
-              throw new Error("llvmpipe WebGPU adapter is unavailable");
-            }
-            console.log(adapter.info);
-          '
 
       - name: Check independent Wasm tools
         run: |
