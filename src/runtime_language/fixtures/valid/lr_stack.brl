@@ -1,9 +1,0 @@
-import runtime.intrinsics;
-
-fn reduce_stack(states: span<u16>, depth: u32) -> u32 {
-  let total: u32 = 0;
-  for index in 0..depth {
-    total = total + states[index] as u32;
-  }
-  return total;
-}

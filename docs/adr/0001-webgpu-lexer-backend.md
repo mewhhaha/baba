@@ -115,11 +115,9 @@ tuning problem.
    prefix formulation of an LR stack without changing the algorithm.
 3. **Branch search is bounded backtracking DFS, not GLR.** The declared-conflict
    policy is `deterministic-or-declared-branching`
-   (`src/targets/runtime/portable_plan.ts:249`); the contract in
-   `src/runtime/branch_search.brl` is depth-first with save/restore
-   (`branch_next_depth`, `branch_can_enqueue`, `branch_restore_outcome`) and a
-   `branchLimit` diagnostic. Branches are explored one at a time against a
-   restored stack, not maintained as a frontier.
+   (`src/targets/runtime/portable_plan.ts:249`). Branches are explored one at a
+   time against a restored stack and bounded by a `branchLimit` diagnostic, not
+   maintained as a frontier.
 
 The corollary is what makes the lexer tractable. Because identity is resolved
 later, the lexer's _only_ job is boundaries plus `acceptingState`. Token records

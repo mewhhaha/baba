@@ -7,6 +7,9 @@
 - Wasm core plan format 6 stops duplicating ASCII ranges in sparse lexer rows
   when the complete dense ASCII table is present. Regenerate `parser.plan` and
   `parser.wasm` together.
+- Removed the unused private BRL compiler, backends, runtime sources, manifests,
+  fixtures, and conformance gates. Shipping runtimes continue to use the
+  TypeScript and Rust implementations recorded by the runtime manifest.
 
 ## 7.0.0
 

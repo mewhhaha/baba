@@ -1,9 +1,0 @@
-// expect: BRL_RESOLVE_INVALID_IMPORT
-// expect: BRL_RESOLVE_DUPLICATE_FIELD
-// expect: BRL_RESOLVE_UNKNOWN_NAME
-import runtime.missing;
-
-record Cursor {
-  offset: u32;
-  offset: Missing;
-}

@@ -194,7 +194,7 @@ export const wasmFrontendCandidates: readonly WasmFrontendCandidate[] = [
     runtimeFit: "none",
     sourceUrls: [
       "src/targets/runtime/wasm_core_runtime.ts",
-      "src/targets/runtime/language.ts",
+      "src/targets/runtime/wasm_engine_rs/src/lib.rs",
     ],
     notes: [
       "Preferred packaged path: extract Baba's existing binary emission into a small typed builder/compiler owned by this package.",

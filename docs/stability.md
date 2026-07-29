@@ -150,11 +150,3 @@ rules. Safely lowerable positive trailing guards emit named external tokens and
 a generated `src/scanner.c`; the portable analyzed regex remains the source of
 truth. Guard shapes that Tree-sitter's forward-only scanner cannot preserve
 produce `TREE_SITTER_UNSUPPORTED_CONTEXTUAL_GUARD`.
-
-## Internal BRL
-
-The internal runtime language is private and unstable. Its syntax, IR, verifier,
-compiler helpers, artifact manifests, and generated helper layout may change
-between releases. Public compatibility is expressed through generated parser
-APIs, parser-plan versions, runtime diagnostic contracts, and Wasm ABI versions,
-not through BRL source compatibility.
