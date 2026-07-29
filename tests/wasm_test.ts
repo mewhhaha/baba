@@ -485,6 +485,50 @@ Deno.test("Wasm core and wrapper are stable across grammars", () => {
   );
 });
 
+Deno.test({
+  name: "emitted Wasm core validates with wasm-tools when installed",
+  ignore: !(await commandAvailable("wasm-tools")),
+  async fn() {
+    const { dir } = await materialize(`module = "ok" ;`);
+    try {
+      const result = await runCommand("wasm-tools", [
+        "validate",
+        `${dir}/wasm/parser.wasm`,
+      ]);
+      assert(
+        result.success,
+        `wasm-tools validate failed:\n${result.stdout}${result.stderr}`,
+      );
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "emitted Wasm core ABI executes in Wasmtime when installed",
+  ignore: !(await commandAvailable("wasmtime")),
+  async fn() {
+    const { dir } = await materialize(`module = "ok" ;`);
+    try {
+      const wasmPath = `${dir}/wasm/parser.wasm`;
+      const result = await runCommand("wasmtime", [
+        "run",
+        "--invoke",
+        "abi_version",
+        wasmPath,
+      ]);
+      assert(
+        result.success,
+        `Wasmtime could not invoke abi_version:\n${result.stdout}${result.stderr}`,
+      );
+      assertEquals(result.stdout.trim(), "1");
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  },
+});
+
 Deno.test("combined parser plans round-trip current runtime metadata with exact section sizes", () => {
   const bundle = wasmBundle(STATEMENT_GRAMMAR);
   const file = bundle.files.find((entry) => entry.path === "wasm/parser.plan");
@@ -1638,6 +1682,43 @@ function wasmBundle(source: string, metadata?: BabaMetadata) {
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);
   return result.bundle;
+}
+
+async function commandAvailable(commandName: string): Promise<boolean> {
+  try {
+    const result = await new Deno.Command(commandName, {
+      args: ["--version"],
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    return result.success;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function runCommand(
+  commandName: string,
+  args: readonly string[],
+): Promise<{
+  readonly success: boolean;
+  readonly stdout: string;
+  readonly stderr: string;
+}> {
+  const result = await new Deno.Command(commandName, {
+    args: [...args],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  const decoder = new TextDecoder();
+  return {
+    success: result.success,
+    stdout: decoder.decode(result.stdout),
+    stderr: decoder.decode(result.stderr),
+  };
 }
 
 async function materialize(source: string): Promise<{

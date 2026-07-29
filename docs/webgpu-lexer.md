@@ -238,8 +238,9 @@ so it needs nothing on disk, and covers the empty string, error tokens, lone and
 paired surrogates, above-ASCII classes, longest-match backtracking, unterminated
 constructs, 9000-unit single tokens, both grid boundaries swept unit by unit,
 runs spanning three to five segments, a squeezed dispatch grid, and a simulated
-floor device. **It does not run in CI, because CI has no GPU adapter**, so a
-green CI run is not evidence that GPU parity holds.
+floor device. CI runs this gate through the Vulkan llvmpipe software adapter.
+That provides deterministic correctness coverage but is not evidence of hardware
+GPU performance.
 
 `deno task parity:webgpu-lexer` is the wider sweep across the four shipped
 example grammars, with multi-MiB corpora and failure-mode guards. It needs

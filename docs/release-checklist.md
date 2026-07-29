@@ -27,8 +27,8 @@ Manual review:
 - Wasm cold start and small-file parse numbers are present in the benchmark
   report;
 - embedded Rust `parser.wasm` bytes match `src/targets/runtime/wasm_engine_rs`;
-- runtime implementation manifest sources are all included in the publish
-  payload or are intentionally private;
+- runtime implementation manifest rebuild sources remain intentionally private
+  while their embedded Wasm artifacts are included in the publish payload;
 - README and target docs match the actual generated output shape;
 - generated parser APIs in README, docs, and examples mention only the current
   cursor parse, lazy lex tape, validation trace, reset, and dispose surface;

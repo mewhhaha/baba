@@ -1,13 +1,22 @@
 import type { GpuFrontendPlan } from "../../compiler/gpu_frontend.ts";
 import type { CompactFrontendProgram } from "./frontend.ts";
 import { GpuFrontendCapacityError } from "./frontend_capacity.ts";
+import {
+  GPU_FRONTEND_CANDIDATE_WORDS as CANDIDATE_WORDS,
+  GPU_FRONTEND_DIAGNOSTIC_DELIMITER as STATUS_DELIMITER,
+  GPU_FRONTEND_DIAGNOSTIC_EDGE_CAPACITY as STATUS_EDGE_CAPACITY,
+  GPU_FRONTEND_DIAGNOSTIC_LEXICAL as STATUS_LEXICAL,
+  GPU_FRONTEND_DIAGNOSTIC_NODE_CAPACITY as STATUS_NODE_CAPACITY,
+  GPU_FRONTEND_DIAGNOSTIC_SYNTAX as STATUS_SYNTAX,
+  GPU_FRONTEND_DIAGNOSTIC_TOKEN_CAPACITY as STATUS_TOKEN_CAPACITY,
+  GPU_FRONTEND_EDGE_WORDS as EDGE_WORDS,
+  GPU_FRONTEND_HEADER_WORDS as HEADER_WORDS,
+  GPU_FRONTEND_NODE_WORDS as NODE_WORDS,
+  GPU_FRONTEND_STATUS_SUCCESS as STATUS_SUCCESS,
+  GPU_FRONTEND_TOKEN_WORDS as TOKEN_WORDS,
+} from "./frontend_contract.ts";
 import { GPU_LEX_STAGE_LABELS, type WebGpuLexer } from "./lexer.ts";
 
-const HEADER_WORDS = 40;
-const TOKEN_WORDS = 4;
-const NODE_WORDS = 8;
-const EDGE_WORDS = 4;
-const CANDIDATE_WORDS = 16;
 // This must match the compiler eligibility bound and the shader's 16 KiB
 // workgroup-storage budget.
 const MAX_PARALLEL_CHUNK_STATES = 7;
@@ -53,15 +62,6 @@ const CANDIDATE_WORKGROUP_ENTRY_POINTS = new Set<string>([
   "contract_long_regions",
   "emit_long_regions",
 ]);
-
-const STATUS_SUCCESS = 0;
-const STATUS_LEXICAL = 1;
-const STATUS_DELIMITER = 2;
-const STATUS_SYNTAX = 3;
-const STATUS_TOKEN_CAPACITY = 4;
-const STATUS_NODE_CAPACITY = 5;
-const STATUS_EDGE_CAPACITY = 6;
-const STATUS_DEPTH_CAPACITY = 12;
 
 export interface GpuIslandExecution {
   readonly status: number;
@@ -1746,21 +1746,11 @@ function decodeExecution(
   };
 }
 
-export {
-  STATUS_DELIMITER,
-  STATUS_DEPTH_CAPACITY,
-  STATUS_EDGE_CAPACITY,
-  STATUS_LEXICAL,
-  STATUS_NODE_CAPACITY,
-  STATUS_SYNTAX,
-  STATUS_TOKEN_CAPACITY,
-};
-
 const ISLAND_EXECUTOR_WGSL = String.raw`
-const HEADER_WORDS: u32 = 40u;
-const TOKEN_WORDS: u32 = 4u;
-const NODE_WORDS: u32 = 8u;
-const EDGE_WORDS: u32 = 4u;
+const HEADER_WORDS: u32 = ${HEADER_WORDS}u;
+const TOKEN_WORDS: u32 = ${TOKEN_WORDS}u;
+const NODE_WORDS: u32 = ${NODE_WORDS}u;
+const EDGE_WORDS: u32 = ${EDGE_WORDS}u;
 
 @group(0) @binding(0) var<storage, read> compact_records: array<u32>;
 @group(0) @binding(1) var<storage, read> source_units: array<u32>;
@@ -1911,7 +1901,7 @@ fn classify(@builtin(global_invocation_id) invocation: vec3<u32>) {
   }
   if (lex_metadata[1u] == 1u) {
     if (compact_index == 0u) {
-      fail(4u, 0u, arena[23u], compact_count, compact_count, arena[9u]);
+      fail(${STATUS_TOKEN_CAPACITY}u, 0u, arena[23u], compact_count, compact_count, arena[9u]);
     }
     return;
   }
@@ -2108,7 +2098,7 @@ fn structure() {
       unit = source_unit(start);
     }
     fail(
-      1u,
+      ${STATUS_LEXICAL}u,
       start,
       token_word(token_index, 2u),
       start,
@@ -2119,7 +2109,7 @@ fn structure() {
   }
   if (kind == 2u) {
     fail(
-      3u,
+      ${STATUS_SYNTAX}u,
       token_word(token_index, 1u),
       token_word(token_index, 2u),
       token_index,
@@ -2140,7 +2130,7 @@ fn structure() {
     actual = u32(terminal(matched));
   }
   fail(
-    2u,
+    ${STATUS_DELIMITER}u,
     token_word(token_index, 1u),
     token_word(token_index, 2u),
     token_index,
@@ -2946,7 +2936,7 @@ fn validate_root() {
     finish = token_word(rejected, 2u);
   }
   fail(
-    3u,
+    ${STATUS_SYNTAX}u,
     start,
     finish,
     scan_scratch[rejected],
@@ -3219,10 +3209,10 @@ fn finalize_offsets(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let total = scan_scratch[dispatch_params.block_sums_offset];
   if (candidate == 0u) {
     var capacity = arena[11u];
-    var code = 5u;
+    var code = ${STATUS_NODE_CAPACITY}u;
     if (dispatch_params.mode == 1u) {
       capacity = arena[12u];
-      code = 6u;
+      code = ${STATUS_EDGE_CAPACITY}u;
     }
     if (total > capacity) {
       fail(

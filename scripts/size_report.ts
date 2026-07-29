@@ -83,6 +83,10 @@ const DEFAULT_EXCLUDES = new Set([".git"]);
 export async function buildSizeReport(root = "."): Promise<SizeReport> {
   const normalizedRoot = stripTrailingSlash(root);
   const allFiles = await listFiles(normalizedRoot);
+  const repositoryFiles = await excludeIgnoredRepositoryFiles(
+    normalizedRoot,
+    allFiles,
+  );
   const denoConfig = JSON.parse(
     await Deno.readTextFile(joinPath(normalizedRoot, "deno.json")),
   ) as { publish?: { include?: string[] } };
@@ -108,13 +112,13 @@ export async function buildSizeReport(root = "."): Promise<SizeReport> {
     root: normalizedRoot,
     generatedWasmLoaderSourceBytes,
     repository: {
-      fileCount: allFiles.length,
-      bytes: sumBytes(allFiles),
+      fileCount: repositoryFiles.length,
+      bytes: sumBytes(repositoryFiles),
       topLevel: buckets(
-        allFiles,
+        repositoryFiles,
         (path) => path.split("/")[0] || ".",
       ),
-      largestFiles: largest(allFiles, 20),
+      largestFiles: largest(repositoryFiles, 20),
     },
     publishPayload: {
       includePatterns,
@@ -149,6 +153,37 @@ export async function buildSizeReport(root = "."): Promise<SizeReport> {
       wasmRepresentations: await wasmRepresentations(allFiles, normalizedRoot),
     },
   };
+}
+
+async function excludeIgnoredRepositoryFiles(
+  root: string,
+  files: readonly FileEntry[],
+): Promise<FileEntry[]> {
+  const ignorePath = joinPath(root, ".gitignore");
+  const source = await Deno.readTextFile(ignorePath);
+  const patterns: string[] = [];
+  for (const rawLine of source.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) {
+      continue;
+    }
+    if (line.startsWith("!")) {
+      throw new Error(
+        `Size report cannot interpret negated gitignore pattern '${line}' in ${ignorePath}.`,
+      );
+    }
+    let pattern = line;
+    if (pattern.startsWith("/")) {
+      pattern = pattern.slice(1);
+    }
+    if (pattern.endsWith("/")) {
+      pattern = `${pattern}**`;
+    }
+    patterns.push(pattern);
+  }
+  return files.filter((file) =>
+    !patterns.some((pattern) => matchesGlob(file.path, pattern))
+  );
 }
 
 export async function applySizeBudgets(

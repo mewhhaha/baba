@@ -63,9 +63,9 @@ export {
   WebGpuFrontend,
 } from "./frontend.ts";
 export { CpuFrontend } from "./cpu_frontend.ts";
+export type { CpuFrontendOptions } from "./cpu_frontend.ts";
 export type {
   CompactFrontendProgram,
-  CpuFrontendOptions,
   FrontendDiagnostic,
   GpuFrontendPlanInspection,
   GpuFrontendResult,
