@@ -45,18 +45,6 @@ export type {
   GrammarGreenToken,
 } from "../src/compiler/grammar_cst.ts";
 export {
-  applyGrammarTextEdits,
-  createGrammarIncrementalParser,
-} from "../src/compiler/grammar_incremental.ts";
-export type {
-  GrammarChangedRange,
-  GrammarIncrementalParseOptions,
-  GrammarIncrementalParser,
-  GrammarIncrementalResult,
-  GrammarIncrementalState,
-  GrammarTextEdit,
-} from "../src/compiler/grammar_incremental.ts";
-export {
   buildGrammarLexerPlan,
   lexGrammar,
   validateGrammarTokenStream,

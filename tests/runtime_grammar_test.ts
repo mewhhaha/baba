@@ -46,7 +46,7 @@ Deno.test("grammar TypeScript runtime adapter lexes parses CSTs and ASTs", () =>
   assertEquals(uncheckedTokens.ok, true);
 });
 
-Deno.test("grammar runtime exposes diagnostics source maps and incremental parser", () => {
+Deno.test("grammar runtime exposes diagnostics and source maps", () => {
   const runtime = createGrammarRuntime(portablePlan());
 
   const invalid = runtime.parse("let x = ;");
@@ -64,15 +64,6 @@ Deno.test("grammar runtime exposes diagnostics source maps and incremental parse
   const position = sourceMap.positionAt(2);
   assertEquals(position.line, 1);
   assertEquals(position.column, 0);
-
-  const incremental = runtime.createIncrementalParser();
-  const initial = incremental.parseInitial("let x = 1;");
-  const next = incremental.applyEdits(initial, [{
-    start: 8,
-    oldEnd: 9,
-    newText: "2",
-  }]);
-  assertEquals(next.source, "let x = 2;");
 });
 
 function portablePlan(): GrammarPortablePlan {
