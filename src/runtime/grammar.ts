@@ -26,10 +26,6 @@ import {
   type GrammarAstMaterializeResult,
   materializeGrammarAst,
 } from "../compiler/grammar_ast.ts";
-import {
-  createGrammarIncrementalParser,
-  type GrammarIncrementalParser,
-} from "../compiler/grammar_incremental.ts";
 import type {
   BnfGrammar,
   BnfProduction,
@@ -98,7 +94,6 @@ export interface GrammarRuntime {
   materializeAst(source: string): GrammarAstMaterializeResult;
   diagnostics(source: string): readonly Diagnostic[];
   sourceMap(source: string): GrammarSourceMapping;
-  createIncrementalParser(): GrammarIncrementalParser;
   wasmStatus(): GrammarPortablePlan["targets"]["wasm"];
 }
 
@@ -216,9 +211,6 @@ export function createGrammarRuntime(
     },
     sourceMap(source: string): GrammarSourceMapping {
       return createSourceMapping(source);
-    },
-    createIncrementalParser(): GrammarIncrementalParser {
-      return createGrammarIncrementalParser(plan.cst, lexer);
     },
     wasmStatus(): GrammarPortablePlan["targets"]["wasm"] {
       return plan.targets.wasm;

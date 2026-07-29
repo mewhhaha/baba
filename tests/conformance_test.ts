@@ -7,7 +7,6 @@ import {
   buildGrammarParserCorePlan,
   buildGrammarTokenCst,
   composeGrammarModules,
-  createGrammarIncrementalParser,
   debugGrammarCst,
   type GrammarLayoutOptions,
   lexGrammar,
@@ -53,7 +52,6 @@ Deno.test("grammar conformance matrix satisfies fast gate coverage", () => {
   assertEquals(contextualFixtures().length, 3);
   assertEquals(layoutFixtures().length, 2);
   assertEquals(modularFixtures().length, 2);
-  assertEquals(incrementalFixtures().length, 1);
 });
 
 Deno.test("grammar conformance grammar parser fixtures are stable", () => {
@@ -117,7 +115,7 @@ Deno.test("grammar conformance AST and recovery goldens are stable", () => {
   }
 });
 
-Deno.test("grammar conformance contextual layout modular and incremental cases", () => {
+Deno.test("grammar conformance contextual layout and modular cases", () => {
   for (const fixture of contextualFixtures()) {
     const analyzed = analyzedGrammar(fixture.grammar);
     const lexer = buildGrammarLexerPlan(analyzed);
@@ -158,21 +156,6 @@ Deno.test("grammar conformance contextual layout modular and incremental cases",
     assertEquals(
       composed.diagnostics.map((diagnostic) => diagnostic.code).join(","),
       fixture.expectedDiagnostics,
-      fixture.name,
-    );
-  }
-
-  for (const fixture of incrementalFixtures()) {
-    const analyzed = analyzedGrammar(fixture.grammar);
-    const lexer = buildGrammarLexerPlan(analyzed);
-    const cstSchema = buildGrammarCstSchema(analyzed);
-    const incremental = createGrammarIncrementalParser(cstSchema, lexer);
-    const initial = incremental.parseInitial(fixture.source);
-    const next = incremental.applyEdits(initial, fixture.edits);
-    const full = buildGrammarTokenCst(cstSchema, lexer, next.source);
-    assertEquals(
-      debugGrammarCst(next.tree),
-      debugGrammarCst(full.root),
       fixture.name,
     );
   }
@@ -329,15 +312,6 @@ function modularFixtures() {
         "GRAMMAR_MODULE_IMPORT_CYCLE,GRAMMAR_DUPLICATE_EXPORT,GRAMMAR_DUPLICATE_RULE,GRAMMAR_UNUSED_TOKEN",
     },
   ];
-}
-
-function incrementalFixtures() {
-  return [{
-    name: "single-edit",
-    grammar: BASIC_GRAMMAR,
-    source: "let x = 1;",
-    edits: [{ start: 8, oldEnd: 9, newText: "2" }],
-  }];
 }
 
 function analyzedGrammar(source: string): AnalyzedGrammar {

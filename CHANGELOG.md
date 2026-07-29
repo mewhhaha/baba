@@ -10,6 +10,9 @@
 - Removed the unused private BRL compiler, backends, runtime sources, manifests,
   fixtures, and conformance gates. Shipping runtimes continue to use the
   TypeScript and Rust implementations recorded by the runtime manifest.
+- Removed the grammar runtime's incremental parser facade and benchmark because
+  each edit reparsed the complete source. Editor integrations should use the
+  Tree-sitter target until Baba has a runtime that reuses actual parse work.
 
 ## 7.0.0
 

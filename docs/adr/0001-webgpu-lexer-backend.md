@@ -606,12 +606,10 @@ in parallel rather than as part of it.
 > structured `PARSER_INPUT_TOO_LARGE` diagnostic instead of throwing. See
 > `docs/limits.md`.
 
-**There is no incremental machinery to conflict with or to lean on.**
-`src/compiler/grammar_incremental.ts` is a full reparse behind an incremental
-API - it reports a `reparsedRange`, but the work is not incremental. A GPU lexer
-neither breaks an incremental path nor gets to reuse one. If real incremental
-relexing lands later, its interaction with a whole-buffer GPU pass will need its
-own decision.
+**There is no incremental runtime machinery to conflict with or to lean on.**
+Editor integrations use the Tree-sitter target. If a native incremental runtime
+lands later, it must reuse actual lexer and parser work; its interaction with a
+whole-buffer GPU pass will need its own decision.
 
 ## Out of Scope
 
