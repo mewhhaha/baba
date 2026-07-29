@@ -104,7 +104,7 @@ adapter treats any result other than `1` as an invalid plan. After a successful
 load, `input_base()` returns the first byte offset after the loaded core table
 section, aligned for caller-managed input.
 
-The current core table section uses format version 5. It keeps section offsets
+The current core table section uses format version 6. It keeps section offsets
 in the header and may store dense DFA/LR helper sections as compact `i16` or
 `u16` cells when all generated values fit. This compact encoding is an internal
 core-plan detail; hosts should validate the plan with `wasm/abi.json` and

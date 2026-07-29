@@ -25,7 +25,11 @@ import {
   GPU_FRONTEND_TOKEN_WORDS as TOKEN_WORDS,
   type GpuFrontendDiagnosticRecord as RawDiagnostic,
 } from "./frontend_contract.ts";
-import { decodeLexerPlanTables, type LexerPlanTables } from "./plan_tables.ts";
+import {
+  decodeLexerPlanTables,
+  type LexerPlanTables,
+  planTransition,
+} from "./plan_tables.ts";
 
 export interface CpuFrontendOptions extends FrontendAllocationLimits {
   readonly maxTokens?: number;
@@ -200,7 +204,7 @@ function lex(
     let acceptedSpec = -1;
     while (cursor < source.length) {
       const codePoint = sourceCodePoint(source, cursor);
-      const target = transition(lexer, state, codePoint.value);
+      const target = planTransition(lexer, state, codePoint.value);
       if (target < 0) {
         break;
       }
@@ -275,25 +279,6 @@ function sourceCodePoint(
     }
   }
   return { value: first, width: 1 };
-}
-
-function transition(
-  lexer: LexerPlanTables,
-  state: number,
-  codePoint: number,
-): number {
-  const start = lexer.transitionRows[state];
-  const end = lexer.transitionRows[state + 1];
-  for (let index = start; index < end; index += 1) {
-    const offset = index * 3;
-    if (
-      codePoint >= lexer.transitions[offset] &&
-      codePoint <= lexer.transitions[offset + 1]
-    ) {
-      return lexer.transitions[offset + 2];
-    }
-  }
-  return -1;
 }
 
 function matchDelimiters(

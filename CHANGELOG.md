@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Wasm core plan format 6 stops duplicating ASCII ranges in sparse lexer rows
+  when the complete dense ASCII table is present. Regenerate `parser.plan` and
+  `parser.wasm` together.
+
 ## 7.0.0
 
 Three versioned contracts move in this release, and all three require

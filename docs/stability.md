@@ -75,8 +75,8 @@ generations. Baba emits and accepts one combination:
 | Contract                         | Current version |
 | -------------------------------- | --------------: |
 | Portable parser plan             |               2 |
-| Wasm core table encoding         |               5 |
-| Wasm runtime metadata subsection |               2 |
+| Wasm core table encoding         |               6 |
+| Wasm runtime metadata subsection |               3 |
 | Compact metadata container       |               1 |
 | Optional GPU frontend section    |               3 |
 
@@ -85,7 +85,7 @@ compiler always emits the versions above, and each loader rejects a different
 version at its input boundary.
 
 The binary core table section that `load_plan` reads carries its own format
-version, currently `5`. It is an internal encoding, not part of the
+version, currently `6`. It is an internal encoding, not part of the
 `PortableParserPlan` contract: hosts are expected to validate a plan through
 `wasm/abi.json` and `load_plan` rather than to decode the tables themselves.
 Adding, removing, or reordering a header slot or a section changes that version,
@@ -93,15 +93,11 @@ and the loader rejects any other value outright rather than guessing at a
 layout. A reader that does not understand the current core format version must
 regenerate the plan; there is no forward-compatible partial read.
 
-Version `4` adds header slots 31-35: the explicit DFA start state, and the
-lexer's alphabet equivalence classes as a class count, an ASCII class table and
-a sorted range list. The start state was previously hardcoded to `0` by every
-consumer and not stored at all, so a plan whose DFA started elsewhere would have
-been mislexed with nothing to detect it. The dense `(state x class)` transition
-table is deliberately **not** persisted: measured across the four example
-grammars and `fixtures/perf/large-runtime` it is 1.4x to 3.9x the size of the
-CSR rows it would duplicate, and it is derivable from them in one lookup per
-class.
+The current layout stores the explicit DFA start state and alphabet equivalence
+classes. Dense-eligible DFAs store complete ASCII transitions in a direct table
+and keep only U+0080 and above in their sparse CSR rows. DFAs above the
+dense-table size limit keep complete CSR rows. The split removes duplicate ASCII
+ranges without adding a lookup to the Wasm lexer hot path.
 
 ## Generated Wasm API
 
