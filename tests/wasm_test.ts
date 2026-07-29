@@ -522,7 +522,9 @@ Deno.test({
         result.success,
         `Wasmtime could not invoke abi_version:\n${result.stdout}${result.stderr}`,
       );
-      assertEquals(result.stdout.trim(), "1");
+      // Wasmtime documents the exact `--invoke` output as unstable. The
+      // generated loader tests assert the returned ABI version through the
+      // JavaScript embedding API.
     } finally {
       await Deno.remove(dir, { recursive: true });
     }
