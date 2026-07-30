@@ -1263,6 +1263,42 @@ Deno.test("Wasm documents read each edit field once at the trust boundary", asyn
   }
 });
 
+Deno.test("Wasm documents read each creation option once at the trust boundary", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
+    let goalReads = 0;
+    let triviaReads = 0;
+    let limitReads = 0;
+    const options = {
+      get goal(): "validate" {
+        goalReads++;
+        return "validate";
+      },
+      get trivia(): "discard" {
+        triviaReads++;
+        return "discard";
+      },
+      get maxParserActions(): number {
+        limitReads++;
+        return 10_000;
+      },
+    };
+
+    const document = parser.createDocument("let value = 1;", options);
+
+    assertEquals(document.validate().ok, true);
+    assertEquals(goalReads, 1);
+    assertEquals(triviaReads, 1);
+    assertEquals(limitReads, 1);
+
+    document.dispose();
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("lex tapes stay correct across later lex calls", async () => {
   const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
   try {

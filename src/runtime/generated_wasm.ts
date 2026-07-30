@@ -729,10 +729,10 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       () => this.#documents.delete(document),
     );
     this.#documents.add(document);
-    if (options.goal === "lex") {
+    if (document.goal === "lex") {
       return document as unknown as IncrementalLexDocument;
     }
-    if (options.goal === "validate") {
+    if (document.goal === "validate") {
       return document as unknown as IncrementalValidateDocument;
     }
     return document as unknown as IncrementalParseDocument<Root>;
@@ -2566,25 +2566,51 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
         "Incremental document creation requires an options object.",
       );
     }
+    const goal = (options as { readonly goal?: unknown }).goal;
     if (
-      options.goal !== "lex" && options.goal !== "validate" &&
-      options.goal !== "parse"
+      goal !== "lex" && goal !== "validate" &&
+      goal !== "parse"
     ) {
       throw new Error(
         `Incremental document goal must be 'lex', 'validate', or 'parse', got '${
-          String((options as { goal?: unknown }).goal)
+          String(goal)
         }'.`,
       );
     }
-    this.goal = options.goal;
-    this.#preserveTrivia = externalDocumentTriviaPolicy(metadata, options);
-    let maxParserActions = 1_000_000;
-    if (options.goal !== "lex") {
-      maxParserActions = externalPositiveLimit(
-        options,
-        "maxParserActions",
-        maxParserActions,
+    this.goal = goal;
+    const trivia = options.trivia;
+    let preserveTrivia = metadata.defaultPreserveTrivia;
+    if (trivia === "preserve") {
+      preserveTrivia = true;
+    } else if (trivia === "discard") {
+      preserveTrivia = false;
+    } else if (trivia !== undefined) {
+      throw new TypeError(
+        `Incremental document trivia policy must be 'preserve' or 'discard', got '${
+          String(trivia)
+        }'.`,
       );
+    }
+    this.#preserveTrivia = preserveTrivia;
+    let maxParserActions = 1_000_000;
+    if (goal !== "lex") {
+      const selectedLimit = (
+        options as { readonly maxParserActions?: unknown }
+      ).maxParserActions;
+      if (selectedLimit !== undefined) {
+        if (
+          typeof selectedLimit !== "number" ||
+          !Number.isSafeInteger(selectedLimit) ||
+          selectedLimit < 1
+        ) {
+          throw new RangeError(
+            `maxParserActions must be a positive safe integer, got '${
+              String(selectedLimit)
+            }'.`,
+          );
+        }
+        maxParserActions = selectedLimit;
+      }
     }
     this.#maxParserActions = maxParserActions;
     this.#snapshot = ExternalSourceSnapshot.initial(source);
@@ -2852,29 +2878,6 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       throw new Error("Incremental document is disposed.");
     }
   }
-}
-
-function externalDocumentTriviaPolicy(
-  metadata: ExternalRuntimeMetadata,
-  options:
-    | LexDocumentOptions
-    | ValidateDocumentOptions
-    | ParseDocumentOptions,
-): boolean {
-  if (options.trivia === undefined) {
-    return metadata.defaultPreserveTrivia;
-  }
-  if (options.trivia === "preserve") {
-    return true;
-  }
-  if (options.trivia === "discard") {
-    return false;
-  }
-  throw new TypeError(
-    `Incremental document trivia policy must be 'preserve' or 'discard', got '${
-      String(options.trivia)
-    }'.`,
-  );
 }
 
 function externalIncrementalValidateResult(
