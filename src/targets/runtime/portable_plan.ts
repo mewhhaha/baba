@@ -800,7 +800,7 @@ export function portablePlanStatistics(
   return {
     ...withoutSerializedBytes,
     serializedJsonBytes: new TextEncoder().encode(
-      serializePortableParserPlanJson(stablePlan),
+      `${JSON.stringify(stablePlan, null, 2)}\n`,
     ).length,
   };
 }
