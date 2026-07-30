@@ -3616,7 +3616,7 @@ function parseExternalCursorWithWasm(
     const ruleCapacity = structuralCapacity;
     const childCapacity = structuralCapacity * 2;
     const fieldCapacity = structuralCapacity;
-    const valueCapacity = structuralCapacity * 4;
+    const valueCapacity = structuralCapacity * 3;
     const valueItemCapacity = structuralCapacity * 2;
     const fragmentCapacity = structuralCapacity * 2;
 
