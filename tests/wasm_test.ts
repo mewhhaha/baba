@@ -1226,6 +1226,43 @@ Deno.test("Wasm documents preserve an earlier diagnostic when a later edit chang
   }
 });
 
+Deno.test("Wasm documents read each edit field once at the trust boundary", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
+    const document = parser.createDocument("let value = 1;", { goal: "lex" });
+    let startReads = 0;
+    let oldEndReads = 0;
+    let newTextReads = 0;
+    const edit = {
+      get start(): number {
+        startReads++;
+        return 12;
+      },
+      get oldEnd(): number {
+        oldEndReads++;
+        return 13;
+      },
+      get newText(): string {
+        newTextReads++;
+        return "2";
+      },
+    };
+
+    document.applyEdits([edit]);
+
+    assertEquals(document.snapshot.text(), "let value = 2;");
+    assertEquals(startReads, 1);
+    assertEquals(oldEndReads, 1);
+    assertEquals(newTextReads, 1);
+
+    document.dispose();
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("lex tapes stay correct across later lex calls", async () => {
   const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
   try {

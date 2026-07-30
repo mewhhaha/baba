@@ -1570,47 +1570,53 @@ function externalMergeSourcePieces(
   return merged;
 }
 
-function externalValidateTextEdits(
+function externalParseTextEdits(
   edits: readonly TextEdit[],
   sourceLength: number,
-): void {
+): readonly TextEdit[] {
+  const parsed: TextEdit[] = [];
   let previousStart = -1;
   let previousEnd = -1;
-  for (let index = 0; index < edits.length; index++) {
+  const editCount = edits.length;
+  for (let index = 0; index < editCount; index++) {
     const edit = edits[index];
     if (edit === undefined || typeof edit !== "object" || edit === null) {
       throw new TypeError(`Text edit ${index} must be an object.`);
     }
+    const start = edit.start;
+    const oldEnd = edit.oldEnd;
+    const newText = edit.newText;
     if (
-      !Number.isSafeInteger(edit.start) ||
-      !Number.isSafeInteger(edit.oldEnd) ||
-      edit.start < 0 ||
-      edit.oldEnd < edit.start ||
-      edit.oldEnd > sourceLength
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(oldEnd) ||
+      start < 0 ||
+      oldEnd < start ||
+      oldEnd > sourceLength
     ) {
       throw new RangeError(
-        `Text edit ${index} range [${String(edit.start)}, ${
-          String(edit.oldEnd)
+        `Text edit ${index} range [${String(start)}, ${
+          String(oldEnd)
         }) is outside source length ${sourceLength}.`,
       );
     }
-    if (typeof edit.newText !== "string") {
+    if (typeof newText !== "string") {
       throw new TypeError(
-        `Text edit ${index} newText must be a string, got '${typeof edit
-          .newText}'.`,
+        `Text edit ${index} newText must be a string, got '${typeof newText}'.`,
       );
     }
     if (
-      edit.start < previousEnd ||
-      (previousStart === previousEnd && edit.start === previousEnd)
+      start < previousEnd ||
+      (previousStart === previousEnd && start === previousEnd)
     ) {
       throw new RangeError(
-        `Text edit ${index} starts at ${edit.start}, which overlaps the previous edit or shares its insertion point.`,
+        `Text edit ${index} starts at ${start}, which overlaps the previous edit or shares its insertion point.`,
       );
     }
-    previousStart = edit.start;
-    previousEnd = edit.oldEnd;
+    parsed.push({ start, oldEnd, newText });
+    previousStart = start;
+    previousEnd = oldEnd;
   }
+  return parsed;
 }
 
 interface ExternalIncrementalLexState {
@@ -2641,13 +2647,16 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     if (!Array.isArray(edits)) {
       throw new TypeError("Incremental document edits must be an array.");
     }
-    externalValidateTextEdits(edits, this.#snapshot.length);
-    if (edits.length === 0) {
+    const parsedEdits = externalParseTextEdits(
+      edits,
+      this.#snapshot.length,
+    );
+    if (parsedEdits.length === 0) {
       return this.#emptyUpdate();
     }
     const previousSnapshot = this.#snapshot;
     const previousLexState = this.#lexState;
-    const applied = previousSnapshot.apply(edits);
+    const applied = previousSnapshot.apply(parsedEdits);
     const source = applied.snapshot.text();
     const relexed = externalIncrementalRelex(
       this.wasm,
@@ -2655,7 +2664,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       previousLexState,
       previousSnapshot.length,
       source,
-      edits,
+      parsedEdits,
     );
     this.#snapshot = applied.snapshot;
     this.#source = source;
@@ -2687,7 +2696,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       );
       parserWork = validation.work;
       if (this.goal === "parse") {
-        const firstEdit = edits[0];
+        const firstEdit = parsedEdits[0];
         if (firstEdit === undefined) {
           throw new Error("Incremental parse update has no first edit.");
         }
