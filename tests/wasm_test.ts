@@ -1299,6 +1299,54 @@ Deno.test("Wasm documents read each creation option once at the trust boundary",
   }
 });
 
+Deno.test("Wasm documents preserve parity across compound edit shapes", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
+    const source = [
+      "let alpha = 1;",
+      "let beta = 2;",
+      "let gamma = 3;",
+    ].join("\n");
+    const document = parser.createDocument(source, { goal: "parse" });
+    const alphaStart = source.indexOf("alpha");
+    const betaStart = source.indexOf("beta");
+    const secondValueStart = source.indexOf("2");
+    document.applyEdits([
+      { start: alphaStart, oldEnd: alphaStart + 5, newText: "a" },
+      { start: betaStart, oldEnd: betaStart + 4, newText: "longBeta" },
+      {
+        start: secondValueStart,
+        oldEnd: secondValueStart + 1,
+        newText: "20",
+      },
+    ]);
+    assertIncrementalDocumentParity(parser, document);
+
+    const beforeBoundaryInsertions = document.snapshot.text();
+    document.applyEdits([
+      { start: 0, oldEnd: 0, newText: "let zero = 0;\n" },
+      {
+        start: beforeBoundaryInsertions.length,
+        oldEnd: beforeBoundaryInsertions.length,
+        newText: "\nlet omega = 4;",
+      },
+    ]);
+    assertIncrementalDocumentParity(parser, document);
+
+    document.applyEdits([
+      { start: 4, oldEnd: 5, newText: "a" },
+      { start: 5, oldEnd: 6, newText: "b" },
+    ]);
+    assertIncrementalDocumentParity(parser, document);
+
+    document.dispose();
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("lex tapes stay correct across later lex calls", async () => {
   const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
   try {
@@ -1979,6 +2027,70 @@ function cursorLabel(
     return `token:${JSON.stringify(value.kind)}`;
   }
   return `token:${value.kind}`;
+}
+
+function assertIncrementalDocumentParity(
+  parser: GeneratedParser,
+  document: GeneratedIncrementalDocument,
+): void {
+  const source = document.snapshot.text();
+  const incrementalLex = document.lex();
+  const freshLex = parser.lex(source, { preserveTrivia: true });
+  assertEquals(
+    JSON.stringify(incrementalLex.diagnostics),
+    JSON.stringify(freshLex.diagnostics),
+  );
+  assertEquals(incrementalLex.tokenTape.length, freshLex.tokenTape.length);
+  for (let index = 0; index < freshLex.tokenTape.length; index++) {
+    assertEquals(
+      JSON.stringify(incrementalLex.tokenTape.token(index)),
+      JSON.stringify(freshLex.tokenTape.token(index)),
+    );
+  }
+
+  const incrementalValidate = document.validate();
+  const freshValidate = parser.validate(source);
+  assertEquals(incrementalValidate.ok, freshValidate.ok);
+  assertEquals(
+    JSON.stringify(incrementalValidate.diagnostics),
+    JSON.stringify(freshValidate.diagnostics),
+  );
+
+  const incrementalParse = document.parse();
+  const freshParse = parser.parse(source);
+  assertEquals(incrementalParse.ok, freshParse.ok);
+  assertEquals(
+    JSON.stringify(incrementalParse.diagnostics),
+    JSON.stringify(freshParse.diagnostics),
+  );
+  if (incrementalParse.ok && freshParse.ok) {
+    assertEquals(
+      JSON.stringify(cursorShape(incrementalParse.cursor)),
+      JSON.stringify(cursorShape(freshParse.cursor)),
+    );
+  }
+}
+
+function cursorShape(
+  cursor: CursorRuleLike | CursorTokenLike,
+): unknown {
+  if (cursor.type === "token") {
+    return {
+      type: cursor.type,
+      tokenType: cursor.tokenType,
+      kind: cursor.kind,
+      text: cursor.text,
+      span: cursor.span,
+      tokenIndex: cursor.tokenIndex,
+    };
+  }
+  return {
+    type: cursor.type,
+    name: cursor.name,
+    span: cursor.span,
+    tokenRange: cursor.tokenRange,
+    children: cursor.children().map(cursorShape),
+  };
 }
 
 function wasmBundle(source: string, metadata?: BabaMetadata) {
