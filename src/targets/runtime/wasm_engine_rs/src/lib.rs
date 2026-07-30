@@ -1153,6 +1153,31 @@ fn select_action(
         ordinary_main_candidate_count: 0,
     };
 
+    let fast_spec = header_table_value(PLAN_HEADER_FAST_SPECS, accepting_state);
+    if fast_spec >= 0 && fast_spec == fallback_spec {
+        selection.checked_count = 1;
+        let terminal = header_table_value(PLAN_HEADER_SPEC_TERMINALS, fast_spec);
+        if include_trivia && terminal < 0 {
+            selection.trivia_spec = fast_spec;
+            return selection;
+        }
+        if terminal < 0 {
+            return selection;
+        }
+        let flags = header_table_value(PLAN_HEADER_SPEC_FLAGS, fast_spec);
+        if flags & SPEC_FLAG_CONTEXTUAL == 0 {
+            selection.ordinary_main_candidate_count = 1;
+        }
+        let action = parser_action(state, terminal);
+        if action != 0 {
+            selection.choice_count = 1;
+            selection.selected_spec = fast_spec;
+            selection.selected_terminal = terminal;
+            selection.selected_action = action;
+        }
+        return selection;
+    }
+
     let rows = header(PLAN_HEADER_ACCEPT_CANDIDATE_ROWS);
     let mut index = table_value(rows, accepting_state);
     let end = table_value(rows, accepting_state + 1);
