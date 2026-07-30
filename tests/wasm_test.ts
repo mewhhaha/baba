@@ -1309,6 +1309,8 @@ Deno.test("Wasm documents preserve parity across compound edit shapes", async ()
       "let gamma = 3;",
     ].join("\n");
     const document = parser.createDocument(source, { goal: "parse" });
+    const initialParse = document.parse();
+    assert(initialParse.ok);
     const alphaStart = source.indexOf("alpha");
     const betaStart = source.indexOf("beta");
     const secondValueStart = source.indexOf("2");
@@ -1339,6 +1341,12 @@ Deno.test("Wasm documents preserve parity across compound edit shapes", async ()
       { start: 5, oldEnd: 6, newText: "b" },
     ]);
     assertIncrementalDocumentParity(parser, document);
+
+    const initialThirdStatement = initialParse.cursor.child(2);
+    assertCursorRule(initialThirdStatement, "statement");
+    const initialThirdName = initialThirdStatement.field("name");
+    assertCursorToken(initialThirdName, "IDENT");
+    assertEquals(initialThirdName.text, "gamma");
 
     document.dispose();
     parser.dispose();

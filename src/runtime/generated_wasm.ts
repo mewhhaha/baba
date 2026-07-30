@@ -4115,6 +4115,7 @@ const externalCursorTapeByRoot = new WeakMap<
 class ExternalCursorTapeView {
   private readonly ruleCache: (RuleCursor | undefined)[] = [];
   private readonly tokenCache: (TokenCursor | undefined)[] = [];
+  private reuse: ExternalCursorTapeReuse | undefined;
 
   constructor(
     private readonly metadata: ExternalRuntimeMetadata,
@@ -4125,8 +4126,13 @@ class ExternalCursorTapeView {
     private readonly fieldRecords: Int32Array,
     private readonly valueRecords: Int32Array,
     private readonly valueItems: Int32Array,
-    private readonly reuse?: ExternalCursorTapeReuse,
-  ) {}
+    reuse?: ExternalCursorTapeReuse,
+  ) {
+    this.reuse = reuse;
+    if (reuse !== undefined) {
+      reuse.tape.reuse = undefined;
+    }
+  }
 
   cursorForRuleRef(ref: number): RuleCursor {
     if (externalCursorRefIsToken(ref)) {
