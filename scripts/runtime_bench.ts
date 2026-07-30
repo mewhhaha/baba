@@ -55,7 +55,7 @@ export interface TargetTiming {
       readonly scannedCodeUnits: number;
       readonly parserActions: number;
       readonly reusedTokens: number;
-      readonly reusedSubtrees: number;
+      readonly reusedCheckpoints: number;
     };
   };
   readonly memoryPages: {
@@ -377,7 +377,7 @@ interface RuntimeIncrementalDocumentLike {
     };
     readonly parser: {
       readonly parserActions: number;
-      readonly reusedSubtrees: number;
+      readonly reusedCheckpoints: number;
     };
   };
   dispose(): void;
@@ -509,7 +509,7 @@ function benchmarkIncrementalValidation(
       scannedCodeUnits: measured.value.lexer.scannedCodeUnits,
       parserActions: measured.value.parser.parserActions,
       reusedTokens: measured.value.lexer.reusedTokens,
-      reusedSubtrees: measured.value.parser.reusedSubtrees,
+      reusedCheckpoints: measured.value.parser.reusedCheckpoints,
     };
   }
   document.dispose();
@@ -747,7 +747,7 @@ function renderTextReport(report: RuntimeBenchReport): string {
         }, late ${formatDistribution(wasm.hot.validateLateError)}`,
         `    incremental validate: ${
           formatDistribution(wasm.hot.incrementalValidate)
-        }, scanned ${wasm.hot.incrementalWork.scannedCodeUnits} code units, ${wasm.hot.incrementalWork.parserActions} parser actions, reused ${wasm.hot.incrementalWork.reusedTokens} tokens / ${wasm.hot.incrementalWork.reusedSubtrees} parser checkpoints`,
+        }, scanned ${wasm.hot.incrementalWork.scannedCodeUnits} code units, ${wasm.hot.incrementalWork.parserActions} parser actions, reused ${wasm.hot.incrementalWork.reusedTokens} tokens / ${wasm.hot.incrementalWork.reusedCheckpoints} parser checkpoints`,
         `    memory pages: create ${wasm.memoryPages.afterCreate}, lex ${wasm.memoryPages.afterLex}, validate ${wasm.memoryPages.afterValidate}, parse/high-water ${wasm.memoryPages.highWater}`,
       );
     }

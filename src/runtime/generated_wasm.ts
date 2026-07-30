@@ -166,8 +166,8 @@ export interface IncrementalParserWork {
   readonly reparsedRanges: readonly Span[];
   readonly parserActions: number;
   readonly reuseChecks: number;
-  readonly reusedSubtrees: number;
-  readonly createdSubtrees: number;
+  readonly reusedCheckpoints: number;
+  readonly createdCheckpoints: number;
 }
 
 export interface IncrementalLexUpdate {
@@ -2179,9 +2179,9 @@ function externalRunIncrementalValidation(
               ),
               parserActions,
               reuseChecks,
-              reusedSubtrees: previous.checkpoints.length -
+              reusedCheckpoints: previous.checkpoints.length -
                 oldTokenIndex - 1,
-              createdSubtrees: tokenIndex - reparseTokenStart,
+              createdCheckpoints: tokenIndex - reparseTokenStart,
             },
           };
         }
@@ -2412,8 +2412,8 @@ function externalRunIncrementalValidation(
           ),
           parserActions,
           reuseChecks,
-          reusedSubtrees: 0,
-          createdSubtrees: tokenIndex - reparseTokenStart,
+          reusedCheckpoints: 0,
+          createdCheckpoints: tokenIndex - reparseTokenStart,
         },
       };
     }
@@ -2473,7 +2473,7 @@ function externalFailedValidationRun(
   reparsedEnd: number,
   reparseTokenStart: number,
 ): ExternalValidationRun {
-  const createdSubtrees = stoppedTokenIndex - reparseTokenStart;
+  const createdCheckpoints = stoppedTokenIndex - reparseTokenStart;
   return {
     state: {
       checkpoints,
@@ -2486,8 +2486,8 @@ function externalFailedValidationRun(
       reparsedRanges: externalNonEmptyRanges(reparsedStart, reparsedEnd),
       parserActions,
       reuseChecks,
-      reusedSubtrees: 0,
-      createdSubtrees,
+      reusedCheckpoints: 0,
+      createdCheckpoints,
     },
   };
 }
@@ -2754,12 +2754,17 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
         lexer,
       };
     }
+    if (this.#validationState === undefined) {
+      throw new Error(
+        `Incremental document goal '${this.goal}' has no validation state.`,
+      );
+    }
     const parser: IncrementalParserWork = {
       reparsedRanges: [],
       parserActions: 0,
       reuseChecks: 0,
-      reusedSubtrees: this.#lexState.count,
-      createdSubtrees: 0,
+      reusedCheckpoints: this.#validationState.checkpoints.length - 1,
+      createdCheckpoints: 0,
     };
     if (this.goal === "validate") {
       return {

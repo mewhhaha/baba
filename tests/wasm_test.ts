@@ -165,8 +165,8 @@ interface GeneratedIncrementalDocument {
     readonly parser?: {
       readonly parserActions: number;
       readonly reuseChecks: number;
-      readonly reusedSubtrees: number;
-      readonly createdSubtrees: number;
+      readonly reusedCheckpoints: number;
+      readonly createdCheckpoints: number;
     };
   };
   dispose(): void;
@@ -1064,7 +1064,7 @@ Deno.test("Wasm documents reuse lexer records across edits", async () => {
     assert(update.lexer.relexedRange.start <= valueStart);
     assert(update.parser);
     assert(update.parser.reuseChecks > 0);
-    assert(update.parser.reusedSubtrees > 0);
+    assert(update.parser.reusedCheckpoints > 0);
     assertEquals(document.validate().ok, true);
     const newParse = document.parse();
     assert(newParse.ok);
@@ -1180,7 +1180,7 @@ Deno.test("Wasm documents update large checkpoint prefixes without host stack gr
     assertEquals(document.validate().ok, true);
     assert(update.parser);
     assert(update.parser.parserActions > 0);
-    assert(update.parser.reusedSubtrees > 0);
+    assert(update.parser.reusedCheckpoints > 0);
 
     document.dispose();
     parser.dispose();
@@ -1196,6 +1196,12 @@ Deno.test("Wasm documents preserve an earlier diagnostic when a later edit chang
     const source = "let = 1;\nlet value = 2;";
     const document = parser.createDocument(source, { goal: "validate" });
     assertEquals(document.validate().ok, false);
+    const unchanged = document.applyEdits([]);
+    assert(
+      unchanged.parser !== undefined &&
+        unchanged.parser.reusedCheckpoints < document.lex().tokenTape.length,
+      "Expected a no-op update to count only checkpoints built before the error.",
+    );
 
     const editStart = source.lastIndexOf("2");
     const update = document.applyEdits([{
@@ -1211,7 +1217,7 @@ Deno.test("Wasm documents preserve an earlier diagnostic when a later edit chang
       JSON.stringify(incremental.diagnostics),
       JSON.stringify(fresh.diagnostics),
     );
-    assertEquals(update.parser?.createdSubtrees, 0);
+    assertEquals(update.parser?.createdCheckpoints, 0);
 
     document.dispose();
     parser.dispose();
