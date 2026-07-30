@@ -3613,11 +3613,11 @@ function parseExternalCursorWithWasm(
     // The cursor arenas are consumed per token, not per source character. A
     // capacity retry returns to the top and re-lexes because cursor parsing
     // compacts the raw records in place.
-    const ruleCapacity = structuralCapacity * 4;
-    const childCapacity = structuralCapacity * 6;
-    const fieldCapacity = structuralCapacity * 4;
-    const valueCapacity = structuralCapacity * 16;
-    const valueItemCapacity = structuralCapacity * 6;
+    const ruleCapacity = structuralCapacity * 2;
+    const childCapacity = structuralCapacity * 3;
+    const fieldCapacity = structuralCapacity * 2;
+    const valueCapacity = structuralCapacity * 8;
+    const valueItemCapacity = structuralCapacity * 3;
     const fragmentCapacity = structuralCapacity * 2;
 
     const rulePtr = align(
