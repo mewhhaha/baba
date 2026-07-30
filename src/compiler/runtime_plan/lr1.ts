@@ -507,16 +507,22 @@ function closure(
     const symbol = production.rhs[item.dot];
     if (!symbol || symbol.kind !== "nonterminal") continue;
     const tail = production.rhs.slice(item.dot + 1);
-    for (const next of analysis.productionsByLhs.get(symbol.id) ?? []) {
+    const nextLookaheads = firstOfSequence(
+      tail,
+      analysis.nullable,
+      analysis.first,
+    );
+    const tailIsNullable = tail.every((tailSymbol) =>
+      tailSymbol.kind === "nonterminal" &&
+      analysis.nullable.has(tailSymbol.id)
+    );
+    if (tailIsNullable) {
       for (const lookahead of lookaheadValues(item.lookaheads)) {
-        const nextLookaheads = firstOfSequence(
-          tail,
-          analysis.nullable,
-          analysis.first,
-          lookahead,
-        );
-        add(next.id, 0, nextLookaheads);
+        nextLookaheads.add(lookahead);
       }
+    }
+    for (const next of analysis.productionsByLhs.get(symbol.id) ?? []) {
+      add(next.id, 0, nextLookaheads);
     }
   }
 
