@@ -1748,9 +1748,26 @@ function externalIncrementalRelex(
   oldSourceLength: number,
   source: string,
   edits: readonly TextEdit[],
+  searchFloorOffset: number,
+  searchFloorToken: number,
 ): ExternalIncrementalRelexResult {
   let earliestToken = previous.count;
-  for (let tokenIndex = 0; tokenIndex < previous.count; tokenIndex++) {
+  let firstTokenToCheck = 0;
+  const firstEdit = edits[0];
+  // Tokens before the prior floor were proven independent of that offset.
+  // They remain independent of later offsets because reused prefix records
+  // and their dependency ends are unchanged.
+  if (
+    firstEdit !== undefined &&
+    firstEdit.start >= searchFloorOffset
+  ) {
+    firstTokenToCheck = Math.min(searchFloorToken, previous.count);
+  }
+  for (
+    let tokenIndex = firstTokenToCheck;
+    tokenIndex < previous.count;
+    tokenIndex++
+  ) {
     const base = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
     const tokenStart = previous.records[base + 1];
     const dependencyEnd = previous.records[base + 4];
@@ -2596,6 +2613,8 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
   #snapshot: ExternalSourceSnapshot;
   #source: string;
   #lexState: ExternalIncrementalLexState;
+  #lexSearchFloorOffset = 0;
+  #lexSearchFloorToken = 0;
   #lexResult: IncrementalLexResult;
   #validateResult: IncrementalValidateResult | undefined;
   #validationState: ExternalValidationState | undefined;
@@ -2741,6 +2760,10 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     if (parsedEdits.length === 0) {
       return this.#emptyUpdate();
     }
+    const firstEdit = parsedEdits[0];
+    if (firstEdit === undefined) {
+      throw new Error("Incremental update has no first edit.");
+    }
     const previousSnapshot = this.#snapshot;
     const previousLexState = this.#lexState;
     const applied = previousSnapshot.apply(parsedEdits);
@@ -2752,10 +2775,14 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       previousSnapshot.length,
       source,
       parsedEdits,
+      this.#lexSearchFloorOffset,
+      this.#lexSearchFloorToken,
     );
     this.#snapshot = applied.snapshot;
     this.#source = source;
     this.#lexState = relexed.state;
+    this.#lexSearchFloorOffset = firstEdit.start;
+    this.#lexSearchFloorToken = relexed.oldPrefixTokenCount;
     this.#lexResult = externalIncrementalLexResult(
       this.metadata,
       this.#snapshot,
@@ -2784,10 +2811,6 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       );
       parserWork = validation.work;
       if (this.goal === "parse") {
-        const firstEdit = parsedEdits[0];
-        if (firstEdit === undefined) {
-          throw new Error("Incremental parse update has no first edit.");
-        }
         const parsed = this.#parseCurrentRecords(firstEdit.start);
         this.#parseResult = externalIncrementalParseResult(
           this.#snapshot,
