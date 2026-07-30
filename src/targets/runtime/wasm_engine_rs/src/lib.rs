@@ -595,6 +595,10 @@ fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut R
         index += decoded.width;
         state = target;
         if index > memo_floor && memo_is_set(cursor.memo, cursor.memo_words, index, state) {
+            // The memo bit summarizes a failed scan over an unknown-length
+            // suffix. Incremental callers need a conservative dependency
+            // bound for this record, so retain the whole remaining source.
+            dependency_end = len;
             break;
         }
         let accept = selected_global_spec_tracked(src, len, index, state, &mut dependency_end);
