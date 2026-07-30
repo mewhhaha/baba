@@ -1218,6 +1218,10 @@ Deno.test("Wasm documents preserve an earlier diagnostic when a later edit chang
       JSON.stringify(fresh.diagnostics),
     );
     assertEquals(update.parser?.createdCheckpoints, 0);
+    assert(
+      update.parser !== undefined && update.parser.reusedCheckpoints > 0,
+      "Expected the unchanged parser prefix checkpoints to be reused.",
+    );
 
     document.dispose();
     parser.dispose();

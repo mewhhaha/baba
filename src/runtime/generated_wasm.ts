@@ -2203,8 +2203,8 @@ function externalRunIncrementalValidation(
               ),
               parserActions,
               reuseChecks,
-              reusedCheckpoints: previous.checkpoints.length -
-                oldTokenIndex - 1,
+              reusedCheckpoints: reparseTokenStart +
+                previous.checkpoints.length - oldTokenIndex - 1,
               createdCheckpoints: tokenIndex - reparseTokenStart,
             },
           };
@@ -2436,7 +2436,7 @@ function externalRunIncrementalValidation(
           ),
           parserActions,
           reuseChecks,
-          reusedCheckpoints: 0,
+          reusedCheckpoints: reparseTokenStart,
           createdCheckpoints: tokenIndex - reparseTokenStart,
         },
       };
@@ -2510,7 +2510,7 @@ function externalFailedValidationRun(
       reparsedRanges: externalNonEmptyRanges(reparsedStart, reparsedEnd),
       parserActions,
       reuseChecks,
-      reusedCheckpoints: 0,
+      reusedCheckpoints: reparseTokenStart,
       createdCheckpoints,
     },
   };
