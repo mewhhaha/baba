@@ -53,9 +53,9 @@ The most relevant runtime benchmark fields are:
 - `hot.lex`, `hot.validate`, and `hot.parse`, each with p25 and median;
 - `hot.validateEarlyError` and `hot.validateLateError`;
 - `hot.incrementalValidate` and `hot.incrementalWork`, covering a middle
-  one-code-unit replacement with the same text. This isolates best-case indexing
-  and reuse overhead, with exact scanned-code-unit, parser-action, token-reuse,
-  and parser-checkpoint-reuse counts;
+  whitespace insertion and removal. This measures real source updates while
+  retaining a stable valid parse, with exact scanned-code-unit, parser-action,
+  token-reuse, and parser-checkpoint-reuse counts;
 - `memoryPages.highWater`;
 - `compileModuleMs`;
 - `createParserMs`;

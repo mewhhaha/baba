@@ -1329,6 +1329,9 @@ Deno.test("Wasm documents preserve parity across compound edit shapes", async ()
     ]);
     assertIncrementalDocumentParity(parser, document);
 
+    const unrelatedParse = parser.parse("let detached = 5;");
+    assertEquals(unrelatedParse.ok, true);
+
     const beforeBoundaryInsertions = document.snapshot.text();
     document.applyEdits([
       { start: 0, oldEnd: 0, newText: "let zero = 0;\n" },

@@ -373,6 +373,7 @@ interface RuntimeParserLike {
 }
 
 interface RuntimeIncrementalDocumentLike {
+  validate(): RuntimeParseLike;
   applyEdits(
     edits: readonly {
       readonly start: number;
@@ -504,15 +505,41 @@ function benchmarkIncrementalValidation(
 } {
   const document = parser.createDocument(source, { goal: "validate" });
   const offset = Math.floor(source.length / 2);
-  const replacement = source.slice(offset, offset + 1);
-  const edit = [{ start: offset, oldEnd: offset + 1, newText: replacement }];
+  let inserted = false;
+  const applyEdit = () => {
+    let edit: readonly {
+      readonly start: number;
+      readonly oldEnd: number;
+      readonly newText: string;
+    }[];
+    if (inserted) {
+      edit = [{ start: offset, oldEnd: offset + 1, newText: "" }];
+    } else {
+      edit = [{ start: offset, oldEnd: offset, newText: " " }];
+    }
+    const result = document.applyEdits(edit);
+    inserted = !inserted;
+    return result;
+  };
+  applyEdit();
+  if (document.validate().ok !== true) {
+    throw new Error(
+      "Runtime incremental benchmark insertion produced an invalid document.",
+    );
+  }
+  applyEdit();
+  if (document.validate().ok !== true) {
+    throw new Error(
+      "Runtime incremental benchmark removal produced an invalid document.",
+    );
+  }
   for (let warmup = 0; warmup < hotWarmupCount; warmup++) {
-    document.applyEdits(edit);
+    applyEdit();
   }
   const samples: number[] = [];
   let work: TargetTiming["hot"]["incrementalWork"] | undefined;
   for (let sample = 0; sample < hotSampleCount; sample++) {
-    const measured = time(() => document.applyEdits(edit));
+    const measured = time(applyEdit);
     samples.push(measured.ms);
     work = {
       scannedCodeUnits: measured.value.lexer.scannedCodeUnits,
@@ -764,7 +791,7 @@ function renderTextReport(report: RuntimeBenchReport): string {
         `    validation errors: early ${
           formatDistribution(wasm.hot.validateEarlyError)
         }, late ${formatDistribution(wasm.hot.validateLateError)}`,
-        `    incremental same-text validate: ${
+        `    incremental changed-text validate: ${
           formatDistribution(wasm.hot.incrementalValidate)
         }, scanned ${wasm.hot.incrementalWork.scannedCodeUnits} code units, ${wasm.hot.incrementalWork.parserActions} parser actions, reused ${wasm.hot.incrementalWork.reusedTokens} tokens / ${wasm.hot.incrementalWork.reusedCheckpoints} parser checkpoints`,
         `    memory pages: create ${wasm.memoryPages.afterCreate}, lex ${wasm.memoryPages.afterLex}, validate ${wasm.memoryPages.afterValidate}, parse/high-water ${wasm.memoryPages.highWater}`,

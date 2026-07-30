@@ -523,6 +523,11 @@ interface ExternalWasmSourceCache {
   source: string | undefined;
 }
 
+interface ExternalWasmSourceUpdate {
+  readonly previousSource: string;
+  readonly edits: readonly TextEdit[];
+}
+
 export const wasmTargetKind = WASM_TARGET_KIND;
 export const wasmAbiVersion = WASM_ABI_VERSION;
 export const wasmSemanticsVersion = RUNTIME_IMPLEMENTATION_METADATA.version;
@@ -1757,12 +1762,13 @@ function externalIncrementalRelex(
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
   previous: ExternalIncrementalLexState,
-  oldSourceLength: number,
+  previousSource: string,
   source: string,
   edits: readonly TextEdit[],
   searchFloorOffset: number,
   searchFloorToken: number,
 ): ExternalIncrementalRelexResult {
+  const oldSourceLength = previousSource.length;
   let earliestToken = previous.count;
   let firstTokenToCheck = 0;
   const firstEdit = edits[0];
@@ -1846,6 +1852,10 @@ function externalIncrementalRelex(
   let createdCount = 0;
   let cursor = relexStart;
   let oldSuffixTokenStart = previous.count;
+  let sourceUpdate: ExternalWasmSourceUpdate | undefined = {
+    previousSource,
+    edits,
+  };
   while (cursor < source.length) {
     let minimumEnd = newSuffixStart;
     if (minimumEnd <= cursor) {
@@ -1858,10 +1868,12 @@ function externalIncrementalRelex(
       wasm,
       planByteLength,
       sourceCache,
+      sourceUpdate,
       source,
       cursor,
       minimumEnd,
     );
+    sourceUpdate = undefined;
     if (lexed.count === 0) {
       cursor = source.length;
     } else {
@@ -2713,6 +2725,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       wasm,
       planByteLength,
       sourceCache,
+      undefined,
       source,
       0,
       source.length,
@@ -2788,7 +2801,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       this.planByteLength,
       this.sourceCache,
       previousLexState,
-      previousSnapshot.length,
+      this.#source,
       source,
       parsedEdits,
       this.#lexSearchFloorOffset,
@@ -3323,6 +3336,7 @@ function lexExternalIncrementalRecords(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
+  sourceUpdate: ExternalWasmSourceUpdate | undefined,
   source: string,
   start: number,
   minimumEnd: number,
@@ -3353,6 +3367,7 @@ function lexExternalIncrementalRecords(
     sourcePtr,
     sourceCache,
     source,
+    sourceUpdate,
   );
   let count = wasm.lex_incremental(
     sourcePtr,
@@ -5033,12 +5048,39 @@ function writeExternalWasmSource(
   sourcePtr: number,
   cache: ExternalWasmSourceCache,
   source: string,
+  update?: ExternalWasmSourceUpdate,
 ): DataView {
   const view = new DataView(memory.buffer);
   if (cache.source === source) {
     return view;
   }
-  for (let index = 0; index < source.length; index++) {
+  if (update === undefined || cache.source !== update.previousSource) {
+    for (let index = 0; index < source.length; index++) {
+      view.setUint16(
+        sourcePtr + index * WASM_UTF16_UNIT_BYTES,
+        source.charCodeAt(index),
+        true,
+      );
+    }
+    cache.source = source;
+    return view;
+  }
+  const firstEdit = update.edits[0];
+  const finalEdit = update.edits[update.edits.length - 1];
+  if (firstEdit === undefined || finalEdit === undefined) {
+    throw new Error("Incremental Wasm source update has no edits.");
+  }
+  const oldSuffixStart = finalEdit.oldEnd;
+  const newSuffixStart = oldSuffixStart +
+    source.length -
+    update.previousSource.length;
+  const bytes = new Uint8Array(memory.buffer);
+  bytes.copyWithin(
+    sourcePtr + newSuffixStart * WASM_UTF16_UNIT_BYTES,
+    sourcePtr + oldSuffixStart * WASM_UTF16_UNIT_BYTES,
+    sourcePtr + update.previousSource.length * WASM_UTF16_UNIT_BYTES,
+  );
+  for (let index = firstEdit.start; index < newSuffixStart; index++) {
     view.setUint16(
       sourcePtr + index * WASM_UTF16_UNIT_BYTES,
       source.charCodeAt(index),
