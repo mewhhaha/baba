@@ -75,10 +75,7 @@ export function buildDfa(
   const stateByKey = new Map<string, number>();
   const queue: number[][] = [];
 
-  const addState = (nfaStates: readonly number[]): number => {
-    const normalized = [...new Set(nfaStates)].sort((left, right) =>
-      left - right
-    );
+  const addState = (normalized: number[]): number => {
     const key = normalized.join(",");
     const existing = stateByKey.get(key);
     if (existing !== undefined) return existing;
@@ -445,7 +442,7 @@ function move(
       }
     }
   }
-  return [...result].sort((left, right) => left - right);
+  return [...result];
 }
 
 function collectAlphabetSegments(nfa: Nfa): CharRange[] {
