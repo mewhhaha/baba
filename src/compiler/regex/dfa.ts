@@ -143,6 +143,9 @@ export function minimizeDfa(dfa: Dfa): Dfa {
   }
 
   const representatives = alphabetRepresentatives(dfa.alphabet);
+  const transitionTargetsByState = dfa.states.map((state) =>
+    representatives.map((codePoint) => transitionTargetAt(state, codePoint))
+  );
   let partitionByState = partitionStates(
     dfa.states,
     (state) => acceptingSignature(state),
@@ -151,8 +154,7 @@ export function minimizeDfa(dfa: Dfa): Dfa {
   while (true) {
     const refined = partitionStates(dfa.states, (state) => {
       const targets: number[] = [];
-      for (const codePoint of representatives) {
-        const target = transitionTargetAt(state, codePoint);
+      for (const target of transitionTargetsByState[state.id]) {
         if (target < 0) {
           targets.push(-1);
           continue;
