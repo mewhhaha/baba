@@ -5070,6 +5070,27 @@ function writeExternalWasmSource(
   if (firstEdit === undefined || finalEdit === undefined) {
     throw new Error("Incremental Wasm source update has no edits.");
   }
+  let preservesLength = true;
+  for (const edit of update.edits) {
+    if (edit.newText.length !== edit.oldEnd - edit.start) {
+      preservesLength = false;
+      break;
+    }
+  }
+  if (preservesLength) {
+    for (const edit of update.edits) {
+      for (let index = 0; index < edit.newText.length; index++) {
+        view.setUint16(
+          sourcePtr +
+            (edit.start + index) * WASM_UTF16_UNIT_BYTES,
+          edit.newText.charCodeAt(index),
+          true,
+        );
+      }
+    }
+    cache.source = source;
+    return view;
+  }
   const oldSuffixStart = finalEdit.oldEnd;
   const newSuffixStart = oldSuffixStart +
     source.length -
