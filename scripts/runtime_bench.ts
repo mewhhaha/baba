@@ -9,11 +9,14 @@ import {
 import { inspectCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
 
 export interface RuntimeBenchReport {
+  readonly format: "baba-runtime-benchmark";
+  readonly version: 2;
   readonly generatedAt: string;
   readonly engine: {
     readonly deno: string;
     readonly v8: string;
     readonly wasmCorePath: string | null;
+    readonly sharedRuntimeImportMs: number;
   };
   readonly fixtures: readonly FixtureReport[];
   readonly budget?: RuntimeBudgetResult;
@@ -182,17 +185,23 @@ export async function buildRuntimeBenchReport(
     ? options.fixtureNames
     : await discoverFixtures(fixturesRoot);
   const fixtures: FixtureReport[] = [];
+  const sharedRuntimeImport = await timeAsync(() =>
+    import("@mewhhaha/baba/runtime/generated-wasm")
+  );
   for (const name of fixtureNames) {
     fixtures.push(
       await benchFixture(fixturesRoot, name, options.wasmCorePath),
     );
   }
   return {
+    format: "baba-runtime-benchmark",
+    version: 2,
     generatedAt: new Date().toISOString(),
     engine: {
       deno: Deno.version.deno,
       v8: Deno.version.v8,
       wasmCorePath: optionalPath(options.wasmCorePath),
+      sharedRuntimeImportMs: sharedRuntimeImport.ms,
     },
     fixtures,
   };
@@ -204,29 +213,31 @@ async function benchFixture(
   wasmCorePath: string | undefined,
 ): Promise<FixtureReport> {
   const fixturePath = `${fixturesRoot}/${name}`;
-  const grammarSource = await Deno.readTextFile(`${fixturePath}/grammar.baba`);
-  const metadata = await readOptionalMetadata(`${fixturePath}/baba.json`);
-  const smallInput = await Deno.readTextFile(`${fixturePath}/small.input`);
-  const mediumInput = await Deno.readTextFile(`${fixturePath}/medium.input`);
-  const largeInput = await Deno.readTextFile(`${fixturePath}/large.input`);
+  const [grammarSource, metadata, smallInput, mediumInput, largeInput] =
+    await Promise.all([
+      Deno.readTextFile(`${fixturePath}/grammar.baba`),
+      readOptionalMetadata(`${fixturePath}/baba.json`),
+      Deno.readTextFile(`${fixturePath}/small.input`),
+      Deno.readTextFile(`${fixturePath}/medium.input`),
+      Deno.readTextFile(`${fixturePath}/large.input`),
+    ]);
 
-  const allCompile = time(() =>
+  const compiled = time(() =>
     compile(grammarSource, {
       name,
       metadata,
       targets: ["wasm"],
     })
   );
-  throwOnDiagnostics(name, allCompile.value.diagnostics);
-  const bundle = allCompile.value.bundle;
-  if (!bundle) throw new Error(`Fixture ${name} did not produce a bundle.`);
+  throwOnDiagnostics(name, compiled.value.diagnostics);
+  const bundle = requireBundle(name, compiled.value.bundle);
 
   const planStats = planStatsFromBundle(bundle);
   const artifactSizes = artifactSizesFromBundle(bundle);
   const wasm = await benchWasmTarget(
     name,
-    grammarSource,
-    metadata,
+    bundle,
+    compiled.ms,
     smallInput,
     mediumInput,
     largeInput,
@@ -246,22 +257,13 @@ async function benchFixture(
 
 async function benchWasmTarget(
   name: string,
-  grammarSource: string,
-  metadata: BabaMetadata | undefined,
+  bundle: GeneratedBundle,
+  compileGrammarMs: number,
   smallInput: string,
   mediumInput: string,
   largeInput: string,
   wasmCorePath: string | undefined,
 ): Promise<WasmTargetTiming> {
-  const compileResult = time(() =>
-    compile(grammarSource, {
-      name,
-      metadata,
-      targets: ["wasm"],
-    })
-  );
-  throwOnDiagnostics(name, compileResult.value.diagnostics);
-  const bundle = requireBundle(name, compileResult.value.bundle);
   const tempDir = await Deno.makeTempDir({
     prefix: "baba-runtime-bench-wasm-",
   });
@@ -278,9 +280,12 @@ async function benchWasmTarget(
     new WebAssembly.Module(
       arrayBufferFor(wasmBytes),
     )
-  ).ms;
+  );
   const create = time(() =>
-    imported.value.createParser({ bytes: wasmBytes, plan: planBytes })
+    imported.value.createParser({
+      module: compileModule.value,
+      plan: planBytes,
+    })
   );
   const parser = create.value as {
     lex(source: string): RuntimeLexTapeLike;
@@ -292,6 +297,7 @@ async function benchWasmTarget(
       source: string,
       options: { readonly goal: "validate" },
     ): RuntimeIncrementalDocumentLike;
+    dispose(): void;
   };
   const afterCreate = runtimeMemoryPages(parser);
   assertValidTimedInput(name, "small", parser, smallInput);
@@ -310,14 +316,14 @@ async function benchWasmTarget(
   assertValidTimedInput(name, "hot", parser, hotSource);
   const hot = benchmarkHotPaths(parser, hotSource);
   const afterParse = runtimeMemoryPages(parser);
-  return {
+  const timing: WasmTargetTiming = {
     generatedBytes: generatedBytes(bundle.files),
     wasmBytes: wasmBytes.byteLength,
-    compileGrammarMs: compileResult.ms,
+    compileGrammarMs,
     writeBundleMs: write.ms,
     importMs: imported.ms,
     createParserMs: create.ms,
-    compileModuleMs: compileModule,
+    compileModuleMs: compileModule.ms,
     instantiateMs: create.ms,
     cold: {
       lexSmallMs: coldLex.ms,
@@ -335,6 +341,9 @@ async function benchWasmTarget(
       highWater: Math.max(afterCreate, afterLex, afterValidate, afterParse),
     },
   };
+  parser.dispose();
+  await Deno.remove(tempDir, { recursive: true });
+  return timing;
 }
 
 interface RuntimeLexTapeLike {
@@ -707,7 +716,10 @@ function addRuntimeBudgetCheck(
 }
 
 function renderTextReport(report: RuntimeBenchReport): string {
-  const lines = ["Baba runtime benchmark"];
+  const lines = [
+    "Baba runtime benchmark",
+    `shared runtime import: ${formatMs(report.engine.sharedRuntimeImportMs)}`,
+  ];
   for (const fixture of report.fixtures) {
     lines.push(
       "",
@@ -729,14 +741,21 @@ function renderTextReport(report: RuntimeBenchReport): string {
     const wasm = fixture.targets.wasm;
     if (wasm) {
       lines.push(
+        `  compiler: ${formatMs(wasm.compileGrammarMs)}, bundle write ${
+          formatMs(wasm.writeBundleMs)
+        }`,
         `  wasm: ${formatBytes(wasm.generatedBytes)} generated, ${
           formatBytes(wasm.wasmBytes)
-        } wasm, import ${formatMs(wasm.importMs)}, instantiate ${
-          formatMs(wasm.instantiateMs)
+        } wasm, module compile ${
+          formatOptionalMs(wasm.compileModuleMs)
+        }, import ${formatMs(wasm.importMs)}, parser create ${
+          formatMs(wasm.createParserMs)
         }`,
         `    cold: lex ${formatMs(wasm.cold.lexSmallMs)}, validate ${
           formatMs(wasm.cold.validateSmallMs)
-        }, parse ${formatMs(wasm.cold.parseSmallMs)}`,
+        }, parse small ${formatMs(wasm.cold.parseSmallMs)}, medium ${
+          formatMs(wasm.cold.parseMediumMs)
+        }, large ${formatMs(wasm.cold.parseLargeMs)}`,
         `    hot ${formatBytes(wasm.hot.sourceCodeUnits * 2)}: lex ${
           formatDistribution(wasm.hot.lex)
         }, validate ${formatDistribution(wasm.hot.validate)}, parse ${
@@ -745,7 +764,7 @@ function renderTextReport(report: RuntimeBenchReport): string {
         `    validation errors: early ${
           formatDistribution(wasm.hot.validateEarlyError)
         }, late ${formatDistribution(wasm.hot.validateLateError)}`,
-        `    incremental validate: ${
+        `    incremental same-text validate: ${
           formatDistribution(wasm.hot.incrementalValidate)
         }, scanned ${wasm.hot.incrementalWork.scannedCodeUnits} code units, ${wasm.hot.incrementalWork.parserActions} parser actions, reused ${wasm.hot.incrementalWork.reusedTokens} tokens / ${wasm.hot.incrementalWork.reusedCheckpoints} parser checkpoints`,
         `    memory pages: create ${wasm.memoryPages.afterCreate}, lex ${wasm.memoryPages.afterLex}, validate ${wasm.memoryPages.afterValidate}, parse/high-water ${wasm.memoryPages.highWater}`,
@@ -769,7 +788,28 @@ function renderComparison(
   before: RuntimeBenchReport,
   after: RuntimeBenchReport,
 ): string {
+  if (
+    before.format !== "baba-runtime-benchmark" ||
+    after.format !== "baba-runtime-benchmark" ||
+    before.version !== after.version
+  ) {
+    throw new Error(
+      `Runtime benchmark comparison requires matching report versions, received '${
+        String(before.format)
+      }' v${String(before.version)} and '${String(after.format)}' v${
+        String(after.version)
+      }.`,
+    );
+  }
   const lines: string[] = [];
+  pushDelta(
+    lines,
+    "shared runtime",
+    "import",
+    before.engine.sharedRuntimeImportMs,
+    after.engine.sharedRuntimeImportMs,
+    formatMs,
+  );
   const beforeByName = new Map(before.fixtures.map((fixture) => [
     fixture.name,
     fixture,
@@ -812,9 +852,41 @@ function renderComparison(
     pushDelta(
       lines,
       current.name,
-      "instantiate",
-      previous.targets.wasm?.instantiateMs,
-      current.targets.wasm?.instantiateMs,
+      "compiler",
+      previous.targets.wasm?.compileGrammarMs,
+      current.targets.wasm?.compileGrammarMs,
+      formatMs,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "bundle write",
+      previous.targets.wasm?.writeBundleMs,
+      current.targets.wasm?.writeBundleMs,
+      formatMs,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "module compile",
+      optionalNumber(previous.targets.wasm?.compileModuleMs),
+      optionalNumber(current.targets.wasm?.compileModuleMs),
+      formatMs,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "module import",
+      previous.targets.wasm?.importMs,
+      current.targets.wasm?.importMs,
+      formatMs,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "parser create",
+      previous.targets.wasm?.createParserMs,
+      current.targets.wasm?.createParserMs,
       formatMs,
     );
     pushDelta(
@@ -840,6 +912,22 @@ function renderComparison(
       previous.targets.wasm?.hot.parse.p25Ms,
       current.targets.wasm?.hot.parse.p25Ms,
       formatMs,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "incremental validate p25",
+      previous.targets.wasm?.hot.incrementalValidate.p25Ms,
+      current.targets.wasm?.hot.incrementalValidate.p25Ms,
+      formatMs,
+    );
+    pushDelta(
+      lines,
+      current.name,
+      "memory high-water pages",
+      previous.targets.wasm?.memoryPages.highWater,
+      current.targets.wasm?.memoryPages.highWater,
+      formatNumber,
     );
   }
   return lines.length ? lines.join("\n") : "No comparable fixtures found.";
@@ -1042,6 +1130,20 @@ function formatBytes(bytes: number): string {
 
 function formatMs(ms: number): string {
   return `${ms.toFixed(2)} ms`;
+}
+
+function formatOptionalMs(ms: number | null): string {
+  if (ms === null) {
+    return "unavailable";
+  }
+  return formatMs(ms);
+}
+
+function optionalNumber(value: number | null | undefined): number | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  return value;
 }
 
 function formatDistribution(distribution: SampleDistribution): string {

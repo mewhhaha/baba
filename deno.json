@@ -1,6 +1,6 @@
 {
   "name": "@mewhhaha/baba",
-  "version": "7.7.0",
+  "version": "7.8.0",
   "license": "MIT",
   "exports": {
     ".": "./src/mod.ts",
@@ -112,6 +112,7 @@
     "test:wasm-scaffold": "deno test --allow-read --allow-write --allow-run tests/wasm_frontend_scaffold_test.ts",
     "test:fuzz": "deno run --allow-read --allow-write scripts/fuzz.ts",
     "check": "deno check src scripts tests",
+    "bench:compiler": "deno run --allow-read --allow-write scripts/compiler_bench.ts",
     "bench:runtime": "deno run --allow-read --allow-write scripts/runtime_bench.ts --budget size-budgets.json",
     "bench:webgpu-lexer": "deno run --unstable-webgpu --allow-read --allow-write scripts/webgpu_lexer_bench.ts",
     "bench:webgpu-frontend": "deno run --unstable-webgpu --allow-read scripts/webgpu_frontend_bench.ts",

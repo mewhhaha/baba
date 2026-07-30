@@ -33,6 +33,7 @@ import type {
 import type { LrAction, LrPlanningStats } from "./runtime_plan/lr1.ts";
 import {
   canonicalValue,
+  fnv1a64Bytes,
   fnv1a64String,
   hasId,
   integerProperty,
@@ -925,12 +926,7 @@ function hashPlan(plan: GrammarPortablePlan): string {
   const bytes = new TextEncoder().encode(serializeGrammarPortablePlanJson(
     plan,
   ));
-  let hash = 0xcbf29ce484222325n;
-  for (const byte of bytes) {
-    hash ^= BigInt(byte);
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
+  return `fnv1a64:${fnv1a64Bytes(bytes)}`;
 }
 
 function validateLexer(

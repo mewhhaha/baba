@@ -9,6 +9,7 @@ deno task check
 deno task test
 deno task test:fuzz -- --seed 12345 --max-time-ms 30000 --artifacts tmp/fuzz-artifacts
 for d in examples/brainfuck examples/feature-tour examples/funcfuck examples/thunkwasm; do (cd "$d" && deno task test); done
+deno task bench:compiler --json compiler-bench.json
 deno task bench:runtime --json runtime-bench.json
 deno task size:check
 deno task inspect-plan generated/wasm/parser.plan

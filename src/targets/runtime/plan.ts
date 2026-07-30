@@ -88,6 +88,27 @@ export interface RuntimeParserTargetConfig {
   label: string;
 }
 
+export type RuntimePlanningStage =
+  | "regex-automata"
+  | "literal-overlap"
+  | "combined-lexer-dfa"
+  | "bnf-lowering"
+  | "lr-table"
+  | "token-overlap"
+  | "token-shadowing"
+  | "unused-skips"
+  | "portable-encoding"
+  | "portable-metadata";
+
+export interface RuntimePlanningMeasurement {
+  readonly stage: RuntimePlanningStage;
+  readonly durationMs: number;
+}
+
+export type RuntimePlanningObserver = (
+  measurement: RuntimePlanningMeasurement,
+) => void;
+
 export const PORTABLE_RUNTIME_TARGET_CONFIG: RuntimeParserTargetConfig = {
   backend: "portable",
   codePrefix: "PORTABLE",
@@ -130,6 +151,7 @@ export function planPortableRuntime(
   analyzed: AnalyzedGrammar,
   options: RuntimeParserPlanningOptions = {},
   metadata: BabaMetadata = {},
+  observe?: RuntimePlanningObserver,
 ): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } {
   portableRuntimePlanInvocationCountForTesting++;
   return planRuntimeParserTarget(
@@ -137,6 +159,7 @@ export function planPortableRuntime(
     options,
     metadata,
     PORTABLE_RUNTIME_TARGET_CONFIG,
+    observe,
   );
 }
 
@@ -153,13 +176,25 @@ export function planRuntimeParserTarget(
   options: RuntimeParserPlanningOptions = {},
   metadata: BabaMetadata = {},
   config: RuntimeParserTargetConfig,
+  observe?: RuntimePlanningObserver,
 ): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } {
   const optionDiagnostics = runtimeOptionsDiagnostics(options, config);
   if (hasErrors(optionDiagnostics)) {
     return { diagnostics: capDiagnostics(optionDiagnostics, options, config) };
   }
   const regexLimits = runtimeRegexLimits(options);
+  let stageStarted = 0;
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
   const regexAnalysis = analyzeRuntimeRegexes(analyzed, regexLimits, config);
+  if (observe !== undefined) {
+    observe({
+      stage: "regex-automata",
+      durationMs: performance.now() - stageStarted,
+    });
+    stageStarted = performance.now();
+  }
   const literalOverlapAnalysis = runtimeLiteralOverlapDiagnostics(
     analyzed,
     regexAnalysis.dfaByTokenId,
@@ -167,6 +202,12 @@ export function planRuntimeParserTarget(
     options,
     config,
   );
+  if (observe !== undefined) {
+    observe({
+      stage: "literal-overlap",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
   const diagnostics: Diagnostic[] = [
     ...optionDiagnostics,
     ...regexAnalysis.diagnostics,
@@ -177,6 +218,9 @@ export function planRuntimeParserTarget(
     return { diagnostics: capDiagnostics(diagnostics, options, config) };
   }
 
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
   const dfaAnalysis = runtimeLexerDfaDiagnostics(
     analyzed,
     regexAnalysis.astByTokenId,
@@ -184,12 +228,27 @@ export function planRuntimeParserTarget(
     regexLimits,
     config,
   );
+  if (observe !== undefined) {
+    observe({
+      stage: "combined-lexer-dfa",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
   diagnostics.push(...dfaAnalysis.diagnostics);
   if (hasErrors(diagnostics) || !dfaAnalysis.dfa) {
     return { diagnostics: capDiagnostics(diagnostics, options, config) };
   }
 
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
   const bnf = lowerToBnf(analyzed);
+  if (observe !== undefined) {
+    observe({
+      stage: "bnf-lowering",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
   diagnostics.push(
     ...bnf.diagnostics.map((diagnostic) =>
       retargetRuntimeDiagnostic(diagnostic, config)
@@ -199,6 +258,9 @@ export function planRuntimeParserTarget(
     return { diagnostics: capDiagnostics(diagnostics, options, config) };
   }
 
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
   const lr = buildCanonicalLr1Table(bnf, {
     stateLimit: options.parserStateLimit ?? 20_000,
     itemLimit: options.parserItemLimit,
@@ -207,11 +269,20 @@ export function planRuntimeParserTarget(
     conflictGroups: metadata.parser?.conflicts,
     conflictResolutions: metadata.parser?.resolutions,
   });
+  if (observe !== undefined) {
+    observe({
+      stage: "lr-table",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
   diagnostics.push(
     ...lr.diagnostics.map((diagnostic) =>
       retargetRuntimeDiagnostic(diagnostic, config)
     ),
   );
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
   const tokenOverlapAnalysis = runtimeTokenOverlapDiagnostics(
     analyzed,
     regexAnalysis.dfaByTokenId,
@@ -221,7 +292,16 @@ export function planRuntimeParserTarget(
     bnf,
     lr,
   );
+  if (observe !== undefined) {
+    observe({
+      stage: "token-overlap",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
   diagnostics.push(...tokenOverlapAnalysis.diagnostics);
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
   const shadowingAnalysis = runtimeShadowedTokenDiagnostics(
     analyzed,
     regexAnalysis.dfaByTokenId,
@@ -230,7 +310,16 @@ export function planRuntimeParserTarget(
     bnf,
     lr,
   );
+  if (observe !== undefined) {
+    observe({
+      stage: "token-shadowing",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
   diagnostics.push(...shadowingAnalysis.diagnostics);
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
   const unusedSkipAnalysis = runtimeUnusedSkipDiagnostics(
     analyzed,
     regexAnalysis.dfaByTokenId,
@@ -238,11 +327,20 @@ export function planRuntimeParserTarget(
     config,
     bnf,
   );
+  if (observe !== undefined) {
+    observe({
+      stage: "unused-skips",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
   diagnostics.push(...unusedSkipAnalysis.diagnostics);
   if (hasErrors(diagnostics)) {
     return { diagnostics: capDiagnostics(diagnostics, options, config) };
   }
 
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
   const portable = createPortableParserPlan(
     analyzed,
     bnf,
@@ -250,6 +348,20 @@ export function planRuntimeParserTarget(
     dfaAnalysis.dfa,
     regexAnalysis.trailingContextByTokenId,
   );
+  if (observe !== undefined) {
+    observe({
+      stage: "portable-encoding",
+      durationMs: performance.now() - stageStarted,
+    });
+    stageStarted = performance.now();
+  }
+  const portableMetadata = portableParserPlanMetadata(portable);
+  if (observe !== undefined) {
+    observe({
+      stage: "portable-metadata",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
 
   const cappedDiagnostics = capDiagnostics(diagnostics, options, config);
   const diagnosticsSuppressed = diagnosticSuppressedCount(diagnostics, options);
@@ -259,7 +371,7 @@ export function planRuntimeParserTarget(
     lr,
     dfa: dfaAnalysis.dfa,
     portable,
-    portableMetadata: portableParserPlanMetadata(portable),
+    portableMetadata,
     analysisStats: {
       ...regexAnalysis.stats,
       ...dfaAnalysis.stats,

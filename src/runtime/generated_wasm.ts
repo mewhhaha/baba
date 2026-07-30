@@ -1813,24 +1813,6 @@ function externalIncrementalRelex(
   }
   const oldSuffixStart = finalEdit.oldEnd;
   const newSuffixStart = oldSuffixStart + lengthDelta;
-  const oldBoundaries = new Map<number, number>();
-  for (
-    let tokenIndex = earliestToken;
-    tokenIndex < previous.count;
-    tokenIndex++
-  ) {
-    const start = previous.records[
-      tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
-    ];
-    if (start === undefined) {
-      throw new Error(`Incremental token record ${tokenIndex} has no start.`);
-    }
-    if (start >= oldSuffixStart) {
-      oldBoundaries.set(start, tokenIndex);
-    }
-  }
-  oldBoundaries.set(oldSourceLength, previous.count);
-
   const createdParts: Int32Array[] = [];
   let createdCount = 0;
   let cursor = relexStart;
@@ -1869,7 +1851,11 @@ function externalIncrementalRelex(
       continue;
     }
     const mappedOldOffset = cursor - lengthDelta;
-    const suffixToken = oldBoundaries.get(mappedOldOffset);
+    const suffixToken = externalIncrementalTokenAtStart(
+      previous,
+      oldSourceLength,
+      mappedOldOffset,
+    );
     if (suffixToken !== undefined) {
       oldSuffixTokenStart = suffixToken;
       break;
@@ -1943,6 +1929,46 @@ function externalIncrementalRelex(
   };
 }
 
+function externalIncrementalTokenAtStart(
+  state: ExternalIncrementalLexState,
+  sourceLength: number,
+  start: number,
+): number | undefined {
+  if (start === sourceLength) {
+    return state.count;
+  }
+  // Incremental lexer records advance monotonically through the source.
+  let lower = 0;
+  let upper = state.count;
+  while (lower < upper) {
+    const middle = lower + Math.floor((upper - lower) / 2);
+    const tokenStart = state.records[
+      middle * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
+    ];
+    if (tokenStart === undefined) {
+      throw new Error(`Incremental token record ${middle} has no start.`);
+    }
+    if (tokenStart < start) {
+      lower = middle + 1;
+    } else {
+      upper = middle;
+    }
+  }
+  if (lower === state.count) {
+    return undefined;
+  }
+  const tokenStart = state.records[
+    lower * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
+  ];
+  if (tokenStart === undefined) {
+    throw new Error(`Incremental token record ${lower} has no start.`);
+  }
+  if (tokenStart !== start) {
+    return undefined;
+  }
+  return lower;
+}
+
 function externalIncrementalRawRecords(
   state: ExternalIncrementalLexState,
 ): Int32Array {
@@ -1967,9 +1993,8 @@ function externalIncrementalLexResult(
   preserveTrivia: boolean,
 ): IncrementalLexResult {
   const diagnostics: LexDiagnostic[] = [];
-  const keptRecordIndices = new Int32Array(state.count);
+  let keptRecordIndices: Int32Array | undefined;
   let keptCount = 0;
-  let droppedTrivia = false;
   for (let tokenIndex = 0; tokenIndex < state.count; tokenIndex++) {
     const base = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
     const specIndex = state.records[base];
@@ -1986,19 +2011,28 @@ function externalIncrementalLexResult(
         }.`,
         span: { start, end },
       });
-      keptRecordIndices[keptCount] = tokenIndex;
+      if (keptRecordIndices !== undefined) {
+        keptRecordIndices[keptCount] = tokenIndex;
+      }
       keptCount++;
       continue;
     }
     if (!preserveTrivia && metadata.specIsTrivia[specIndex] === 1) {
-      droppedTrivia = true;
+      if (keptRecordIndices === undefined) {
+        keptRecordIndices = new Int32Array(state.count);
+        for (let keptIndex = 0; keptIndex < keptCount; keptIndex++) {
+          keptRecordIndices[keptIndex] = keptIndex;
+        }
+      }
       continue;
     }
-    keptRecordIndices[keptCount] = tokenIndex;
+    if (keptRecordIndices !== undefined) {
+      keptRecordIndices[keptCount] = tokenIndex;
+    }
     keptCount++;
   }
   let indices: Int32Array | null = null;
-  if (droppedTrivia) {
+  if (keptRecordIndices !== undefined) {
     indices = keptRecordIndices;
   }
   return {

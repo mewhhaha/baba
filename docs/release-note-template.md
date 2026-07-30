@@ -19,6 +19,7 @@ const result = parser.parse(source);
 
 ## Performance Numbers
 
+- `deno task bench:compiler --json compiler-bench.json`
 - `deno task bench:runtime --json runtime-bench.json`
 
 ## Known Limitations

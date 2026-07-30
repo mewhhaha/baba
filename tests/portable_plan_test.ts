@@ -1,6 +1,10 @@
 import { parseGrammar } from "../src/api.ts";
 import { analyzeGrammarDocumentForWasm } from "../src/compiler/grammar_wasm_analysis.ts";
 import {
+  fnv1a64Bytes,
+  fnv1a64String,
+} from "../src/compiler/portable_plan_shared.ts";
+import {
   parsePortableParserPlanJson,
   type PortableParserPlan,
   portablePlanStatistics,
@@ -12,6 +16,56 @@ import {
 } from "../src/targets/runtime/portable_plan.ts";
 import { planPortableRuntime } from "../src/targets/runtime/plan.ts";
 import { assert, assertEquals, assertIncludes } from "./helpers.ts";
+
+Deno.test("portable plan FNV-1a hashes preserve the 64-bit contract", () => {
+  const encoder = new TextEncoder();
+  assertEquals(fnv1a64String(""), "cbf29ce484222325");
+  assertEquals(fnv1a64String("a"), "af63dc4c8601ec8c");
+  assertEquals(fnv1a64String("foobar"), "85944171f73967e8");
+  assertEquals(fnv1a64String("λ🙂"), "e930250cd5670685");
+  assertEquals(
+    fnv1a64Bytes(encoder.encode("λ🙂")),
+    "12ac1030ad9c0ee0",
+  );
+});
+
+Deno.test("runtime planning observer measures every explicit compiler stage", () => {
+  const grammar = parseGrammar(`
+    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+    skip WS = /[ \\t\\r\\n]+/ ;
+    module = IDENT ;
+  `);
+  const analyzed = analyzeGrammarDocumentForWasm(grammar, {
+    name: "measured_fixture",
+  });
+  assertEquals(analyzed.diagnostics.length, 0);
+  const stages: string[] = [];
+  const result = planPortableRuntime(
+    analyzed,
+    {},
+    {},
+    (measurement) => {
+      assert(measurement.durationMs >= 0);
+      stages.push(measurement.stage);
+    },
+  );
+  assertEquals(result.diagnostics.length, 0);
+  assertEquals(
+    stages.join(","),
+    [
+      "regex-automata",
+      "literal-overlap",
+      "combined-lexer-dfa",
+      "bnf-lowering",
+      "lr-table",
+      "token-overlap",
+      "token-shadowing",
+      "unused-skips",
+      "portable-encoding",
+      "portable-metadata",
+    ].join(","),
+  );
+});
 
 function portablePlanFor(source: string): PortableParserPlan {
   const grammar = parseGrammar(source);

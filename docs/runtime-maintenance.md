@@ -12,6 +12,7 @@ Keep runtime changes in the layer that owns the behavior:
   `src/targets/runtime/wasm_core_runtime.ts`, and the Rust engine under
   `src/targets/runtime/wasm_engine_rs`;
 - generated Wasm TypeScript loader API: `src/runtime/generated_wasm.ts`;
+- compiler-stage benchmarks: `scripts/compiler_bench.ts`;
 - size and cold-start benchmarks: `scripts/runtime_bench.ts`;
 - package and generated-output budgets: `size-budgets.json` and
   `scripts/size_report.ts`;
