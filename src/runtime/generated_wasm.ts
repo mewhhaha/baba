@@ -2154,8 +2154,8 @@ function externalRunIncrementalValidation(
   let stack = stackPool.root;
   let logicalActionCount = 0;
   let parserActions = 0;
-  const checkpoints: ExternalParserStackNode[] = [stack];
-  const actionCounts: number[] = [0];
+  let checkpoints: ExternalParserStackNode[] = [stack];
+  let actionCounts: number[] = [0];
   if (previous !== undefined && relexed !== undefined) {
     tokenIndex = Math.min(
       relexed.oldPrefixTokenCount,
@@ -2170,19 +2170,8 @@ function externalRunIncrementalValidation(
     }
     stack = previousStack;
     logicalActionCount = previousActionCount;
-    checkpoints.length = 0;
-    actionCounts.length = 0;
-    for (let index = 0; index <= tokenIndex; index++) {
-      const checkpoint = previous.checkpoints[index];
-      const actionCount = previous.actionCounts[index];
-      if (checkpoint === undefined || actionCount === undefined) {
-        throw new Error(
-          `Incremental validation prefix checkpoint ${index} is missing.`,
-        );
-      }
-      checkpoints.push(checkpoint);
-      actionCounts.push(actionCount);
-    }
+    checkpoints = previous.checkpoints.slice(0, tokenIndex + 1);
+    actionCounts = previous.actionCounts.slice(0, tokenIndex + 1);
   }
   const reparseTokenStart = tokenIndex;
 
@@ -2211,23 +2200,24 @@ function externalRunIncrementalValidation(
           (previous.totalActionCount - oldActionCount);
         if (projectedActionCount <= maxParserActions) {
           const actionDelta = logicalActionCount - oldActionCount;
-          for (
-            let suffixIndex = oldTokenIndex + 1;
-            suffixIndex < previous.checkpoints.length;
-            suffixIndex++
-          ) {
-            const suffixStack = previous.checkpoints[suffixIndex];
-            const suffixActionCount = previous.actionCounts[suffixIndex];
-            if (
-              suffixStack === undefined || suffixActionCount === undefined
-            ) {
-              throw new Error(
-                `Incremental validation suffix checkpoint ${suffixIndex} is missing.`,
-              );
+          checkpoints = checkpoints.concat(
+            previous.checkpoints.slice(oldTokenIndex + 1),
+          );
+          const suffixActionCounts = previous.actionCounts.slice(
+            oldTokenIndex + 1,
+          );
+          if (actionDelta !== 0) {
+            for (let index = 0; index < suffixActionCounts.length; index++) {
+              const previousCount = suffixActionCounts[index];
+              if (previousCount === undefined) {
+                throw new Error(
+                  `Incremental validation suffix action count ${index} is missing.`,
+                );
+              }
+              suffixActionCounts[index] = previousCount + actionDelta;
             }
-            checkpoints.push(suffixStack);
-            actionCounts.push(suffixActionCount + actionDelta);
           }
+          actionCounts = actionCounts.concat(suffixActionCounts);
           return {
             state: {
               checkpoints,
