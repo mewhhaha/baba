@@ -519,6 +519,10 @@ interface ExternalParserWasmExports {
   result_lifetime_model(): number;
 }
 
+interface ExternalWasmSourceCache {
+  source: string | undefined;
+}
+
 export const wasmTargetKind = WASM_TARGET_KIND;
 export const wasmAbiVersion = WASM_ABI_VERSION;
 export const wasmSemanticsVersion = RUNTIME_IMPLEMENTATION_METADATA.version;
@@ -654,6 +658,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
   #disposed = false;
   readonly #documents = new Set<ExternalIncrementalDocument<Root>>();
   #metadata: ExternalRuntimeMetadata | undefined;
+  readonly #sourceCache: ExternalWasmSourceCache = { source: undefined };
 
   readonly parse: ParserInstance<Root>["parse"];
 
@@ -669,6 +674,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
         this.#loadMetadata(),
         this.wasm,
         this.inputBase,
+        this.#sourceCache,
         source,
         options,
       );
@@ -681,6 +687,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       this.#loadMetadata(),
       this.wasm,
       this.inputBase,
+      this.#sourceCache,
       source,
       options,
     );
@@ -692,6 +699,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       this.#loadMetadata(),
       this.wasm,
       this.inputBase,
+      this.#sourceCache,
       source,
       options,
     );
@@ -724,6 +732,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       this.#loadMetadata(),
       this.wasm,
       this.inputBase,
+      this.#sourceCache,
       source,
       options,
       () => this.#documents.delete(document),
@@ -817,6 +826,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       metadata,
       this.wasm,
       this.inputBase,
+      this.#sourceCache,
       source,
       options,
       records.slice(),
@@ -825,6 +835,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
 
   reset(): void {
     this.#assertLive();
+    this.#sourceCache.source = undefined;
     this.wasm.reset();
   }
 
@@ -1744,6 +1755,7 @@ interface ExternalIncrementalRelexResult {
 function externalIncrementalRelex(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   previous: ExternalIncrementalLexState,
   oldSourceLength: number,
   source: string,
@@ -1845,6 +1857,7 @@ function externalIncrementalRelex(
     const lexed = lexExternalIncrementalRecords(
       wasm,
       planByteLength,
+      sourceCache,
       source,
       cursor,
       minimumEnd,
@@ -2629,6 +2642,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     private readonly metadata: ExternalRuntimeMetadata,
     private readonly wasm: ExternalParserWasmExports,
     private readonly planByteLength: number,
+    private readonly sourceCache: ExternalWasmSourceCache,
     source: string,
     options:
       | LexDocumentOptions
@@ -2698,6 +2712,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     this.#lexState = lexExternalIncrementalRecords(
       wasm,
       planByteLength,
+      sourceCache,
       source,
       0,
       source.length,
@@ -2771,6 +2786,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     const relexed = externalIncrementalRelex(
       this.wasm,
       this.planByteLength,
+      this.sourceCache,
       previousLexState,
       previousSnapshot.length,
       source,
@@ -2949,6 +2965,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       this.metadata,
       this.wasm,
       this.planByteLength,
+      this.sourceCache,
       this.#source,
       {
         preserveTrivia: this.#preserveTrivia,
@@ -3076,6 +3093,7 @@ function lexExternalWasmTape(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
   options: LexOptions = {},
 ): LexTapeResult {
@@ -3090,7 +3108,7 @@ function lexExternalWasmTape(
     }
     preserveTrivia = options.preserveTrivia;
   }
-  const lexed = lexExternalRecords(wasm, planByteLength, source);
+  const lexed = lexExternalRecords(wasm, planByteLength, sourceCache, source);
   if (!lexed.ok) {
     // The token arena for this source cannot fit in the wasm32 address space.
     // `parse` and `validate` report that as a diagnostic, so `lex` does too
@@ -3197,6 +3215,7 @@ function parseExternalWasm<Root extends RuleCursor>(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
   options?: ParseOptions,
 ): CursorParseResult<Root> {
@@ -3204,6 +3223,7 @@ function parseExternalWasm<Root extends RuleCursor>(
     metadata,
     wasm,
     planByteLength,
+    sourceCache,
     source,
     options,
   ) as CursorParseResult<Root>;
@@ -3213,6 +3233,7 @@ function parseExternalCursorDefault(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
   options: ParseOptions | undefined,
 ): CursorParseResult<RuleCursor> {
@@ -3220,6 +3241,7 @@ function parseExternalCursorDefault(
     metadata,
     wasm,
     planByteLength,
+    sourceCache,
     source,
     options,
     undefined,
@@ -3229,6 +3251,7 @@ function parseExternalCursorDefault(
 function lexExternalRecords(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
 ): ExternalLexRecordTape {
   let maxRecords = source.length;
@@ -3246,14 +3269,12 @@ function lexExternalRecords(
     return { ok: false, requiredBytes };
   }
   ensureExternalWasmCapacity(wasm.memory, requiredBytes);
-  let view = new DataView(wasm.memory.buffer);
-  for (let index = 0; index < source.length; index++) {
-    view.setUint16(
-      sourcePtr + index * WASM_UTF16_UNIT_BYTES,
-      source.charCodeAt(index),
-      true,
-    );
-  }
+  let view = writeExternalWasmSource(
+    wasm.memory,
+    sourcePtr,
+    sourceCache,
+    source,
+  );
   let count = wasm.lex_all(
     sourcePtr,
     source.length,
@@ -3301,6 +3322,7 @@ function lexExternalRecords(
 function lexExternalIncrementalRecords(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
   start: number,
   minimumEnd: number,
@@ -3326,14 +3348,12 @@ function lexExternalIncrementalRecords(
     );
   }
   ensureExternalWasmCapacity(wasm.memory, requiredBytes);
-  let view = new DataView(wasm.memory.buffer);
-  for (let index = 0; index < source.length; index++) {
-    view.setUint16(
-      sourcePtr + index * WASM_UTF16_UNIT_BYTES,
-      source.charCodeAt(index),
-      true,
-    );
-  }
+  let view = writeExternalWasmSource(
+    wasm.memory,
+    sourcePtr,
+    sourceCache,
+    source,
+  );
   let count = wasm.lex_incremental(
     sourcePtr,
     source.length,
@@ -3388,6 +3408,7 @@ function validateExternalWasm(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
   options: ParseOptions | undefined,
 ): ValidateParseResult {
@@ -3420,14 +3441,12 @@ function validateExternalWasm(
     };
   }
   ensureExternalWasmCapacity(wasm.memory, requiredBytes);
-  let view = new DataView(wasm.memory.buffer);
-  for (let index = 0; index < source.length; index++) {
-    view.setUint16(
-      sourcePtr + index * WASM_UTF16_UNIT_BYTES,
-      source.charCodeAt(index),
-      true,
-    );
-  }
+  let view = writeExternalWasmSource(
+    wasm.memory,
+    sourcePtr,
+    sourceCache,
+    source,
+  );
   let status = wasm.validate(
     sourcePtr,
     source.length,
@@ -3495,6 +3514,7 @@ function parseExternalCursorWithWasm(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
   options: ParseOptions | undefined,
   externalRecords: Int32Array | undefined,
@@ -3536,14 +3556,7 @@ function parseExternalCursorWithWasm(
     ]);
   }
   ensureExternalWasmCapacity(wasm.memory, lexerRequiredBytes);
-  const sourceView = new DataView(wasm.memory.buffer);
-  for (let index = 0; index < source.length; index++) {
-    sourceView.setUint16(
-      sourcePtr + index * WASM_UTF16_UNIT_BYTES,
-      source.charCodeAt(index),
-      true,
-    );
-  }
+  writeExternalWasmSource(wasm.memory, sourcePtr, sourceCache, source);
 
   let rawTokenCount = -1;
   let structuralCapacity = 0;
@@ -5013,4 +5026,25 @@ function ensureExternalWasmCapacity(
   }
   const currentPages = memory.buffer.byteLength / WASM_PAGE_BYTES;
   memory.grow(requiredPages - currentPages);
+}
+
+function writeExternalWasmSource(
+  memory: WebAssembly.Memory,
+  sourcePtr: number,
+  cache: ExternalWasmSourceCache,
+  source: string,
+): DataView {
+  const view = new DataView(memory.buffer);
+  if (cache.source === source) {
+    return view;
+  }
+  for (let index = 0; index < source.length; index++) {
+    view.setUint16(
+      sourcePtr + index * WASM_UTF16_UNIT_BYTES,
+      source.charCodeAt(index),
+      true,
+    );
+  }
+  cache.source = source;
+  return view;
 }
