@@ -1889,30 +1889,36 @@ function externalIncrementalRelex(
     }
     outputWord += part.length;
   }
-  for (
-    let tokenIndex = oldSuffixTokenStart;
-    tokenIndex < previous.count;
-    tokenIndex++
-  ) {
-    const oldBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+  const oldSuffixWordStart = oldSuffixTokenStart *
+    WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+  if (lengthDelta === 0) {
+    records.set(previous.records.subarray(oldSuffixWordStart), outputWord);
+  } else {
     for (
-      let field = 0;
-      field < WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-      field++
+      let tokenIndex = oldSuffixTokenStart;
+      tokenIndex < previous.count;
+      tokenIndex++
     ) {
-      const value = previous.records[oldBase + field];
-      if (value === undefined) {
-        throw new Error(
-          `Incremental token record ${tokenIndex} is incomplete.`,
-        );
+      const oldBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      for (
+        let field = 0;
+        field < WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+        field++
+      ) {
+        const value = previous.records[oldBase + field];
+        if (value === undefined) {
+          throw new Error(
+            `Incremental token record ${tokenIndex} is incomplete.`,
+          );
+        }
+        let shifted = value;
+        if (field === 1 || field === 2 || field === 4) {
+          shifted += lengthDelta;
+        }
+        records[outputWord + field] = shifted;
       }
-      let shifted = value;
-      if (field === 1 || field === 2 || field === 4) {
-        shifted += lengthDelta;
-      }
-      records[outputWord + field] = shifted;
+      outputWord += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
     }
-    outputWord += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
   }
 
   return {
