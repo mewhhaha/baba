@@ -7,6 +7,7 @@ import {
   WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
   WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
+  WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
@@ -62,6 +63,7 @@ export interface WasmFrontendRequirements {
   readonly resultLifetimeModel: number;
   readonly lexResultI32Count: number;
   readonly tokenRecordI32Count: number;
+  readonly incrementalTokenRecordI32Count: number;
   readonly validateResultI32Count: number;
   readonly parseCursorResultI32Count: number;
   readonly cursorRuleRecordI32Count: number;
@@ -113,6 +115,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
   resultLifetimeModel: WASM_RESULT_LIFETIME_CALLER_BUFFER,
   lexResultI32Count: WASM_LEX_RESULT_I32_COUNT,
   tokenRecordI32Count: WASM_TOKEN_RECORD_I32_COUNT,
+  incrementalTokenRecordI32Count: WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
   validateResultI32Count: WASM_VALIDATE_RESULT_I32_COUNT,
   parseCursorResultI32Count: WASM_PARSE_CURSOR_RESULT_I32_COUNT,
   cursorRuleRecordI32Count: WASM_CURSOR_RULE_RECORD_I32_COUNT,
@@ -127,11 +130,13 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "parser_action",
     "parser_actions",
     "parser_select_action",
+    "parser_select_incremental",
     "validate",
     "parse_cursor",
     "parse_cursor_records",
     "parser_goto",
     "lex_all",
+    "lex_incremental",
     "lex_memo_i32_per_position",
     "load_plan",
     "abi_version",
@@ -145,6 +150,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "span_unit",
     "lex_result_i32_count",
     "token_record_i32_count",
+    "incremental_token_record_i32_count",
     "validate_result_i32_count",
     "host_ownership_model",
     "result_lifetime_model",

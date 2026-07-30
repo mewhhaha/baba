@@ -2,8 +2,8 @@
 
 use core::panic::PanicInfo;
 
-const WASM_ABI_VERSION: i32 = 11;
-const RUNTIME_IMPLEMENTATION_VERSION: i32 = 2;
+const WASM_ABI_VERSION: i32 = 12;
+const RUNTIME_IMPLEMENTATION_VERSION: i32 = 3;
 const MAX_WASM_PAGES: i32 = 65_535;
 const SOURCE_ENCODING_UTF16: i32 = 1;
 const SPAN_UNIT_UTF16: i32 = 1;
@@ -11,7 +11,7 @@ const HOST_OWNERSHIP_CALLER_MANAGED: i32 = 1;
 const RESULT_LIFETIME_CALLER_BUFFER: i32 = 1;
 
 const PLAN_MAGIC: i32 = 0x3150_5742;
-const PLAN_FORMAT_VERSION: i32 = 6;
+const PLAN_FORMAT_VERSION: i32 = 7;
 const PLAN_HEADER_MAGIC: i32 = 0;
 const PLAN_HEADER_FORMAT_VERSION: i32 = 1;
 const PLAN_HEADER_PARSER_PLAN_VERSION: i32 = 2;
@@ -53,6 +53,7 @@ const COMPACT_U16_OFFSET_BASE: i32 = 0x4000_0000;
 
 const LEX_RESULT_I32_COUNT: i32 = 2;
 const TOKEN_RECORD_I32_COUNT: i32 = 4;
+const INCREMENTAL_TOKEN_RECORD_I32_COUNT: i32 = 5;
 const VALIDATE_RESULT_I32_COUNT: i32 = 5;
 const PARSE_CURSOR_RESULT_I32_COUNT: i32 = 10;
 const CURSOR_RULE_RECORD_I32_COUNT: i32 = 9;
@@ -279,6 +280,11 @@ pub extern "C" fn lex_result_i32_count() -> i32 {
 #[no_mangle]
 pub extern "C" fn token_record_i32_count() -> i32 {
     TOKEN_RECORD_I32_COUNT
+}
+
+#[no_mangle]
+pub extern "C" fn incremental_token_record_i32_count() -> i32 {
+    INCREMENTAL_TOKEN_RECORD_I32_COUNT
 }
 
 #[no_mangle]
@@ -514,6 +520,7 @@ struct RawToken {
     start: i32,
     end: i32,
     accepting_state: i32,
+    dependency_end: i32,
 }
 
 const EMPTY_RAW_TOKEN: RawToken = RawToken {
@@ -521,6 +528,7 @@ const EMPTY_RAW_TOKEN: RawToken = RawToken {
     start: 0,
     end: 0,
     accepting_state: -1,
+    dependency_end: 0,
 };
 
 struct RawLexerCursor {
@@ -535,6 +543,11 @@ struct RawLexerCursor {
 impl RawLexerCursor {
     #[inline]
     fn new(len: i32, memo: i32, memo_capacity: i32) -> RawLexerCursor {
+        RawLexerCursor::new_at(0, len, memo, memo_capacity)
+    }
+
+    #[inline]
+    fn new_at(offset: i32, len: i32, memo: i32, memo_capacity: i32) -> RawLexerCursor {
         let memo_required = memo_i32_count(len);
         let memo_words = lex_memo_i32_per_position();
         let mut memo_enabled = false;
@@ -543,7 +556,7 @@ impl RawLexerCursor {
             memo_enabled = true;
         }
         RawLexerCursor {
-            offset: 0,
+            offset,
             memo,
             memo_words,
             memo_required,
@@ -566,6 +579,7 @@ fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut R
     let mut best_spec = -1;
     let mut best_end = start;
     let mut best_state = -1;
+    let mut dependency_end = start;
     let mut memo_floor = len;
     if cursor.memo_enabled {
         memo_floor = start;
@@ -573,6 +587,7 @@ fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut R
 
     while index < len {
         let decoded = decode_code_point(src, index, len);
+        dependency_end = dependency_end.max(index + decoded.width);
         let target = transition(state, decoded.code_point);
         if target < 0 {
             break;
@@ -582,7 +597,7 @@ fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut R
         if index > memo_floor && memo_is_set(cursor.memo, cursor.memo_words, index, state) {
             break;
         }
-        let accept = selected_global_spec(src, len, index, state);
+        let accept = selected_global_spec_tracked(src, len, index, state, &mut dependency_end);
         if accept >= 0 {
             best_spec = accept;
             best_end = index;
@@ -629,9 +644,51 @@ fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut R
         start,
         end,
         accepting_state: best_state,
+        dependency_end,
     };
     cursor.offset = end;
     1
+}
+
+#[no_mangle]
+pub extern "C" fn lex_incremental(
+    src: i32,
+    len: i32,
+    start: i32,
+    minimum_end: i32,
+    tokens: i32,
+    token_capacity: i32,
+    memo: i32,
+    memo_capacity: i32,
+) -> i32 {
+    if start < 0 || start > len || minimum_end < start || minimum_end > len {
+        return LEX_STATUS_TOKEN_CAPACITY;
+    }
+    if token_capacity < len - start {
+        return LEX_STATUS_TOKEN_CAPACITY;
+    }
+    let mut cursor = RawLexerCursor::new_at(start, len, memo, memo_capacity);
+    let mut count = 0;
+    let mut token = EMPTY_RAW_TOKEN;
+    while cursor.offset < minimum_end {
+        let status = next_raw_token(&mut cursor, src, len, &mut token);
+        if status == 0 {
+            return count;
+        }
+        if status == LEX_STATUS_MEMO_REQUIRED {
+            return LEX_STATUS_MEMO_REQUIRED;
+        }
+        let record = tokens + count * INCREMENTAL_TOKEN_RECORD_I32_COUNT * 4;
+        unsafe {
+            store_i32(record, token.spec);
+            store_i32(record + 4, token.start);
+            store_i32(record + 8, token.end);
+            store_i32(record + 12, token.accepting_state);
+            store_i32(record + 16, token.dependency_end);
+        }
+        count += 1;
+    }
+    count
 }
 
 struct DecodedCodePoint {
@@ -662,7 +719,7 @@ fn transition(state: i32, code_point: i32) -> i32 {
     }
 
     // INVARIANT: when the plan carries a dense ASCII transition table it is
-    // COMPLETE and AUTHORITATIVE for code points 0..127. Core plan format 6
+    // COMPLETE and AUTHORITATIVE for code points 0..127. Core plan format 7
     // removes ASCII ranges from the CSR rows in that case, so falling through
     // cannot add an answer. Plans above the dense-table size limit carry -1 in
     // this header slot and retain complete CSR rows.
@@ -702,6 +759,17 @@ fn transition(state: i32, code_point: i32) -> i32 {
 }
 
 fn selected_global_spec(src: i32, len: i32, end: i32, accepting_state: i32) -> i32 {
+    let mut dependency_end = end;
+    selected_global_spec_tracked(src, len, end, accepting_state, &mut dependency_end)
+}
+
+fn selected_global_spec_tracked(
+    src: i32,
+    len: i32,
+    end: i32,
+    accepting_state: i32,
+    dependency_end: &mut i32,
+) -> i32 {
     let fast_spec = header_table_value(PLAN_HEADER_FAST_SPECS, accepting_state);
     if fast_spec >= 0 {
         return fast_spec;
@@ -711,7 +779,7 @@ fn selected_global_spec(src: i32, len: i32, end: i32, accepting_state: i32) -> i
     let stop = table_value(rows, accepting_state + 1);
     while index < stop {
         let spec = table_value(header(PLAN_HEADER_ACCEPT_CANDIDATES), index);
-        if spec_guard_matches(spec, src, len, end) {
+        if spec_guard_matches_tracked(spec, src, len, end, dependency_end) {
             return spec;
         }
         index += 1;
@@ -720,6 +788,17 @@ fn selected_global_spec(src: i32, len: i32, end: i32, accepting_state: i32) -> i
 }
 
 fn spec_guard_matches(spec: i32, src: i32, len: i32, offset: i32) -> bool {
+    let mut dependency_end = offset;
+    spec_guard_matches_tracked(spec, src, len, offset, &mut dependency_end)
+}
+
+fn spec_guard_matches_tracked(
+    spec: i32,
+    src: i32,
+    len: i32,
+    offset: i32,
+    dependency_end: &mut i32,
+) -> bool {
     if spec < 0 || spec >= header(PLAN_HEADER_SPEC_COUNT) {
         return false;
     }
@@ -736,18 +815,26 @@ fn spec_guard_matches(spec: i32, src: i32, len: i32, offset: i32) -> bool {
     }
     if flags & SPEC_FLAG_HAS_FOLLOW != 0 || flags & SPEC_FLAG_FOLLOW_EOF != 0 {
         let followed = offset == len && flags & SPEC_FLAG_FOLLOW_EOF != 0
-            || guard_dfa_matches(follow_start, src, len, offset);
+            || guard_dfa_matches_tracked(follow_start, src, len, offset, dependency_end);
         if !followed {
             return false;
         }
     }
-    if not_follow_start >= 0 && guard_dfa_matches(not_follow_start, src, len, offset) {
+    if not_follow_start >= 0
+        && guard_dfa_matches_tracked(not_follow_start, src, len, offset, dependency_end)
+    {
         return false;
     }
-    !excluded_word_matches(spec, src, len, offset)
+    !excluded_word_matches_tracked(spec, src, len, offset, dependency_end)
 }
 
-fn guard_dfa_matches(start: i32, src: i32, len: i32, offset: i32) -> bool {
+fn guard_dfa_matches_tracked(
+    start: i32,
+    src: i32,
+    len: i32,
+    offset: i32,
+    dependency_end: &mut i32,
+) -> bool {
     if start < 0 || start >= header(PLAN_HEADER_GUARD_STATE_COUNT) {
         return false;
     }
@@ -758,6 +845,7 @@ fn guard_dfa_matches(start: i32, src: i32, len: i32, offset: i32) -> bool {
     let mut index = offset;
     while index < len {
         let decoded = decode_code_point(src, index, len);
+        *dependency_end = (*dependency_end).max(index + decoded.width);
         state = guard_transition(state, decoded.code_point);
         if state < 0 {
             return false;
@@ -789,7 +877,13 @@ fn guard_transition(state: i32, code_point: i32) -> i32 {
     -1
 }
 
-fn excluded_word_matches(spec: i32, src: i32, len: i32, offset: i32) -> bool {
+fn excluded_word_matches_tracked(
+    spec: i32,
+    src: i32,
+    len: i32,
+    offset: i32,
+    dependency_end: &mut i32,
+) -> bool {
     let spec_rows = header(PLAN_HEADER_SPEC_WORD_ROWS);
     let mut word = table_value(spec_rows, spec);
     let word_end = table_value(spec_rows, spec + 1);
@@ -805,6 +899,7 @@ fn excluded_word_matches(spec: i32, src: i32, len: i32, offset: i32) -> bool {
                 break;
             }
             let decoded = decode_code_point(src, source_offset, len);
+            *dependency_end = (*dependency_end).max(source_offset + decoded.width);
             let expected = table_value(header(PLAN_HEADER_WORD_CODE_POINTS), character);
             if decoded.code_point != expected {
                 matches = false;
@@ -817,7 +912,9 @@ fn excluded_word_matches(spec: i32, src: i32, len: i32, offset: i32) -> bool {
             if source_offset >= len {
                 return true;
             }
-            let next = decode_code_point(src, source_offset, len).code_point;
+            let decoded = decode_code_point(src, source_offset, len);
+            let next = decoded.code_point;
+            *dependency_end = (*dependency_end).max(source_offset + decoded.width);
             if !is_word_code_point(next) {
                 return true;
             }
@@ -980,6 +1077,47 @@ pub extern "C" fn parser_select_action(
         store_i32(result + 12, selection.selected_action);
     }
     1
+}
+
+#[no_mangle]
+pub extern "C" fn parser_select_incremental(
+    state: i32,
+    accepting_state: i32,
+    fallback_spec: i32,
+    src: i32,
+    len: i32,
+    end_offset: i32,
+    result: i32,
+) -> i32 {
+    if accepting_state < 0 || accepting_state >= header(PLAN_HEADER_DFA_STATE_COUNT) {
+        return -1;
+    }
+
+    let selection = select_action(
+        state,
+        accepting_state,
+        fallback_spec,
+        true,
+        src,
+        len,
+        end_offset,
+    );
+    unsafe {
+        store_i32(result, selection.checked_count);
+        store_i32(result + 4, selection.selected_spec);
+        store_i32(result + 8, selection.selected_terminal);
+        store_i32(result + 12, selection.selected_action);
+    }
+    if selection.selected_action != 0 {
+        return 1;
+    }
+    if selection.ordinary_main_candidate_count == 0 && selection.trivia_spec >= 0 {
+        unsafe {
+            store_i32(result + 4, selection.trivia_spec);
+        }
+        return 2;
+    }
+    0
 }
 
 struct Selection {
@@ -1155,6 +1293,7 @@ pub extern "C" fn validate(
                 start: len,
                 end: len,
                 accepting_state: -1,
+                dependency_end: len,
             };
             action = parser_action(current_state, header(PLAN_HEADER_EOF_TERMINAL));
             if action <= 0 {

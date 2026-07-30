@@ -35,6 +35,7 @@ import {
   WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_I32_BYTES,
+  WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
@@ -397,6 +398,17 @@ function wasmAbiDescriptor(): unknown {
           bytes: WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES,
           fields: ["specIndex", "start", "end", "acceptingState"],
         },
+        incrementalTokenRecord: {
+          i32Count: WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
+          bytes: WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES,
+          fields: [
+            "specIndex",
+            "start",
+            "end",
+            "acceptingState",
+            "dependencyEnd",
+          ],
+        },
         parserSelection: {
           i32Count: 4,
           bytes: 4 * WASM_I32_BYTES,
@@ -502,6 +514,20 @@ function wasmAbiDescriptor(): unknown {
             "selectionStatusOneSelectedZeroUnexpectedTwoMultipleChoicesMinusOneInvalid",
         },
         {
+          name: "parser_select_incremental",
+          params: [
+            "state",
+            "acceptingState",
+            "fallbackSpecIndex",
+            "sourcePtr",
+            "sourceLength",
+            "tokenEnd",
+            "selectionPtr",
+          ],
+          result:
+            "selectionStatusOneSelectedZeroUnexpectedTwoTriviaMinusOneInvalid",
+        },
+        {
           name: "validate",
           params: [
             "sourcePtr",
@@ -592,6 +618,20 @@ function wasmAbiDescriptor(): unknown {
           result: "tokenRecordCountOrMinusOneTokenCapacityMinusTwoMemoRequired",
         },
         {
+          name: "lex_incremental",
+          params: [
+            "sourcePtr",
+            "sourceLength",
+            "start",
+            "minimumEnd",
+            "tokenPtr",
+            "tokenCapacity",
+            "memoPtr",
+            "memoCapacity",
+          ],
+          result: "tokenRecordCountOrMinusOneTokenCapacityMinusTwoMemoRequired",
+        },
+        {
           name: "lex_memo_i32_per_position",
           params: [],
           result: "memoI32CountPerSourcePosition",
@@ -653,6 +693,11 @@ function wasmAbiDescriptor(): unknown {
         },
         {
           name: "token_record_i32_count",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "incremental_token_record_i32_count",
           params: [],
           result: "i32",
         },
@@ -726,7 +771,24 @@ import {
 } from "@mewhhaha/baba/runtime/generated-wasm";
 import type {
   AsyncParserInstanceOptions as SharedAsyncParserInstanceOptions,
+  IncrementalLexResult,
+  IncrementalLexDocument as SharedIncrementalLexDocument,
+  IncrementalLexUpdate,
+  IncrementalLexWork,
+  IncrementalParseDocument as SharedIncrementalParseDocument,
+  IncrementalParseResult as SharedIncrementalParseResult,
+  IncrementalParseUpdate,
+  IncrementalParserWork,
+  IncrementalValidateDocument as SharedIncrementalValidateDocument,
+  IncrementalValidateResult,
+  IncrementalValidateUpdate,
+  LexDocumentOptions,
+  ParseDocumentOptions,
   ParserInstanceOptions as SharedParserInstanceOptions,
+  SourceChange,
+  SourceSnapshot,
+  TextEdit,
+  ValidateDocumentOptions,
 } from "@mewhhaha/baba/runtime/generated-wasm";
 
 export * from "./syntax.ts";
@@ -761,6 +823,25 @@ export {
 
 export type ParserInstanceOptions = SharedParserInstanceOptions;
 export type AsyncParserInstanceOptions = SharedAsyncParserInstanceOptions;
+export type IncrementalLexDocument = SharedIncrementalLexDocument;
+export type IncrementalValidateDocument = SharedIncrementalValidateDocument;
+export type IncrementalParseDocument = SharedIncrementalParseDocument<RootCursor>;
+export type IncrementalParseResult = SharedIncrementalParseResult<RootCursor>;
+export type {
+  IncrementalLexResult,
+  IncrementalLexUpdate,
+  IncrementalLexWork,
+  IncrementalParseUpdate,
+  IncrementalParserWork,
+  IncrementalValidateResult,
+  IncrementalValidateUpdate,
+  LexDocumentOptions,
+  ParseDocumentOptions,
+  SourceChange,
+  SourceSnapshot,
+  TextEdit,
+  ValidateDocumentOptions,
+};
 
 export interface ParserInstance {
   lex(source: string, options?: LexOptions): LexTapeResult;
@@ -771,6 +852,18 @@ export interface ParserInstance {
     options?: ParseOptions,
   ): CursorParseResult<RootCursor>;
   validate(source: string, options?: ParseOptions): ValidateParseResult;
+  createDocument(
+    source: string,
+    options: LexDocumentOptions,
+  ): IncrementalLexDocument;
+  createDocument(
+    source: string,
+    options: ValidateDocumentOptions,
+  ): IncrementalValidateDocument;
+  createDocument(
+    source: string,
+    options: ParseDocumentOptions,
+  ): IncrementalParseDocument;
   reset(): void;
   dispose(): void;
 }

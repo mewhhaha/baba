@@ -3,7 +3,7 @@
  * (states x classes) transition table.
  *
  * The classes are no longer derived here. `computeDfaAlphabet` in
- * `src/compiler/regex/dfa.ts` computes them, core plan format version 6
+ * `src/compiler/regex/dfa.ts` computes them, core plan format version 7
  * persists them, and this module reads them back. What is still built at load
  * time is the dense `(states x classes)` table, which is deliberately not in
  * the plan: it is a pure function of the persisted classes and transition

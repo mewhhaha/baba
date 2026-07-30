@@ -50,6 +50,13 @@ export interface TargetTiming {
     readonly parse: SampleDistribution;
     readonly validateEarlyError: SampleDistribution;
     readonly validateLateError: SampleDistribution;
+    readonly incrementalValidate: SampleDistribution;
+    readonly incrementalWork: {
+      readonly scannedCodeUnits: number;
+      readonly parserActions: number;
+      readonly reusedTokens: number;
+      readonly reusedSubtrees: number;
+    };
   };
   readonly memoryPages: {
     readonly afterCreate: number;
@@ -281,6 +288,10 @@ async function benchWasmTarget(
       source: string,
     ): RuntimeCursorParseLike;
     validate(source: string): RuntimeParseLike;
+    createDocument(
+      source: string,
+      options: { readonly goal: "validate" },
+    ): RuntimeIncrementalDocumentLike;
   };
   const afterCreate = runtimeMemoryPages(parser);
   assertValidTimedInput(name, "small", parser, smallInput);
@@ -346,6 +357,30 @@ interface RuntimeParserLike {
   lex(source: string): RuntimeLexTapeLike;
   parse(source: string): RuntimeCursorParseLike;
   validate(source: string): RuntimeParseLike;
+  createDocument(
+    source: string,
+    options: { readonly goal: "validate" },
+  ): RuntimeIncrementalDocumentLike;
+}
+
+interface RuntimeIncrementalDocumentLike {
+  applyEdits(
+    edits: readonly {
+      readonly start: number;
+      readonly oldEnd: number;
+      readonly newText: string;
+    }[],
+  ): {
+    readonly lexer: {
+      readonly scannedCodeUnits: number;
+      readonly reusedTokens: number;
+    };
+    readonly parser: {
+      readonly parserActions: number;
+      readonly reusedSubtrees: number;
+    };
+  };
+  dispose(): void;
 }
 
 function assertValidTimedInput(
@@ -437,6 +472,7 @@ function benchmarkHotPaths(
     }
   }
   const lexed = parser.lex(source);
+  const incremental = benchmarkIncrementalValidation(parser, source);
   return {
     sourceCodeUnits: source.length,
     tokenCount: lexed.tokenTape.length,
@@ -445,7 +481,42 @@ function benchmarkHotPaths(
     parse: sampleDistribution(samples[2]),
     validateEarlyError: sampleDistribution(samples[3]),
     validateLateError: sampleDistribution(samples[4]),
+    incrementalValidate: incremental.distribution,
+    incrementalWork: incremental.work,
   };
+}
+
+function benchmarkIncrementalValidation(
+  parser: RuntimeParserLike,
+  source: string,
+): {
+  readonly distribution: SampleDistribution;
+  readonly work: TargetTiming["hot"]["incrementalWork"];
+} {
+  const document = parser.createDocument(source, { goal: "validate" });
+  const offset = Math.floor(source.length / 2);
+  const replacement = source.slice(offset, offset + 1);
+  const edit = [{ start: offset, oldEnd: offset + 1, newText: replacement }];
+  for (let warmup = 0; warmup < hotWarmupCount; warmup++) {
+    document.applyEdits(edit);
+  }
+  const samples: number[] = [];
+  let work: TargetTiming["hot"]["incrementalWork"] | undefined;
+  for (let sample = 0; sample < hotSampleCount; sample++) {
+    const measured = time(() => document.applyEdits(edit));
+    samples.push(measured.ms);
+    work = {
+      scannedCodeUnits: measured.value.lexer.scannedCodeUnits,
+      parserActions: measured.value.parser.parserActions,
+      reusedTokens: measured.value.lexer.reusedTokens,
+      reusedSubtrees: measured.value.parser.reusedSubtrees,
+    };
+  }
+  document.dispose();
+  if (work === undefined) {
+    throw new Error("Runtime incremental benchmark produced no work sample.");
+  }
+  return { distribution: sampleDistribution(samples), work };
 }
 
 function sampleDistribution(
@@ -674,6 +745,9 @@ function renderTextReport(report: RuntimeBenchReport): string {
         `    validation errors: early ${
           formatDistribution(wasm.hot.validateEarlyError)
         }, late ${formatDistribution(wasm.hot.validateLateError)}`,
+        `    incremental validate: ${
+          formatDistribution(wasm.hot.incrementalValidate)
+        }, scanned ${wasm.hot.incrementalWork.scannedCodeUnits} code units, ${wasm.hot.incrementalWork.parserActions} parser actions, reused ${wasm.hot.incrementalWork.reusedTokens} tokens / ${wasm.hot.incrementalWork.reusedSubtrees} parser checkpoints`,
         `    memory pages: create ${wasm.memoryPages.afterCreate}, lex ${wasm.memoryPages.afterLex}, validate ${wasm.memoryPages.afterValidate}, parse/high-water ${wasm.memoryPages.highWater}`,
       );
     }

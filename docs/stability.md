@@ -66,7 +66,7 @@ rules. Breaking changes require a new plan version or a separately versioned
 subsection.
 
 Generated `parser.plan` files currently use runtime metadata subsection version
-`2` and portable parser-plan version `2`. The loader accepts only this current
+`4` and portable parser-plan version `2`. The loader accepts only this current
 contract; regenerate plans produced by earlier Baba releases.
 
 These numbers version independent contracts, not concurrently supported parser
@@ -75,8 +75,8 @@ generations. Baba emits and accepts one combination:
 | Contract                         | Current version |
 | -------------------------------- | --------------: |
 | Portable parser plan             |               2 |
-| Wasm core table encoding         |               6 |
-| Wasm runtime metadata subsection |               3 |
+| Wasm core table encoding         |               7 |
+| Wasm runtime metadata subsection |               4 |
 | Compact metadata container       |               1 |
 | Optional GPU frontend section    |               3 |
 
@@ -85,7 +85,7 @@ compiler always emits the versions above, and each loader rejects a different
 version at its input boundary.
 
 The binary core table section that `load_plan` reads carries its own format
-version, currently `6`. It is an internal encoding, not part of the
+version, currently `7`. It is an internal encoding, not part of the
 `PortableParserPlan` contract: hosts are expected to validate a plan through
 `wasm/abi.json` and `load_plan` rather than to decode the tables themselves.
 Adding, removing, or reordering a header slot or a section changes that version,
@@ -106,7 +106,8 @@ Generated Wasm parser modules expose a stable ergonomic API:
 - `createParser({ bytes, plan })`;
 - `createParser({ module, plan })`;
 - `createParserAsync(options)`;
-- parser instances with `lex`, `parse`, `validate`, `reset`, and `dispose`;
+- parser instances with `lex`, `parse`, `validate`, `createDocument`, `reset`,
+  and `dispose`;
 - generated token, rule-specific cursor, lexer tape, cursor parse, validation,
   and diagnostic types in `syntax.ts`.
 
@@ -117,7 +118,7 @@ runtime helper internals.
 ## Wasm ABI
 
 The generated Wasm core ABI is versioned separately from package and parser-plan
-versions. ABI version `11` is documented in `docs/wasm-abi.md` and described by
+versions. ABI version `12` is documented in `docs/wasm-abi.md` and described by
 each generated `wasm/abi.json`. Changes to exported core functions, record
 layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.
@@ -127,10 +128,12 @@ and so is the capacity argument that bounds it. Every buffer-writing export now
 takes an explicit capacity and rejects an undersized buffer with a status rather
 than writing past it: `lex_all` gained `tokenCapacity` plus a separate `memoPtr`
 and `memoCapacity` for its failure memo, and no longer writes anything into the
-token records it does not return. ABI version 11 replaces `parse_trace` with
-output-free `validate`, makes failure-memo allocation demand-driven, and renames
-the public action limit to `maxParserActions`. Narrowing what an export may
-write is additive; widening it is not, and needs a version change.
+token records it does not return. ABI version 12 adds dependency-bearing
+incremental token records and source-aware parser selection; version 11 replaced
+`parse_trace` with output-free `validate`, made failure-memo allocation
+demand-driven, and renamed the public action limit to `maxParserActions`.
+Narrowing what an export may write is additive; widening it is not, and needs a
+version change.
 
 The TypeScript Wasm adapter API is stable at the generated module entrypoint.
 Generated modules import their loader from

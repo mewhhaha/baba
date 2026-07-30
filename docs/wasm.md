@@ -29,7 +29,7 @@ authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded
 in the Baba package; grammar generation does not invoke Cargo or require Rust on
 the user's machine. `parser.plan` contains the generated DFA/LR core data,
 contextual trailing-guard DFAs and excluded-word tables, plus runtime metadata
-version 3 used for runtime identity, token and literal names, trivia policy,
+version 4 used for runtime identity, token and literal names, trivia policy,
 expected-token displays, and cursor field schemas. DFA transitions, LR tables,
 productions, reducers, and contextual guards remain solely in the core section.
 `mod.ts` is a thin wrapper around `@mewhhaha/baba/runtime/generated-wasm`;
@@ -82,6 +82,11 @@ The parser instance returned by `createParser({ bytes, plan })` or
   for indexed access to token records.
 - `validate(source, options?)`: output-free Wasm validation with structured
   diagnostics and lazy lexing.
+- `createDocument(source, { goal, ...options })`: mutable incremental document
+  for a fixed `"lex"`, `"validate"`, or `"parse"` goal. `applyEdits` accepts
+  sorted, non-overlapping UTF-16 ranges and returns exact lexer/parser work
+  counters. Results retain immutable source snapshots, so tokens and cursors
+  returned for an older version remain valid after later edits.
 - `reset()` and `dispose()`.
 
 Generated Wasm parser instances expose only the methods listed above.

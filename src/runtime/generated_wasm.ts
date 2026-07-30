@@ -33,6 +33,10 @@ import {
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../targets/runtime/implementation.ts";
 import {
   WASM_ABI_VERSION,
+  WASM_ACTION_ACCEPT,
+  WASM_ACTION_PAYLOAD_MASK,
+  WASM_ACTION_REDUCE,
+  WASM_ACTION_SHIFT,
   WASM_CURSOR_CHILD_RECORD_I32_COUNT,
   WASM_CURSOR_FIELD_RECORD_I32_COUNT,
   WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT,
@@ -41,6 +45,7 @@ import {
   WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_I32_BYTES,
+  WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
@@ -99,7 +104,161 @@ export interface ParserInstance<Root extends RuleCursor = RuleCursor> {
     options?: ParseOptions,
   ): CursorParseResult<Root>;
   validate(source: string, options?: ParseOptions): ValidateParseResult;
+  createDocument(
+    source: string,
+    options: LexDocumentOptions,
+  ): IncrementalLexDocument;
+  createDocument(
+    source: string,
+    options: ValidateDocumentOptions,
+  ): IncrementalValidateDocument;
+  createDocument(
+    source: string,
+    options: ParseDocumentOptions,
+  ): IncrementalParseDocument<Root>;
   reset(): void;
+  dispose(): void;
+}
+
+export interface TextEdit {
+  readonly start: number;
+  readonly oldEnd: number;
+  readonly newText: string;
+}
+
+export interface SourceSnapshot {
+  readonly version: number;
+  readonly length: number;
+  slice(start?: number, end?: number): string;
+  text(): string;
+}
+
+export interface LexDocumentOptions {
+  readonly goal: "lex";
+  readonly trivia?: "preserve" | "discard";
+}
+
+export interface ValidateDocumentOptions {
+  readonly goal: "validate";
+  readonly trivia?: "preserve" | "discard";
+  readonly maxParserActions?: number;
+}
+
+export interface ParseDocumentOptions {
+  readonly goal: "parse";
+  readonly trivia?: "preserve" | "discard";
+  readonly maxParserActions?: number;
+}
+
+export interface SourceChange {
+  readonly oldRange: Span;
+  readonly newRange: Span;
+}
+
+export interface IncrementalLexWork {
+  readonly relexedRange: Span;
+  readonly scannedCodeUnits: number;
+  readonly createdTokens: number;
+  readonly reusedTokens: number;
+}
+
+export interface IncrementalParserWork {
+  readonly reparsedRanges: readonly Span[];
+  readonly parserActions: number;
+  readonly reuseChecks: number;
+  readonly reusedSubtrees: number;
+  readonly createdSubtrees: number;
+}
+
+export interface IncrementalLexUpdate {
+  readonly goal: "lex";
+  readonly version: number;
+  readonly changes: readonly SourceChange[];
+  readonly lexer: IncrementalLexWork;
+}
+
+export interface IncrementalValidateUpdate {
+  readonly goal: "validate";
+  readonly version: number;
+  readonly changes: readonly SourceChange[];
+  readonly lexer: IncrementalLexWork;
+  readonly parser: IncrementalParserWork;
+}
+
+export interface IncrementalParseUpdate {
+  readonly goal: "parse";
+  readonly version: number;
+  readonly changes: readonly SourceChange[];
+  readonly lexer: IncrementalLexWork;
+  readonly parser: IncrementalParserWork;
+}
+
+export interface IncrementalLexResult {
+  readonly version: number;
+  readonly snapshot: SourceSnapshot;
+  readonly tokenTape: TokenTape;
+  readonly diagnostics: readonly LexDiagnostic[];
+}
+
+export type IncrementalValidateResult =
+  | {
+    readonly ok: true;
+    readonly version: number;
+    readonly snapshot: SourceSnapshot;
+    readonly diagnostics: readonly [];
+  }
+  | {
+    readonly ok: false;
+    readonly version: number;
+    readonly snapshot: SourceSnapshot;
+    readonly diagnostics: readonly ParseDiagnostic[];
+  };
+
+export type IncrementalParseResult<Root extends RuleCursor = RuleCursor> =
+  | {
+    readonly ok: true;
+    readonly version: number;
+    readonly snapshot: SourceSnapshot;
+    readonly cursor: Root;
+    readonly diagnostics: readonly [];
+  }
+  | {
+    readonly ok: false;
+    readonly version: number;
+    readonly snapshot: SourceSnapshot;
+    readonly cursor: null;
+    readonly diagnostics: readonly ParseDiagnostic[];
+  };
+
+export interface IncrementalLexDocument {
+  readonly goal: "lex";
+  readonly version: number;
+  readonly snapshot: SourceSnapshot;
+  lex(): IncrementalLexResult;
+  applyEdits(edits: readonly TextEdit[]): IncrementalLexUpdate;
+  dispose(): void;
+}
+
+export interface IncrementalValidateDocument {
+  readonly goal: "validate";
+  readonly version: number;
+  readonly snapshot: SourceSnapshot;
+  lex(): IncrementalLexResult;
+  validate(): IncrementalValidateResult;
+  applyEdits(edits: readonly TextEdit[]): IncrementalValidateUpdate;
+  dispose(): void;
+}
+
+export interface IncrementalParseDocument<
+  Root extends RuleCursor = RuleCursor,
+> {
+  readonly goal: "parse";
+  readonly version: number;
+  readonly snapshot: SourceSnapshot;
+  lex(): IncrementalLexResult;
+  validate(): IncrementalValidateResult;
+  parse(): IncrementalParseResult<Root>;
+  applyEdits(edits: readonly TextEdit[]): IncrementalParseUpdate;
   dispose(): void;
 }
 
@@ -254,6 +413,16 @@ export interface LexTapeResult {
 
 interface ExternalParserWasmExports {
   memory: WebAssembly.Memory;
+  lex_incremental(
+    sourcePtr: number,
+    sourceLength: number,
+    start: number,
+    minimumEnd: number,
+    tokenPtr: number,
+    tokenCapacity: number,
+    memoPtr: number,
+    memoCapacity: number,
+  ): number;
   lex_all(
     sourcePtr: number,
     sourceLength: number,
@@ -264,6 +433,18 @@ interface ExternalParserWasmExports {
     memoCapacity: number,
   ): number;
   lex_memo_i32_per_position(): number;
+  incremental_token_record_i32_count(): number;
+  parser_action(state: number, terminal: number): number;
+  parser_goto(state: number, nonterminal: number): number;
+  parser_select_incremental(
+    state: number,
+    acceptingState: number,
+    fallbackSpec: number,
+    sourcePtr: number,
+    sourceLength: number,
+    endOffset: number,
+    resultPtr: number,
+  ): number;
   validate(
     sourcePtr: number,
     sourceLength: number,
@@ -471,6 +652,7 @@ export async function createParserAsync<Root extends RuleCursor = RuleCursor>(
 class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
   implements ParserInstance<Root> {
   #disposed = false;
+  readonly #documents = new Set<ExternalIncrementalDocument<Root>>();
   #metadata: ExternalRuntimeMetadata | undefined;
 
   readonly parse: ParserInstance<Root>["parse"];
@@ -513,6 +695,47 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       source,
       options,
     );
+  }
+
+  createDocument(
+    source: string,
+    options: LexDocumentOptions,
+  ): IncrementalLexDocument;
+  createDocument(
+    source: string,
+    options: ValidateDocumentOptions,
+  ): IncrementalValidateDocument;
+  createDocument(
+    source: string,
+    options: ParseDocumentOptions,
+  ): IncrementalParseDocument<Root>;
+  createDocument(
+    source: string,
+    options:
+      | LexDocumentOptions
+      | ValidateDocumentOptions
+      | ParseDocumentOptions,
+  ):
+    | IncrementalLexDocument
+    | IncrementalValidateDocument
+    | IncrementalParseDocument<Root> {
+    this.#assertLive();
+    const document = new ExternalIncrementalDocument<Root>(
+      this.#loadMetadata(),
+      this.wasm,
+      this.inputBase,
+      source,
+      options,
+      () => this.#documents.delete(document),
+    );
+    this.#documents.add(document);
+    if (options.goal === "lex") {
+      return document as unknown as IncrementalLexDocument;
+    }
+    if (options.goal === "validate") {
+      return document as unknown as IncrementalValidateDocument;
+    }
+    return document as unknown as IncrementalParseDocument<Root>;
   }
 
   parseRecords(
@@ -606,6 +829,10 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
   }
 
   dispose(): void {
+    for (const document of this.#documents) {
+      document.dispose();
+    }
+    this.#documents.clear();
     this.#disposed = true;
   }
 
@@ -632,6 +859,7 @@ interface ExternalRuntimeMetadata {
   readonly defaultPreserveTrivia: boolean;
   readonly eofTerminal: number;
   readonly parserStateCount: number;
+  readonly productions: readonly ExternalProduction[];
   readonly specs: readonly ExternalLexerSpec[];
   /** 1 when the lexer spec at that index produces a trivia-channel token. */
   readonly specIsTrivia: Uint8Array;
@@ -647,6 +875,11 @@ interface ExternalRuntimeMetadata {
   readonly fieldIds: ReadonlyMap<string, number>;
   readonly fieldNames: readonly string[];
   readonly fieldSchemas: readonly (ExternalRuleFieldSchema | undefined)[];
+}
+
+interface ExternalProduction {
+  readonly lhs: number;
+  readonly rhsLength: number;
 }
 
 type ExternalLexerSpec =
@@ -678,6 +911,8 @@ interface ExternalFieldConfig {
 const EXTERNAL_CORE_HEADER_PARSER_STATE_COUNT = 4;
 const EXTERNAL_CORE_HEADER_ACTION_ROWS = 9;
 const EXTERNAL_CORE_HEADER_ACTION_PAIRS = 10;
+const EXTERNAL_CORE_HEADER_PRODUCTION_COUNT = 19;
+const EXTERNAL_CORE_HEADER_PRODUCTIONS = 20;
 const EXTERNAL_CORE_COMPACT_I16_OFFSET_TAG = 2;
 const EXTERNAL_CORE_COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 function decodeExternalRuntimeMetadata(
@@ -902,6 +1137,25 @@ function decodeExternalRuntimeMetadata(
     planBytes,
     EXTERNAL_CORE_HEADER_PARSER_STATE_COUNT,
   );
+  const productionCount = readCoreI32(
+    planBytes,
+    EXTERNAL_CORE_HEADER_PRODUCTION_COUNT,
+  );
+  const productionOffset = readCoreI32(
+    planBytes,
+    EXTERNAL_CORE_HEADER_PRODUCTIONS,
+  );
+  const productions: ExternalProduction[] = [];
+  for (let production = 0; production < productionCount; production++) {
+    const base = productionOffset + production * WASM_I32_BYTES * 4;
+    productions.push({
+      lhs: readI32AtByteOffset(planBytes, base),
+      rhsLength: readI32AtByteOffset(
+        planBytes,
+        base + WASM_I32_BYTES,
+      ),
+    });
+  }
   const expected = externalExpectedRowsFromCorePlan(
     planBytes,
     parserStateCount,
@@ -911,6 +1165,7 @@ function decodeExternalRuntimeMetadata(
     defaultPreserveTrivia,
     eofTerminal,
     parserStateCount,
+    productions,
     specs,
     specIsTrivia,
     hasTriviaSpecs,
@@ -1142,6 +1397,1512 @@ interface ExternalCursorTokenData {
   readonly start: number;
   readonly end: number;
   readonly tokenIndex: number;
+}
+
+interface SourcePiece {
+  readonly source: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+class ExternalSourceSnapshot implements SourceSnapshot {
+  #materialized: string | undefined;
+
+  constructor(
+    readonly version: number,
+    private readonly pieces: readonly SourcePiece[],
+    readonly length: number,
+  ) {}
+
+  static initial(source: string): ExternalSourceSnapshot {
+    const pieces: SourcePiece[] = [];
+    if (source.length > 0) {
+      pieces.push({ source, start: 0, end: source.length });
+    }
+    const snapshot = new ExternalSourceSnapshot(0, pieces, source.length);
+    snapshot.#materialized = source;
+    return snapshot;
+  }
+
+  slice(start = 0, end = this.length): string {
+    const selectedStart = externalSnapshotOffset(start, this.length, "start");
+    const selectedEnd = externalSnapshotOffset(end, this.length, "end");
+    if (selectedEnd <= selectedStart) {
+      return "";
+    }
+    const parts: string[] = [];
+    let offset = 0;
+    for (const piece of this.pieces) {
+      const pieceLength = piece.end - piece.start;
+      const pieceEnd = offset + pieceLength;
+      if (pieceEnd <= selectedStart) {
+        offset = pieceEnd;
+        continue;
+      }
+      if (offset >= selectedEnd) {
+        break;
+      }
+      const localStart = Math.max(0, selectedStart - offset);
+      const localEnd = Math.min(pieceLength, selectedEnd - offset);
+      parts.push(
+        piece.source.slice(piece.start + localStart, piece.start + localEnd),
+      );
+      offset = pieceEnd;
+    }
+    return parts.join("");
+  }
+
+  text(): string {
+    if (this.#materialized !== undefined) {
+      return this.#materialized;
+    }
+    this.#materialized = this.slice(0, this.length);
+    return this.#materialized;
+  }
+
+  apply(
+    edits: readonly TextEdit[],
+  ): {
+    readonly snapshot: ExternalSourceSnapshot;
+    readonly changes: SourceChange[];
+  } {
+    const pieces: SourcePiece[] = [];
+    const changes: SourceChange[] = [];
+    let oldOffset = 0;
+    let lengthDelta = 0;
+    for (const edit of edits) {
+      this.appendRange(pieces, oldOffset, edit.start);
+      if (edit.newText.length > 0) {
+        pieces.push({
+          source: edit.newText,
+          start: 0,
+          end: edit.newText.length,
+        });
+      }
+      const newStart = edit.start + lengthDelta;
+      const newEnd = newStart + edit.newText.length;
+      changes.push({
+        oldRange: { start: edit.start, end: edit.oldEnd },
+        newRange: { start: newStart, end: newEnd },
+      });
+      lengthDelta += edit.newText.length - (edit.oldEnd - edit.start);
+      oldOffset = edit.oldEnd;
+    }
+    this.appendRange(pieces, oldOffset, this.length);
+    return {
+      snapshot: new ExternalSourceSnapshot(
+        this.version + 1,
+        externalMergeSourcePieces(pieces),
+        this.length + lengthDelta,
+      ),
+      changes,
+    };
+  }
+
+  private appendRange(
+    output: SourcePiece[],
+    start: number,
+    end: number,
+  ): void {
+    if (end <= start) {
+      return;
+    }
+    let offset = 0;
+    for (const piece of this.pieces) {
+      const pieceLength = piece.end - piece.start;
+      const pieceEnd = offset + pieceLength;
+      if (pieceEnd <= start) {
+        offset = pieceEnd;
+        continue;
+      }
+      if (offset >= end) {
+        break;
+      }
+      const localStart = Math.max(0, start - offset);
+      const localEnd = Math.min(pieceLength, end - offset);
+      output.push({
+        source: piece.source,
+        start: piece.start + localStart,
+        end: piece.start + localEnd,
+      });
+      offset = pieceEnd;
+    }
+  }
+}
+
+function externalSnapshotOffset(
+  value: number,
+  length: number,
+  name: string,
+): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > length) {
+    throw new RangeError(
+      `Source snapshot ${name} offset ${
+        String(value)
+      } is outside [0, ${length}].`,
+    );
+  }
+  return value;
+}
+
+function externalMergeSourcePieces(
+  pieces: readonly SourcePiece[],
+): readonly SourcePiece[] {
+  const merged: SourcePiece[] = [];
+  for (const piece of pieces) {
+    if (piece.end <= piece.start) {
+      continue;
+    }
+    const previous = merged[merged.length - 1];
+    if (
+      previous !== undefined && previous.source === piece.source &&
+      previous.end === piece.start
+    ) {
+      merged[merged.length - 1] = {
+        source: previous.source,
+        start: previous.start,
+        end: piece.end,
+      };
+      continue;
+    }
+    merged.push(piece);
+  }
+  return merged;
+}
+
+function externalValidateTextEdits(
+  edits: readonly TextEdit[],
+  sourceLength: number,
+): void {
+  let previousStart = -1;
+  let previousEnd = -1;
+  for (let index = 0; index < edits.length; index++) {
+    const edit = edits[index];
+    if (edit === undefined || typeof edit !== "object" || edit === null) {
+      throw new TypeError(`Text edit ${index} must be an object.`);
+    }
+    if (
+      !Number.isSafeInteger(edit.start) ||
+      !Number.isSafeInteger(edit.oldEnd) ||
+      edit.start < 0 ||
+      edit.oldEnd < edit.start ||
+      edit.oldEnd > sourceLength
+    ) {
+      throw new RangeError(
+        `Text edit ${index} range [${String(edit.start)}, ${
+          String(edit.oldEnd)
+        }) is outside source length ${sourceLength}.`,
+      );
+    }
+    if (typeof edit.newText !== "string") {
+      throw new TypeError(
+        `Text edit ${index} newText must be a string, got '${typeof edit
+          .newText}'.`,
+      );
+    }
+    if (
+      edit.start < previousEnd ||
+      (previousStart === previousEnd && edit.start === previousEnd)
+    ) {
+      throw new RangeError(
+        `Text edit ${index} starts at ${edit.start}, which overlaps the previous edit or shares its insertion point.`,
+      );
+    }
+    previousStart = edit.start;
+    previousEnd = edit.oldEnd;
+  }
+}
+
+interface ExternalIncrementalLexState {
+  readonly records: Int32Array;
+  readonly count: number;
+}
+
+class ExternalSnapshotTokenTape implements TokenTape {
+  #cache: (Token | undefined)[] | undefined;
+
+  constructor(
+    private readonly metadata: ExternalRuntimeMetadata,
+    private readonly snapshot: SourceSnapshot,
+    private readonly records: Int32Array,
+    private readonly keptRecordIndices: Int32Array | null,
+    private readonly keptCount: number,
+  ) {}
+
+  get length(): number {
+    return this.keptCount + 1;
+  }
+
+  token(index: number): Token | undefined {
+    if (!Number.isInteger(index) || index < 0 || index > this.keptCount) {
+      return undefined;
+    }
+    let cache = this.#cache;
+    if (cache === undefined) {
+      cache = new Array(this.keptCount + 1);
+      this.#cache = cache;
+    }
+    const cached = cache[index];
+    if (cached !== undefined) {
+      return cached;
+    }
+    let token: Token;
+    if (index === this.keptCount) {
+      token = externalEofToken(this.snapshot.length);
+    } else {
+      let recordIndex = index;
+      if (this.keptRecordIndices !== null) {
+        const selected = this.keptRecordIndices[index];
+        if (selected === undefined) {
+          throw new Error(`Token tape entry ${index} is missing.`);
+        }
+        recordIndex = selected;
+      }
+      token = materializeExternalSnapshotToken(
+        this.metadata,
+        this.snapshot,
+        this.records,
+        recordIndex,
+      );
+    }
+    cache[index] = token;
+    return token;
+  }
+}
+
+function materializeExternalSnapshotToken(
+  metadata: ExternalRuntimeMetadata,
+  snapshot: SourceSnapshot,
+  records: Int32Array,
+  recordIndex: number,
+): Token {
+  const base = recordIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+  const specIndex = records[base];
+  const start = records[base + 1];
+  const end = records[base + 2];
+  if (specIndex === undefined || start === undefined || end === undefined) {
+    throw new Error(`Incremental token record ${recordIndex} is incomplete.`);
+  }
+  if (specIndex < 0) {
+    return {
+      type: "error",
+      text: snapshot.slice(start, end),
+      span: { start, end },
+      channel: "error",
+    };
+  }
+  const spec = metadata.specs[specIndex];
+  if (spec === undefined) {
+    throw new Error(
+      `Incremental token record ${recordIndex} references unknown spec ${specIndex}.`,
+    );
+  }
+  if (spec.type === "literal") {
+    const literal = metadata.literalById.get(spec.literalId);
+    if (literal === undefined) {
+      throw new Error(
+        `Incremental token record ${recordIndex} references unknown literal ${spec.literalId}.`,
+      );
+    }
+    return {
+      type: "literal",
+      literal: literal.value,
+      text: literal.value,
+      span: { start, end },
+      channel: "main",
+    };
+  }
+  const named = metadata.namedById.get(spec.tokenId);
+  if (named === undefined) {
+    throw new Error(
+      `Incremental token record ${recordIndex} references unknown token ${spec.tokenId}.`,
+    );
+  }
+  return {
+    type: "named",
+    kind: named.name,
+    text: snapshot.slice(start, end),
+    span: { start, end },
+    channel: named.channel,
+  };
+}
+
+interface ExternalIncrementalRelexResult {
+  readonly state: ExternalIncrementalLexState;
+  readonly work: IncrementalLexWork;
+  readonly oldPrefixTokenCount: number;
+  readonly oldSuffixTokenStart: number;
+  readonly newSuffixTokenStart: number;
+}
+
+function externalIncrementalRelex(
+  wasm: ExternalParserWasmExports,
+  planByteLength: number,
+  previous: ExternalIncrementalLexState,
+  oldSourceLength: number,
+  source: string,
+  edits: readonly TextEdit[],
+): ExternalIncrementalRelexResult {
+  let earliestToken = previous.count;
+  for (let tokenIndex = 0; tokenIndex < previous.count; tokenIndex++) {
+    const base = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    const tokenStart = previous.records[base + 1];
+    const dependencyEnd = previous.records[base + 4];
+    if (tokenStart === undefined || dependencyEnd === undefined) {
+      throw new Error(`Incremental token record ${tokenIndex} is incomplete.`);
+    }
+    for (const edit of edits) {
+      let intersectsDependency = tokenStart < edit.oldEnd &&
+        dependencyEnd > edit.start;
+      if (edit.start === edit.oldEnd) {
+        intersectsDependency = tokenStart <= edit.start &&
+          dependencyEnd >= edit.start;
+      }
+      if (intersectsDependency) {
+        earliestToken = tokenIndex;
+        break;
+      }
+    }
+    if (earliestToken !== previous.count) {
+      break;
+    }
+  }
+  if (earliestToken === previous.count && edits.length > 0) {
+    earliestToken = previous.count;
+  }
+
+  let relexStart = 0;
+  if (earliestToken < previous.count) {
+    const selected = previous.records[
+      earliestToken * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
+    ];
+    if (selected === undefined) {
+      throw new Error(
+        `Incremental token record ${earliestToken} has no start offset.`,
+      );
+    }
+    relexStart = selected;
+  } else {
+    relexStart = oldSourceLength;
+  }
+
+  const finalEdit = edits[edits.length - 1];
+  if (finalEdit === undefined) {
+    return {
+      state: previous,
+      work: {
+        relexedRange: { start: 0, end: 0 },
+        scannedCodeUnits: 0,
+        createdTokens: 0,
+        reusedTokens: previous.count,
+      },
+      oldPrefixTokenCount: previous.count,
+      oldSuffixTokenStart: previous.count,
+      newSuffixTokenStart: previous.count,
+    };
+  }
+  let lengthDelta = 0;
+  for (const edit of edits) {
+    lengthDelta += edit.newText.length - (edit.oldEnd - edit.start);
+  }
+  const oldSuffixStart = finalEdit.oldEnd;
+  const newSuffixStart = oldSuffixStart + lengthDelta;
+  const oldBoundaries = new Map<number, number>();
+  for (
+    let tokenIndex = earliestToken;
+    tokenIndex < previous.count;
+    tokenIndex++
+  ) {
+    const start = previous.records[
+      tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
+    ];
+    if (start === undefined) {
+      throw new Error(`Incremental token record ${tokenIndex} has no start.`);
+    }
+    if (start >= oldSuffixStart) {
+      oldBoundaries.set(start, tokenIndex);
+    }
+  }
+  oldBoundaries.set(oldSourceLength, previous.count);
+
+  const createdParts: Int32Array[] = [];
+  let createdCount = 0;
+  let cursor = relexStart;
+  let oldSuffixTokenStart = previous.count;
+  while (cursor < source.length) {
+    let minimumEnd = newSuffixStart;
+    if (minimumEnd <= cursor) {
+      minimumEnd = cursor + 1;
+    }
+    if (minimumEnd > source.length) {
+      minimumEnd = source.length;
+    }
+    const lexed = lexExternalIncrementalRecords(
+      wasm,
+      planByteLength,
+      source,
+      cursor,
+      minimumEnd,
+    );
+    if (lexed.count === 0) {
+      cursor = source.length;
+    } else {
+      createdParts.push(lexed.records);
+      createdCount += lexed.count;
+      const lastBase = (lexed.count - 1) *
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      const nextCursor = lexed.records[lastBase + 2];
+      if (nextCursor === undefined || nextCursor <= cursor) {
+        throw new Error(
+          `Incremental lexer did not advance from source offset ${cursor}.`,
+        );
+      }
+      cursor = nextCursor;
+    }
+    if (cursor < newSuffixStart) {
+      continue;
+    }
+    const mappedOldOffset = cursor - lengthDelta;
+    const suffixToken = oldBoundaries.get(mappedOldOffset);
+    if (suffixToken !== undefined) {
+      oldSuffixTokenStart = suffixToken;
+      break;
+    }
+  }
+  if (cursor === source.length) {
+    oldSuffixTokenStart = previous.count;
+  }
+
+  const reusedSuffixCount = previous.count - oldSuffixTokenStart;
+  const totalCount = earliestToken + createdCount + reusedSuffixCount;
+  const records = new Int32Array(
+    totalCount * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
+  );
+  const prefixWordCount = earliestToken *
+    WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+  records.set(previous.records.subarray(0, prefixWordCount), 0);
+  let outputWord = prefixWordCount;
+  let dependencyEnd = cursor;
+  for (const part of createdParts) {
+    records.set(part, outputWord);
+    for (
+      let index = 0;
+      index < part.length;
+      index += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+    ) {
+      const selected = part[index + 4];
+      if (selected !== undefined && selected > dependencyEnd) {
+        dependencyEnd = selected;
+      }
+    }
+    outputWord += part.length;
+  }
+  for (
+    let tokenIndex = oldSuffixTokenStart;
+    tokenIndex < previous.count;
+    tokenIndex++
+  ) {
+    const oldBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    for (
+      let field = 0;
+      field < WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      field++
+    ) {
+      const value = previous.records[oldBase + field];
+      if (value === undefined) {
+        throw new Error(
+          `Incremental token record ${tokenIndex} is incomplete.`,
+        );
+      }
+      let shifted = value;
+      if (field === 1 || field === 2 || field === 4) {
+        shifted += lengthDelta;
+      }
+      records[outputWord + field] = shifted;
+    }
+    outputWord += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+  }
+
+  return {
+    state: { records, count: totalCount },
+    work: {
+      relexedRange: { start: relexStart, end: dependencyEnd },
+      scannedCodeUnits: dependencyEnd - relexStart,
+      createdTokens: createdCount,
+      reusedTokens: earliestToken + reusedSuffixCount,
+    },
+    oldPrefixTokenCount: earliestToken,
+    oldSuffixTokenStart,
+    newSuffixTokenStart: earliestToken + createdCount,
+  };
+}
+
+function externalIncrementalRawRecords(
+  state: ExternalIncrementalLexState,
+): Int32Array {
+  const records = new Int32Array(
+    state.count * WASM_TOKEN_RECORD_I32_COUNT,
+  );
+  for (let tokenIndex = 0; tokenIndex < state.count; tokenIndex++) {
+    const sourceBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    const targetBase = tokenIndex * WASM_TOKEN_RECORD_I32_COUNT;
+    records[targetBase] = state.records[sourceBase];
+    records[targetBase + 1] = state.records[sourceBase + 1];
+    records[targetBase + 2] = state.records[sourceBase + 2];
+    records[targetBase + 3] = state.records[sourceBase + 3];
+  }
+  return records;
+}
+
+function externalIncrementalLexResult(
+  metadata: ExternalRuntimeMetadata,
+  snapshot: SourceSnapshot,
+  state: ExternalIncrementalLexState,
+  preserveTrivia: boolean,
+): IncrementalLexResult {
+  const diagnostics: LexDiagnostic[] = [];
+  const keptRecordIndices = new Int32Array(state.count);
+  let keptCount = 0;
+  let droppedTrivia = false;
+  for (let tokenIndex = 0; tokenIndex < state.count; tokenIndex++) {
+    const base = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    const specIndex = state.records[base];
+    const start = state.records[base + 1];
+    const end = state.records[base + 2];
+    if (specIndex === undefined || start === undefined || end === undefined) {
+      throw new Error(`Incremental token record ${tokenIndex} is incomplete.`);
+    }
+    if (specIndex < 0) {
+      diagnostics.push({
+        code: "LEX_UNEXPECTED_CHARACTER",
+        message: `Unexpected character ${
+          JSON.stringify(snapshot.slice(start, end))
+        }.`,
+        span: { start, end },
+      });
+      keptRecordIndices[keptCount] = tokenIndex;
+      keptCount++;
+      continue;
+    }
+    if (!preserveTrivia && metadata.specIsTrivia[specIndex] === 1) {
+      droppedTrivia = true;
+      continue;
+    }
+    keptRecordIndices[keptCount] = tokenIndex;
+    keptCount++;
+  }
+  let indices: Int32Array | null = null;
+  if (droppedTrivia) {
+    indices = keptRecordIndices;
+  }
+  return {
+    version: snapshot.version,
+    snapshot,
+    tokenTape: new ExternalSnapshotTokenTape(
+      metadata,
+      snapshot,
+      state.records,
+      indices,
+      keptCount,
+    ),
+    diagnostics,
+  };
+}
+
+class ExternalParserStackNode {
+  readonly children = new Map<number, ExternalParserStackNode>();
+
+  constructor(
+    readonly state: number,
+    readonly parent: ExternalParserStackNode | undefined,
+    readonly depth: number,
+  ) {}
+}
+
+class ExternalParserStackPool {
+  readonly root = new ExternalParserStackNode(0, undefined, 1);
+
+  push(
+    parent: ExternalParserStackNode,
+    state: number,
+  ): ExternalParserStackNode {
+    const existing = parent.children.get(state);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const node = new ExternalParserStackNode(
+      state,
+      parent,
+      parent.depth + 1,
+    );
+    parent.children.set(state, node);
+    return node;
+  }
+
+  pop(
+    node: ExternalParserStackNode,
+    count: number,
+  ): ExternalParserStackNode | undefined {
+    let current: ExternalParserStackNode | undefined = node;
+    for (let index = 0; index < count; index++) {
+      if (current === undefined) {
+        return undefined;
+      }
+      current = current.parent;
+    }
+    return current;
+  }
+}
+
+interface ExternalValidationState {
+  readonly checkpoints: readonly ExternalParserStackNode[];
+  readonly actionCounts: readonly number[];
+  readonly result: ValidateParseResult;
+  readonly totalActionCount: number;
+  readonly stoppedTokenIndex: number;
+}
+
+interface ExternalValidationRun {
+  readonly state: ExternalValidationState;
+  readonly work: IncrementalParserWork;
+}
+
+function externalRunIncrementalValidation(
+  metadata: ExternalRuntimeMetadata,
+  wasm: ExternalParserWasmExports,
+  planByteLength: number,
+  source: string,
+  lexState: ExternalIncrementalLexState,
+  maxParserActions: number,
+  stackPool: ExternalParserStackPool,
+  previous: ExternalValidationState | undefined,
+  relexed: ExternalIncrementalRelexResult | undefined,
+): ExternalValidationRun {
+  const sourcePtr = align(planByteLength, 8);
+  const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
+  const selectionPtr = align(sourcePtr + sourceByteLength, WASM_I32_BYTES);
+  ensureExternalWasmCapacity(
+    wasm.memory,
+    selectionPtr + WASM_I32_BYTES * 4,
+  );
+
+  let tokenIndex = 0;
+  let stack = stackPool.root;
+  let logicalActionCount = 0;
+  let parserActions = 0;
+  const checkpoints: ExternalParserStackNode[] = [stack];
+  const actionCounts: number[] = [0];
+  if (previous !== undefined && relexed !== undefined) {
+    tokenIndex = Math.min(
+      relexed.oldPrefixTokenCount,
+      previous.checkpoints.length - 1,
+    );
+    const previousStack = previous.checkpoints[tokenIndex];
+    const previousActionCount = previous.actionCounts[tokenIndex];
+    if (previousStack === undefined || previousActionCount === undefined) {
+      throw new Error(
+        `Incremental validation checkpoint ${tokenIndex} is missing.`,
+      );
+    }
+    stack = previousStack;
+    logicalActionCount = previousActionCount;
+    checkpoints.length = 0;
+    actionCounts.length = 0;
+    for (let index = 0; index <= tokenIndex; index++) {
+      const checkpoint = previous.checkpoints[index];
+      const actionCount = previous.actionCounts[index];
+      if (checkpoint === undefined || actionCount === undefined) {
+        throw new Error(
+          `Incremental validation prefix checkpoint ${index} is missing.`,
+        );
+      }
+      checkpoints.push(checkpoint);
+      actionCounts.push(actionCount);
+    }
+  }
+  const reparseTokenStart = tokenIndex;
+
+  const reparsedStart = externalIncrementalTokenStart(
+    lexState,
+    tokenIndex,
+    source.length,
+  );
+  let reparsedEnd = reparsedStart;
+  let reuseChecks = 0;
+  while (true) {
+    if (
+      previous !== undefined && relexed !== undefined &&
+      tokenIndex >= relexed.newSuffixTokenStart
+    ) {
+      reuseChecks++;
+      const oldTokenIndex = relexed.oldSuffixTokenStart +
+        (tokenIndex - relexed.newSuffixTokenStart);
+      const oldStack = previous.checkpoints[oldTokenIndex];
+      const oldActionCount = previous.actionCounts[oldTokenIndex];
+      if (
+        previous.result.ok && oldStack === stack &&
+        oldActionCount !== undefined
+      ) {
+        const projectedActionCount = logicalActionCount +
+          (previous.totalActionCount - oldActionCount);
+        if (projectedActionCount <= maxParserActions) {
+          const actionDelta = logicalActionCount - oldActionCount;
+          for (
+            let suffixIndex = oldTokenIndex + 1;
+            suffixIndex < previous.checkpoints.length;
+            suffixIndex++
+          ) {
+            const suffixStack = previous.checkpoints[suffixIndex];
+            const suffixActionCount = previous.actionCounts[suffixIndex];
+            if (
+              suffixStack === undefined || suffixActionCount === undefined
+            ) {
+              throw new Error(
+                `Incremental validation suffix checkpoint ${suffixIndex} is missing.`,
+              );
+            }
+            checkpoints.push(suffixStack);
+            actionCounts.push(suffixActionCount + actionDelta);
+          }
+          return {
+            state: {
+              checkpoints,
+              actionCounts,
+              result: { ok: true, source, diagnostics: [] },
+              totalActionCount: projectedActionCount,
+              stoppedTokenIndex: lexState.count,
+            },
+            work: {
+              reparsedRanges: externalNonEmptyRanges(
+                reparsedStart,
+                reparsedEnd,
+              ),
+              parserActions,
+              reuseChecks,
+              reusedSubtrees: previous.checkpoints.length -
+                oldTokenIndex - 1,
+              createdSubtrees: tokenIndex - reparseTokenStart,
+            },
+          };
+        }
+      }
+    }
+
+    const state = stack.state;
+    let action: number;
+    let selectedSpec = -2;
+    let tokenStart = source.length;
+    let tokenEnd = source.length;
+    if (tokenIndex < lexState.count) {
+      const base = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      const fallbackSpec = lexState.records[base];
+      tokenStart = lexState.records[base + 1];
+      tokenEnd = lexState.records[base + 2];
+      const acceptingState = lexState.records[base + 3];
+      if (
+        fallbackSpec === undefined || tokenStart === undefined ||
+        tokenEnd === undefined || acceptingState === undefined
+      ) {
+        throw new Error(
+          `Incremental token record ${tokenIndex} is incomplete.`,
+        );
+      }
+      if (fallbackSpec < 0) {
+        const diagnostic = externalValidateStatusDiagnostic(
+          metadata,
+          source,
+          externalParseStatusUnexpected,
+          state,
+          fallbackSpec,
+          tokenStart,
+          tokenEnd,
+        );
+        return externalFailedValidationRun(
+          source,
+          diagnostic,
+          checkpoints,
+          actionCounts,
+          logicalActionCount,
+          tokenIndex,
+          parserActions,
+          reuseChecks,
+          reparsedStart,
+          tokenEnd,
+          reparseTokenStart,
+        );
+      }
+      const selectionStatus = wasm.parser_select_incremental(
+        state,
+        acceptingState,
+        fallbackSpec,
+        sourcePtr,
+        source.length,
+        tokenEnd,
+        selectionPtr,
+      );
+      const selectionView = new DataView(wasm.memory.buffer);
+      selectedSpec = selectionView.getInt32(
+        selectionPtr + WASM_I32_BYTES,
+        true,
+      );
+      if (selectionStatus === 2) {
+        tokenIndex++;
+        reparsedEnd = tokenEnd;
+        checkpoints.push(stack);
+        actionCounts.push(logicalActionCount);
+        continue;
+      }
+      if (selectionStatus !== 1) {
+        const diagnostic = externalValidateStatusDiagnostic(
+          metadata,
+          source,
+          externalParseStatusUnexpected,
+          state,
+          fallbackSpec,
+          tokenStart,
+          tokenEnd,
+        );
+        return externalFailedValidationRun(
+          source,
+          diagnostic,
+          checkpoints,
+          actionCounts,
+          logicalActionCount,
+          tokenIndex,
+          parserActions,
+          reuseChecks,
+          reparsedStart,
+          tokenEnd,
+          reparseTokenStart,
+        );
+      }
+      action = selectionView.getInt32(
+        selectionPtr + WASM_I32_BYTES * 3,
+        true,
+      );
+    } else {
+      action = wasm.parser_action(state, metadata.eofTerminal);
+      if (action <= 0) {
+        const diagnostic = externalValidateStatusDiagnostic(
+          metadata,
+          source,
+          externalParseStatusUnexpected,
+          state,
+          -2,
+          source.length,
+          source.length,
+        );
+        return externalFailedValidationRun(
+          source,
+          diagnostic,
+          checkpoints,
+          actionCounts,
+          logicalActionCount,
+          tokenIndex,
+          parserActions,
+          reuseChecks,
+          reparsedStart,
+          source.length,
+          reparseTokenStart,
+        );
+      }
+    }
+
+    if (logicalActionCount >= maxParserActions) {
+      const diagnostic = externalValidateStatusDiagnostic(
+        metadata,
+        source,
+        externalParseStatusActionLimit,
+        state,
+        selectedSpec,
+        tokenStart,
+        tokenEnd,
+      );
+      return externalFailedValidationRun(
+        source,
+        diagnostic,
+        checkpoints,
+        actionCounts,
+        logicalActionCount,
+        tokenIndex,
+        parserActions,
+        reuseChecks,
+        reparsedStart,
+        tokenEnd,
+        reparseTokenStart,
+      );
+    }
+    logicalActionCount++;
+    parserActions++;
+    const kind = action & 0xff_00_00_00;
+    const payload = action & WASM_ACTION_PAYLOAD_MASK;
+    if (kind === WASM_ACTION_SHIFT) {
+      stack = stackPool.push(stack, payload);
+      tokenIndex++;
+      reparsedEnd = tokenEnd;
+      checkpoints.push(stack);
+      actionCounts.push(logicalActionCount);
+      continue;
+    }
+    if (kind === WASM_ACTION_REDUCE) {
+      const production = metadata.productions[payload];
+      if (production === undefined) {
+        return externalInternalValidationRun(
+          source,
+          `Incremental parser references unknown production ${payload}.`,
+          checkpoints,
+          actionCounts,
+          logicalActionCount,
+          tokenIndex,
+          parserActions,
+          reuseChecks,
+          reparsedStart,
+          tokenEnd,
+          reparseTokenStart,
+        );
+      }
+      const gotoSource = stackPool.pop(stack, production.rhsLength);
+      if (gotoSource === undefined) {
+        return externalInternalValidationRun(
+          source,
+          `Incremental parser production ${payload} pops ${production.rhsLength} states from stack depth ${stack.depth}.`,
+          checkpoints,
+          actionCounts,
+          logicalActionCount,
+          tokenIndex,
+          parserActions,
+          reuseChecks,
+          reparsedStart,
+          tokenEnd,
+          reparseTokenStart,
+        );
+      }
+      const gotoState = wasm.parser_goto(gotoSource.state, production.lhs);
+      if (gotoState < 0) {
+        return externalInternalValidationRun(
+          source,
+          `Incremental parser has no goto from state ${gotoSource.state} on nonterminal ${production.lhs}.`,
+          checkpoints,
+          actionCounts,
+          logicalActionCount,
+          tokenIndex,
+          parserActions,
+          reuseChecks,
+          reparsedStart,
+          tokenEnd,
+          reparseTokenStart,
+        );
+      }
+      stack = stackPool.push(gotoSource, gotoState);
+      continue;
+    }
+    if (kind === WASM_ACTION_ACCEPT) {
+      return {
+        state: {
+          checkpoints,
+          actionCounts,
+          result: { ok: true, source, diagnostics: [] },
+          totalActionCount: logicalActionCount,
+          stoppedTokenIndex: tokenIndex,
+        },
+        work: {
+          reparsedRanges: externalNonEmptyRanges(
+            reparsedStart,
+            reparsedEnd,
+          ),
+          parserActions,
+          reuseChecks,
+          reusedSubtrees: 0,
+          createdSubtrees: tokenIndex - reparseTokenStart,
+        },
+      };
+    }
+    return externalInternalValidationRun(
+      source,
+      `Incremental parser received unknown action ${action}.`,
+      checkpoints,
+      actionCounts,
+      logicalActionCount,
+      tokenIndex,
+      parserActions,
+      reuseChecks,
+      reparsedStart,
+      tokenEnd,
+      reparseTokenStart,
+    );
+  }
+}
+
+function externalIncrementalTokenStart(
+  state: ExternalIncrementalLexState,
+  tokenIndex: number,
+  sourceLength: number,
+): number {
+  if (tokenIndex >= state.count) {
+    return sourceLength;
+  }
+  const start = state.records[
+    tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
+  ];
+  if (start === undefined) {
+    throw new Error(`Incremental token record ${tokenIndex} has no start.`);
+  }
+  return start;
+}
+
+function externalNonEmptyRanges(
+  start: number,
+  end: number,
+): readonly Span[] {
+  if (end <= start) {
+    return [];
+  }
+  return [{ start, end }];
+}
+
+function externalFailedValidationRun(
+  source: string,
+  diagnostic: ExternalParseDiagnostic,
+  checkpoints: readonly ExternalParserStackNode[],
+  actionCounts: readonly number[],
+  totalActionCount: number,
+  stoppedTokenIndex: number,
+  parserActions: number,
+  reuseChecks: number,
+  reparsedStart: number,
+  reparsedEnd: number,
+  reparseTokenStart: number,
+): ExternalValidationRun {
+  const createdSubtrees = stoppedTokenIndex - reparseTokenStart;
+  return {
+    state: {
+      checkpoints,
+      actionCounts,
+      result: { ok: false, source, diagnostics: [diagnostic] },
+      totalActionCount,
+      stoppedTokenIndex,
+    },
+    work: {
+      reparsedRanges: externalNonEmptyRanges(reparsedStart, reparsedEnd),
+      parserActions,
+      reuseChecks,
+      reusedSubtrees: 0,
+      createdSubtrees,
+    },
+  };
+}
+
+function externalInternalValidationRun(
+  source: string,
+  message: string,
+  checkpoints: readonly ExternalParserStackNode[],
+  actionCounts: readonly number[],
+  totalActionCount: number,
+  stoppedTokenIndex: number,
+  parserActions: number,
+  reuseChecks: number,
+  reparsedStart: number,
+  reparsedEnd: number,
+  reparseTokenStart: number,
+): ExternalValidationRun {
+  return externalFailedValidationRun(
+    source,
+    externalParseDiagnostic(
+      "PARSER_INTERNAL_ERROR",
+      message,
+      { start: reparsedEnd, end: reparsedEnd },
+    ),
+    checkpoints,
+    actionCounts,
+    totalActionCount,
+    stoppedTokenIndex,
+    parserActions,
+    reuseChecks,
+    reparsedStart,
+    reparsedEnd,
+    reparseTokenStart,
+  );
+}
+
+class ExternalIncrementalDocument<Root extends RuleCursor> {
+  #disposed = false;
+  #snapshot: ExternalSourceSnapshot;
+  #source: string;
+  #lexState: ExternalIncrementalLexState;
+  #lexResult: IncrementalLexResult;
+  #validateResult: IncrementalValidateResult | undefined;
+  #validationState: ExternalValidationState | undefined;
+  #parseResult: IncrementalParseResult<Root> | undefined;
+  readonly #stackPool = new ExternalParserStackPool();
+  readonly #preserveTrivia: boolean;
+  readonly #maxParserActions: number;
+
+  readonly goal: "lex" | "validate" | "parse";
+
+  constructor(
+    private readonly metadata: ExternalRuntimeMetadata,
+    private readonly wasm: ExternalParserWasmExports,
+    private readonly planByteLength: number,
+    source: string,
+    options:
+      | LexDocumentOptions
+      | ValidateDocumentOptions
+      | ParseDocumentOptions,
+    private readonly onDispose: () => void,
+  ) {
+    if (typeof source !== "string") {
+      throw new TypeError(
+        `Incremental document source must be a string, got '${typeof source}'.`,
+      );
+    }
+    if (options === undefined || options === null) {
+      throw new Error(
+        "Incremental document creation requires an options object.",
+      );
+    }
+    if (
+      options.goal !== "lex" && options.goal !== "validate" &&
+      options.goal !== "parse"
+    ) {
+      throw new Error(
+        `Incremental document goal must be 'lex', 'validate', or 'parse', got '${
+          String((options as { goal?: unknown }).goal)
+        }'.`,
+      );
+    }
+    this.goal = options.goal;
+    this.#preserveTrivia = externalDocumentTriviaPolicy(metadata, options);
+    let maxParserActions = 1_000_000;
+    if (options.goal !== "lex") {
+      maxParserActions = externalPositiveLimit(
+        options,
+        "maxParserActions",
+        maxParserActions,
+      );
+    }
+    this.#maxParserActions = maxParserActions;
+    this.#snapshot = ExternalSourceSnapshot.initial(source);
+    this.#source = source;
+    this.#lexState = lexExternalIncrementalRecords(
+      wasm,
+      planByteLength,
+      source,
+      0,
+      source.length,
+    );
+    this.#lexResult = externalIncrementalLexResult(
+      metadata,
+      this.#snapshot,
+      this.#lexState,
+      this.#preserveTrivia,
+    );
+    this.#refreshParserResults();
+  }
+
+  get version(): number {
+    this.#assertLive();
+    return this.#snapshot.version;
+  }
+
+  get snapshot(): SourceSnapshot {
+    this.#assertLive();
+    return this.#snapshot;
+  }
+
+  lex(): IncrementalLexResult {
+    this.#assertLive();
+    return this.#lexResult;
+  }
+
+  validate(): IncrementalValidateResult {
+    this.#assertLive();
+    if (this.goal === "lex" || this.#validateResult === undefined) {
+      throw new Error(
+        `Incremental document goal '${this.goal}' does not maintain parser validation state.`,
+      );
+    }
+    return this.#validateResult;
+  }
+
+  parse(): IncrementalParseResult<Root> {
+    this.#assertLive();
+    if (this.goal !== "parse" || this.#parseResult === undefined) {
+      throw new Error(
+        `Incremental document goal '${this.goal}' does not maintain cursor parse state.`,
+      );
+    }
+    return this.#parseResult;
+  }
+
+  applyEdits(
+    edits: readonly TextEdit[],
+  ): IncrementalLexUpdate | IncrementalValidateUpdate | IncrementalParseUpdate {
+    this.#assertLive();
+    if (!Array.isArray(edits)) {
+      throw new TypeError("Incremental document edits must be an array.");
+    }
+    externalValidateTextEdits(edits, this.#snapshot.length);
+    if (edits.length === 0) {
+      return this.#emptyUpdate();
+    }
+    const previousSnapshot = this.#snapshot;
+    const previousLexState = this.#lexState;
+    const applied = previousSnapshot.apply(edits);
+    const source = applied.snapshot.text();
+    const relexed = externalIncrementalRelex(
+      this.wasm,
+      this.planByteLength,
+      previousLexState,
+      previousSnapshot.length,
+      source,
+      edits,
+    );
+    this.#snapshot = applied.snapshot;
+    this.#source = source;
+    this.#lexState = relexed.state;
+    this.#lexResult = externalIncrementalLexResult(
+      this.metadata,
+      this.#snapshot,
+      this.#lexState,
+      this.#preserveTrivia,
+    );
+
+    let parserWork: IncrementalParserWork | undefined;
+    if (this.goal !== "lex") {
+      const validation = externalRunIncrementalValidation(
+        this.metadata,
+        this.wasm,
+        this.planByteLength,
+        this.#source,
+        this.#lexState,
+        this.#maxParserActions,
+        this.#stackPool,
+        this.#validationState,
+        relexed,
+      );
+      this.#validationState = validation.state;
+      this.#validateResult = externalIncrementalValidateResult(
+        this.#snapshot,
+        validation.state.result,
+      );
+      parserWork = validation.work;
+      if (this.goal === "parse") {
+        const firstEdit = edits[0];
+        if (firstEdit === undefined) {
+          throw new Error("Incremental parse update has no first edit.");
+        }
+        const parsed = this.#parseCurrentRecords(firstEdit.start);
+        this.#parseResult = externalIncrementalParseResult(
+          this.#snapshot,
+          parsed,
+        );
+      }
+    }
+
+    if (this.goal === "lex") {
+      return {
+        goal: "lex",
+        version: this.#snapshot.version,
+        changes: applied.changes,
+        lexer: relexed.work,
+      };
+    }
+    if (parserWork === undefined) {
+      throw new Error("Incremental parser work was not recorded.");
+    }
+    if (this.goal === "validate") {
+      return {
+        goal: "validate",
+        version: this.#snapshot.version,
+        changes: applied.changes,
+        lexer: relexed.work,
+        parser: parserWork,
+      };
+    }
+    return {
+      goal: "parse",
+      version: this.#snapshot.version,
+      changes: applied.changes,
+      lexer: relexed.work,
+      parser: parserWork,
+    };
+  }
+
+  dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#disposed = true;
+    this.onDispose();
+  }
+
+  #emptyUpdate():
+    | IncrementalLexUpdate
+    | IncrementalValidateUpdate
+    | IncrementalParseUpdate {
+    const lexer: IncrementalLexWork = {
+      relexedRange: { start: 0, end: 0 },
+      scannedCodeUnits: 0,
+      createdTokens: 0,
+      reusedTokens: this.#lexState.count,
+    };
+    if (this.goal === "lex") {
+      return {
+        goal: "lex",
+        version: this.#snapshot.version,
+        changes: [],
+        lexer,
+      };
+    }
+    const parser: IncrementalParserWork = {
+      reparsedRanges: [],
+      parserActions: 0,
+      reuseChecks: 0,
+      reusedSubtrees: this.#lexState.count,
+      createdSubtrees: 0,
+    };
+    if (this.goal === "validate") {
+      return {
+        goal: "validate",
+        version: this.#snapshot.version,
+        changes: [],
+        lexer,
+        parser,
+      };
+    }
+    return {
+      goal: "parse",
+      version: this.#snapshot.version,
+      changes: [],
+      lexer,
+      parser,
+    };
+  }
+
+  #refreshParserResults(): void {
+    if (this.goal === "lex") {
+      return;
+    }
+    const validation = externalRunIncrementalValidation(
+      this.metadata,
+      this.wasm,
+      this.planByteLength,
+      this.#source,
+      this.#lexState,
+      this.#maxParserActions,
+      this.#stackPool,
+      undefined,
+      undefined,
+    );
+    this.#validationState = validation.state;
+    this.#validateResult = externalIncrementalValidateResult(
+      this.#snapshot,
+      validation.state.result,
+    );
+    if (this.goal === "parse") {
+      this.#parseResult = externalIncrementalParseResult(
+        this.#snapshot,
+        this.#parseCurrentRecords(),
+      );
+    }
+  }
+
+  #parseCurrentRecords(
+    unchangedPrefixEnd = -1,
+  ): CursorParseResult<Root> {
+    let reuse: ExternalCursorTapeReuse | undefined;
+    if (this.#parseResult !== undefined && this.#parseResult.ok) {
+      const previousTape = externalCursorTapeByRoot.get(
+        this.#parseResult.cursor,
+      );
+      if (previousTape !== undefined) {
+        reuse = { tape: previousTape, unchangedPrefixEnd };
+      }
+    }
+    return parseExternalCursorWithWasm(
+      this.metadata,
+      this.wasm,
+      this.planByteLength,
+      this.#source,
+      {
+        preserveTrivia: this.#preserveTrivia,
+        maxParserActions: this.#maxParserActions,
+      },
+      externalIncrementalRawRecords(this.#lexState),
+      reuse,
+    ) as CursorParseResult<Root>;
+  }
+
+  #assertLive(): void {
+    if (this.#disposed) {
+      throw new Error("Incremental document is disposed.");
+    }
+  }
+}
+
+function externalDocumentTriviaPolicy(
+  metadata: ExternalRuntimeMetadata,
+  options:
+    | LexDocumentOptions
+    | ValidateDocumentOptions
+    | ParseDocumentOptions,
+): boolean {
+  if (options.trivia === undefined) {
+    return metadata.defaultPreserveTrivia;
+  }
+  if (options.trivia === "preserve") {
+    return true;
+  }
+  if (options.trivia === "discard") {
+    return false;
+  }
+  throw new TypeError(
+    `Incremental document trivia policy must be 'preserve' or 'discard', got '${
+      String(options.trivia)
+    }'.`,
+  );
+}
+
+function externalIncrementalValidateResult(
+  snapshot: SourceSnapshot,
+  result: ValidateParseResult,
+): IncrementalValidateResult {
+  if (result.ok) {
+    return {
+      ok: true,
+      version: snapshot.version,
+      snapshot,
+      diagnostics: [],
+    };
+  }
+  return {
+    ok: false,
+    version: snapshot.version,
+    snapshot,
+    diagnostics: result.diagnostics,
+  };
+}
+
+function externalIncrementalParseResult<Root extends RuleCursor>(
+  snapshot: SourceSnapshot,
+  result: CursorParseResult<Root>,
+): IncrementalParseResult<Root> {
+  if (result.ok) {
+    return {
+      ok: true,
+      version: snapshot.version,
+      snapshot,
+      cursor: result.cursor,
+      diagnostics: [],
+    };
+  }
+  return {
+    ok: false,
+    version: snapshot.version,
+    snapshot,
+    cursor: null,
+    diagnostics: result.diagnostics,
+  };
 }
 
 /**
@@ -1434,6 +3195,92 @@ function lexExternalRecords(
   };
 }
 
+function lexExternalIncrementalRecords(
+  wasm: ExternalParserWasmExports,
+  planByteLength: number,
+  source: string,
+  start: number,
+  minimumEnd: number,
+): ExternalIncrementalLexState {
+  let maxRecords = source.length - start;
+  if (maxRecords < 1) {
+    maxRecords = 1;
+  }
+  const sourcePtr = align(planByteLength, 8);
+  const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
+  const tokenPtr = align(sourcePtr + sourceByteLength, WASM_I32_BYTES);
+  const recordBytes = WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES;
+  const memoPtr = align(tokenPtr + maxRecords * recordBytes, WASM_I32_BYTES);
+  let memoCapacity = 0;
+  let requiredBytes = memoPtr;
+  if (!externalWasmCapacityFits(requiredBytes)) {
+    throw new RangeError(
+      externalOversizedInputMessage(
+        source.length,
+        requiredBytes,
+        externalOversizedSplitRemedy,
+      ),
+    );
+  }
+  ensureExternalWasmCapacity(wasm.memory, requiredBytes);
+  let view = new DataView(wasm.memory.buffer);
+  for (let index = 0; index < source.length; index++) {
+    view.setUint16(
+      sourcePtr + index * WASM_UTF16_UNIT_BYTES,
+      source.charCodeAt(index),
+      true,
+    );
+  }
+  let count = wasm.lex_incremental(
+    sourcePtr,
+    source.length,
+    start,
+    minimumEnd,
+    tokenPtr,
+    maxRecords,
+    memoPtr,
+    memoCapacity,
+  );
+  if (count === -2) {
+    memoCapacity = externalLexMemoCapacity(wasm, source.length);
+    requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
+    if (!externalWasmCapacityFits(requiredBytes)) {
+      throw new RangeError(
+        externalOversizedInputMessage(
+          source.length,
+          requiredBytes,
+          externalOversizedSplitRemedy,
+        ),
+      );
+    }
+    ensureExternalWasmCapacity(wasm.memory, requiredBytes);
+    count = wasm.lex_incremental(
+      sourcePtr,
+      source.length,
+      start,
+      minimumEnd,
+      tokenPtr,
+      maxRecords,
+      memoPtr,
+      memoCapacity,
+    );
+    view = new DataView(wasm.memory.buffer);
+  }
+  if (count < 0 || count > maxRecords) {
+    throw new Error(
+      `Wasm incremental lexer returned token count ${count} for capacity ${maxRecords}.`,
+    );
+  }
+  return {
+    records: copyI32Tape(
+      view,
+      tokenPtr,
+      count * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
+    ),
+    count,
+  };
+}
+
 function validateExternalWasm(
   metadata: ExternalRuntimeMetadata,
   wasm: ExternalParserWasmExports,
@@ -1548,6 +3395,7 @@ function parseExternalCursorWithWasm(
   source: string,
   options: ParseOptions | undefined,
   externalRecords: Int32Array | undefined,
+  reuse?: ExternalCursorTapeReuse,
 ): CursorParseResult<RuleCursor> {
   let preserveTrivia = metadata.defaultPreserveTrivia;
   if (options !== undefined && options.preserveTrivia !== undefined) {
@@ -1845,12 +3693,15 @@ function parseExternalCursorWithWasm(
         valueItemPtr,
         valueItemCount * WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
       ),
+      reuse,
     );
     try {
+      const cursor = tape.cursorForRuleRef(rootRef);
+      externalCursorTapeByRoot.set(cursor, tape);
       return {
         ok: true,
         source,
-        cursor: tape.cursorForRuleRef(rootRef),
+        cursor,
         diagnostics: [],
       };
     } catch (error) {
@@ -2234,6 +4085,16 @@ function materializeExternalTokenRecordValue(
   );
 }
 
+interface ExternalCursorTapeReuse {
+  readonly tape: ExternalCursorTapeView;
+  readonly unchangedPrefixEnd: number;
+}
+
+const externalCursorTapeByRoot = new WeakMap<
+  RuleCursor,
+  ExternalCursorTapeView
+>();
+
 class ExternalCursorTapeView {
   private readonly ruleCache: (RuleCursor | undefined)[] = [];
   private readonly tokenCache: (TokenCursor | undefined)[] = [];
@@ -2247,6 +4108,7 @@ class ExternalCursorTapeView {
     private readonly fieldRecords: Int32Array,
     private readonly valueRecords: Int32Array,
     private readonly valueItems: Int32Array,
+    private readonly reuse?: ExternalCursorTapeReuse,
   ) {}
 
   cursorForRuleRef(ref: number): RuleCursor {
@@ -2293,6 +4155,50 @@ class ExternalCursorTapeView {
       fieldStart === undefined || fieldCount === undefined
     ) {
       throw new Error("Cursor rule record is incomplete.");
+    }
+    if (
+      this.reuse !== undefined &&
+      span.end <= this.reuse.unchangedPrefixEnd
+    ) {
+      let recordMatches = true;
+      for (
+        let field = 0;
+        field < WASM_CURSOR_RULE_RECORD_I32_COUNT;
+        field++
+      ) {
+        if (
+          this.ruleRecords[base + field] !==
+            this.reuse.tape.ruleRecords[base + field]
+        ) {
+          recordMatches = false;
+          break;
+        }
+      }
+      for (
+        let tokenIndex = tokenRange.start;
+        recordMatches && tokenIndex < tokenRange.end;
+        tokenIndex++
+      ) {
+        const tokenBase = tokenIndex * WASM_TOKEN_RECORD_I32_COUNT;
+        for (
+          let field = 0;
+          field < WASM_TOKEN_RECORD_I32_COUNT;
+          field++
+        ) {
+          if (
+            this.tokenRecords[tokenBase + field] !==
+              this.reuse.tape.tokenRecords[tokenBase + field]
+          ) {
+            recordMatches = false;
+            break;
+          }
+        }
+      }
+      if (recordMatches) {
+        const previous = this.reuse.tape.ruleCursor(ruleIndex);
+        this.ruleCache[ruleIndex] = previous;
+        return previous;
+      }
     }
     let childrenCache: readonly SyntaxCursor[] | undefined;
     // Child edges form a singly linked node list in the Wasm arena, so a child
@@ -2883,6 +4789,14 @@ function validateStaticExternalWasmAbi(wasm: ExternalParserWasmExports): void {
   if (typeof wasm.validate !== "function") {
     throw new Error("Wasm ABI is missing the validate export.");
   }
+  if (typeof wasm.lex_incremental !== "function") {
+    throw new Error("Wasm ABI is missing the lex_incremental export.");
+  }
+  if (typeof wasm.parser_select_incremental !== "function") {
+    throw new Error(
+      "Wasm ABI is missing the parser_select_incremental export.",
+    );
+  }
   if (wasm.semantics_version() !== RUNTIME_IMPLEMENTATION_METADATA.version) {
     throw new Error(
       "Wasm runtime semantics version does not match shared adapter.",
@@ -2902,6 +4816,14 @@ function validateStaticExternalWasmAbi(wasm: ExternalParserWasmExports): void {
   }
   if (wasm.token_record_i32_count() !== WASM_TOKEN_RECORD_I32_COUNT) {
     throw new Error("Wasm token record width does not match shared adapter.");
+  }
+  if (
+    wasm.incremental_token_record_i32_count() !==
+      WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+  ) {
+    throw new Error(
+      "Wasm incremental token record width does not match shared adapter.",
+    );
   }
   if (wasm.validate_result_i32_count() !== WASM_VALIDATE_RESULT_I32_COUNT) {
     throw new Error(

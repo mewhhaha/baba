@@ -127,6 +127,48 @@ interface GeneratedParser {
     source: string,
     options?: Record<string, unknown>,
   ): ValidateResultLike;
+  createDocument(
+    source: string,
+    options: Record<string, unknown>,
+  ): GeneratedIncrementalDocument;
+  dispose(): void;
+}
+
+interface GeneratedIncrementalDocument {
+  readonly version: number;
+  readonly snapshot: {
+    readonly version: number;
+    readonly length: number;
+    slice(start?: number, end?: number): string;
+    text(): string;
+  };
+  lex(): {
+    readonly version: number;
+    readonly tokenTape: TokenTapeLike;
+    readonly diagnostics: readonly DiagnosticLike[];
+  };
+  validate(): ValidateResultLike;
+  parse(): CursorParseResultLike;
+  applyEdits(
+    edits: readonly {
+      readonly start: number;
+      readonly oldEnd: number;
+      readonly newText: string;
+    }[],
+  ): {
+    readonly version: number;
+    readonly lexer: {
+      readonly relexedRange: { readonly start: number; readonly end: number };
+      readonly createdTokens: number;
+      readonly reusedTokens: number;
+    };
+    readonly parser?: {
+      readonly parserActions: number;
+      readonly reuseChecks: number;
+      readonly reusedSubtrees: number;
+      readonly createdSubtrees: number;
+    };
+  };
   dispose(): void;
 }
 
@@ -591,7 +633,7 @@ Deno.test("combined parser plans round-trip current runtime metadata with exact 
   );
 });
 
-// Core plan format version 6 header slots. Named here rather than imported
+// Core plan format version 7 header slots. Named here rather than imported
 // because the encoder and the validator both keep them module-private, and a
 // test that reads the bytes is exactly the place that should re-state them.
 const CORE_HEADER_DFA_STATE_COUNT = 3;
@@ -986,6 +1028,192 @@ Deno.test("shared Wasm adapter preserves lexer and parser behavior", async () =>
         }),
       "maxParserActions must be a positive safe integer",
     );
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm documents reuse lexer records across edits", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
+    const source = [
+      "let alpha = 1;",
+      "let beta = 2;",
+      "let gamma = 3;",
+    ].join("\n");
+    const document = parser.createDocument(source, {
+      goal: "parse",
+      trivia: "preserve",
+    });
+    const oldParse = document.parse();
+    assert(oldParse.ok);
+    const valueStart = source.indexOf("2");
+    const update = document.applyEdits([{
+      start: valueStart,
+      oldEnd: valueStart + 1,
+      newText: "20",
+    }]);
+
+    assertEquals(document.version, 1);
+    assertEquals(document.snapshot.version, 1);
+    assertEquals(document.snapshot.text(), source.replace("2", "20"));
+    assert(update.lexer.createdTokens < document.lex().tokenTape.length);
+    assert(update.lexer.reusedTokens > 0);
+    assert(update.lexer.relexedRange.start <= valueStart);
+    assert(update.parser);
+    assert(update.parser.reuseChecks > 0);
+    assert(update.parser.reusedSubtrees > 0);
+    assertEquals(document.validate().ok, true);
+    const newParse = document.parse();
+    assert(newParse.ok);
+    assert(
+      oldParse.cursor.child(0) === newParse.cursor.child(0),
+      "Expected the unchanged first statement cursor to be reused.",
+    );
+    assertEquals(oldParse.cursor.span.end, source.length);
+
+    const invalidUpdate = document.applyEdits([{
+      start: valueStart,
+      oldEnd: valueStart + 2,
+      newText: "",
+    }]);
+    assertEquals(invalidUpdate.version, 2);
+    const invalidParse = document.parse();
+    assertEquals(invalidParse.ok, false);
+    assertEquals(invalidParse.cursor, null);
+    assertEquals(document.validate().ok, false);
+
+    const versionBeforeRejectedEdits = document.version;
+    const sourceBeforeRejectedEdits = document.snapshot.text();
+    assertThrowsIncludes(
+      () =>
+        document.applyEdits([
+          { start: 0, oldEnd: 3, newText: "if" },
+          { start: 2, oldEnd: 4, newText: "x" },
+        ]),
+      "overlaps",
+    );
+    assertEquals(document.version, versionBeforeRejectedEdits);
+    assertEquals(document.snapshot.text(), sourceBeforeRejectedEdits);
+
+    const fresh = parser.lex(document.snapshot.text(), {
+      preserveTrivia: true,
+    });
+    const incremental = document.lex();
+    assertEquals(
+      JSON.stringify(incremental.diagnostics),
+      JSON.stringify(fresh.diagnostics),
+    );
+    assertEquals(incremental.tokenTape.length, fresh.tokenTape.length);
+    for (let index = 0; index < fresh.tokenTape.length; index++) {
+      assertEquals(
+        JSON.stringify(incremental.tokenTape.token(index)),
+        JSON.stringify(fresh.tokenTape.token(index)),
+      );
+    }
+
+    document.dispose();
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm documents invalidate guarded tokens from their lookahead dependency", async () => {
+  const grammar = `
+    token IDENT = /[a-z]+/ ;
+    skip WS = /[ ]+/ ;
+    contextual APPLICATION_SPACE = /[ ]+(?=[a-z])/ ;
+    module = "app" APPLICATION_SPACE IDENT ";" ;
+  `;
+  const { dir, mod, bytes, plan } = await materialize(grammar);
+  try {
+    const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
+    const source = "app x;";
+    const document = parser.createDocument(source, {
+      goal: "lex",
+      trivia: "preserve",
+    });
+    const update = document.applyEdits([{
+      start: 4,
+      oldEnd: 5,
+      newText: "#",
+    }]);
+    assertEquals(update.lexer.relexedRange.start, 3);
+
+    const fresh = parser.lex("app #;", { preserveTrivia: true });
+    const incremental = document.lex();
+    assertEquals(
+      JSON.stringify(incremental.diagnostics),
+      JSON.stringify(fresh.diagnostics),
+    );
+    assertEquals(incremental.tokenTape.length, fresh.tokenTape.length);
+    for (let index = 0; index < fresh.tokenTape.length; index++) {
+      assertEquals(
+        JSON.stringify(incremental.tokenTape.token(index)),
+        JSON.stringify(fresh.tokenTape.token(index)),
+      );
+    }
+
+    document.dispose();
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm documents update large checkpoint prefixes without host stack growth", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
+    const source = "let value = 1;\n".repeat(20_000);
+    const document = parser.createDocument(source, { goal: "validate" });
+    const editStart = Math.floor(source.length / 2) + 12;
+    const update = document.applyEdits([{
+      start: editStart,
+      oldEnd: editStart + 1,
+      newText: "2",
+    }]);
+
+    assertEquals(document.validate().ok, true);
+    assert(update.parser);
+    assert(update.parser.parserActions > 0);
+    assert(update.parser.reusedSubtrees > 0);
+
+    document.dispose();
+    parser.dispose();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm documents preserve an earlier diagnostic when a later edit changes no parser prefix", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
+    const source = "let = 1;\nlet value = 2;";
+    const document = parser.createDocument(source, { goal: "validate" });
+    assertEquals(document.validate().ok, false);
+
+    const editStart = source.lastIndexOf("2");
+    const update = document.applyEdits([{
+      start: editStart,
+      oldEnd: editStart + 1,
+      newText: "3",
+    }]);
+    const incremental = document.validate();
+    const fresh = parser.validate(document.snapshot.text());
+
+    assertEquals(incremental.ok, false);
+    assertEquals(
+      JSON.stringify(incremental.diagnostics),
+      JSON.stringify(fresh.diagnostics),
+    );
+    assertEquals(update.parser?.createdSubtrees, 0);
+
+    document.dispose();
     parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });

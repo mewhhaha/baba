@@ -29,6 +29,9 @@ The most relevant runtime benchmark fields are:
 - `cold.lexSmallMs`, `cold.validateSmallMs`, and `cold.parseSmallMs`;
 - `hot.lex`, `hot.validate`, and `hot.parse`, each with p25 and median;
 - `hot.validateEarlyError` and `hot.validateLateError`;
+- `hot.incrementalValidate` and `hot.incrementalWork`, covering a middle edit
+  with exact scanned-code-unit, parser-action, token-reuse, and
+  parser-checkpoint-reuse counts;
 - `memoryPages.highWater`;
 - `compileModuleMs`;
 - `createParserMs`;
@@ -67,7 +70,7 @@ one wasted scan per token, the maximal-munch failure step - and it could never
 succeed, because `buildAsciiTransitions` materialises every ASCII code point of
 every transition, so a negative cell already means "no transition".
 
-Core plan format 6 makes that ownership explicit: when the dense table is
+Core plan format 7 makes that ownership explicit: when the dense table is
 present, sparse rows contain only U+0080 and above. On `large-runtime`, this
 removes 1,256 duplicated ASCII ranges and reduces `parser.plan` from 112,904 to
 97,832 bytes without changing the engine's transition loop.

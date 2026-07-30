@@ -67,7 +67,7 @@ export interface PlanClassRange {
 
 /**
  * The alphabet equivalence classes exactly as the compiler computed them, read
- * out of core plan format version 6. Nothing here is re-derived: two code points
+ * out of core plan format version 7. Nothing here is re-derived: two code points
  * share a class because the compiler said so, which is what makes a dense
  * `(states x classes)` table built from this agree with the transition
  * sections the Wasm engine walks.
