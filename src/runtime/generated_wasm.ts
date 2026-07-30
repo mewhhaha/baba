@@ -2058,6 +2058,24 @@ class ExternalParserStackPool {
     }
     return current;
   }
+
+  prune(checkpoints: readonly ExternalParserStackNode[]): void {
+    const retained = new Set<ExternalParserStackNode>();
+    for (const checkpoint of checkpoints) {
+      let node: ExternalParserStackNode | undefined = checkpoint;
+      while (node !== undefined && !retained.has(node)) {
+        retained.add(node);
+        node = node.parent;
+      }
+    }
+    for (const node of retained) {
+      for (const [state, child] of node.children) {
+        if (!retained.has(child)) {
+          node.children.delete(state);
+        }
+      }
+    }
+  }
 }
 
 interface ExternalValidationState {
@@ -2716,6 +2734,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
         relexed,
       );
       this.#validationState = validation.state;
+      this.#stackPool.prune(validation.state.checkpoints);
       this.#validateResult = externalIncrementalValidateResult(
         this.#snapshot,
         validation.state.result,
@@ -2835,6 +2854,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       undefined,
     );
     this.#validationState = validation.state;
+    this.#stackPool.prune(validation.state.checkpoints);
     this.#validateResult = externalIncrementalValidateResult(
       this.#snapshot,
       validation.state.result,
