@@ -1514,7 +1514,7 @@ function validateContextualGuardDfa(
 }
 
 function hashPortableParserPlan(plan: PortableParserPlan): string {
-  const bytes = new TextEncoder().encode(serializePortableParserPlanJson(plan));
+  const bytes = new TextEncoder().encode(JSON.stringify(canonicalValue(plan)));
   return `fnv1a64:${fnv1a64Bytes(bytes)}`;
 }
 
