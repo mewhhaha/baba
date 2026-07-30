@@ -2067,6 +2067,8 @@ class ExternalParserStackNode {
 
 class ExternalParserStackPool {
   readonly root = new ExternalParserStackNode(0, undefined, 1);
+  private creationCount = 1;
+  private lastPrunedCreationCount = 0;
 
   push(
     parent: ExternalParserStackNode,
@@ -2082,6 +2084,7 @@ class ExternalParserStackPool {
       parent.depth + 1,
     );
     parent.children.set(state, node);
+    this.creationCount++;
     return node;
   }
 
@@ -2115,6 +2118,16 @@ class ExternalParserStackPool {
         }
       }
     }
+    this.lastPrunedCreationCount = this.creationCount;
+  }
+
+  pruneAfterUpdate(checkpoints: readonly ExternalParserStackNode[]): void {
+    // Pruning scans every checkpoint, so amortize it while bounding unpruned
+    // stack growth to fewer than 1,024 newly interned nodes.
+    if (this.creationCount - this.lastPrunedCreationCount < 1_024) {
+      return;
+    }
+    this.prune(checkpoints);
   }
 }
 
@@ -2764,7 +2777,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
         relexed,
       );
       this.#validationState = validation.state;
-      this.#stackPool.prune(validation.state.checkpoints);
+      this.#stackPool.pruneAfterUpdate(validation.state.checkpoints);
       this.#validateResult = externalIncrementalValidateResult(
         this.#snapshot,
         validation.state.result,
