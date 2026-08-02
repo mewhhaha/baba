@@ -16,6 +16,11 @@ module = chunks:chunk* ;
 chunk = values:"x"* ";" ;
 `;
 
+const CYCLE_GRAMMAR = String.raw`
+module = chunks:chunk* ;
+chunk = ("a" "b" "c" "d")* ";" ;
+`;
+
 const METADATA = parseMetadata(JSON.stringify({
   version: 2,
   gpuFrontend: {
@@ -30,9 +35,12 @@ const METADATA = parseMetadata(JSON.stringify({
   },
 }));
 
-function compileExperimentPlan(): Uint8Array {
-  const built = compile(GRAMMAR, {
-    name: "island_simd_experiment_test",
+function compileExperimentPlan(
+  grammar: string,
+  fixtureName: string,
+): Uint8Array {
+  const built = compile(grammar, {
+    name: fixtureName,
     rootRule: "module",
     metadata: METADATA,
     targets: ["wasm"],
@@ -50,7 +58,10 @@ function compileExperimentPlan(): Uint8Array {
 }
 
 Deno.test("Rust SIMD island validation matches the scalar transducer", async () => {
-  const program = compileIslandSimdProgram(compileExperimentPlan(), 1);
+  const program = compileIslandSimdProgram(
+    compileExperimentPlan(GRAMMAR, "island_simd_experiment_test"),
+    1,
+  );
   let repeated = -1;
   let repeatedState = -1;
   let terminating = -1;
@@ -108,9 +119,32 @@ Deno.test("Rust SIMD island validation matches the scalar transducer", async () 
   );
 });
 
+Deno.test("Rust SIMD island validation composes all six cycle states", async () => {
+  const program = compileIslandSimdProgram(
+    compileExperimentPlan(CYCLE_GRAMMAR, "island_simd_cycle_test"),
+    1,
+  );
+  assertEquals(program.stateCount, 6);
+  assertEquals(program.terminalCount, 6);
+
+  const tokens = new Uint16Array(32_769);
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    tokens[index] = index % 4 + 1;
+  }
+  tokens[tokens.length - 1] = 5;
+  const runner = await IslandSimdRunner.create(program, tokens);
+  assertEquals(runner.validateLr(), true);
+  assertEquals(runner.validateScalar(), true);
+  assertEquals(runner.validateSimd(), true);
+});
+
 Deno.test("Rust SIMD island compilation rejects the recursive root island", () => {
   assertThrowsIncludes(
-    () => compileIslandSimdProgram(compileExperimentPlan(), 0),
+    () =>
+      compileIslandSimdProgram(
+        compileExperimentPlan(GRAMMAR, "island_simd_subset_test"),
+        0,
+      ),
     "not a terminal-only long region",
   );
 });
