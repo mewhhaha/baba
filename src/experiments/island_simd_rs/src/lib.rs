@@ -187,6 +187,36 @@ pub extern "C" fn validate_island_scalar(
     let failure_state = state_count;
     let mut state = start_state;
     let mut index = 0;
+    while index + 4 <= token_count {
+        let terminal0 = unsafe { load_token(tokens, index) };
+        let terminal1 = unsafe { load_token(tokens, index + 1) };
+        let terminal2 = unsafe { load_token(tokens, index + 2) };
+        let terminal3 = unsafe { load_token(tokens, index + 3) };
+        if terminal0 >= terminal_count
+            || terminal1 >= terminal_count
+            || terminal2 >= terminal_count
+            || terminal3 >= terminal_count
+        {
+            return STATUS_INVALID_TERMINAL;
+        }
+        state = unsafe {
+            core::ptr::read_unaligned((transitions + terminal0 * 16 + state) as usize as *const u8)
+                as i32
+        };
+        state = unsafe {
+            core::ptr::read_unaligned((transitions + terminal1 * 16 + state) as usize as *const u8)
+                as i32
+        };
+        state = unsafe {
+            core::ptr::read_unaligned((transitions + terminal2 * 16 + state) as usize as *const u8)
+                as i32
+        };
+        state = unsafe {
+            core::ptr::read_unaligned((transitions + terminal3 * 16 + state) as usize as *const u8)
+                as i32
+        };
+        index += 4;
+    }
     while index < token_count {
         let terminal = unsafe { load_token(tokens, index) };
         if terminal >= terminal_count {
