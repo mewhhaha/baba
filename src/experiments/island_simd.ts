@@ -3,6 +3,7 @@ import { islandSimdWasmBytes } from "./island_simd_wasm_bytes.ts";
 
 const SIMD_LANES = 16;
 const MAX_SIMD_STATES = 7;
+let compiledIslandSimdModule: Promise<WebAssembly.Module> | undefined;
 
 export interface IslandSimdProgram {
   readonly island: number;
@@ -178,8 +179,13 @@ export class IslandSimdRunner {
     program: IslandSimdProgram,
     tokens: Uint16Array,
   ): Promise<IslandSimdRunner> {
-    const wasmBytes = islandSimdWasmBytes();
-    const module = await WebAssembly.compile(wasmBytes.buffer as ArrayBuffer);
+    if (compiledIslandSimdModule === undefined) {
+      const wasmBytes = islandSimdWasmBytes();
+      compiledIslandSimdModule = WebAssembly.compile(
+        wasmBytes.buffer as ArrayBuffer,
+      );
+    }
+    const module = await compiledIslandSimdModule;
     const instance = await WebAssembly.instantiate(module);
     const exports = instance.exports as IslandSimdExports;
     const transitionsAddress = Math.ceil(
