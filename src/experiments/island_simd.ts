@@ -79,6 +79,11 @@ export function compileIslandSimdProgram(
       `GPU frontend island ${islandId} has invalid start state ${island.startState}.`,
     );
   }
+  if (island.startState !== 0) {
+    throw new Error(
+      `GPU frontend island ${islandId} starts at state ${island.startState}; the SIMD experiment requires state 0.`,
+    );
+  }
 
   const terminalCount = plan.execution.denseTransitions.terminalSymbols;
   if (terminalCount <= 0 || terminalCount > 0xffff) {

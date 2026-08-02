@@ -1,6 +1,6 @@
 #![no_std]
 
-use core::arch::wasm32::{i8x16_swizzle, v128, v128_load};
+use core::arch::wasm32::{i8x16_swizzle, u8x16_extract_lane, v128, v128_load};
 use core::panic::PanicInfo;
 
 const MAX_SIMD_STATES: i32 = 7;
@@ -55,8 +55,7 @@ fn plan_is_valid(
         && terminal_count > 0
         && state_count > 0
         && state_count <= MAX_SIMD_STATES
-        && start_state >= 0
-        && start_state < state_count
+        && start_state == 0
 }
 
 #[inline]
@@ -233,8 +232,7 @@ pub extern "C" fn validate_island_simd(
         index += 1;
     }
 
-    let summary_lanes: [u8; 16] = unsafe { core::mem::transmute(summary) };
-    let state = summary_lanes[start_state as usize] as i32;
+    let state = u8x16_extract_lane::<0>(summary) as i32;
     if state == state_count {
         return 0;
     }

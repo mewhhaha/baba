@@ -8,6 +8,7 @@ The accepted subset is intentionally narrow:
 
 - the island must appear in `execution.longRegions`;
 - it must contain at most seven states;
+- its start state must be zero;
 - every transition must consume a terminal, with no nested-island placeholder;
 - the result is acceptance or rejection, not a CST or AST.
 
