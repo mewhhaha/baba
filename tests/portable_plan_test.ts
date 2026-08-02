@@ -96,8 +96,8 @@ Deno.test("portable parser plan serializes deterministically and round-trips", (
   const firstJson = serializePortableParserPlanJson(first);
   const secondJson = serializePortableParserPlanJson(second);
   assertEquals(firstJson, secondJson);
-  assertEquals(first.version, 2);
-  assertEquals(first.semantics, "baba-portable-v2");
+  assertEquals(first.version, 3);
+  assertEquals(first.semantics, "baba-island-v3");
   assertIncludes(firstJson, '"format": "baba-parser-plan"');
   assertIncludes(firstJson, '"stableId": "p_');
   assertIncludes(firstJson, '"reducers": [');

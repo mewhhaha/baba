@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "baba-wasm-parser-engine"
+name = "baba-wasm-lexer-engine"
 version = "0.1.0"

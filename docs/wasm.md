@@ -24,18 +24,16 @@ locals, folds, tags, textobjects, or injections also get corresponding
 contract. `grammar.js` is emitted separately when the `tree-sitter` target is
 selected.
 
-`parser.wasm` contains the generic lexer/parser lookup runtime. The engine is
-authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded
-in the Baba package; grammar generation does not invoke Cargo or require Rust on
-the user's machine. The module uses the standardized WebAssembly `simd128`
-extension. `parser.plan` contains the generated DFA/LR core data, contextual
-trailing-guard DFAs and excluded-word tables, plus runtime metadata version 4
-used for runtime identity, token and literal names, trivia policy,
-expected-token displays, and cursor field schemas. DFA transitions, LR tables,
-productions, reducers, and contextual guards remain solely in the core section.
-`mod.ts` is a thin wrapper around `@mewhhaha/baba/runtime/generated-wasm`;
-`syntax.ts` is the typed token/cursor surface and does not contain runtime
-tables.
+`parser.wasm` contains the generic DFA lexer runtime. The engine is authored in
+Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded in the Baba
+package; grammar generation does not invoke Cargo or require Rust on the user's
+machine. `parser.plan` contains generated DFA data, contextual trailing-guard
+DFAs and excluded-word tables, GPU island data when configured, and runtime
+metadata version 5. The shared strict island parser is a second, 653-byte Rust
+Wasm module built with the standardized `simd128` extension and embedded in the
+runtime package rather than each generated bundle. `mod.ts` is a thin wrapper
+around `@mewhhaha/baba/runtime/generated-wasm`; `syntax.ts` is the typed
+token/cursor surface and does not contain runtime tables.
 
 The Rust grammar frontend lives under `src/compiler/grammar_rs` and is embedded
 as `src/grammar_parser_wasm_bytes.ts`. It is checked with
@@ -81,7 +79,7 @@ The parser instance returned by `createParser({ bytes, plan })` or
   TypeScript consumers.
 - `lex(source, options?)`: lazy token tape result. Use `tokenTape.token(index)`
   for indexed access to token records.
-- `validate(source, options?)`: output-free Wasm validation with structured
+- `validate(source, options?)`: strict island validation with structured
   diagnostics and lazy lexing.
 - `createDocument(source, { goal, ...options })`: mutable incremental document
   for a fixed `"lex"`, `"validate"`, or `"parse"` goal. `applyEdits` accepts
@@ -95,6 +93,13 @@ Synchronous creation requires `plan` and exactly one of `bytes` or `module`.
 Asynchronous creation requires exactly one of `bytes`, `module`, or `url`, and
 exactly one of `plan` or `planUrl`.
 
+`parse`, `validate`, and parse/validate documents require `gpuFrontend` metadata
+with `throughput: "strict"`. The repeated root region must be terminated,
+terminal-only, start at dense state zero, and contain at most seven states.
+Unsupported strict plans fail generation with `WASM_ISLAND_*` diagnostics. Plans
+without strict metadata remain valid lexer bundles, but their parser operations
+throw an explicit unsupported-plan error.
+
 ## ABI Descriptor
 
 `wasm/abi.json` records:
@@ -106,8 +111,7 @@ exactly one of `plan` or `planUrl`.
 - memory layout constants
 - exported Wasm function names
 - external plan path and storage layout
-- token, lex-result, trace-result, and cursor-tape record layouts
-- parser trace status codes
+- token and lex-result record layouts
 - parser diagnostic code schemas
 
 Non-JavaScript hosts should use `abi.json`, `parser.wasm`, and `parser.plan`

@@ -513,7 +513,7 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
     );
     const gpuDuckInspection = inspectGpuFrontendPlan(gpuDuckPlan);
     assert(gpuDuckInspection);
-    assertEquals(gpuDuckInspection.throughput, "strict");
+    assertEquals(gpuDuckInspection.throughput, "general");
     assertEquals(gpuDuckInspection.rootLoopIsland, 2);
     assertEquals(gpuDuckInspection.contractionRounds, 33);
     const cpuDuck = CpuFrontend.create(gpuDuckPlan).ingest(gpuDuckSource);

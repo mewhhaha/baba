@@ -118,13 +118,13 @@ Deno.test("non-ASCII string literal terminals match the characters they name", (
   const parser = compiledParser(NON_ASCII_GRAMMAR);
 
   // `read_string` had the same byte-widening defect as the regex scanner.
-  const result = parser.validate("→");
+  const result = parser.lex("→");
   assertEquals(
     result.diagnostics.length,
     0,
     "a non-ASCII literal terminal should match its own text",
   );
-  assert(result.ok);
+  assertEquals(result.tokenTape.token(0)?.text, "→");
 });
 
 Deno.test("non-ASCII and ASCII token classes coexist without a spurious overlap diagnostic", () => {

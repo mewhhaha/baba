@@ -11,6 +11,8 @@ Keep runtime changes in the layer that owns the behavior:
 - generated Wasm adapters and core ABI: `src/targets/wasm`,
   `src/targets/runtime/wasm_core_runtime.ts`, and the Rust engine under
   `src/targets/runtime/wasm_engine_rs`;
+- strict SIMD island parsing: `src/runtime/island_parser.ts` and
+  `src/targets/runtime/island_parser_rs`;
 - generated Wasm TypeScript loader API: `src/runtime/generated_wasm.ts`;
 - compiler-stage benchmarks: `scripts/compiler_bench.ts`;
 - size and cold-start benchmarks: `scripts/runtime_bench.ts`;
@@ -23,6 +25,9 @@ Do not add parser-driver logic to generated files.
 After changing the Rust engine, run `deno task build:wasm-engine` to refresh the
 embedded `parser.wasm` bytes. Run `deno task build:wasm-engine:check` in CI or
 before publishing to verify the embedded bytes still match the Rust source.
+
+After changing the island parser, run `deno task build:island-parser` and
+`deno task build:island-parser:check` for the embedded SIMD module.
 
 After changing the Rust grammar frontend, run `deno task check:grammar-rs` and
 `deno task build:grammar-parser` to refresh the embedded parser bytes. Run

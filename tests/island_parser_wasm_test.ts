@@ -7,8 +7,9 @@ import {
 } from "./helpers.ts";
 import {
   compileIslandSimdProgram,
+  compileStrictIslandParserProgram,
   IslandValidationSession,
-} from "../src/experiments/island_simd.ts";
+} from "../src/runtime/island_parser.ts";
 
 const GRAMMAR = String.raw`
 skip WS = /[ \t\r\n]+/ ;
@@ -60,7 +61,7 @@ function compileExperimentPlan(
 Deno.test("Rust SIMD island validation matches the scalar transducer", async () => {
   const planBytes = compileExperimentPlan(
     GRAMMAR,
-    "island_simd_experiment_test",
+    "island_parser_wasm_test",
   );
   const program = compileIslandSimdProgram(
     planBytes,
@@ -98,15 +99,16 @@ Deno.test("Rust SIMD island validation matches the scalar transducer", async () 
   tokens[tokens.length - 1] = terminating;
 
   const accepted = await IslandValidationSession.create(program, tokens);
-  assertEquals(accepted.validateLr(), true);
   assertEquals(accepted.validateScalar(), true);
   assertEquals(accepted.validateSimd(), true);
+  const synchronous = IslandValidationSession.createSync(program, tokens);
+  assertEquals(synchronous.validateScalarRange(0, tokens.length), true);
+  assertEquals(synchronous.validateSimdRange(0, tokens.length), true);
 
   const incomplete = await IslandValidationSession.create(
     program,
     new Uint16Array([repeated]),
   );
-  assertEquals(incomplete.validateLr(), false);
   assertEquals(incomplete.validateScalar(), false);
   assertEquals(incomplete.validateSimd(), false);
 
@@ -126,7 +128,7 @@ Deno.test("Rust SIMD island validation matches the scalar transducer", async () 
 
 Deno.test("Rust SIMD island validation composes all six cycle states", async () => {
   const program = compileIslandSimdProgram(
-    compileExperimentPlan(CYCLE_GRAMMAR, "island_simd_cycle_test"),
+    compileExperimentPlan(CYCLE_GRAMMAR, "island_parser_cycle_test"),
     1,
   );
   assertEquals(program.stateCount, 6);
@@ -138,16 +140,29 @@ Deno.test("Rust SIMD island validation composes all six cycle states", async () 
   }
   tokens[tokens.length - 1] = 5;
   const session = await IslandValidationSession.create(program, tokens);
-  assertEquals(session.validateLr(), true);
   assertEquals(session.validateScalar(), true);
   assertEquals(session.validateSimd(), true);
+});
+
+Deno.test("strict island parser contract identifies root regions and emissions", () => {
+  const program = compileStrictIslandParserProgram(
+    compileExperimentPlan(GRAMMAR, "strict_island_parser_contract_test"),
+  );
+  assertEquals(program.rootIsland, 0);
+  assertEquals(program.rootRuleName, "module");
+  assertEquals(program.regionIsland, 1);
+  assertEquals(program.regionRuleName, "chunk");
+  assert(program.boundaryTerminal >= 0);
+  assert(program.rootField >= 0);
+  assertEquals(program.validation.transitionFields.length, 3 * 16);
+  assertEquals(program.terminalBySpec.length, 3);
 });
 
 Deno.test("Rust SIMD island compilation rejects the recursive root island", () => {
   assertThrowsIncludes(
     () =>
       compileIslandSimdProgram(
-        compileExperimentPlan(GRAMMAR, "island_simd_subset_test"),
+        compileExperimentPlan(GRAMMAR, "island_parser_subset_test"),
         0,
       ),
     "not a terminal-only long region",

@@ -60,13 +60,13 @@ release.
 ## Parser-Plan Format
 
 `PortableParserPlan` is a versioned runtime data contract, not a package
-implementation detail. Plan version `2` is stable for its current serialized
+implementation detail. Plan version `3` is stable for its current serialized
 fields, canonical ordering, reducer opcodes, diagnostic schema, and validation
 rules. Breaking changes require a new plan version or a separately versioned
 subsection.
 
 Generated `parser.plan` files currently use runtime metadata subsection version
-`4` and portable parser-plan version `2`. The loader accepts only this current
+`5` and portable parser-plan version `3`. The loader accepts only this current
 contract; regenerate plans produced by earlier Baba releases.
 
 These numbers version independent contracts, not concurrently supported parser
@@ -74,9 +74,9 @@ generations. Baba emits and accepts one combination:
 
 | Contract                         | Current version |
 | -------------------------------- | --------------: |
-| Portable parser plan             |               2 |
-| Wasm core table encoding         |               7 |
-| Wasm runtime metadata subsection |               4 |
+| Portable parser plan             |               3 |
+| Wasm core table encoding         |               8 |
+| Wasm runtime metadata subsection |               5 |
 | Compact metadata container       |               1 |
 | Optional GPU frontend section    |               3 |
 
@@ -85,7 +85,7 @@ compiler always emits the versions above, and each loader rejects a different
 version at its input boundary.
 
 The binary core table section that `load_plan` reads carries its own format
-version, currently `7`. It is an internal encoding, not part of the
+version, currently `8`. It is an internal encoding, not part of the
 `PortableParserPlan` contract: hosts are expected to validate a plan through
 `wasm/abi.json` and `load_plan` rather than to decode the tables themselves.
 Adding, removing, or reordering a header slot or a section changes that version,
@@ -118,22 +118,16 @@ runtime helper internals.
 ## Wasm ABI
 
 The generated Wasm core ABI is versioned separately from package and parser-plan
-versions. ABI version `12` is documented in `docs/wasm-abi.md` and described by
+versions. ABI version `13` is documented in `docs/wasm-abi.md` and described by
 each generated `wasm/abi.json`. Changes to exported core functions, record
 layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.
 
 How much of a caller-owned buffer an export may write is part of that contract,
-and so is the capacity argument that bounds it. Every buffer-writing export now
-takes an explicit capacity and rejects an undersized buffer with a status rather
-than writing past it: `lex_all` gained `tokenCapacity` plus a separate `memoPtr`
-and `memoCapacity` for its failure memo, and no longer writes anything into the
-token records it does not return. ABI version 12 adds dependency-bearing
-incremental token records and source-aware parser selection; version 11 replaced
-`parse_trace` with output-free `validate`, made failure-memo allocation
-demand-driven, and renamed the public action limit to `maxParserActions`.
-Narrowing what an export may write is additive; widening it is not, and needs a
-version change.
+and so is the capacity argument that bounds it. ABI version 13 removes all LR
+parser exports and layouts from the core. The generated TypeScript adapter owns
+strict SIMD island validation and cursor construction. `lex_all` retains its
+explicit token and memo capacities and never writes records it does not return.
 
 The TypeScript Wasm adapter API is stable at the generated module entrypoint.
 Generated modules import their loader from

@@ -96,10 +96,6 @@ export interface PlanStats {
   readonly lexerStateCount: number;
   readonly lexerTransitionCount: number;
   readonly acceptCandidateCount: number;
-  readonly lrStateCount: number;
-  readonly actionEntries: number;
-  readonly gotoEntries: number;
-  readonly productionCount: number;
 }
 
 interface RuntimeBudgetConfig {
@@ -620,10 +616,6 @@ function planStatsFromBundle(bundle: GeneratedBundle): PlanStats {
     lexerStateCount: plan.tables.lexerStates,
     lexerTransitionCount: plan.tables.lexerTransitions,
     acceptCandidateCount: plan.tables.lexerAcceptCandidates,
-    lrStateCount: plan.tables.parserStates,
-    actionEntries: plan.tables.parserActions,
-    gotoEntries: plan.tables.parserGotos,
-    productionCount: plan.tables.productions,
   };
 }
 
@@ -756,7 +748,7 @@ function renderTextReport(report: RuntimeBenchReport): string {
       }, largest ${
         formatBytes(fixture.artifactSizes.largestFile.bytes)
       } ${fixture.artifactSizes.largestFile.path}`,
-      `  plan: ${fixture.planStats.lexerStateCount} lexer states, ${fixture.planStats.lexerTransitionCount} lexer transitions, ${fixture.planStats.acceptCandidateCount} accept candidates, ${fixture.planStats.lrStateCount} LR states, ${fixture.planStats.actionEntries} actions, ${fixture.planStats.gotoEntries} gotos, ${fixture.planStats.productionCount} productions`,
+      `  plan: ${fixture.planStats.lexerStateCount} lexer states, ${fixture.planStats.lexerTransitionCount} lexer transitions, ${fixture.planStats.acceptCandidateCount} accept candidates`,
       `  plan bytes: ${
         formatBytes(fixture.artifactSizes.corePlanBinaryBytes)
       } core, ${

@@ -6,7 +6,6 @@
 
 import { assert, compile } from "./helpers.ts";
 import type { Dfa } from "../src/compiler/regex/dfa.ts";
-import type { LrTable } from "../src/compiler/runtime_plan/lr1.ts";
 import { encodeCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
 import {
   decodeLexerPlanTables,
@@ -243,29 +242,11 @@ Deno.test("plans above the dense ASCII limit retain complete CSR transitions", (
       }],
     },
   };
-  const lr: LrTable = {
-    states: [{ id: 0, items: [] }],
-    actions: new Map(),
-    gotos: new Map(),
-    stats: {
-      bnfProductions: 0,
-      states: 1,
-      coreItems: 0,
-      items: 0,
-      closureWork: 0,
-      actionEntries: 0,
-      gotoEntries: 0,
-      tableEntries: 0,
-    },
-    diagnostics: [],
-  };
   const acceptCandidates: number[][] = [];
   for (let state = 0; state < stateCount; state++) {
     acceptCandidates.push([]);
   }
-  const image = emitWasmModule(dfa, lr, {
-    eofTerminal: 0,
-    terminalBySpec: [0],
+  const image = emitWasmModule(dfa, {
     acceptCandidates,
     specs: [{
       contextual: false,
@@ -274,7 +255,6 @@ Deno.test("plans above the dense ASCII limit retain complete CSR transitions", (
       notFollowedBy: undefined,
       excludedWords: [],
     }],
-    productions: [],
   });
   const plan = encodeCombinedWasmParserPlan(image.planBytes, {});
   const tables = decodeLexerPlanTables(plan);

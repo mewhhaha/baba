@@ -1,5 +1,5 @@
 [package]
-name = "baba-wasm-parser-engine"
+name = "baba-wasm-lexer-engine"
 version = "0.1.0"
 edition = "2021"
 publish = false

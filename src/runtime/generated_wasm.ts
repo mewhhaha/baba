@@ -32,14 +32,14 @@ import {
 } from "../targets/runtime/diagnostic_codes.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../targets/runtime/implementation.ts";
 import {
+  compileStrictIslandParserProgram,
+  IslandValidationSession,
+  type StrictIslandParserProgram,
+} from "./island_parser.ts";
+import {
   WASM_ABI_VERSION,
-  WASM_ACTION_ACCEPT,
-  WASM_ACTION_PAYLOAD_MASK,
-  WASM_ACTION_REDUCE,
-  WASM_ACTION_SHIFT,
   WASM_CURSOR_CHILD_RECORD_I32_COUNT,
   WASM_CURSOR_FIELD_RECORD_I32_COUNT,
-  WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT,
   WASM_CURSOR_RULE_RECORD_I32_COUNT,
   WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
   WASM_CURSOR_VALUE_RECORD_I32_COUNT,
@@ -49,15 +49,12 @@ import {
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
-  WASM_PARSE_CURSOR_RESULT_I32_COUNT,
-  WASM_PARSE_STATUS_MEMO_REQUIRED,
   WASM_RESULT_LIFETIME_CALLER_BUFFER,
   WASM_SOURCE_ENCODING_UTF16,
   WASM_SPAN_UNIT_UTF16,
   WASM_TARGET_KIND,
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
-  WASM_VALIDATE_RESULT_I32_COUNT,
 } from "../targets/runtime/wasm_abi.ts";
 
 type LocalWasmSource =
@@ -434,74 +431,6 @@ interface ExternalParserWasmExports {
   ): number;
   lex_memo_i32_per_position(): number;
   incremental_token_record_i32_count(): number;
-  parser_action(state: number, terminal: number): number;
-  parser_goto(state: number, nonterminal: number): number;
-  parser_select_incremental(
-    state: number,
-    acceptingState: number,
-    fallbackSpec: number,
-    sourcePtr: number,
-    sourceLength: number,
-    endOffset: number,
-    resultPtr: number,
-  ): number;
-  validate(
-    sourcePtr: number,
-    sourceLength: number,
-    resultPtr: number,
-    stackPtr: number,
-    stackCapacity: number,
-    memoPtr: number,
-    memoCapacity: number,
-    maxParserActions: number,
-  ): number;
-  parse_cursor(
-    sourcePtr: number,
-    sourceLength: number,
-    tokenPtr: number,
-    tokenCapacity: number,
-    rulePtr: number,
-    ruleCapacity: number,
-    childPtr: number,
-    childCapacity: number,
-    fieldPtr: number,
-    fieldCapacity: number,
-    valuePtr: number,
-    valueCapacity: number,
-    valueItemPtr: number,
-    valueItemCapacity: number,
-    resultPtr: number,
-    stackPtr: number,
-    fragmentPtr: number,
-    fragmentCapacity: number,
-    memoPtr: number,
-    memoCapacity: number,
-    preserveTrivia: number,
-    maxParserActions: number,
-  ): number;
-  parse_cursor_records(
-    sourcePtr: number,
-    sourceLength: number,
-    tokenPtr: number,
-    rawTokenCount: number,
-    tokenCapacity: number,
-    rulePtr: number,
-    ruleCapacity: number,
-    childPtr: number,
-    childCapacity: number,
-    fieldPtr: number,
-    fieldCapacity: number,
-    valuePtr: number,
-    valueCapacity: number,
-    valueItemPtr: number,
-    valueItemCapacity: number,
-    resultPtr: number,
-    stackPtr: number,
-    fragmentPtr: number,
-    fragmentCapacity: number,
-    preserveTrivia: number,
-    maxParserActions: number,
-  ): number;
   load_plan(planPtr: number, planLength: number): number;
   abi_version(): number;
   plan_version(): number;
@@ -514,7 +443,6 @@ interface ExternalParserWasmExports {
   span_unit(): number;
   lex_result_i32_count(): number;
   token_record_i32_count(): number;
-  validate_result_i32_count(): number;
   host_ownership_model(): number;
   result_lifetime_model(): number;
 }
@@ -664,6 +592,8 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
   readonly #documents = new Set<ExternalIncrementalDocument<Root>>();
   #metadata: ExternalRuntimeMetadata | undefined;
   readonly #sourceCache: ExternalWasmSourceCache = { source: undefined };
+  readonly #islandProgram: StrictIslandParserProgram | undefined;
+  readonly #islandUnavailableReason: string | undefined;
 
   readonly parse: ParserInstance<Root>["parse"];
 
@@ -673,10 +603,24 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
     private readonly wasm: ExternalParserWasmExports,
     private readonly inputBase: number,
   ) {
+    let islandProgram: StrictIslandParserProgram | undefined;
+    let islandUnavailableReason: string | undefined;
+    try {
+      islandProgram = compileStrictIslandParserProgram(planBytes);
+    } catch (error) {
+      if (error instanceof Error) {
+        islandUnavailableReason = error.message;
+      } else {
+        islandUnavailableReason = String(error);
+      }
+    }
+    this.#islandProgram = islandProgram;
+    this.#islandUnavailableReason = islandUnavailableReason;
     this.parse = ((source: string, options?: ParseOptions) => {
       this.#assertLive();
-      return parseExternalWasm<Root>(
+      return parseExternalIsland<Root>(
         this.#loadMetadata(),
+        this.#requireIslandProgram(),
         this.wasm,
         this.inputBase,
         this.#sourceCache,
@@ -700,8 +644,9 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
 
   validate(source: string, options?: ParseOptions): ValidateParseResult {
     this.#assertLive();
-    return validateExternalWasm(
+    return validateExternalIsland(
       this.#loadMetadata(),
+      this.#requireIslandProgram(),
       this.wasm,
       this.inputBase,
       this.#sourceCache,
@@ -735,6 +680,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
     this.#assertLive();
     const document = new ExternalIncrementalDocument<Root>(
       this.#loadMetadata(),
+      this.#islandProgram,
       this.wasm,
       this.inputBase,
       this.#sourceCache,
@@ -827,10 +773,9 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
         `Wasm parser external lexer records end at ${expectedStart}, expected source length ${source.length}.`,
       );
     }
-    return parseExternalCursorWithWasm(
+    return parseExternalIslandRecords(
       metadata,
-      this.wasm,
-      this.inputBase,
+      this.#requireIslandProgram(),
       this.#sourceCache,
       source,
       options,
@@ -858,6 +803,17 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
     }
   }
 
+  #requireIslandProgram(): StrictIslandParserProgram {
+    if (this.#islandProgram !== undefined) {
+      return this.#islandProgram;
+    }
+    let reason = "the plan has no strict GPU frontend metadata";
+    if (this.#islandUnavailableReason !== undefined) {
+      reason = this.#islandUnavailableReason;
+    }
+    throw new Error(`Wasm parsing is unavailable: ${reason}`);
+  }
+
   #loadMetadata(): ExternalRuntimeMetadata {
     if (this.#metadata !== undefined) {
       return this.#metadata;
@@ -873,9 +829,6 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
 
 interface ExternalRuntimeMetadata {
   readonly defaultPreserveTrivia: boolean;
-  readonly eofTerminal: number;
-  readonly parserStateCount: number;
-  readonly productions: readonly ExternalProduction[];
   readonly specs: readonly ExternalLexerSpec[];
   /** 1 when the lexer spec at that index produces a trivia-channel token. */
   readonly specIsTrivia: Uint8Array;
@@ -886,16 +839,10 @@ interface ExternalRuntimeMetadata {
   readonly terminalByLiteralId: ReadonlyMap<number, number>;
   readonly acceptCandidatesByState: readonly (readonly number[])[];
   readonly terminalDisplays: readonly string[];
-  readonly expected: readonly (readonly string[])[];
   readonly ruleNames: readonly string[];
   readonly fieldIds: ReadonlyMap<string, number>;
   readonly fieldNames: readonly string[];
   readonly fieldSchemas: readonly (ExternalRuleFieldSchema | undefined)[];
-}
-
-interface ExternalProduction {
-  readonly lhs: number;
-  readonly rhsLength: number;
 }
 
 type ExternalLexerSpec =
@@ -924,13 +871,6 @@ interface ExternalFieldConfig {
   readonly valueArray: boolean;
 }
 
-const EXTERNAL_CORE_HEADER_PARSER_STATE_COUNT = 4;
-const EXTERNAL_CORE_HEADER_ACTION_ROWS = 9;
-const EXTERNAL_CORE_HEADER_ACTION_PAIRS = 10;
-const EXTERNAL_CORE_HEADER_PRODUCTION_COUNT = 19;
-const EXTERNAL_CORE_HEADER_PRODUCTIONS = 20;
-const EXTERNAL_CORE_COMPACT_I16_OFFSET_TAG = 2;
-const EXTERNAL_CORE_COMPACT_U16_OFFSET_BASE = 0x4000_0000;
 function decodeExternalRuntimeMetadata(
   planBytes: Uint8Array,
   validated: ValidatedWasmParserPlan,
@@ -1149,39 +1089,8 @@ function decodeExternalRuntimeMetadata(
     fieldSchemas[ruleId] = { entries, byName };
   }
 
-  const parserStateCount = readCoreI32(
-    planBytes,
-    EXTERNAL_CORE_HEADER_PARSER_STATE_COUNT,
-  );
-  const productionCount = readCoreI32(
-    planBytes,
-    EXTERNAL_CORE_HEADER_PRODUCTION_COUNT,
-  );
-  const productionOffset = readCoreI32(
-    planBytes,
-    EXTERNAL_CORE_HEADER_PRODUCTIONS,
-  );
-  const productions: ExternalProduction[] = [];
-  for (let production = 0; production < productionCount; production++) {
-    const base = productionOffset + production * WASM_I32_BYTES * 4;
-    productions.push({
-      lhs: readI32AtByteOffset(planBytes, base),
-      rhsLength: readI32AtByteOffset(
-        planBytes,
-        base + WASM_I32_BYTES,
-      ),
-    });
-  }
-  const expected = externalExpectedRowsFromCorePlan(
-    planBytes,
-    parserStateCount,
-    terminalDisplays,
-  );
   return {
     defaultPreserveTrivia,
-    eofTerminal,
-    parserStateCount,
-    productions,
     specs,
     specIsTrivia,
     hasTriviaSpecs,
@@ -1191,120 +1100,11 @@ function decodeExternalRuntimeMetadata(
     terminalByLiteralId,
     acceptCandidatesByState,
     terminalDisplays,
-    expected,
     ruleNames,
     fieldIds,
     fieldNames,
     fieldSchemas,
   };
-}
-
-function externalExpectedRowsFromCorePlan(
-  planBytes: Uint8Array,
-  stateCount: number,
-  terminalDisplays: readonly string[],
-): readonly (readonly string[])[] {
-  const actionRows = decodeExternalCoreSectionOffset(
-    readCoreI32(planBytes, EXTERNAL_CORE_HEADER_ACTION_ROWS),
-  );
-  const actionPairs = decodeExternalCoreSectionOffset(
-    readCoreI32(planBytes, EXTERNAL_CORE_HEADER_ACTION_PAIRS),
-  );
-  const expectedRows: string[][] = [];
-  const expectedSeen: Set<string>[] = [];
-  for (let state = 0; state < stateCount; state++) {
-    expectedRows.push([]);
-    expectedSeen.push(new Set());
-  }
-  for (let state = 0; state < stateCount; state++) {
-    const start = readExternalCoreSectionValue(planBytes, actionRows, state);
-    const end = readExternalCoreSectionValue(planBytes, actionRows, state + 1);
-    const row = expectedRows[state];
-    const seen = expectedSeen[state];
-    if (row === undefined || seen === undefined) {
-      throw new Error(`Wasm parser expected-token state ${state} is missing.`);
-    }
-    for (let index = start; index < end; index++) {
-      const terminal = readExternalCorePairKey(planBytes, actionPairs, index);
-      const display = terminalDisplays[terminal];
-      if (display === undefined) {
-        throw new Error(
-          `Wasm parser action ${index} references terminal ${terminal}.`,
-        );
-      }
-      if (!seen.has(display)) {
-        seen.add(display);
-        row.push(display);
-      }
-    }
-  }
-  return expectedRows.map((row) => row.sort());
-}
-
-interface ExternalCoreSectionOffset {
-  readonly offset: number;
-  readonly cellBytes: 2 | 4;
-}
-
-function decodeExternalCoreSectionOffset(
-  encoded: number,
-): ExternalCoreSectionOffset {
-  if (encoded <= -EXTERNAL_CORE_COMPACT_U16_OFFSET_BASE) {
-    return {
-      offset: -encoded - EXTERNAL_CORE_COMPACT_U16_OFFSET_BASE,
-      cellBytes: 2,
-    };
-  }
-  if (encoded < -1) {
-    return {
-      offset: -encoded - EXTERNAL_CORE_COMPACT_I16_OFFSET_TAG,
-      cellBytes: 2,
-    };
-  }
-  return { offset: encoded, cellBytes: 4 };
-}
-
-function readExternalCoreSectionValue(
-  bytes: Uint8Array,
-  section: ExternalCoreSectionOffset,
-  index: number,
-): number {
-  const byteOffset = section.offset + index * section.cellBytes;
-  if (section.cellBytes === 2) {
-    return readU16AtByteOffset(bytes, byteOffset);
-  }
-  return readI32AtByteOffset(bytes, byteOffset);
-}
-
-function readExternalCorePairKey(
-  bytes: Uint8Array,
-  section: ExternalCoreSectionOffset,
-  index: number,
-): number {
-  if (section.cellBytes === 2) {
-    return readU16AtByteOffset(bytes, section.offset + index * 4);
-  }
-  return readI32AtByteOffset(bytes, section.offset + index * 8);
-}
-
-function readCoreI32(planBytes: Uint8Array, headerIndex: number): number {
-  return readI32AtByteOffset(planBytes, headerIndex * WASM_I32_BYTES);
-}
-
-function readI32AtByteOffset(bytes: Uint8Array, byteOffset: number): number {
-  if (byteOffset + WASM_I32_BYTES > bytes.byteLength) {
-    throw new Error("Wasm parser plan is truncated.");
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return view.getInt32(byteOffset, true);
-}
-
-function readU16AtByteOffset(bytes: Uint8Array, byteOffset: number): number {
-  if (byteOffset + 2 > bytes.byteLength) {
-    throw new Error("Wasm parser plan is truncated.");
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return view.getUint16(byteOffset, true);
 }
 
 function expectRecord(
@@ -1396,11 +1196,6 @@ const externalCursorTokenNamed = 1;
 const externalCursorTokenLiteral = 2;
 const externalCursorTokenEof = 3;
 const externalCursorTokenError = 4;
-const externalParseStatusOk = 0;
-const externalParseStatusUnexpected = 1;
-const externalParseCursorStatusCapacity = 3;
-const externalParseStatusActionLimit = 4;
-const externalParseStatusAmbiguous = 5;
 const externalCursorValueNull = 0;
 const externalCursorValueRef = 1;
 const externalCursorValueArray = 2;
@@ -2097,542 +1892,6 @@ function externalIncrementalLexResult(
   };
 }
 
-class ExternalParserStackNode {
-  readonly children = new Map<number, ExternalParserStackNode>();
-
-  constructor(
-    readonly state: number,
-    readonly parent: ExternalParserStackNode | undefined,
-    readonly depth: number,
-  ) {}
-}
-
-class ExternalParserStackPool {
-  readonly root = new ExternalParserStackNode(0, undefined, 1);
-  private creationCount = 1;
-  private lastPrunedCreationCount = 0;
-
-  push(
-    parent: ExternalParserStackNode,
-    state: number,
-  ): ExternalParserStackNode {
-    const existing = parent.children.get(state);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const node = new ExternalParserStackNode(
-      state,
-      parent,
-      parent.depth + 1,
-    );
-    parent.children.set(state, node);
-    this.creationCount++;
-    return node;
-  }
-
-  pop(
-    node: ExternalParserStackNode,
-    count: number,
-  ): ExternalParserStackNode | undefined {
-    let current: ExternalParserStackNode | undefined = node;
-    for (let index = 0; index < count; index++) {
-      if (current === undefined) {
-        return undefined;
-      }
-      current = current.parent;
-    }
-    return current;
-  }
-
-  prune(checkpoints: readonly ExternalParserStackNode[]): void {
-    const retained = new Set<ExternalParserStackNode>();
-    for (const checkpoint of checkpoints) {
-      let node: ExternalParserStackNode | undefined = checkpoint;
-      while (node !== undefined && !retained.has(node)) {
-        retained.add(node);
-        node = node.parent;
-      }
-    }
-    for (const node of retained) {
-      for (const [state, child] of node.children) {
-        if (!retained.has(child)) {
-          node.children.delete(state);
-        }
-      }
-    }
-    this.lastPrunedCreationCount = this.creationCount;
-  }
-
-  pruneAfterUpdate(checkpoints: readonly ExternalParserStackNode[]): void {
-    // Pruning scans every checkpoint, so amortize it while bounding unpruned
-    // stack growth to fewer than 1,024 newly interned nodes.
-    if (this.creationCount - this.lastPrunedCreationCount < 1_024) {
-      return;
-    }
-    this.prune(checkpoints);
-  }
-}
-
-interface ExternalValidationState {
-  readonly checkpoints: readonly ExternalParserStackNode[];
-  readonly actionCounts: readonly number[];
-  readonly result: ValidateParseResult;
-  readonly totalActionCount: number;
-  readonly stoppedTokenIndex: number;
-}
-
-interface ExternalValidationRun {
-  readonly state: ExternalValidationState;
-  readonly work: IncrementalParserWork;
-}
-
-function externalRunIncrementalValidation(
-  metadata: ExternalRuntimeMetadata,
-  wasm: ExternalParserWasmExports,
-  planByteLength: number,
-  source: string,
-  lexState: ExternalIncrementalLexState,
-  maxParserActions: number,
-  stackPool: ExternalParserStackPool,
-  previous: ExternalValidationState | undefined,
-  relexed: ExternalIncrementalRelexResult | undefined,
-): ExternalValidationRun {
-  const sourcePtr = align(planByteLength, 8);
-  const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
-  const selectionPtr = align(sourcePtr + sourceByteLength, WASM_I32_BYTES);
-  ensureExternalWasmCapacity(
-    wasm.memory,
-    selectionPtr + WASM_I32_BYTES * 4,
-  );
-
-  let tokenIndex = 0;
-  let stack = stackPool.root;
-  let logicalActionCount = 0;
-  let parserActions = 0;
-  let checkpoints: ExternalParserStackNode[] = [stack];
-  let actionCounts: number[] = [0];
-  if (previous !== undefined && relexed !== undefined) {
-    tokenIndex = Math.min(
-      relexed.oldPrefixTokenCount,
-      previous.checkpoints.length - 1,
-    );
-    const previousStack = previous.checkpoints[tokenIndex];
-    const previousActionCount = previous.actionCounts[tokenIndex];
-    if (previousStack === undefined || previousActionCount === undefined) {
-      throw new Error(
-        `Incremental validation checkpoint ${tokenIndex} is missing.`,
-      );
-    }
-    stack = previousStack;
-    logicalActionCount = previousActionCount;
-    checkpoints = previous.checkpoints.slice(0, tokenIndex + 1);
-    actionCounts = previous.actionCounts.slice(0, tokenIndex + 1);
-  }
-  const reparseTokenStart = tokenIndex;
-
-  const reparsedStart = externalIncrementalTokenStart(
-    lexState,
-    tokenIndex,
-    source.length,
-  );
-  let reparsedEnd = reparsedStart;
-  let reuseChecks = 0;
-  while (true) {
-    if (
-      previous !== undefined && relexed !== undefined &&
-      tokenIndex >= relexed.newSuffixTokenStart
-    ) {
-      reuseChecks++;
-      const oldTokenIndex = relexed.oldSuffixTokenStart +
-        (tokenIndex - relexed.newSuffixTokenStart);
-      const oldStack = previous.checkpoints[oldTokenIndex];
-      const oldActionCount = previous.actionCounts[oldTokenIndex];
-      if (
-        previous.result.ok && oldStack === stack &&
-        oldActionCount !== undefined
-      ) {
-        const projectedActionCount = logicalActionCount +
-          (previous.totalActionCount - oldActionCount);
-        if (projectedActionCount <= maxParserActions) {
-          const actionDelta = logicalActionCount - oldActionCount;
-          checkpoints = checkpoints.concat(
-            previous.checkpoints.slice(oldTokenIndex + 1),
-          );
-          const suffixActionCounts = previous.actionCounts.slice(
-            oldTokenIndex + 1,
-          );
-          if (actionDelta !== 0) {
-            for (let index = 0; index < suffixActionCounts.length; index++) {
-              const previousCount = suffixActionCounts[index];
-              if (previousCount === undefined) {
-                throw new Error(
-                  `Incremental validation suffix action count ${index} is missing.`,
-                );
-              }
-              suffixActionCounts[index] = previousCount + actionDelta;
-            }
-          }
-          actionCounts = actionCounts.concat(suffixActionCounts);
-          return {
-            state: {
-              checkpoints,
-              actionCounts,
-              result: { ok: true, source, diagnostics: [] },
-              totalActionCount: projectedActionCount,
-              stoppedTokenIndex: lexState.count,
-            },
-            work: {
-              reparsedRanges: externalNonEmptyRanges(
-                reparsedStart,
-                reparsedEnd,
-              ),
-              parserActions,
-              reuseChecks,
-              reusedCheckpoints: reparseTokenStart +
-                previous.checkpoints.length - oldTokenIndex - 1,
-              createdCheckpoints: tokenIndex - reparseTokenStart,
-            },
-          };
-        }
-      }
-    }
-
-    const state = stack.state;
-    let action: number;
-    let selectedSpec = -2;
-    let tokenStart = source.length;
-    let tokenEnd = source.length;
-    if (tokenIndex < lexState.count) {
-      const base = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-      const fallbackSpec = lexState.records[base];
-      tokenStart = lexState.records[base + 1];
-      tokenEnd = lexState.records[base + 2];
-      const acceptingState = lexState.records[base + 3];
-      if (
-        fallbackSpec === undefined || tokenStart === undefined ||
-        tokenEnd === undefined || acceptingState === undefined
-      ) {
-        throw new Error(
-          `Incremental token record ${tokenIndex} is incomplete.`,
-        );
-      }
-      if (fallbackSpec < 0) {
-        const diagnostic = externalValidateStatusDiagnostic(
-          metadata,
-          source,
-          externalParseStatusUnexpected,
-          state,
-          fallbackSpec,
-          tokenStart,
-          tokenEnd,
-        );
-        return externalFailedValidationRun(
-          source,
-          diagnostic,
-          checkpoints,
-          actionCounts,
-          logicalActionCount,
-          tokenIndex,
-          parserActions,
-          reuseChecks,
-          reparsedStart,
-          tokenEnd,
-          reparseTokenStart,
-        );
-      }
-      const selectionStatus = wasm.parser_select_incremental(
-        state,
-        acceptingState,
-        fallbackSpec,
-        sourcePtr,
-        source.length,
-        tokenEnd,
-        selectionPtr,
-      );
-      const selectionView = new DataView(wasm.memory.buffer);
-      selectedSpec = selectionView.getInt32(
-        selectionPtr + WASM_I32_BYTES,
-        true,
-      );
-      if (selectionStatus === 2) {
-        tokenIndex++;
-        reparsedEnd = tokenEnd;
-        checkpoints.push(stack);
-        actionCounts.push(logicalActionCount);
-        continue;
-      }
-      if (selectionStatus !== 1) {
-        const diagnostic = externalValidateStatusDiagnostic(
-          metadata,
-          source,
-          externalParseStatusUnexpected,
-          state,
-          fallbackSpec,
-          tokenStart,
-          tokenEnd,
-        );
-        return externalFailedValidationRun(
-          source,
-          diagnostic,
-          checkpoints,
-          actionCounts,
-          logicalActionCount,
-          tokenIndex,
-          parserActions,
-          reuseChecks,
-          reparsedStart,
-          tokenEnd,
-          reparseTokenStart,
-        );
-      }
-      action = selectionView.getInt32(
-        selectionPtr + WASM_I32_BYTES * 3,
-        true,
-      );
-    } else {
-      action = wasm.parser_action(state, metadata.eofTerminal);
-      if (action <= 0) {
-        const diagnostic = externalValidateStatusDiagnostic(
-          metadata,
-          source,
-          externalParseStatusUnexpected,
-          state,
-          -2,
-          source.length,
-          source.length,
-        );
-        return externalFailedValidationRun(
-          source,
-          diagnostic,
-          checkpoints,
-          actionCounts,
-          logicalActionCount,
-          tokenIndex,
-          parserActions,
-          reuseChecks,
-          reparsedStart,
-          source.length,
-          reparseTokenStart,
-        );
-      }
-    }
-
-    if (logicalActionCount >= maxParserActions) {
-      const diagnostic = externalValidateStatusDiagnostic(
-        metadata,
-        source,
-        externalParseStatusActionLimit,
-        state,
-        selectedSpec,
-        tokenStart,
-        tokenEnd,
-      );
-      return externalFailedValidationRun(
-        source,
-        diagnostic,
-        checkpoints,
-        actionCounts,
-        logicalActionCount,
-        tokenIndex,
-        parserActions,
-        reuseChecks,
-        reparsedStart,
-        tokenEnd,
-        reparseTokenStart,
-      );
-    }
-    logicalActionCount++;
-    parserActions++;
-    const kind = action & 0xff_00_00_00;
-    const payload = action & WASM_ACTION_PAYLOAD_MASK;
-    if (kind === WASM_ACTION_SHIFT) {
-      stack = stackPool.push(stack, payload);
-      tokenIndex++;
-      reparsedEnd = tokenEnd;
-      checkpoints.push(stack);
-      actionCounts.push(logicalActionCount);
-      continue;
-    }
-    if (kind === WASM_ACTION_REDUCE) {
-      const production = metadata.productions[payload];
-      if (production === undefined) {
-        return externalInternalValidationRun(
-          source,
-          `Incremental parser references unknown production ${payload}.`,
-          checkpoints,
-          actionCounts,
-          logicalActionCount,
-          tokenIndex,
-          parserActions,
-          reuseChecks,
-          reparsedStart,
-          tokenEnd,
-          reparseTokenStart,
-        );
-      }
-      const gotoSource = stackPool.pop(stack, production.rhsLength);
-      if (gotoSource === undefined) {
-        return externalInternalValidationRun(
-          source,
-          `Incremental parser production ${payload} pops ${production.rhsLength} states from stack depth ${stack.depth}.`,
-          checkpoints,
-          actionCounts,
-          logicalActionCount,
-          tokenIndex,
-          parserActions,
-          reuseChecks,
-          reparsedStart,
-          tokenEnd,
-          reparseTokenStart,
-        );
-      }
-      const gotoState = wasm.parser_goto(gotoSource.state, production.lhs);
-      if (gotoState < 0) {
-        return externalInternalValidationRun(
-          source,
-          `Incremental parser has no goto from state ${gotoSource.state} on nonterminal ${production.lhs}.`,
-          checkpoints,
-          actionCounts,
-          logicalActionCount,
-          tokenIndex,
-          parserActions,
-          reuseChecks,
-          reparsedStart,
-          tokenEnd,
-          reparseTokenStart,
-        );
-      }
-      stack = stackPool.push(gotoSource, gotoState);
-      continue;
-    }
-    if (kind === WASM_ACTION_ACCEPT) {
-      return {
-        state: {
-          checkpoints,
-          actionCounts,
-          result: { ok: true, source, diagnostics: [] },
-          totalActionCount: logicalActionCount,
-          stoppedTokenIndex: tokenIndex,
-        },
-        work: {
-          reparsedRanges: externalNonEmptyRanges(
-            reparsedStart,
-            reparsedEnd,
-          ),
-          parserActions,
-          reuseChecks,
-          reusedCheckpoints: reparseTokenStart,
-          createdCheckpoints: tokenIndex - reparseTokenStart,
-        },
-      };
-    }
-    return externalInternalValidationRun(
-      source,
-      `Incremental parser received unknown action ${action}.`,
-      checkpoints,
-      actionCounts,
-      logicalActionCount,
-      tokenIndex,
-      parserActions,
-      reuseChecks,
-      reparsedStart,
-      tokenEnd,
-      reparseTokenStart,
-    );
-  }
-}
-
-function externalIncrementalTokenStart(
-  state: ExternalIncrementalLexState,
-  tokenIndex: number,
-  sourceLength: number,
-): number {
-  if (tokenIndex >= state.count) {
-    return sourceLength;
-  }
-  const start = state.records[
-    tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
-  ];
-  if (start === undefined) {
-    throw new Error(`Incremental token record ${tokenIndex} has no start.`);
-  }
-  return start;
-}
-
-function externalNonEmptyRanges(
-  start: number,
-  end: number,
-): readonly Span[] {
-  if (end <= start) {
-    return [];
-  }
-  return [{ start, end }];
-}
-
-function externalFailedValidationRun(
-  source: string,
-  diagnostic: ExternalParseDiagnostic,
-  checkpoints: readonly ExternalParserStackNode[],
-  actionCounts: readonly number[],
-  totalActionCount: number,
-  stoppedTokenIndex: number,
-  parserActions: number,
-  reuseChecks: number,
-  reparsedStart: number,
-  reparsedEnd: number,
-  reparseTokenStart: number,
-): ExternalValidationRun {
-  const createdCheckpoints = stoppedTokenIndex - reparseTokenStart;
-  return {
-    state: {
-      checkpoints,
-      actionCounts,
-      result: { ok: false, source, diagnostics: [diagnostic] },
-      totalActionCount,
-      stoppedTokenIndex,
-    },
-    work: {
-      reparsedRanges: externalNonEmptyRanges(reparsedStart, reparsedEnd),
-      parserActions,
-      reuseChecks,
-      reusedCheckpoints: reparseTokenStart,
-      createdCheckpoints,
-    },
-  };
-}
-
-function externalInternalValidationRun(
-  source: string,
-  message: string,
-  checkpoints: readonly ExternalParserStackNode[],
-  actionCounts: readonly number[],
-  totalActionCount: number,
-  stoppedTokenIndex: number,
-  parserActions: number,
-  reuseChecks: number,
-  reparsedStart: number,
-  reparsedEnd: number,
-  reparseTokenStart: number,
-): ExternalValidationRun {
-  return externalFailedValidationRun(
-    source,
-    externalParseDiagnostic(
-      "PARSER_INTERNAL_ERROR",
-      message,
-      { start: reparsedEnd, end: reparsedEnd },
-    ),
-    checkpoints,
-    actionCounts,
-    totalActionCount,
-    stoppedTokenIndex,
-    parserActions,
-    reuseChecks,
-    reparsedStart,
-    reparsedEnd,
-    reparseTokenStart,
-  );
-}
-
 class ExternalIncrementalDocument<Root extends RuleCursor> {
   #disposed = false;
   #snapshot: ExternalSourceSnapshot;
@@ -2642,9 +1901,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
   #lexSearchFloorToken = 0;
   #lexResult: IncrementalLexResult;
   #validateResult: IncrementalValidateResult | undefined;
-  #validationState: ExternalValidationState | undefined;
   #parseResult: IncrementalParseResult<Root> | undefined;
-  readonly #stackPool = new ExternalParserStackPool();
   readonly #preserveTrivia: boolean;
   readonly #maxParserActions: number;
 
@@ -2652,6 +1909,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
 
   constructor(
     private readonly metadata: ExternalRuntimeMetadata,
+    private readonly islandProgram: StrictIslandParserProgram | undefined,
     private readonly wasm: ExternalParserWasmExports,
     private readonly planByteLength: number,
     private readonly sourceCache: ExternalWasmSourceCache,
@@ -2684,6 +1942,11 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       );
     }
     this.goal = goal;
+    if (goal !== "lex" && islandProgram === undefined) {
+      throw new Error(
+        `Incremental document goal '${goal}' requires a strict island parser.`,
+      );
+    }
     const trivia = options.trivia;
     let preserveTrivia = metadata.defaultPreserveTrivia;
     if (trivia === "preserve") {
@@ -2821,26 +2084,20 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
 
     let parserWork: IncrementalParserWork | undefined;
     if (this.goal !== "lex") {
-      const validation = externalRunIncrementalValidation(
-        this.metadata,
-        this.wasm,
-        this.planByteLength,
-        this.#source,
-        this.#lexState,
-        this.#maxParserActions,
-        this.#stackPool,
-        this.#validationState,
-        relexed,
-      );
-      this.#validationState = validation.state;
-      this.#stackPool.pruneAfterUpdate(validation.state.checkpoints);
+      const validated = this.#validateCurrentRecords();
       this.#validateResult = externalIncrementalValidateResult(
         this.#snapshot,
-        validation.state.result,
+        validated,
       );
-      parserWork = validation.work;
+      parserWork = {
+        reparsedRanges: [{ start: 0, end: this.#source.length }],
+        parserActions: this.#lexState.count,
+        reuseChecks: 0,
+        reusedCheckpoints: 0,
+        createdCheckpoints: 0,
+      };
       if (this.goal === "parse") {
-        const parsed = this.#parseCurrentRecords(firstEdit.start);
+        const parsed = this.#parseCurrentRecords();
         this.#parseResult = externalIncrementalParseResult(
           this.#snapshot,
           parsed,
@@ -2903,16 +2160,11 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
         lexer,
       };
     }
-    if (this.#validationState === undefined) {
-      throw new Error(
-        `Incremental document goal '${this.goal}' has no validation state.`,
-      );
-    }
     const parser: IncrementalParserWork = {
       reparsedRanges: [],
       parserActions: 0,
       reuseChecks: 0,
-      reusedCheckpoints: this.#validationState.checkpoints.length - 1,
+      reusedCheckpoints: 0,
       createdCheckpoints: 0,
     };
     if (this.goal === "validate") {
@@ -2937,22 +2189,9 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     if (this.goal === "lex") {
       return;
     }
-    const validation = externalRunIncrementalValidation(
-      this.metadata,
-      this.wasm,
-      this.planByteLength,
-      this.#source,
-      this.#lexState,
-      this.#maxParserActions,
-      this.#stackPool,
-      undefined,
-      undefined,
-    );
-    this.#validationState = validation.state;
-    this.#stackPool.prune(validation.state.checkpoints);
     this.#validateResult = externalIncrementalValidateResult(
       this.#snapshot,
-      validation.state.result,
+      this.#validateCurrentRecords(),
     );
     if (this.goal === "parse") {
       this.#parseResult = externalIncrementalParseResult(
@@ -2962,22 +2201,14 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     }
   }
 
-  #parseCurrentRecords(
-    unchangedPrefixEnd = -1,
-  ): CursorParseResult<Root> {
-    let reuse: ExternalCursorTapeReuse | undefined;
-    if (this.#parseResult !== undefined && this.#parseResult.ok) {
-      const previousTape = externalCursorTapeByRoot.get(
-        this.#parseResult.cursor,
-      );
-      if (previousTape !== undefined) {
-        reuse = { tape: previousTape, unchangedPrefixEnd };
-      }
+  #validateCurrentRecords(): ValidateParseResult {
+    const islandProgram = this.islandProgram;
+    if (islandProgram === undefined) {
+      throw new Error("Incremental validation has no strict island parser.");
     }
-    return parseExternalCursorWithWasm(
+    return validateExternalIslandRecords(
       this.metadata,
-      this.wasm,
-      this.planByteLength,
+      islandProgram,
       this.sourceCache,
       this.#source,
       {
@@ -2985,8 +2216,25 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
         maxParserActions: this.#maxParserActions,
       },
       externalIncrementalRawRecords(this.#lexState),
-      reuse,
-    ) as CursorParseResult<Root>;
+    );
+  }
+
+  #parseCurrentRecords(): CursorParseResult<Root> {
+    const islandProgram = this.islandProgram;
+    if (islandProgram === undefined) {
+      throw new Error("Incremental parsing has no strict island parser.");
+    }
+    return parseExternalIslandRecords(
+      this.metadata,
+      islandProgram,
+      this.sourceCache,
+      this.#source,
+      {
+        preserveTrivia: this.#preserveTrivia,
+        maxParserActions: this.#maxParserActions,
+      },
+      externalIncrementalRawRecords(this.#lexState),
+    );
   }
 
   #assertLive(): void {
@@ -3224,43 +2472,6 @@ function lexExternalWasmTape(
   };
 }
 
-function parseExternalWasm<Root extends RuleCursor>(
-  metadata: ExternalRuntimeMetadata,
-  wasm: ExternalParserWasmExports,
-  planByteLength: number,
-  sourceCache: ExternalWasmSourceCache,
-  source: string,
-  options?: ParseOptions,
-): CursorParseResult<Root> {
-  return parseExternalCursorDefault(
-    metadata,
-    wasm,
-    planByteLength,
-    sourceCache,
-    source,
-    options,
-  ) as CursorParseResult<Root>;
-}
-
-function parseExternalCursorDefault(
-  metadata: ExternalRuntimeMetadata,
-  wasm: ExternalParserWasmExports,
-  planByteLength: number,
-  sourceCache: ExternalWasmSourceCache,
-  source: string,
-  options: ParseOptions | undefined,
-): CursorParseResult<RuleCursor> {
-  return parseExternalCursorWithWasm(
-    metadata,
-    wasm,
-    planByteLength,
-    sourceCache,
-    source,
-    options,
-    undefined,
-  );
-}
-
 function lexExternalRecords(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
@@ -3419,8 +2630,28 @@ function lexExternalIncrementalRecords(
   };
 }
 
-function validateExternalWasm(
+interface ExternalIslandRegion {
+  readonly start: number;
+  readonly end: number;
+}
+
+type ExternalIslandAnalysis =
+  | {
+    readonly ok: true;
+    readonly terminals: Uint16Array;
+    readonly tokenRecords: Int32Array;
+    readonly rawTokenRecords: Int32Array;
+    readonly structuralRecordIndices: Int32Array;
+    readonly regions: readonly ExternalIslandRegion[];
+  }
+  | {
+    readonly ok: false;
+    readonly diagnostics: readonly ExternalParseDiagnostic[];
+  };
+
+function validateExternalIsland(
   metadata: ExternalRuntimeMetadata,
+  program: StrictIslandParserProgram,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
@@ -3432,109 +2663,52 @@ function validateExternalWasm(
     "maxParserActions",
     1_000_000,
   );
-  const sourcePtr = align(planByteLength, 8);
-  const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
-  const stackPtr = align(sourcePtr + sourceByteLength, WASM_I32_BYTES);
-  const stackCapacity = source.length + metadata.parserStateCount + 1;
-  const stackByteLength = stackCapacity * WASM_I32_BYTES;
-  const resultPtr = align(stackPtr + stackByteLength, WASM_I32_BYTES);
-  const resultByteLength = WASM_VALIDATE_RESULT_I32_COUNT * WASM_I32_BYTES;
-  const memoPtr = align(resultPtr + resultByteLength, WASM_I32_BYTES);
-  let memoCapacity = 0;
-  let requiredBytes = memoPtr;
-  if (!externalWasmCapacityFits(requiredBytes)) {
-    return {
-      ok: false,
-      source,
-      diagnostics: [
-        externalOversizedInputDiagnostic(
-          source,
-          requiredBytes,
-          externalOversizedSplitRemedy,
-        ),
-      ],
-    };
-  }
-  ensureExternalWasmCapacity(wasm.memory, requiredBytes);
-  let view = writeExternalWasmSource(
-    wasm.memory,
-    sourcePtr,
+  const analysis = analyzeExternalIsland(
+    metadata,
+    program,
+    wasm,
+    planByteLength,
     sourceCache,
     source,
-  );
-  let status = wasm.validate(
-    sourcePtr,
-    source.length,
-    resultPtr,
-    stackPtr,
-    stackCapacity,
-    memoPtr,
-    memoCapacity,
     maxParserActions,
   );
-  if (status === WASM_PARSE_STATUS_MEMO_REQUIRED) {
-    memoCapacity = externalLexMemoCapacity(wasm, source.length);
-    requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
-    if (!externalWasmCapacityFits(requiredBytes)) {
-      return {
-        ok: false,
-        source,
-        diagnostics: [
-          externalOversizedInputDiagnostic(
-            source,
-            requiredBytes,
-            externalOversizedSplitRemedy,
-          ),
-        ],
-      };
-    }
-    ensureExternalWasmCapacity(wasm.memory, requiredBytes);
-    status = wasm.validate(
-      sourcePtr,
-      source.length,
-      resultPtr,
-      stackPtr,
-      stackCapacity,
-      memoPtr,
-      memoCapacity,
-      maxParserActions,
-    );
+  if (!analysis.ok) {
+    return { ok: false, source, diagnostics: analysis.diagnostics };
   }
-  view = new DataView(wasm.memory.buffer);
-  if (status === externalParseStatusOk) {
-    return { ok: true, source, diagnostics: [] };
-  }
-  const errorState = view.getInt32(resultPtr + WASM_I32_BYTES, true);
-  const errorSpec = view.getInt32(resultPtr + WASM_I32_BYTES * 2, true);
-  const errorStart = view.getInt32(resultPtr + WASM_I32_BYTES * 3, true);
-  const errorEnd = view.getInt32(resultPtr + WASM_I32_BYTES * 4, true);
-  return {
-    ok: false,
-    source,
-    diagnostics: [
-      externalValidateStatusDiagnostic(
-        metadata,
-        source,
-        status,
-        errorState,
-        errorSpec,
-        errorStart,
-        errorEnd,
-      ),
-    ],
-  };
+  return { ok: true, source, diagnostics: [] };
 }
 
-function parseExternalCursorWithWasm(
+function parseExternalIsland<Root extends RuleCursor>(
   metadata: ExternalRuntimeMetadata,
+  program: StrictIslandParserProgram,
   wasm: ExternalParserWasmExports,
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
   source: string,
   options: ParseOptions | undefined,
-  externalRecords: Int32Array | undefined,
-  reuse?: ExternalCursorTapeReuse,
-): CursorParseResult<RuleCursor> {
+): CursorParseResult<Root> {
+  const maxParserActions = externalPositiveLimit(
+    options,
+    "maxParserActions",
+    1_000_000,
+  );
+  const analysis = analyzeExternalIsland(
+    metadata,
+    program,
+    wasm,
+    planByteLength,
+    sourceCache,
+    source,
+    maxParserActions,
+  );
+  if (!analysis.ok) {
+    return {
+      ok: false,
+      source,
+      cursor: null,
+      diagnostics: analysis.diagnostics,
+    };
+  }
   let preserveTrivia = metadata.defaultPreserveTrivia;
   if (options !== undefined && options.preserveTrivia !== undefined) {
     if (typeof options.preserveTrivia !== "boolean") {
@@ -3546,547 +2720,613 @@ function parseExternalCursorWithWasm(
     }
     preserveTrivia = options.preserveTrivia;
   }
+  try {
+    const cursor = materializeExternalIslandCursor(
+      metadata,
+      program,
+      source,
+      analysis,
+      preserveTrivia,
+    );
+    return { ok: true, source, cursor: cursor as Root, diagnostics: [] };
+  } catch (error) {
+    return {
+      ok: false,
+      source,
+      cursor: null,
+      diagnostics: [
+        externalInternalParserDiagnostic(error, {
+          start: source.length,
+          end: source.length,
+        }),
+      ],
+    };
+  }
+}
+
+function parseExternalIslandRecords<Root extends RuleCursor>(
+  metadata: ExternalRuntimeMetadata,
+  program: StrictIslandParserProgram,
+  sourceCache: ExternalWasmSourceCache,
+  source: string,
+  options: ParseOptions | undefined,
+  records: Int32Array,
+): CursorParseResult<Root> {
   const maxParserActions = externalPositiveLimit(
     options,
     "maxParserActions",
     1_000_000,
   );
-  const sourcePtr = align(planByteLength, 8);
-  const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
-  const tokenPtr = align(sourcePtr + sourceByteLength, WASM_I32_BYTES);
-  const tokenRecordBytes = WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES;
-  let maximumRawTokenCount = source.length;
-  if (maximumRawTokenCount < 1) {
-    maximumRawTokenCount = 1;
-  }
-  const lexerRequiredBytes = tokenPtr +
-    maximumRawTokenCount * tokenRecordBytes;
-  if (!externalWasmCapacityFits(lexerRequiredBytes)) {
-    return externalFailedCursorParseResult(source, [
-      externalOversizedInputDiagnostic(
-        source,
-        lexerRequiredBytes,
-        externalOversizedSplitRemedy,
-      ),
-    ]);
-  }
-  ensureExternalWasmCapacity(wasm.memory, lexerRequiredBytes);
-  writeExternalWasmSource(wasm.memory, sourcePtr, sourceCache, source);
-
-  let rawTokenCount = -1;
-  let structuralCapacity = 0;
-
-  while (true) {
-    if (externalRecords === undefined) {
-      rawTokenCount = wasm.lex_all(
-        sourcePtr,
-        source.length,
-        0,
-        tokenPtr,
-        maximumRawTokenCount,
-        0,
-        0,
-      );
-      if (rawTokenCount === -2) {
-        const memoPtr = align(lexerRequiredBytes, WASM_I32_BYTES);
-        const memoCapacity = externalLexMemoCapacity(wasm, source.length);
-        const memoRequiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
-        if (!externalWasmCapacityFits(memoRequiredBytes)) {
-          return externalFailedCursorParseResult(source, [
-            externalOversizedInputDiagnostic(
-              source,
-              memoRequiredBytes,
-              externalOversizedSplitRemedy,
-            ),
-          ]);
-        }
-        ensureExternalWasmCapacity(wasm.memory, memoRequiredBytes);
-        rawTokenCount = wasm.lex_all(
-          sourcePtr,
-          source.length,
-          0,
-          tokenPtr,
-          maximumRawTokenCount,
-          memoPtr,
-          memoCapacity,
-        );
-      }
-      if (rawTokenCount < 0 || rawTokenCount > maximumRawTokenCount) {
-        return externalInvalidCursorTapeResult(source);
-      }
-    } else {
-      rawTokenCount = externalRecords.length / WASM_TOKEN_RECORD_I32_COUNT;
-    }
-    let tokenCapacity = rawTokenCount;
-    if (tokenCapacity < 1) {
-      tokenCapacity = 1;
-    }
-    if (structuralCapacity === 0) {
-      structuralCapacity = tokenCapacity + 32;
-    }
-
-    // The cursor arenas are consumed per token, not per source character. A
-    // capacity retry returns to the top and re-lexes because cursor parsing
-    // compacts the raw records in place.
-    const ruleCapacity = structuralCapacity;
-    const childCapacity = structuralCapacity * 2;
-    const fieldCapacity = structuralCapacity;
-    const valueCapacity = structuralCapacity * 3;
-    const valueItemCapacity = structuralCapacity * 2;
-    const fragmentCapacity = structuralCapacity * 2;
-
-    const rulePtr = align(
-      tokenPtr + tokenCapacity * tokenRecordBytes,
-      WASM_I32_BYTES,
-    );
-    const ruleRecordBytes = WASM_CURSOR_RULE_RECORD_I32_COUNT *
-      WASM_I32_BYTES;
-    const childPtr = align(
-      rulePtr + ruleCapacity * ruleRecordBytes,
-      WASM_I32_BYTES,
-    );
-    const childRecordBytes = WASM_CURSOR_CHILD_RECORD_I32_COUNT *
-      WASM_I32_BYTES;
-    const fieldPtr = align(
-      childPtr + childCapacity * childRecordBytes,
-      WASM_I32_BYTES,
-    );
-    const fieldRecordBytes = WASM_CURSOR_FIELD_RECORD_I32_COUNT *
-      WASM_I32_BYTES;
-    const valuePtr = align(
-      fieldPtr + fieldCapacity * fieldRecordBytes,
-      WASM_I32_BYTES,
-    );
-    const valueRecordBytes = WASM_CURSOR_VALUE_RECORD_I32_COUNT *
-      WASM_I32_BYTES;
-    const valueItemPtr = align(
-      valuePtr + valueCapacity * valueRecordBytes,
-      WASM_I32_BYTES,
-    );
-    const valueItemRecordBytes = WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT *
-      WASM_I32_BYTES;
-    const resultPtr = align(
-      valueItemPtr + valueItemCapacity * valueItemRecordBytes,
-      WASM_I32_BYTES,
-    );
-    const resultByteLength = WASM_PARSE_CURSOR_RESULT_I32_COUNT *
-      WASM_I32_BYTES;
-    const stackPtr = align(resultPtr + resultByteLength, WASM_I32_BYTES);
-    const fragmentPtr = align(
-      stackPtr + fragmentCapacity * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const fragmentRecordBytes = WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT *
-      WASM_I32_BYTES;
-    const requiredBytes = align(
-      fragmentPtr + fragmentCapacity * fragmentRecordBytes,
-      WASM_I32_BYTES,
-    );
-    if (!externalWasmCapacityFits(requiredBytes)) {
-      return externalFailedCursorParseResult(source, [
-        externalOversizedInputDiagnostic(
-          source,
-          requiredBytes,
-          externalOversizedSplitRemedy,
-        ),
-      ]);
-    }
-    ensureExternalWasmCapacity(wasm.memory, requiredBytes);
-
-    let view = new DataView(wasm.memory.buffer);
-    if (externalRecords !== undefined) {
-      new Int32Array(
-        wasm.memory.buffer,
-        tokenPtr,
-        externalRecords.length,
-      ).set(externalRecords);
-    }
-    let preserveTriviaFlag = 0;
-    if (preserveTrivia) {
-      preserveTriviaFlag = 1;
-    }
-    const status = wasm.parse_cursor_records(
-      sourcePtr,
-      source.length,
-      tokenPtr,
-      rawTokenCount,
-      tokenCapacity,
-      rulePtr,
-      ruleCapacity,
-      childPtr,
-      childCapacity,
-      fieldPtr,
-      fieldCapacity,
-      valuePtr,
-      valueCapacity,
-      valueItemPtr,
-      valueItemCapacity,
-      resultPtr,
-      stackPtr,
-      fragmentPtr,
-      fragmentCapacity,
-      preserveTriviaFlag,
-      maxParserActions,
-    );
-    view = new DataView(wasm.memory.buffer);
-    const tokenCount = view.getInt32(resultPtr, true);
-    const ruleCount = view.getInt32(resultPtr + WASM_I32_BYTES, true);
-    const childCount = view.getInt32(resultPtr + WASM_I32_BYTES * 2, true);
-    const fieldCount = view.getInt32(resultPtr + WASM_I32_BYTES * 3, true);
-    const valueCount = view.getInt32(resultPtr + WASM_I32_BYTES * 4, true);
-    const valueItemCount = view.getInt32(resultPtr + WASM_I32_BYTES * 5, true);
-    const rootRef = view.getInt32(resultPtr + WASM_I32_BYTES * 6, true);
-    const errorOffset = view.getInt32(resultPtr + WASM_I32_BYTES * 7, true);
-    const errorState = view.getInt32(resultPtr + WASM_I32_BYTES * 8, true);
-    const tokenRead = view.getInt32(resultPtr + WASM_I32_BYTES * 9, true);
-    if (status === externalParseCursorStatusCapacity) {
-      const nextCapacity = structuralCapacity * 2;
-      if (
-        nextCapacity <= structuralCapacity ||
-        !Number.isSafeInteger(nextCapacity)
-      ) {
-        return externalFailedCursorParseResult(source, [
-          externalParseDiagnostic(
-            "PARSER_INTERNAL_ERROR",
-            "Wasm cursor parser exceeded host cursor buffer capacity.",
-            externalClampSpan(
-              { start: errorOffset, end: errorOffset },
-              source.length,
-            ),
-          ),
-        ]);
-      }
-      structuralCapacity = nextCapacity;
-      continue;
-    }
-    if (status !== externalParseStatusOk) {
-      return externalFailedCursorParseResult(source, [
-        externalCursorStatusDiagnostic(
-          metadata,
-          source,
-          view,
-          tokenPtr,
-          tokenCapacity,
-          status,
-          errorOffset,
-          errorState,
-          tokenRead,
-        ),
-      ]);
-    }
-    if (tokenCount < 0 || tokenCount > tokenCapacity) {
-      return externalInvalidCursorTapeResult(source);
-    }
-    if (ruleCount < 0 || ruleCount > ruleCapacity) {
-      return externalInvalidCursorTapeResult(source);
-    }
-    if (childCount < 0 || childCount > childCapacity) {
-      return externalInvalidCursorTapeResult(source);
-    }
-    if (fieldCount < 0 || fieldCount > fieldCapacity) {
-      return externalInvalidCursorTapeResult(source);
-    }
-    if (valueCount < 0 || valueCount > valueCapacity) {
-      return externalInvalidCursorTapeResult(source);
-    }
-    if (valueItemCount < 0 || valueItemCount > valueItemCapacity) {
-      return externalInvalidCursorTapeResult(source);
-    }
-    if (rootRef < 0 || externalCursorRefIsToken(rootRef)) {
-      return externalInvalidCursorTapeResult(source);
-    }
-    const tape = new ExternalCursorTapeView(
-      metadata,
+  const analysis = analyzeExternalIsland(
+    metadata,
+    program,
+    undefined,
+    0,
+    sourceCache,
+    source,
+    maxParserActions,
+    records,
+  );
+  if (!analysis.ok) {
+    return {
+      ok: false,
       source,
-      copyI32Tape(view, tokenPtr, tokenCount * WASM_TOKEN_RECORD_I32_COUNT),
-      copyI32Tape(
-        view,
-        rulePtr,
-        ruleCount * WASM_CURSOR_RULE_RECORD_I32_COUNT,
-      ),
-      copyI32Tape(
-        view,
-        childPtr,
-        childCount * WASM_CURSOR_CHILD_RECORD_I32_COUNT,
-      ),
-      copyI32Tape(
-        view,
-        fieldPtr,
-        fieldCount * WASM_CURSOR_FIELD_RECORD_I32_COUNT,
-      ),
-      copyI32Tape(
-        view,
-        valuePtr,
-        valueCount * WASM_CURSOR_VALUE_RECORD_I32_COUNT,
-      ),
-      copyI32Tape(
-        view,
-        valueItemPtr,
-        valueItemCount * WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
-      ),
-      reuse,
+      cursor: null,
+      diagnostics: analysis.diagnostics,
+    };
+  }
+  let preserveTrivia = metadata.defaultPreserveTrivia;
+  if (options !== undefined && options.preserveTrivia !== undefined) {
+    if (typeof options.preserveTrivia !== "boolean") {
+      throw new TypeError(
+        `preserveTrivia must be a boolean, got '${
+          String(options.preserveTrivia)
+        }'.`,
+      );
+    }
+    preserveTrivia = options.preserveTrivia;
+  }
+  try {
+    const cursor = materializeExternalIslandCursor(
+      metadata,
+      program,
+      source,
+      analysis,
+      preserveTrivia,
     );
-    try {
-      const cursor = tape.cursorForRuleRef(rootRef);
-      externalCursorTapeByRoot.set(cursor, tape);
-      return {
-        ok: true,
-        source,
-        cursor,
-        diagnostics: [],
-      };
-    } catch (error) {
-      return externalFailedCursorParseResult(source, [
+    return { ok: true, source, cursor: cursor as Root, diagnostics: [] };
+  } catch (error) {
+    return {
+      ok: false,
+      source,
+      cursor: null,
+      diagnostics: [
         externalInternalParserDiagnostic(error, {
           start: source.length,
           end: source.length,
         }),
-      ]);
-    }
+      ],
+    };
   }
 }
 
-function externalValidateStatusDiagnostic(
+function validateExternalIslandRecords(
   metadata: ExternalRuntimeMetadata,
+  program: StrictIslandParserProgram,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
-  status: number,
-  errorState: number,
-  errorSpec: number,
-  errorStart: number,
-  errorEnd: number,
-): ExternalParseDiagnostic {
-  const span = externalClampSpan(
-    { start: errorStart, end: errorEnd },
-    source.length,
+  options: ParseOptions | undefined,
+  records: Int32Array,
+): ValidateParseResult {
+  const maxParserActions = externalPositiveLimit(
+    options,
+    "maxParserActions",
+    1_000_000,
   );
-  if (status === externalParseStatusActionLimit) {
-    return externalParseDiagnostic(
-      "PARSER_TRACE_LIMIT",
-      "Parser exceeded the parser action limit.",
-      span,
-    );
-  }
-  if (status === externalParseStatusAmbiguous) {
-    return externalParseDiagnostic(
-      "PARSER_AMBIGUOUS_PARSE",
-      "Wasm parser validation found multiple viable parser actions.",
-      span,
-    );
-  }
-  if (status !== externalParseStatusUnexpected) {
-    return externalParseDiagnostic(
-      "PARSER_INTERNAL_ERROR",
-      "Wasm parser validation reported an internal failure.",
-      span,
-    );
-  }
-  if (errorSpec === -2) {
-    return externalCursorUnexpectedTokenDiagnostic(
-      metadata,
-      source,
-      {
-        type: externalCursorTokenEof,
-        id: -1,
-        terminal: metadata.eofTerminal,
-        start: source.length,
-        end: source.length,
-        tokenIndex: 0,
-      },
-      errorState,
-    );
-  }
-  if (errorSpec < 0) {
-    const diagnostic = externalUnexpectedCharacterSpan(
-      source,
-      span.start,
-      span.end,
-    );
-    return {
-      ...externalParseDiagnostic(
-        "PARSE_LEXICAL_ERROR",
-        diagnostic.message,
-        diagnostic.span,
-      ),
-      found: JSON.stringify(source.slice(span.start, span.end)),
-    };
-  }
-  const token = externalCursorTokenDataFromSpec(
+  const analysis = analyzeExternalIsland(
     metadata,
-    errorSpec,
-    span.start,
-    span.end,
+    program,
+    undefined,
     0,
-  );
-  return externalCursorUnexpectedTokenDiagnostic(
-    metadata,
+    sourceCache,
     source,
-    token,
-    errorState,
+    maxParserActions,
+    records,
   );
+  if (!analysis.ok) {
+    return { ok: false, source, diagnostics: analysis.diagnostics };
+  }
+  return { ok: true, source, diagnostics: [] };
 }
 
-function externalCursorStatusDiagnostic(
+function analyzeExternalIsland(
   metadata: ExternalRuntimeMetadata,
+  program: StrictIslandParserProgram,
+  wasm: ExternalParserWasmExports | undefined,
+  planByteLength: number,
+  sourceCache: ExternalWasmSourceCache,
   source: string,
-  view: DataView,
-  tokenPtr: number,
-  tokenCapacity: number,
-  status: number,
-  errorOffset: number,
-  errorState: number,
-  tokenRead: number,
-): ExternalParseDiagnostic {
-  if (status === externalParseStatusActionLimit) {
-    return externalParseDiagnostic(
-      "PARSER_TRACE_LIMIT",
-      "Parser exceeded the trace action limit.",
-      externalClampSpan(
-        { start: errorOffset, end: errorOffset },
-        source.length,
-      ),
-    );
-  }
-  if (status === externalParseStatusAmbiguous) {
-    return externalParseDiagnostic(
-      "PARSER_AMBIGUOUS_PARSE",
-      "Wasm cursor parser found multiple viable parser actions.",
-      externalClampSpan(
-        { start: errorOffset, end: errorOffset },
-        source.length,
-      ),
-    );
-  }
-  if (status === externalParseStatusUnexpected) {
-    return externalUnexpectedWasmCursorDiagnostic(
-      metadata,
-      source,
-      view,
-      tokenPtr,
-      tokenCapacity,
-      errorOffset,
-      errorState,
-      tokenRead,
-    );
-  }
-  return externalParseDiagnostic(
-    "PARSER_INTERNAL_ERROR",
-    "Wasm cursor parser reported an internal failure.",
-    externalClampSpan({ start: errorOffset, end: errorOffset }, source.length),
-  );
-}
-
-function externalUnexpectedWasmCursorDiagnostic(
-  metadata: ExternalRuntimeMetadata,
-  source: string,
-  view: DataView,
-  tokenPtr: number,
-  tokenCapacity: number,
-  errorOffset: number,
-  errorState: number,
-  tokenRead: number,
-): ExternalParseDiagnostic {
-  if (errorOffset >= source.length) {
-    return externalCursorUnexpectedTokenDiagnostic(
-      metadata,
-      source,
-      {
-        type: externalCursorTokenEof,
-        id: -1,
-        terminal: metadata.eofTerminal,
-        start: source.length,
-        end: source.length,
-        tokenIndex: tokenRead,
-      },
-      errorState,
-    );
-  }
-  const record = externalTokenRecordFromWasmBuffer(
-    view,
-    tokenPtr,
-    tokenCapacity,
-    tokenRead,
-  );
-  if (record !== null && record.specIndex < 0) {
-    const diagnostic = externalUnexpectedCharacterSpan(
-      source,
-      record.start,
-      record.end,
-    );
-    return {
-      ...externalParseDiagnostic(
-        "PARSE_LEXICAL_ERROR",
-        diagnostic.message,
-        diagnostic.span,
-      ),
-      found: JSON.stringify(source.slice(record.start, record.end)),
-    };
-  }
-  let token: ExternalCursorTokenData;
-  if (record === null) {
-    token = {
-      type: externalCursorTokenEof,
-      id: -1,
-      terminal: metadata.eofTerminal,
-      start: source.length,
-      end: source.length,
-      tokenIndex: tokenRead,
-    };
+  maxParserActions: number,
+  externalRecords?: Int32Array,
+): ExternalIslandAnalysis {
+  let lexed: ExternalLexRecordTape;
+  if (externalRecords === undefined) {
+    if (wasm === undefined) {
+      throw new Error("Production island parsing has no lexer instance.");
+    }
+    lexed = lexExternalRecords(wasm, planByteLength, sourceCache, source);
   } else {
-    token = externalCursorTokenDataFromSpec(
-      metadata,
-      record.specIndex,
-      record.start,
-      record.end,
-      tokenRead,
-    );
-    if (token.type === externalCursorTokenError) {
-      token = externalCursorErrorToken(
-        errorOffset,
-        Math.min(errorOffset + 1, source.length),
-        tokenRead,
+    lexed = {
+      ok: true,
+      records: externalRecords,
+      count: externalRecords.length / WASM_TOKEN_RECORD_I32_COUNT,
+    };
+  }
+  if (!lexed.ok) {
+    return {
+      ok: false,
+      diagnostics: [
+        externalOversizedInputDiagnostic(
+          source,
+          lexed.requiredBytes,
+          externalOversizedSplitRemedy,
+        ),
+      ],
+    };
+  }
+
+  const terminalBuffer = new Uint16Array(lexed.count);
+  const tokenRecordBuffer = new Int32Array(
+    lexed.count * WASM_TOKEN_RECORD_I32_COUNT,
+  );
+  const structuralRecordIndexBuffer = new Int32Array(lexed.count);
+  let tokenCount = 0;
+  for (let recordIndex = 0; recordIndex < lexed.count; recordIndex += 1) {
+    const recordBase = recordIndex * WASM_TOKEN_RECORD_I32_COUNT;
+    const specIndex = lexed.records[recordBase];
+    const start = lexed.records[recordBase + 1];
+    const end = lexed.records[recordBase + 2];
+    const acceptingState = lexed.records[recordBase + 3];
+    if (
+      specIndex === undefined || start === undefined || end === undefined ||
+      acceptingState === undefined
+    ) {
+      throw new Error(`Wasm lexer record ${recordIndex} is incomplete.`);
+    }
+    if (specIndex < 0) {
+      const lexical = externalUnexpectedCharacterSpan(source, start, end);
+      return {
+        ok: false,
+        diagnostics: [{
+          ...externalParseDiagnostic(
+            "PARSE_LEXICAL_ERROR",
+            lexical.message,
+            lexical.span,
+          ),
+          found: JSON.stringify(source.slice(start, end)),
+        }],
+      };
+    }
+    if (specIndex >= metadata.specs.length) {
+      throw new Error(
+        `Wasm lexer record ${recordIndex} references unknown spec ${specIndex}.`,
       );
     }
+    if (metadata.specIsTrivia[specIndex] === 1) {
+      continue;
+    }
+    const terminal = program.terminalBySpec[specIndex];
+    if (terminal === undefined || terminal < 0) {
+      throw new Error(
+        `Lexer spec ${specIndex} has no production island terminal.`,
+      );
+    }
+    terminalBuffer[tokenCount] = terminal;
+    structuralRecordIndexBuffer[tokenCount] = recordIndex;
+    const targetBase = tokenCount * WASM_TOKEN_RECORD_I32_COUNT;
+    tokenRecordBuffer[targetBase] = specIndex;
+    tokenRecordBuffer[targetBase + 1] = start;
+    tokenRecordBuffer[targetBase + 2] = end;
+    tokenRecordBuffer[targetBase + 3] = acceptingState;
+    tokenCount += 1;
   }
-  return externalCursorUnexpectedTokenDiagnostic(
-    metadata,
-    source,
-    token,
-    errorState,
-  );
-}
 
-function externalTokenRecordFromWasmBuffer(
-  view: DataView,
-  tokenPtr: number,
-  tokenCapacity: number,
-  index: number,
-): ExternalTokenRecord | null {
-  if (!Number.isInteger(index) || index < 0 || index >= tokenCapacity) {
-    return null;
+  const terminals = terminalBuffer.slice(0, tokenCount);
+  const tokenRecords = tokenRecordBuffer.slice(
+    0,
+    tokenCount * WASM_TOKEN_RECORD_I32_COUNT,
+  );
+  const structuralRecordIndices = structuralRecordIndexBuffer.slice(
+    0,
+    tokenCount,
+  );
+  if (tokenCount > maxParserActions) {
+    const recordBase = maxParserActions * WASM_TOKEN_RECORD_I32_COUNT;
+    const limitOffset = tokenRecords[recordBase + 1];
+    if (limitOffset === undefined) {
+      throw new Error(
+        `Parser action limit ${maxParserActions} has no token record.`,
+      );
+    }
+    return {
+      ok: false,
+      diagnostics: [externalParseDiagnostic(
+        "PARSER_TRACE_LIMIT",
+        `Parser exceeded the ${maxParserActions} transition action limit.`,
+        { start: limitOffset, end: limitOffset },
+      )],
+    };
   }
-  const recordBytes = WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES;
-  const offset = tokenPtr + index * recordBytes;
-  if (offset < 0 || offset + recordBytes > view.byteLength) {
-    return null;
+  if (tokenCount === 0) {
+    if (!program.rootAcceptsEmpty) {
+      return {
+        ok: false,
+        diagnostics: [externalIslandUnexpectedDiagnostic(
+          metadata,
+          program,
+          source,
+          terminals,
+          tokenRecords,
+          0,
+          0,
+        )],
+      };
+    }
+    return {
+      ok: true,
+      terminals,
+      tokenRecords,
+      rawTokenRecords: lexed.records,
+      structuralRecordIndices,
+      regions: [],
+    };
+  }
+
+  const session = IslandValidationSession.createSync(
+    program.validation,
+    terminals,
+  );
+  const regions: ExternalIslandRegion[] = [];
+  let regionStart = 0;
+  for (let tokenIndex = 0; tokenIndex < tokenCount; tokenIndex += 1) {
+    if (terminals[tokenIndex] !== program.boundaryTerminal) {
+      continue;
+    }
+    const regionEnd = tokenIndex + 1;
+    if (!session.validateSimdRange(regionStart, regionEnd - regionStart)) {
+      return {
+        ok: false,
+        diagnostics: [externalIslandUnexpectedDiagnostic(
+          metadata,
+          program,
+          source,
+          terminals,
+          tokenRecords,
+          regionStart,
+          regionEnd,
+        )],
+      };
+    }
+    regions.push({ start: regionStart, end: regionEnd });
+    regionStart = regionEnd;
+  }
+  if (regionStart !== tokenCount) {
+    return {
+      ok: false,
+      diagnostics: [externalIslandUnexpectedDiagnostic(
+        metadata,
+        program,
+        source,
+        terminals,
+        tokenRecords,
+        regionStart,
+        tokenCount,
+      )],
+    };
   }
   return {
-    specIndex: view.getInt32(offset, true),
-    start: view.getInt32(offset + WASM_I32_BYTES, true),
-    end: view.getInt32(offset + WASM_I32_BYTES * 2, true),
-    acceptingState: view.getInt32(offset + WASM_I32_BYTES * 3, true),
+    ok: true,
+    terminals,
+    tokenRecords,
+    rawTokenRecords: lexed.records,
+    structuralRecordIndices,
+    regions,
   };
 }
 
-function externalInvalidCursorTapeResult(
+function externalIslandUnexpectedDiagnostic(
+  metadata: ExternalRuntimeMetadata,
+  program: StrictIslandParserProgram,
   source: string,
-): CursorParseResult<RuleCursor> {
-  return externalFailedCursorParseResult(source, [
-    externalParseDiagnostic(
-      "PARSER_INTERNAL_ERROR",
-      "Wasm cursor parser returned invalid cursor tape bounds.",
-      { start: source.length, end: source.length },
+  terminals: Uint16Array,
+  tokenRecords: Int32Array,
+  regionStart: number,
+  regionEnd: number,
+): ExternalParseDiagnostic {
+  let state = program.validation.startState;
+  let unexpectedIndex = regionEnd;
+  for (let tokenIndex = regionStart; tokenIndex < regionEnd; tokenIndex += 1) {
+    const terminal = terminals[tokenIndex];
+    if (terminal === undefined) {
+      throw new Error(`Island token ${tokenIndex} is missing.`);
+    }
+    const target = program.validation.transitions[terminal * 16 + state];
+    if (target === undefined || target === program.validation.stateCount) {
+      unexpectedIndex = tokenIndex;
+      break;
+    }
+    state = target;
+  }
+
+  const expected: string[] = [];
+  for (
+    let terminal = 0;
+    terminal < program.validation.terminalCount;
+    terminal += 1
+  ) {
+    const target = program.validation.transitions[terminal * 16 + state];
+    if (target !== undefined && target < program.validation.stateCount) {
+      const display = metadata.terminalDisplays[terminal];
+      if (display === undefined) {
+        throw new Error(`Terminal ${terminal} has no display name.`);
+      }
+      expected.push(display);
+    }
+  }
+
+  if (unexpectedIndex >= terminals.length) {
+    return {
+      ...externalParseDiagnostic(
+        "PARSE_UNEXPECTED_TOKEN",
+        "Unexpected token EOF.",
+        { start: source.length, end: source.length },
+        state,
+      ),
+      expected,
+      found: "EOF",
+    };
+  }
+  const recordBase = unexpectedIndex * WASM_TOKEN_RECORD_I32_COUNT;
+  const specIndex = tokenRecords[recordBase];
+  const start = tokenRecords[recordBase + 1];
+  const end = tokenRecords[recordBase + 2];
+  if (specIndex === undefined || start === undefined || end === undefined) {
+    throw new Error(`Island token record ${unexpectedIndex} is incomplete.`);
+  }
+  const token = externalCursorTokenDataFromSpec(
+    metadata,
+    specIndex,
+    start,
+    end,
+    unexpectedIndex,
+  );
+  const found = externalCursorTokenDisplay(metadata, source, token);
+  let code: ExternalParseDiagnostic["code"] = "PARSE_UNEXPECTED_TOKEN";
+  if (
+    state === program.validation.startState && unexpectedIndex > 0 &&
+    terminals[unexpectedIndex - 1] === program.boundaryTerminal
+  ) {
+    code = "PARSE_TRAILING_INPUT";
+  }
+  return {
+    ...externalParseDiagnostic(
+      code,
+      `Unexpected token ${found}.`,
+      { start, end },
+      state,
     ),
-  ]);
+    expected,
+    found,
+  };
+}
+
+function materializeExternalIslandCursor(
+  metadata: ExternalRuntimeMetadata,
+  program: StrictIslandParserProgram,
+  source: string,
+  analysis: Extract<ExternalIslandAnalysis, { readonly ok: true }>,
+  preserveTrivia: boolean,
+): RuleCursor {
+  const childRecords: number[] = [];
+  const fieldRecords: number[] = [];
+  const valueRecords: number[] = [];
+  const regionChildStarts: number[] = [];
+  const regionFieldStarts: number[] = [];
+  const regionFieldCounts: number[] = [];
+  const regionRecordStarts: number[] = [];
+  const regionRecordEnds: number[] = [];
+  let cursorTokenRecords = analysis.tokenRecords;
+  const structuralByRecord = new Int32Array(
+    analysis.rawTokenRecords.length / WASM_TOKEN_RECORD_I32_COUNT,
+  );
+  structuralByRecord.fill(-1);
+  if (preserveTrivia) {
+    cursorTokenRecords = analysis.rawTokenRecords;
+    for (
+      let tokenIndex = 0;
+      tokenIndex < analysis.structuralRecordIndices.length;
+      tokenIndex += 1
+    ) {
+      const recordIndex = analysis.structuralRecordIndices[tokenIndex];
+      if (recordIndex === undefined) {
+        throw new Error(`Structural token ${tokenIndex} has no raw record.`);
+      }
+      structuralByRecord[recordIndex] = tokenIndex;
+    }
+  }
+
+  const rootChildStart = 0;
+  for (
+    let regionIndex = 0;
+    regionIndex < analysis.regions.length;
+    regionIndex += 1
+  ) {
+    const next = regionIndex + 1;
+    let nextNode = -1;
+    if (next < analysis.regions.length) {
+      nextNode = next;
+    }
+    childRecords.push((regionIndex + 1) * 2, nextNode);
+
+    if (program.rootField >= 0) {
+      const valueId = valueRecords.length /
+        WASM_CURSOR_VALUE_RECORD_I32_COUNT;
+      valueRecords.push(externalCursorValueRef, (regionIndex + 1) * 2, 0, 0);
+      fieldRecords.push(program.rootField, valueId);
+    }
+  }
+
+  for (
+    let regionIndex = 0;
+    regionIndex < analysis.regions.length;
+    regionIndex += 1
+  ) {
+    const region = analysis.regions[regionIndex];
+    let recordStart = region.start;
+    let recordEnd = region.end;
+    if (preserveTrivia) {
+      if (regionIndex === 0) {
+        recordStart = 0;
+      } else {
+        const previousEnd = regionRecordEnds[regionIndex - 1];
+        if (previousEnd === undefined) {
+          throw new Error(`Island region ${regionIndex} has no record start.`);
+        }
+        recordStart = previousEnd;
+      }
+      if (region.end < analysis.terminals.length) {
+        const nextRecord = analysis.structuralRecordIndices[region.end];
+        if (nextRecord === undefined) {
+          throw new Error(
+            `Island region ${regionIndex} has no following raw record.`,
+          );
+        }
+        recordEnd = nextRecord;
+      } else {
+        recordEnd = structuralByRecord.length;
+      }
+    }
+    regionRecordStarts.push(recordStart);
+    regionRecordEnds.push(recordEnd);
+    const childStart = childRecords.length / WASM_CURSOR_CHILD_RECORD_I32_COUNT;
+    regionChildStarts.push(childStart);
+    const fieldStart = fieldRecords.length / WASM_CURSOR_FIELD_RECORD_I32_COUNT;
+    regionFieldStarts.push(fieldStart);
+    let fieldCount = 0;
+    let structuralPosition = 0;
+    let state = program.validation.startState;
+    for (
+      let recordIndex = recordStart;
+      recordIndex < recordEnd;
+      recordIndex += 1
+    ) {
+      let tokenIndex = recordIndex;
+      if (preserveTrivia) {
+        tokenIndex = structuralByRecord[recordIndex];
+      }
+      if (tokenIndex < 0) {
+        continue;
+      }
+      const childNode = childRecords.length /
+        WASM_CURSOR_CHILD_RECORD_I32_COUNT;
+      let nextNode = -1;
+      if (structuralPosition + 1 < region.end - region.start) {
+        nextNode = childNode + 1;
+      }
+      childRecords.push(recordIndex * 2 + 1, nextNode);
+      structuralPosition += 1;
+      const terminal = analysis.terminals[tokenIndex];
+      if (terminal === undefined) {
+        throw new Error(`Island token ${tokenIndex} is missing.`);
+      }
+      const transitionIndex = terminal * 16 + state;
+      const field = program.validation.transitionFields[transitionIndex];
+      const target = program.validation.transitions[transitionIndex];
+      if (field === undefined || target === undefined) {
+        throw new Error(
+          `Island transition ${transitionIndex} is missing during materialization.`,
+        );
+      }
+      if (field >= 0) {
+        const valueId = valueRecords.length /
+          WASM_CURSOR_VALUE_RECORD_I32_COUNT;
+        valueRecords.push(externalCursorValueRef, recordIndex * 2 + 1, 0, 0);
+        fieldRecords.push(field, valueId);
+        fieldCount += 1;
+      }
+      state = target;
+    }
+    regionFieldCounts.push(fieldCount);
+  }
+
+  let rootFieldCount = 0;
+  if (program.rootField >= 0) {
+    rootFieldCount = analysis.regions.length;
+  }
+  const ruleRecords: number[] = [
+    program.rootRuleId,
+    0,
+    source.length,
+    0,
+    cursorTokenRecords.length / WASM_TOKEN_RECORD_I32_COUNT,
+    rootChildStart,
+    analysis.regions.length,
+    0,
+    rootFieldCount,
+  ];
+  for (
+    let regionIndex = 0;
+    regionIndex < analysis.regions.length;
+    regionIndex += 1
+  ) {
+    const region = analysis.regions[regionIndex];
+    const recordStart = regionRecordStarts[regionIndex];
+    const recordEnd = regionRecordEnds[regionIndex];
+    if (recordStart === undefined || recordEnd === undefined) {
+      throw new Error(`Island region ${regionIndex} has no record range.`);
+    }
+    const startRecord = recordStart * WASM_TOKEN_RECORD_I32_COUNT;
+    const endRecord = (recordEnd - 1) * WASM_TOKEN_RECORD_I32_COUNT;
+    const spanStart = cursorTokenRecords[startRecord + 1];
+    const spanEnd = cursorTokenRecords[endRecord + 2];
+    const childStart = regionChildStarts[regionIndex];
+    const fieldStart = regionFieldStarts[regionIndex];
+    const fieldCount = regionFieldCounts[regionIndex];
+    if (
+      spanStart === undefined || spanEnd === undefined ||
+      childStart === undefined || fieldStart === undefined ||
+      fieldCount === undefined
+    ) {
+      throw new Error(
+        `Island region ${regionIndex} materialization is incomplete.`,
+      );
+    }
+    ruleRecords.push(
+      program.regionRuleId,
+      spanStart,
+      spanEnd,
+      recordStart,
+      recordEnd,
+      childStart,
+      region.end - region.start,
+      fieldStart,
+      fieldCount,
+    );
+  }
+
+  const tape = new ExternalCursorTapeView(
+    metadata,
+    source,
+    cursorTokenRecords,
+    Int32Array.from(ruleRecords),
+    Int32Array.from(childRecords),
+    Int32Array.from(fieldRecords),
+    Int32Array.from(valueRecords),
+    new Int32Array(0),
+  );
+  const cursor = tape.cursorForRuleRef(0);
+  externalCursorTapeByRoot.set(cursor, tape);
+  return cursor;
 }
 
 function copyI32Tape(
@@ -4606,39 +3846,6 @@ function externalCursorRefIndex(ref: number): number {
   return Math.floor(ref / 2);
 }
 
-function externalFailedCursorParseResult(
-  source: string,
-  diagnostics: readonly ExternalParseDiagnostic[],
-): CursorParseResult<RuleCursor> {
-  return { ok: false, source, cursor: null, diagnostics };
-}
-
-function externalCursorUnexpectedTokenDiagnostic(
-  metadata: ExternalRuntimeMetadata,
-  source: string,
-  token: ExternalCursorTokenData,
-  state: number,
-): ExternalParseDiagnostic {
-  let expected: readonly string[] = [];
-  const row = metadata.expected[state];
-  if (row !== undefined) expected = row;
-  const found = externalCursorTokenDisplay(metadata, source, token);
-  let code: ExternalParseDiagnostic["code"] = "PARSE_UNEXPECTED_TOKEN";
-  if (expected.includes("EOF") && found !== "EOF") {
-    code = "PARSE_TRAILING_INPUT";
-  }
-  return {
-    ...externalParseDiagnostic(
-      code,
-      `Unexpected token ${found}.`,
-      externalCursorSpan(token),
-      state,
-    ),
-    expected,
-    found,
-  };
-}
-
 const externalOversizedSplitRemedy =
   "Split the input into smaller units and parse them separately.";
 
@@ -4849,21 +4056,6 @@ function externalEofToken(offset: number): Token {
   };
 }
 
-function externalCursorSpan(
-  token: ExternalCursorTokenData,
-): { start: number; end: number } {
-  return { start: token.start, end: token.end };
-}
-
-function externalClampSpan(
-  span: { readonly start: number; readonly end: number },
-  sourceLength: number,
-): { start: number; end: number } {
-  const start = Math.min(Math.max(0, span.start), sourceLength);
-  const end = Math.min(Math.max(start, span.end), sourceLength);
-  return { start, end };
-}
-
 function externalPositiveLimit(
   options: ParseOptions | undefined,
   key: "maxParserActions",
@@ -4918,21 +4110,8 @@ function validateStaticExternalWasmAbi(wasm: ExternalParserWasmExports): void {
   if (wasm.abi_version() !== WASM_ABI_VERSION) {
     throw new Error("Wasm ABI version does not match shared adapter.");
   }
-  if (typeof wasm.parse_cursor_records !== "function") {
-    throw new Error(
-      "Wasm ABI is missing the parse_cursor_records export.",
-    );
-  }
-  if (typeof wasm.validate !== "function") {
-    throw new Error("Wasm ABI is missing the validate export.");
-  }
   if (typeof wasm.lex_incremental !== "function") {
     throw new Error("Wasm ABI is missing the lex_incremental export.");
-  }
-  if (typeof wasm.parser_select_incremental !== "function") {
-    throw new Error(
-      "Wasm ABI is missing the parser_select_incremental export.",
-    );
   }
   if (wasm.semantics_version() !== RUNTIME_IMPLEMENTATION_METADATA.version) {
     throw new Error(
@@ -4960,11 +4139,6 @@ function validateStaticExternalWasmAbi(wasm: ExternalParserWasmExports): void {
   ) {
     throw new Error(
       "Wasm incremental token record width does not match shared adapter.",
-    );
-  }
-  if (wasm.validate_result_i32_count() !== WASM_VALIDATE_RESULT_I32_COUNT) {
-    throw new Error(
-      "Wasm validation result width does not match shared adapter.",
     );
   }
   if (wasm.host_ownership_model() !== WASM_HOST_OWNERSHIP_CALLER_MANAGED) {

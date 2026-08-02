@@ -18,7 +18,6 @@ const TOKEN_RECORD_I32_COUNT = 4;
 const WASM_PAGE_BYTES = 65_536;
 const LEX_STATUS_TOKEN_CAPACITY = -1;
 const LEX_STATUS_MEMO_REQUIRED = -2;
-const PARSE_CURSOR_STATUS_CAPACITY = 3;
 
 interface RawLexExports {
   readonly memory: WebAssembly.Memory;
@@ -35,7 +34,6 @@ interface RawLexExports {
     memo: number,
     memoCapacity: number,
   ) => number;
-  readonly parse_cursor: (...args: number[]) => number;
 }
 
 function planFor(source: string): Uint8Array {
@@ -247,61 +245,10 @@ Deno.test("lex_all writes nothing past the token records it returns", () => {
   }
 });
 
-Deno.test("parse_cursor reports a capacity status for a short memo buffer", () => {
-  const plan = planFor(HEX_GRAMMAR);
-  const exports = loadEngine(plan);
-  const source = "aa; aa;";
-  const sourcePointer = alignUp(exports.input_base(), 8);
-  const tokenCapacity = source.length + 1;
-  const structural = 256;
-  const tokenPointer = alignUp(sourcePointer + source.length * 2, 4);
-  const arenaPointer = alignUp(
-    tokenPointer + tokenCapacity * TOKEN_RECORD_I32_COUNT * 4,
-    4,
-  );
-  // One oversized arena per output tape: this test is about the memo argument,
-  // so everything else is generous on purpose.
-  const arenaI32 = structural * 32;
-  const arena = (index: number) => arenaPointer + index * arenaI32 * 4;
-  const memoPointer = arena(10);
-  const memoCapacity = (source.length + 1) *
-    exports.lex_memo_i32_per_position();
-  growTo(exports.memory, memoPointer + memoCapacity * 4 + WASM_PAGE_BYTES);
-  const units = new Uint16Array(
-    exports.memory.buffer,
-    sourcePointer,
-    source.length,
-  );
-  for (let index = 0; index < source.length; index += 1) {
-    units[index] = source.charCodeAt(index);
-  }
-
-  const call = (capacity: number): number =>
-    exports.parse_cursor(
-      sourcePointer,
-      source.length,
-      tokenPointer,
-      tokenCapacity,
-      arena(0),
-      structural,
-      arena(1),
-      structural,
-      arena(2),
-      structural,
-      arena(3),
-      structural,
-      arena(4),
-      structural,
-      arena(5),
-      arena(6),
-      arena(7),
-      structural,
-      memoPointer,
-      capacity,
-      0,
-      10_000,
-    );
-
-  assertEquals(call(memoCapacity - 1), PARSE_CURSOR_STATUS_CAPACITY);
-  assertEquals(call(memoCapacity), 0);
+Deno.test("lexer core does not expose the retired LR parser", () => {
+  const exports = loadEngine(planFor(HEX_GRAMMAR));
+  assertEquals("parse_cursor" in exports, false);
+  assertEquals("parser_action" in exports, false);
+  assertEquals("parser_goto" in exports, false);
+  assertEquals("validate" in exports, false);
 });

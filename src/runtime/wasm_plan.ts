@@ -109,10 +109,6 @@ export interface WasmParserPlanInfo {
     readonly lexerTransitions: number;
     readonly lexerSpecifications: number;
     readonly lexerAcceptCandidates: number;
-    readonly parserStates: number;
-    readonly parserActions: number;
-    readonly parserGotos: number;
-    readonly productions: number;
   };
 }
 
@@ -210,21 +206,9 @@ export function inspectCombinedWasmParserPlan(
 ): WasmParserPlanInfo {
   const validated = validateCombinedWasmParserPlan(planBytes);
   const dfaStateCount = readI32(planBytes, CORE_HEADER_DFA_STATE_COUNT);
-  const parserStateCount = readI32(
-    planBytes,
-    CORE_HEADER_PARSER_STATE_COUNT,
-  );
   const transitionRows = decodeCompactOffset(
     readI32(planBytes, CORE_HEADER_TRANSITION_ROWS),
     "transition rows",
-  );
-  const actionRows = decodeCompactOffset(
-    readI32(planBytes, CORE_HEADER_ACTION_ROWS),
-    "action rows",
-  );
-  const gotoRows = decodeCompactOffset(
-    readI32(planBytes, CORE_HEADER_GOTO_ROWS),
-    "goto rows",
   );
   const acceptCandidateRows = decodeCompactOffset(
     readI32(planBytes, CORE_HEADER_ACCEPT_CANDIDATE_ROWS),
@@ -253,18 +237,6 @@ export function inspectCombinedWasmParserPlan(
         acceptCandidateRows,
         dfaStateCount,
       ),
-      parserStates: parserStateCount,
-      parserActions: readRowValue(
-        planBytes,
-        actionRows,
-        parserStateCount,
-      ),
-      parserGotos: readRowValue(
-        planBytes,
-        gotoRows,
-        parserStateCount,
-      ),
-      productions: readI32(planBytes, CORE_HEADER_PRODUCTION_COUNT),
     },
   };
 }
@@ -306,6 +278,11 @@ function validateCorePlan(planBytes: Uint8Array): {
     CORE_HEADER_PARSER_STATE_COUNT,
     "parser state count",
   );
+  if (parserStateCount !== 0) {
+    throw new Error(
+      `Wasm island plan carries ${parserStateCount} retired LR parser states.`,
+    );
+  }
   const coreByteLength = readNonNegativeI32(
     planBytes,
     CORE_HEADER_BYTE_LENGTH,
@@ -328,43 +305,36 @@ function validateCorePlan(planBytes: Uint8Array): {
     "transition rows",
   );
   const transitions = readI32(planBytes, CORE_HEADER_TRANSITIONS);
-  const actionRows = decodeCompactOffset(
-    readI32(planBytes, CORE_HEADER_ACTION_ROWS),
-    "action rows",
-  );
-  const actionPairs = decodeCompactOffset(
-    readI32(planBytes, CORE_HEADER_ACTION_PAIRS),
-    "action pairs",
-  );
-  const gotoRows = decodeCompactOffset(
-    readI32(planBytes, CORE_HEADER_GOTO_ROWS),
-    "goto rows",
-  );
-  const gotoPairs = decodeCompactOffset(
-    readI32(planBytes, CORE_HEADER_GOTO_PAIRS),
-    "goto pairs",
-  );
+  for (
+    const retiredHeader of [
+      CORE_HEADER_ACTION_ROWS,
+      CORE_HEADER_ACTION_PAIRS,
+      CORE_HEADER_GOTO_ROWS,
+      CORE_HEADER_GOTO_PAIRS,
+      CORE_HEADER_SPEC_TERMINALS,
+      CORE_HEADER_PRODUCTION_COUNT,
+      CORE_HEADER_PRODUCTIONS,
+    ]
+  ) {
+    if (readI32(planBytes, retiredHeader) !== 0) {
+      throw new Error(
+        `Wasm island plan retired header ${retiredHeader} must be zero.`,
+      );
+    }
+  }
   const specCount = readNonNegativeI32(
     planBytes,
     CORE_HEADER_SPEC_COUNT,
     "lexer spec count",
   );
-  const eofTerminal = readI32(planBytes, CORE_HEADER_EOF_TERMINAL);
-  if (eofTerminal < 0) {
-    throw new Error("Wasm parser plan EOF terminal must be non-negative.");
+  if (readI32(planBytes, CORE_HEADER_EOF_TERMINAL) !== -1) {
+    throw new Error("Wasm island plan retired EOF terminal must be -1.");
   }
-  const specTerminals = readI32(planBytes, CORE_HEADER_SPEC_TERMINALS);
   const acceptCandidateRows = decodeCompactOffset(
     readI32(planBytes, CORE_HEADER_ACCEPT_CANDIDATE_ROWS),
     "lexer accept candidate rows",
   );
   const acceptCandidates = readI32(planBytes, CORE_HEADER_ACCEPT_CANDIDATES);
-  const productionCount = readNonNegativeI32(
-    planBytes,
-    CORE_HEADER_PRODUCTION_COUNT,
-    "production count",
-  );
-  const productions = readI32(planBytes, CORE_HEADER_PRODUCTIONS);
   const specFlags = readI32(planBytes, CORE_HEADER_SPEC_FLAGS);
   const specFollowStarts = readI32(planBytes, CORE_HEADER_SPEC_FOLLOW_STARTS);
   const specNotFollowStarts = readI32(
@@ -456,34 +426,6 @@ function validateCorePlan(planBytes: Uint8Array): {
   );
   validateSection("transitions", transitions, 0, coreByteLength);
   validateSection(
-    "action rows",
-    actionRows.offset,
-    checkedMul(
-      parserStateCount + 1,
-      actionRows.cellBytes,
-      "action row byte length",
-    ),
-    coreByteLength,
-  );
-  validateSection("action pairs", actionPairs.offset, 0, coreByteLength);
-  validateSection(
-    "goto rows",
-    gotoRows.offset,
-    checkedMul(
-      parserStateCount + 1,
-      gotoRows.cellBytes,
-      "goto row byte length",
-    ),
-    coreByteLength,
-  );
-  validateSection("goto pairs", gotoPairs.offset, 0, coreByteLength);
-  validateSection(
-    "lexer spec terminals",
-    specTerminals,
-    checkedMul(specCount, I32_BYTES, "lexer spec terminal byte length"),
-    coreByteLength,
-  );
-  validateSection(
     "lexer accept candidate rows",
     acceptCandidateRows.offset,
     checkedMul(
@@ -497,16 +439,6 @@ function validateCorePlan(planBytes: Uint8Array): {
     "lexer accept candidates",
     acceptCandidates,
     0,
-    coreByteLength,
-  );
-  validateSection(
-    "productions",
-    productions,
-    checkedMul(
-      checkedMul(productionCount, 4, "production row i32 count"),
-      I32_BYTES,
-      "production byte length",
-    ),
     coreByteLength,
   );
   validateSection(
@@ -571,18 +503,6 @@ function validateCorePlan(planBytes: Uint8Array): {
     transitionRows,
     dfaStateCount + 1,
     "transition rows",
-  );
-  validateMonotonicRows(
-    planBytes,
-    actionRows,
-    parserStateCount + 1,
-    "action rows",
-  );
-  validateMonotonicRows(
-    planBytes,
-    gotoRows,
-    parserStateCount + 1,
-    "goto rows",
   );
   validateMonotonicRows(
     planBytes,

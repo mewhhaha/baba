@@ -15,11 +15,7 @@ import {
   RUNTIME_IMPLEMENTATION_METADATA,
 } from "../src/targets/runtime/implementation.ts";
 import {
-  WASM_CURSOR_FIELD_RECORD_I32_COUNT,
-  WASM_CURSOR_RULE_RECORD_I32_COUNT,
-  WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_I32_BYTES,
-  WASM_PARSE_CURSOR_RESULT_I32_COUNT,
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
 } from "../src/targets/runtime/wasm_abi.ts";
@@ -38,7 +34,7 @@ const STATEMENT_GRAMMAR = `
   skip WS = /[ \\t\\r\\n]+/ ;
 
   module = statements:statement* ;
-  statement = "let" name:IDENT "=" value:INT ";" | "if" condition:IDENT ";" ;
+  statement = "let" name:IDENT "=" value:INT ";" ;
 `;
 
 // No `skip` rule, so the lexer plan carries no trivia spec at all and the lex
@@ -49,6 +45,32 @@ const NO_TRIVIA_GRAMMAR = `
   module = items:item+ ;
   item = name:IDENT ";" ;
 `;
+
+const STRICT_STATEMENT_METADATA: BabaMetadata = {
+  gpuFrontend: {
+    version: 3,
+    throughput: "strict",
+    root: "module",
+    islands: [
+      { rule: "module", boundary: { kind: "root" } },
+      { rule: "statement", boundary: { kind: "terminated", terminal: ";" } },
+    ],
+    semantics: { rules: {} },
+  },
+};
+
+const STRICT_ITEM_METADATA: BabaMetadata = {
+  gpuFrontend: {
+    version: 3,
+    throughput: "strict",
+    root: "module",
+    islands: [
+      { rule: "module", boundary: { kind: "root" } },
+      { rule: "item", boundary: { kind: "terminated", terminal: ";" } },
+    ],
+    semantics: { rules: {} },
+  },
+};
 
 interface TokenLike {
   type: string;
@@ -172,7 +194,7 @@ interface GeneratedIncrementalDocument {
   dispose(): void;
 }
 
-interface RawCursorWasmExports {
+interface RawWasmLexerExports {
   memory: WebAssembly.Memory;
   plan_buffer_base(): number;
   input_base(): number;
@@ -185,30 +207,6 @@ interface RawCursorWasmExports {
     tokenCapacity: number,
     memoPtr: number,
     memoCapacity: number,
-  ): number;
-  parse_cursor(
-    sourcePtr: number,
-    sourceLength: number,
-    tokenPtr: number,
-    tokenCapacity: number,
-    rulePtr: number,
-    ruleCapacity: number,
-    childPtr: number,
-    childCapacity: number,
-    fieldPtr: number,
-    fieldCapacity: number,
-    valuePtr: number,
-    valueCapacity: number,
-    valueItemPtr: number,
-    valueItemCapacity: number,
-    resultPtr: number,
-    stackPtr: number,
-    fragmentPtr: number,
-    fragmentCapacity: number,
-    memoPtr: number,
-    memoCapacity: number,
-    preserveTrivia: number,
-    maxParserActions: number,
   ): number;
   lex_memo_i32_per_position(): number;
 }
@@ -288,10 +286,10 @@ Deno.test("grammar features outside the Wasm subset report explicit diagnostics"
 });
 
 Deno.test("Wasm target emits minimal external artifacts", async () => {
-  const bundle = wasmBundle(`module = "ok" ;`);
+  const bundle = wasmBundle(STATEMENT_GRAMMAR);
   assertEquals(
     bundle.files.map((file) => file.path).join(","),
-    "wasm/abi.json,wasm/manifest.json,wasm/mod.ts,wasm/parser.plan,wasm/parser.wasm,wasm/syntax.ts",
+    "queries/generated-highlights.scm,wasm/abi.json,wasm/manifest.json,wasm/mod.ts,wasm/parser.plan,wasm/parser.wasm,wasm/syntax.ts",
   );
   const modSource = textFile(bundle, "wasm/mod.ts");
   assertIncludes(modSource, "@mewhhaha/baba/runtime/generated-wasm");
@@ -367,7 +365,7 @@ Deno.test("Wasm target emits minimal external artifacts", async () => {
     assertEquals("parseTree" in parser, false);
     assertEquals("parseTokens" in parser, false);
     assertEquals("parseTokensUnchecked" in parser, false);
-    const parsed = parser.parse("ok");
+    const parsed = parser.parse("let x = 42;", { preserveTrivia: false });
     assertEquals(parsed.ok, true);
     assert(parsed.cursor);
     parser.dispose();
@@ -466,7 +464,7 @@ Deno.test("Wasm target emits Tree-sitter query fragments from metadata", () => {
 });
 
 Deno.test("runtime manifest contains only active Wasm sources", async () => {
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 14);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 21);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
@@ -477,15 +475,22 @@ Deno.test("runtime manifest contains only active Wasm sources", async () => {
       "parser-plan-contract",
       "combined-wasm-parser-plan-format",
       "generated-wasm-parser-loader",
+      "island-parser-loader",
+      "island-parser-embedded-bytes",
       "parser-diagnostic-codes",
       "wasm-abi-constants",
       "wasm-core-runtime",
       "wasm-core-runtime-build-script",
+      "island-parser-build-script",
       "wasm-core-runtime-rust-manifest",
       "wasm-core-runtime-rust-lockfile",
       "wasm-core-runtime-rust-build-config",
       "wasm-core-runtime-rust-source",
       "wasm-core-runtime-embedded-bytes",
+      "island-parser-rust-manifest",
+      "island-parser-rust-lockfile",
+      "island-parser-rust-build-config",
+      "island-parser-rust-source",
       "generated-source-provenance",
     ].join("\n"),
   );
@@ -633,7 +638,7 @@ Deno.test("combined parser plans round-trip current runtime metadata with exact 
   );
 });
 
-// Core plan format version 7 header slots. Named here rather than imported
+// Core plan format version 8 header slots. Named here rather than imported
 // because the encoder and the validator both keep them module-private, and a
 // test that reads the bytes is exactly the place that should re-state them.
 const CORE_HEADER_DFA_STATE_COUNT = 3;
@@ -838,7 +843,7 @@ Deno.test("Wasm target emits typed cursor result surface", async () => {
   );
   assertIncludes(
     syntax,
-    'field(name: "name"): TokenCursor<"named", "IDENT"> | null;',
+    'field(name: "name"): TokenCursor<"named", "IDENT">;',
   );
   assertIncludes(syntax, "export type RootCursor = ModuleCursor;");
   assertEquals(syntax.includes("contextualLexingStats"), false);
@@ -954,7 +959,9 @@ Deno.test("shared Wasm adapter preserves lexer and parser behavior", async () =>
     assertEquals(lexed.tokenTape.token(1)?.kind, "WS");
     assertEquals(lexed.tokenTape.token(1)?.channel, "trivia");
 
-    const cursorParsed = parser.parse("let x = 42;");
+    const cursorParsed = parser.parse("let x = 42;", {
+      preserveTrivia: false,
+    });
     assertEquals(cursorParsed.ok, true);
     assert(cursorParsed.cursor);
     assertEquals(cursorParsed.cursor.name, "module");
@@ -1045,7 +1052,7 @@ Deno.test("Wasm documents reuse lexer records across edits", async () => {
     ].join("\n");
     const document = parser.createDocument(source, {
       goal: "parse",
-      trivia: "preserve",
+      trivia: "discard",
     });
     const oldParse = document.parse();
     assert(oldParse.ok);
@@ -1063,14 +1070,14 @@ Deno.test("Wasm documents reuse lexer records across edits", async () => {
     assert(update.lexer.reusedTokens > 0);
     assert(update.lexer.relexedRange.start <= valueStart);
     assert(update.parser);
-    assert(update.parser.reuseChecks > 0);
-    assert(update.parser.reusedCheckpoints > 0);
+    assertEquals(update.parser.reuseChecks, 0);
+    assertEquals(update.parser.reusedCheckpoints, 0);
     assertEquals(document.validate().ok, true);
     const newParse = document.parse();
     assert(newParse.ok);
-    assert(
-      oldParse.cursor.child(0) === newParse.cursor.child(0),
-      "Expected the unchanged first statement cursor to be reused.",
+    assertEquals(
+      JSON.stringify(cursorShape(oldParse.cursor.child(0) as CursorRuleLike)),
+      JSON.stringify(cursorShape(newParse.cursor.child(0) as CursorRuleLike)),
     );
     assertEquals(oldParse.cursor.span.end, source.length);
 
@@ -1099,7 +1106,7 @@ Deno.test("Wasm documents reuse lexer records across edits", async () => {
     assertEquals(document.snapshot.text(), sourceBeforeRejectedEdits);
 
     const fresh = parser.lex(document.snapshot.text(), {
-      preserveTrivia: true,
+      preserveTrivia: false,
     });
     const incremental = document.lex();
     assertEquals(
@@ -1164,7 +1171,7 @@ Deno.test("Wasm documents invalidate guarded tokens from their lookahead depende
   }
 });
 
-Deno.test("Wasm documents update large checkpoint prefixes without host stack growth", async () => {
+Deno.test("Wasm documents report full island reparses without LR checkpoints", async () => {
   const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
   try {
     const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
@@ -1180,7 +1187,8 @@ Deno.test("Wasm documents update large checkpoint prefixes without host stack gr
     assertEquals(document.validate().ok, true);
     assert(update.parser);
     assert(update.parser.parserActions > 0);
-    assert(update.parser.reusedCheckpoints > 0);
+    assertEquals(update.parser.reusedCheckpoints, 0);
+    assertEquals(update.parser.createdCheckpoints, 0);
 
     document.dispose();
     parser.dispose();
@@ -1197,11 +1205,7 @@ Deno.test("Wasm documents preserve an earlier diagnostic when a later edit chang
     const document = parser.createDocument(source, { goal: "validate" });
     assertEquals(document.validate().ok, false);
     const unchanged = document.applyEdits([]);
-    assert(
-      unchanged.parser !== undefined &&
-        unchanged.parser.reusedCheckpoints < document.lex().tokenTape.length,
-      "Expected a no-op update to count only checkpoints built before the error.",
-    );
+    assertEquals(unchanged.parser?.reusedCheckpoints, 0);
 
     const editStart = source.lastIndexOf("2");
     const update = document.applyEdits([{
@@ -1218,10 +1222,7 @@ Deno.test("Wasm documents preserve an earlier diagnostic when a later edit chang
       JSON.stringify(fresh.diagnostics),
     );
     assertEquals(update.parser?.createdCheckpoints, 0);
-    assert(
-      update.parser !== undefined && update.parser.reusedCheckpoints > 0,
-      "Expected the unchanged parser prefix checkpoints to be reused.",
-    );
+    assertEquals(update.parser?.reusedCheckpoints, 0);
 
     document.dispose();
     parser.dispose();
@@ -1312,7 +1313,10 @@ Deno.test("Wasm documents preserve parity across compound edit shapes", async ()
       "let beta = 2;",
       "let gamma = 3;",
     ].join("\n");
-    const document = parser.createDocument(source, { goal: "parse" });
+    const document = parser.createDocument(source, {
+      goal: "parse",
+      trivia: "discard",
+    });
     const initialParse = document.parse();
     assert(initialParse.ok);
     const alphaStart = source.indexOf("alpha");
@@ -1480,7 +1484,7 @@ Deno.test("Wasm parser consumes externally supplied lexer records", async () => 
       instance: WebAssembly.Instance;
     };
     const wasm = instantiated.instance
-      .exports as unknown as RawCursorWasmExports;
+      .exports as unknown as RawWasmLexerExports;
     const planPtr = wasm.plan_buffer_base();
     if (wasm.memory.buffer.byteLength < planPtr + plan.byteLength) {
       const missing = planPtr + plan.byteLength - wasm.memory.buffer.byteLength;
@@ -1575,286 +1579,7 @@ Deno.test("Wasm parser rejects malformed external lexer records", async () => {
   }
 });
 
-Deno.test("Wasm parse_cursor export materializes cursor tapes", async () => {
-  const { dir, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
-  try {
-    const instantiated = await WebAssembly.instantiate(
-      bytes,
-      {},
-    ) as unknown as {
-      instance: WebAssembly.Instance;
-    };
-    const wasm = instantiated.instance
-      .exports as unknown as RawCursorWasmExports;
-    const planPtr = wasm.plan_buffer_base();
-    assert(planPtr > 0, "Expected nonzero Wasm plan buffer base.");
-    if (wasm.memory.buffer.byteLength < planPtr + plan.byteLength) {
-      const missing = planPtr + plan.byteLength - wasm.memory.buffer.byteLength;
-      wasm.memory.grow(Math.ceil(missing / 65_536));
-    }
-    new Uint8Array(wasm.memory.buffer, planPtr, plan.byteLength).set(plan);
-    assertEquals(wasm.load_plan(planPtr, plan.byteLength), 1);
-
-    const source = "let x = 42;";
-    const sourcePtr = wasm.input_base();
-    assert(sourcePtr > planPtr);
-    const tokenCapacity = source.length + 1;
-    const structuralCapacity = 128;
-    const tokenPtr = alignTest(
-      sourcePtr + source.length * WASM_UTF16_UNIT_BYTES,
-      WASM_I32_BYTES,
-    );
-    const rulePtr = alignTest(
-      tokenPtr + tokenCapacity * WASM_TOKEN_RECORD_I32_COUNT * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const ruleCapacity = structuralCapacity;
-    const childPtr = alignTest(
-      rulePtr +
-        ruleCapacity * WASM_CURSOR_RULE_RECORD_I32_COUNT * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const childCapacity = structuralCapacity * 4;
-    const fieldPtr = alignTest(
-      childPtr + childCapacity * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const fieldCapacity = structuralCapacity * 4;
-    const valuePtr = alignTest(
-      fieldPtr +
-        fieldCapacity * WASM_CURSOR_FIELD_RECORD_I32_COUNT * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const valueCapacity = structuralCapacity * 8;
-    const valueItemPtr = alignTest(
-      valuePtr +
-        valueCapacity * WASM_CURSOR_VALUE_RECORD_I32_COUNT * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const valueItemCapacity = structuralCapacity * 8;
-    const resultPtr = alignTest(
-      valueItemPtr + valueItemCapacity * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const stackPtr = alignTest(
-      resultPtr + WASM_PARSE_CURSOR_RESULT_I32_COUNT * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const fragmentPtr = alignTest(
-      stackPtr + structuralCapacity * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const memoPtr = alignTest(
-      fragmentPtr + structuralCapacity * 9 * WASM_I32_BYTES,
-      WASM_I32_BYTES,
-    );
-    const memoCapacity = (source.length + 1) *
-      wasm.lex_memo_i32_per_position();
-    const requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
-    if (wasm.memory.buffer.byteLength < requiredBytes) {
-      const missing = requiredBytes - wasm.memory.buffer.byteLength;
-      wasm.memory.grow(Math.ceil(missing / 65_536));
-    }
-    const view = new DataView(wasm.memory.buffer);
-    for (let index = 0; index < source.length; index++) {
-      view.setUint16(
-        sourcePtr + index * WASM_UTF16_UNIT_BYTES,
-        source.charCodeAt(index),
-        true,
-      );
-    }
-    const status = wasm.parse_cursor(
-      sourcePtr,
-      source.length,
-      tokenPtr,
-      tokenCapacity,
-      rulePtr,
-      ruleCapacity,
-      childPtr,
-      childCapacity,
-      fieldPtr,
-      fieldCapacity,
-      valuePtr,
-      valueCapacity,
-      valueItemPtr,
-      valueItemCapacity,
-      resultPtr,
-      stackPtr,
-      fragmentPtr,
-      structuralCapacity,
-      memoPtr,
-      memoCapacity,
-      0,
-      10_000,
-    );
-    assertEquals(status, 0);
-    assertEquals(view.getInt32(resultPtr, true), 5);
-    assert(view.getInt32(resultPtr + WASM_I32_BYTES, true) >= 2);
-    assert(view.getInt32(resultPtr + WASM_I32_BYTES * 2, true) > 0);
-    assert(view.getInt32(resultPtr + WASM_I32_BYTES * 3, true) > 0);
-    assert(view.getInt32(resultPtr + WASM_I32_BYTES * 4, true) > 0);
-    assert(view.getInt32(resultPtr + WASM_I32_BYTES * 5, true) > 0);
-    const rootRef = view.getInt32(resultPtr + WASM_I32_BYTES * 6, true);
-    assertEquals(rootRef % 2, 0);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
-Deno.test("shared Wasm adapter resolves contextual token candidates from Wasm lex records", async () => {
-  const grammar = `
-    token IDENT = /[a-z]+/ ;
-    skip WS = /[ \\t\\r\\n]+/ ;
-    module = statement ;
-    statement = value:IDENT ";" | "@" keyword:"if" ";" ;
-  `;
-  const { dir, mod, bytes, plan } = await materialize(grammar);
-  try {
-    const parser = mod.createParser({ bytes, plan });
-    const cursorIdent = parser.parse("if;");
-    assertEquals(cursorIdent.ok, true);
-    assert(cursorIdent.cursor);
-    const cursorIdentStatement = cursorIdent.cursor.child(0);
-    assertCursorRule(cursorIdentStatement, "statement");
-    const cursorIdentValue = cursorIdentStatement.field("value");
-    assertCursorToken(cursorIdentValue, "IDENT");
-    assertEquals(cursorIdentValue.text, "if");
-
-    const cursorKeyword = parser.parse("@if;");
-    assertEquals(cursorKeyword.ok, true);
-    assert(cursorKeyword.cursor);
-    const cursorStatement = cursorKeyword.cursor.child(0);
-    assertCursorRule(cursorStatement, "statement");
-    const cursorValue = cursorStatement.field("keyword");
-    assertCursorToken(cursorValue, "if");
-    assertEquals(cursorValue.text, "if");
-    parser.dispose();
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
-Deno.test("Wasm parser promotes guarded contextual trivia by parser state", async () => {
-  const grammar = `
-    token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
-    token INT = /[0-9]+/ ;
-    skip WS = /[ \\t\\r\\n]+/ ;
-    contextual APPLICATION_SPACE = /[ \\t]+(?=[A-Za-z_])(?!(if|in)\\b)/ ;
-    contextual TYPE_APPLICATION_SPACE = /[ \\t]+(?=[A-Za-z_#&]|\\(|\\[)/ ;
-    contextual BREAK_VALUE_SPACE = /[ \\t]+(?=[^\\r\\n;}])/ ;
-    contextual BREAK_TERMINATOR_SPACE = /[ \\t]+(?=$|[\\r\\n;}])/ ;
-    contextual EXTENSION_TERMINATOR = /[\\r\\n]/ ;
-    contextual NON_SEMICOLON_SPACE = /[ \\t]+(?!;)/ ;
-
-    module = application_case | type_case | break_case | extension_case | negative_case ;
-    application_case = "app:" first:application "if" second:application ;
-    application = head:IDENT (APPLICATION_SPACE arguments:IDENT)* ;
-    type_case = "type:" constructor:IDENT TYPE_APPLICATION_SPACE argument:IDENT ;
-    break_case = "break:" statement:break_statement trailing:INT? ;
-    break_statement = "break" (
-      BREAK_TERMINATOR_SPACE
-    | BREAK_VALUE_SPACE value:INT
-    )? ;
-    extension_case = "ext:" first:IDENT EXTENSION_TERMINATOR second:IDENT ;
-    negative_case = "neg:" first:IDENT NON_SEMICOLON_SPACE second:IDENT ";" ;
-  `;
-  const { dir, mod, bytes, plan } = await materialize(grammar);
-  try {
-    const parser = mod.createParser({ bytes, plan });
-
-    const lexed = parser.lex("app:f x if y z");
-    assertEquals(lexed.diagnostics.length, 0);
-    assertEquals(lexed.tokenTape.token(2)?.kind, "WS");
-
-    const applied = parser.parse("app:f x if y z");
-    assertEquals(applied.ok, true);
-    assert(applied.cursor);
-    const applicationCase = applied.cursor.child(0);
-    assertCursorRule(applicationCase, "application_case");
-    const firstApplication = applicationCase.field("first");
-    assertCursorRule(firstApplication, "application");
-    assertEquals(firstApplication.fieldArray("arguments").length, 1);
-    const secondApplication = applicationCase.field("second");
-    assertCursorRule(secondApplication, "application");
-    assertEquals(secondApplication.fieldArray("arguments").length, 1);
-
-    const stopKeyword = parser.parse("app:f if y");
-    assertEquals(stopKeyword.ok, true);
-
-    assertEquals(parser.parse("type:Option Value").ok, true);
-
-    const breakValue = parser.parse("break:break 42");
-    assertEquals(breakValue.ok, true);
-    assert(breakValue.cursor);
-    const breakCase = breakValue.cursor.child(0);
-    assertCursorRule(breakCase, "break_case");
-    const breakStatement = breakCase.field("statement");
-    assertCursorRule(breakStatement, "break_statement");
-    const value = breakStatement.field("value");
-    assertCursorToken(value, "INT");
-    assertEquals(value.text, "42");
-    assertEquals(breakCase.field("trailing"), null);
-
-    assertEquals(parser.parse("break:break   ").ok, true);
-    assertEquals(parser.parse("ext:first\nsecond").ok, true);
-    assertEquals(parser.parse("neg:first second;").ok, true);
-    assertEquals(parser.parse("neg:first ;").ok, false);
-    parser.dispose();
-
-    const corruptGuard = new Uint8Array(plan);
-    const corruptGuardView = new DataView(
-      corruptGuard.buffer,
-      corruptGuard.byteOffset,
-      corruptGuard.byteLength,
-    );
-    const positiveGuardStartsOffset = corruptGuardView.getInt32(22 * 4, true);
-    corruptGuardView.setInt32(positiveGuardStartsOffset, 0x7fff_ffff, true);
-    assertThrowsIncludes(
-      () => mod.createParser({ bytes, plan: corruptGuard }),
-      "invalid guard state",
-    );
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
-Deno.test("Wasm cursor parser selects the first viable token candidate deterministically", async () => {
-  const grammar = `
-    token IDENT = /[a-z]+/ ;
-    skip WS = /[ \\t\\r\\n]+/ ;
-    module = statement ;
-    statement = "return" value:IDENT ";" | value:IDENT ";" ;
-  `;
-  const { dir, mod, bytes, plan } = await materialize(grammar);
-  try {
-    const parser = mod.createParser({ bytes, plan });
-    const cursorKeyword = parser.parse("return x;");
-    assertEquals(cursorKeyword.ok, true);
-    assert(cursorKeyword.cursor);
-    const keywordStatement = cursorKeyword.cursor.child(0);
-    assertCursorRule(keywordStatement, "statement");
-    const keywordValue = keywordStatement.field("value");
-    assertCursorToken(keywordValue, "IDENT");
-    assertEquals(keywordValue.text, "x");
-
-    const validateKeyword = parser.validate("return x;");
-    assertEquals(validateKeyword.ok, true);
-
-    const cursorIdent = parser.parse("name;");
-    assertEquals(cursorIdent.ok, true);
-    assert(cursorIdent.cursor);
-    const identStatement = cursorIdent.cursor.child(0);
-    assertCursorRule(identStatement, "statement");
-    const identValue = identStatement.field("value");
-    assertCursorToken(identValue, "IDENT");
-    assertEquals(identValue.text, "name");
-    parser.dispose();
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
-Deno.test("Wasm generation rejects declared branching LR action sets", () => {
+Deno.test("Wasm lexer generation ignores retired branching LR actions", () => {
   const grammar = `
     module = left | right ;
     left = "a" ;
@@ -1864,17 +1589,42 @@ Deno.test("Wasm generation rejects declared branching LR action sets", () => {
     targets: ["wasm"],
     metadata: declaredConflictMetadata(grammar),
   });
-  assertEquals(result.bundle, undefined);
-  assertEquals(
-    result.diagnostics[0].code,
-    "WASM_BRANCHING_ACTIONS_UNSUPPORTED",
-  );
-  assertIncludes(result.diagnostics[0].message, "state ");
-  assertIncludes(result.diagnostics[0].message, "terminal ");
-  assertIncludes(result.diagnostics[0].message, "2 actions");
+  assert(result.bundle);
 });
 
-Deno.test("shared Wasm adapter loads concurrent parser instances with different plans", async () => {
+Deno.test("Wasm generation rejects nested strict island regions", () => {
+  const result = compile(
+    `
+    module = items:item* ;
+    item = values:value* ";" ;
+    value = "x" ;
+  `,
+    {
+      targets: ["wasm"],
+      metadata: {
+        gpuFrontend: {
+          version: 3,
+          throughput: "strict",
+          root: "module",
+          islands: [
+            { rule: "module", boundary: { kind: "root" } },
+            { rule: "item", boundary: { kind: "terminated", terminal: ";" } },
+            { rule: "value", boundary: { kind: "root" } },
+          ],
+          semantics: { rules: {} },
+        },
+      },
+    },
+  );
+  assertEquals(result.bundle, undefined);
+  const diagnostic = result.diagnostics.find((entry) =>
+    entry.code === "WASM_ISLAND_SIMD_REGION_REQUIRED"
+  );
+  assert(diagnostic);
+  assertIncludes(diagnostic.message, "terminal-only transducer");
+});
+
+Deno.test("shared Wasm adapter isolates concurrent lexer plans", async () => {
   const alpha = await materialize(`module = "alpha" ;`);
   const beta = await materialize(`module = "beta" "!" ;`);
   try {
@@ -1886,21 +1636,10 @@ Deno.test("shared Wasm adapter loads concurrent parser instances with different 
       bytes: beta.bytes,
       plan: beta.plan,
     });
-    assertEquals(alphaParser.parse("alpha").ok, true);
-    assertEquals(alphaParser.parse("beta!").ok, false);
-    assertEquals(betaParser.parse("beta!").ok, true);
-    assertEquals(betaParser.parse("alpha").ok, false);
-    const alphaCursor = alphaParser.parse("alpha");
-    const betaCursor = betaParser.parse("beta!");
-    assertEquals(alphaCursor.ok, true);
-    assertEquals(betaCursor.ok, true);
-    assert(alphaCursor.cursor);
-    assert(betaCursor.cursor);
-    assertEquals(
-      cursorLabel(alphaCursor.cursor.children()[0]),
-      'token:"alpha"',
-    );
-    assertEquals(cursorLabel(betaCursor.cursor.children()[0]), 'token:"beta"');
+    assertEquals(alphaParser.lex("alpha").diagnostics.length, 0);
+    assert(alphaParser.lex("beta!").diagnostics.length > 0);
+    assertEquals(betaParser.lex("beta!").diagnostics.length, 0);
+    assert(betaParser.lex("alpha").diagnostics.length > 0);
     alphaParser.dispose();
     betaParser.dispose();
   } finally {
@@ -1920,9 +1659,7 @@ Deno.test("shared Wasm adapter validates external plan bytes", async () => {
       () => mod.createParser({ plan }),
       "exactly one of bytes or module; received bytes=false, module=false",
     );
-    const module = new WebAssembly.Module(
-      new Uint8Array(bytes).buffer,
-    );
+    const module = new WebAssembly.Module(new Uint8Array(bytes).buffer);
     assertThrowsIncludes(
       () => mod.createParser({ bytes, module, plan }),
       "exactly one of bytes or module; received bytes=true, module=true",
@@ -1930,19 +1667,6 @@ Deno.test("shared Wasm adapter validates external plan bytes", async () => {
     await assertRejectsIncludes(
       () => mod.createParserAsync({ bytes }),
       "exactly one of plan or planUrl; received plan=false, planUrl=false",
-    );
-    await assertRejectsIncludes(
-      () => mod.createParserAsync({ bytes, module, plan }),
-      "exactly one of bytes, module, or url; received bytes=true, module=true, url=false",
-    );
-    await assertRejectsIncludes(
-      () =>
-        mod.createParserAsync({
-          bytes,
-          plan,
-          planUrl: dataUrl(plan, "application/octet-stream"),
-        }),
-      "exactly one of plan or planUrl; received plan=true, planUrl=true",
     );
     assertThrowsIncludes(
       () => mod.createParser({ bytes, plan: plan.slice(0, 12) }),
@@ -1960,17 +1684,6 @@ Deno.test("shared Wasm adapter validates external plan bytes", async () => {
       "Unsupported parser plan version 999",
     );
 
-    const corruptOffset = new Uint8Array(plan);
-    new DataView(
-      corruptOffset.buffer,
-      corruptOffset.byteOffset,
-      corruptOffset.byteLength,
-    ).setInt32(20, corruptOffset.byteLength + 1, true);
-    assertThrowsIncludes(
-      () => mod.createParser({ bytes, plan: corruptOffset }),
-      "lexer fast specs offset is not aligned",
-    );
-
     const corruptRuntimeMetadata = new Uint8Array(plan);
     const validated = validateCombinedWasmParserPlan(corruptRuntimeMetadata);
     corruptRuntimeMetadata[validated.runtimeMetadataOffset] = 0;
@@ -1985,16 +1698,16 @@ Deno.test("shared Wasm adapter validates external plan bytes", async () => {
   }
 });
 
-Deno.test("shared Wasm adapter supports async URL loading", async () => {
+Deno.test("shared Wasm adapter supports async URL lexer loading", async () => {
   const { dir, mod, bytes, plan } = await materialize(`module = "ok" ;`);
   try {
     const parser = await mod.createParserAsync({
       url: dataUrl(bytes, "application/wasm"),
       planUrl: dataUrl(plan, "application/octet-stream"),
     });
-    const parsed = parser.parse("ok");
-    assertEquals(parsed.ok, true);
-    assert(parsed.cursor);
+    const lexed = parser.lex("ok");
+    assertEquals(lexed.diagnostics.length, 0);
+    assertEquals(lexed.tokenTape.token(0)?.text, "ok");
     parser.dispose();
   } finally {
     await Deno.remove(dir, { recursive: true });
@@ -2050,7 +1763,7 @@ function assertIncrementalDocumentParity(
 ): void {
   const source = document.snapshot.text();
   const incrementalLex = document.lex();
-  const freshLex = parser.lex(source, { preserveTrivia: true });
+  const freshLex = parser.lex(source, { preserveTrivia: false });
   assertEquals(
     JSON.stringify(incrementalLex.diagnostics),
     JSON.stringify(freshLex.diagnostics),
@@ -2072,7 +1785,7 @@ function assertIncrementalDocumentParity(
   );
 
   const incrementalParse = document.parse();
-  const freshParse = parser.parse(source);
+  const freshParse = parser.parse(source, { preserveTrivia: false });
   assertEquals(incrementalParse.ok, freshParse.ok);
   assertEquals(
     JSON.stringify(incrementalParse.diagnostics),
@@ -2109,11 +1822,18 @@ function cursorShape(
 }
 
 function wasmBundle(source: string, metadata?: BabaMetadata) {
+  let selectedMetadata = metadata;
+  if (selectedMetadata === undefined && source === STATEMENT_GRAMMAR) {
+    selectedMetadata = STRICT_STATEMENT_METADATA;
+  }
+  if (selectedMetadata === undefined && source === NO_TRIVIA_GRAMMAR) {
+    selectedMetadata = STRICT_ITEM_METADATA;
+  }
   let result: ReturnType<typeof compile>;
-  if (metadata === undefined) {
+  if (selectedMetadata === undefined) {
     result = compile(source, { targets: ["wasm"] });
   } else {
-    result = compile(source, { targets: ["wasm"], metadata });
+    result = compile(source, { targets: ["wasm"], metadata: selectedMetadata });
   }
   assertEquals(result.diagnostics.length, 0);
   assert(result.bundle);

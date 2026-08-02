@@ -1,8 +1,7 @@
-import { assert, assertEquals, compile, parseMetadata } from "./helpers.ts";
-import { createParser } from "../src/runtime/generated_wasm.ts";
+import { assert, compile, parseMetadata } from "./helpers.ts";
 import { CpuFrontend } from "../src/runtime/webgpu/mod.ts";
 
-Deno.test("GPU Duck grammar parses the shipped member-block program", async () => {
+Deno.test("GPU Duck frontend parses the shipped member-block program", async () => {
   const grammarSource = await Deno.readTextFile(
     new URL("../examples/gpu-duck/grammar.baba", import.meta.url),
   );
@@ -26,14 +25,6 @@ Deno.test("GPU Duck grammar parses the shipped member-block program", async () =
     ).join("\n"),
   );
 
-  const wasm = built.bundle.files.find((file) =>
-    file.path === "wasm/parser.wasm"
-  );
-  assert(wasm);
-  assert(
-    wasm.encoding === "binary",
-    `Expected wasm/parser.wasm to be binary, received ${wasm.encoding}.`,
-  );
   const plan = built.bundle.files.find((file) =>
     file.path === "wasm/parser.plan"
   );
@@ -43,26 +34,12 @@ Deno.test("GPU Duck grammar parses the shipped member-block program", async () =
     `Expected wasm/parser.plan to be binary, received ${plan.encoding}.`,
   );
 
-  const parser = createParser({ bytes: wasm.content, plan: plan.content });
-  try {
-    const result = parser.parse(programSource);
-    assertEquals(
-      result.diagnostics.map((diagnostic) => diagnostic.code).join(","),
-      "",
-    );
-    assertEquals(result.ok, true);
-
-    const frontendResult = CpuFrontend.create(plan.content).ingest(
-      programSource,
-    );
-    assert(
-      frontendResult.ok,
-      frontendResult.diagnostics.map((diagnostic) => diagnostic.message).join(
-        "\n",
-      ),
-    );
-    assert(frontendResult.program.nodes.length > 0);
-  } finally {
-    parser.dispose();
-  }
+  const frontendResult = CpuFrontend.create(plan.content).ingest(programSource);
+  assert(
+    frontendResult.ok,
+    frontendResult.diagnostics.map((diagnostic) => diagnostic.message).join(
+      "\n",
+    ),
+  );
+  assert(frontendResult.program.nodes.length > 0);
 });

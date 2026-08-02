@@ -2,11 +2,27 @@
 
 ## Unreleased
 
+## 8.0.0
+
 ### Changed
 
-- Wasm core plan format 6 stops duplicating ASCII ranges in sparse lexer rows
-  when the complete dense ASCII table is present. Regenerate `parser.plan` and
-  `parser.wasm` together.
+- Replaced the Wasm LR parser with the shared strict SIMD island transducer.
+  `parse`, `validate`, and parse/validate documents now require a strict GPU
+  frontend plan with one repeated, terminated, terminal-only region of at most
+  seven states. Other Wasm plans remain usable for lexing.
+- Wasm ABI 13 removes raw LR action, GOTO, validation, and cursor exports. Core
+  plan format 8 retires LR table sections. Parser plan 3, runtime metadata 5,
+  and runtime implementation 4 identify the new semantics; regenerate all Wasm
+  artifacts.
+- Strict island validation uses the 653-byte `simd128` Rust module shared by all
+  generated adapters. The parser-core benchmark measures 0.76-1.07 billion
+  tokens/s, 1.07-1.31x its scalar transducer and 10-16x the retired LR loop on
+  the benchmark grammar.
+- Incremental parse documents retain their public API but perform a full island
+  reparse and report zero parser checkpoints.
+
+- Core plan format 8 does not duplicate ASCII ranges in sparse lexer rows when
+  the complete dense ASCII table is present.
 - Removed the unused private BRL compiler, backends, runtime sources, manifests,
   fixtures, and conformance gates. Shipping runtimes continue to use the
   TypeScript and Rust implementations recorded by the runtime manifest.

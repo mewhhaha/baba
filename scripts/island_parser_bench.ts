@@ -3,7 +3,7 @@ import {
   compileIslandSimdProgram,
   type IslandSimdProgram,
   IslandValidationSession,
-} from "../src/experiments/island_simd.ts";
+} from "../src/runtime/island_parser.ts";
 
 const BENCHMARKS = [
   {
@@ -220,7 +220,7 @@ for (
   const benchmark = BENCHMARKS[benchmarkIndex];
   const program = compileBenchmarkProgram(
     benchmark.grammar,
-    `island_simd_bench_${benchmarkIndex}`,
+    `island_parser_bench_${benchmarkIndex}`,
   );
   for (const targetTokenCount of [64, 4_096, 65_536]) {
     const tokens = acceptedTokens(program, targetTokenCount);
@@ -231,16 +231,11 @@ for (
       iterations = 250;
     }
     for (let warmup = 0; warmup < 100; warmup += 1) {
-      if (
-        !session.validateLr() ||
-        !session.validateScalar() ||
-        !session.validateSimd()
-      ) {
+      if (!session.validateScalar() || !session.validateSimd()) {
         throw new Error("Benchmark input was rejected during warmup.");
       }
     }
 
-    const lrSamples = [];
     const scalarSamples = [];
     const simdSamples = [];
     for (let sample = 0; sample < 5; sample += 1) {
@@ -255,18 +250,8 @@ for (
           iterations,
           tokenCount,
         ));
-        lrSamples.push(measure(
-          () => session.validateLr(),
-          iterations,
-          tokenCount,
-        ));
         continue;
       }
-      lrSamples.push(measure(
-        () => session.validateLr(),
-        iterations,
-        tokenCount,
-      ));
       simdSamples.push(measure(
         () => session.validateSimd(),
         iterations,
@@ -278,7 +263,6 @@ for (
         tokenCount,
       ));
     }
-    const lr = medianMeasurement(lrSamples);
     const scalar = medianMeasurement(scalarSamples);
     const simd = medianMeasurement(simdSamples);
     rows.push({
@@ -287,16 +271,13 @@ for (
       tokens: tokenCount,
       samples: 5,
       iterations,
-      lr_ms: lr.milliseconds.toFixed(2),
       scalar_ms: scalar.milliseconds.toFixed(2),
       simd_ms: simd.milliseconds.toFixed(2),
-      lr_mtok_s: lr.millionTokensPerSecond.toFixed(1),
       scalar_mtok_s: scalar.millionTokensPerSecond.toFixed(1),
       simd_mtok_s: simd.millionTokensPerSecond.toFixed(1),
       scalar_to_simd: `${
         (scalar.milliseconds / simd.milliseconds).toFixed(2)
       }x`,
-      lr_to_simd: `${(lr.milliseconds / simd.milliseconds).toFixed(2)}x`,
     });
   }
 }

@@ -6,11 +6,6 @@ import type {
 } from "../../ast.ts";
 import type { AnalyzedGrammar } from "../../compiler/ir.ts";
 import type { Dfa } from "../../compiler/regex/dfa.ts";
-import type {
-  BnfGrammar,
-  ReducerSpec,
-} from "../../compiler/runtime_plan/bnf.ts";
-import type { LrTable } from "../../compiler/runtime_plan/lr1.ts";
 import {
   collectRuleFieldSchemas,
   type RuleFieldSchema,
@@ -28,32 +23,18 @@ import type {
 import {
   WASM_ABI_VERSION,
   WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
-  WASM_CURSOR_CHILD_RECORD_I32_COUNT,
-  WASM_CURSOR_FIELD_RECORD_I32_COUNT,
-  WASM_CURSOR_RULE_RECORD_I32_COUNT,
-  WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
-  WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_I32_BYTES,
   WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
-  WASM_PARSE_CURSOR_RESULT_I32_COUNT,
-  WASM_PARSE_STATUS_ACTION_LIMIT,
-  WASM_PARSE_STATUS_AMBIGUOUS,
-  WASM_PARSE_STATUS_CURSOR_CAPACITY,
-  WASM_PARSE_STATUS_INTERNAL,
-  WASM_PARSE_STATUS_MEMO_REQUIRED,
-  WASM_PARSE_STATUS_OK,
-  WASM_PARSE_STATUS_UNEXPECTED,
   WASM_RESULT_LIFETIME_CALLER_BUFFER,
   WASM_SOURCE_ENCODING_UTF16,
   WASM_SPAN_UNIT_UTF16,
   WASM_TARGET_KIND,
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
-  WASM_VALIDATE_RESULT_I32_COUNT,
 } from "../runtime/wasm_abi.ts";
 import { emitSyntaxFromPortablePlan } from "../../compiler/runtime_plan/syntax_emit.ts";
 import {
@@ -90,6 +71,7 @@ export interface WasmRuntimeMetadata {
   readonly lexerSpecs: readonly WasmRuntimeLexerSpec[];
   readonly acceptCandidates: readonly (readonly number[])[];
   readonly terminals: readonly WasmRuntimeTerminal[];
+  readonly fieldNames: readonly string[];
   readonly fields: readonly RuleFieldSchema[];
   readonly gpuFrontend: GpuFrontendPlan | undefined;
 }
@@ -126,8 +108,6 @@ export type WasmRuntimeTerminal =
 
 export interface WasmPlan {
   analyzed: AnalyzedGrammar;
-  bnf: BnfGrammar;
-  lr: LrTable;
   dfa: Dfa;
   portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
@@ -158,23 +138,6 @@ export function planWasmTarget(
   if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
     return { diagnostics };
   }
-  for (const [state, row] of runtimePlan.lr.actions) {
-    for (const [terminal, actions] of row) {
-      if (actions.length < 2) {
-        continue;
-      }
-      diagnostics.push({
-        code: "WASM_BRANCHING_ACTIONS_UNSUPPORTED",
-        severity: "error",
-        backend: "wasm",
-        message:
-          `Wasm generation requires deterministic parser actions, but state ${state} and terminal ${terminal} have ${actions.length} actions.`,
-      });
-      return { diagnostics };
-    }
-  }
-  const portableBnf = runtimePlan.bnf;
-  const portableLr = runtimePlan.lr;
   const portableDfa = runtimePlan.dfa;
   let preserveTrivia = true;
   if (options.preserveTrivia !== undefined) {
@@ -191,6 +154,61 @@ export function planWasmTarget(
       diagnostics.push(...compiledGpuFrontend.diagnostics);
     } else {
       gpuFrontend = compiledGpuFrontend;
+      if (gpuFrontend.throughput === "strict") {
+        const rootLoop = gpuFrontend.execution.rootLoop;
+        if (rootLoop === null) {
+          diagnostics.push({
+            code: "WASM_ISLAND_ROOT_LOOP_REQUIRED",
+            severity: "error",
+            backend: "wasm",
+            message:
+              "Wasm generation requires one compiler-proven repeated root island.",
+          });
+        } else {
+          const boundary = gpuFrontend.boundaries[rootLoop.island];
+          if (boundary === undefined || boundary.kind !== "terminated") {
+            let boundaryKind = "missing";
+            if (boundary !== undefined) {
+              boundaryKind = boundary.kind;
+            }
+            diagnostics.push({
+              code: "WASM_ISLAND_TERMINATED_REGION_REQUIRED",
+              severity: "error",
+              backend: "wasm",
+              message:
+                `Wasm generation requires a terminated repeated region, received '${boundaryKind}' for island ${rootLoop.island}.`,
+            });
+          }
+          const longRegion = gpuFrontend.execution.longRegions.find((region) =>
+            region.island === rootLoop.island
+          );
+          if (longRegion === undefined) {
+            diagnostics.push({
+              code: "WASM_ISLAND_SIMD_REGION_REQUIRED",
+              severity: "error",
+              backend: "wasm",
+              message:
+                `Wasm generation requires repeated island ${rootLoop.island} to be a terminal-only transducer with at most seven states.`,
+            });
+          } else {
+            const regionIsland = gpuFrontend.islands[rootLoop.island];
+            if (regionIsland === undefined) {
+              throw new Error(
+                `GPU frontend root loop references unknown island ${rootLoop.island}.`,
+              );
+            }
+            if (regionIsland.startState !== 0) {
+              diagnostics.push({
+                code: "WASM_ISLAND_DENSE_START_STATE_REQUIRED",
+                severity: "error",
+                backend: "wasm",
+                message:
+                  `Wasm generation requires repeated island '${regionIsland.ruleName}' to start at state 0, received ${regionIsland.startState}.`,
+              });
+            }
+          }
+        }
+      }
     }
   }
   if (hasErrors(diagnostics)) {
@@ -204,8 +222,7 @@ export function planWasmTarget(
   );
   const wasm = emitWasmModule(
     portableDfa,
-    portableLr,
-    wasmCoreRuntimeMetadata(analyzed, runtimePlan),
+    wasmCoreRuntimeMetadata(runtimePlan),
   );
   const parserPlanBytes = encodeCombinedWasmParserPlan(
     wasm.planBytes,
@@ -214,8 +231,6 @@ export function planWasmTarget(
   const generatedBytes = wasmGeneratedByteLengths(
     analyzed,
     runtimePlan,
-    portableBnf,
-    portableLr,
     wasm,
     parserPlanBytes,
     options,
@@ -240,8 +255,6 @@ export function planWasmTarget(
   }
   return {
     analyzed,
-    bnf: portableBnf,
-    lr: portableLr,
     dfa: portableDfa,
     portable: runtimePlan.portable,
     portableMetadata: runtimePlan.portableMetadata,
@@ -409,78 +422,6 @@ function wasmAbiDescriptor(): unknown {
             "dependencyEnd",
           ],
         },
-        parserSelection: {
-          i32Count: 4,
-          bytes: 4 * WASM_I32_BYTES,
-          fields: [
-            "checkedCandidateCount",
-            "selectedSpecIndex",
-            "selectedTerminal",
-            "encodedAction",
-          ],
-        },
-        validateResult: {
-          i32Count: WASM_VALIDATE_RESULT_I32_COUNT,
-          bytes: WASM_VALIDATE_RESULT_I32_COUNT * WASM_I32_BYTES,
-          fields: [
-            "parserActionCount",
-            "errorState",
-            "errorSpecIndex",
-            "errorStart",
-            "errorEnd",
-          ],
-        },
-        parseCursorResult: {
-          i32Count: WASM_PARSE_CURSOR_RESULT_I32_COUNT,
-          bytes: WASM_PARSE_CURSOR_RESULT_I32_COUNT * WASM_I32_BYTES,
-          fields: [
-            "tokenRecordCount",
-            "ruleRecordCount",
-            "childRefCount",
-            "fieldRecordCount",
-            "valueRecordCount",
-            "valueItemCount",
-            "rootRef",
-            "errorOffset",
-            "errorState",
-            "tokenReadCount",
-          ],
-        },
-        cursorRuleRecord: {
-          i32Count: WASM_CURSOR_RULE_RECORD_I32_COUNT,
-          bytes: WASM_CURSOR_RULE_RECORD_I32_COUNT * WASM_I32_BYTES,
-          fields: [
-            "ruleId",
-            "start",
-            "end",
-            "tokenStart",
-            "tokenEnd",
-            "childHead",
-            "childCount",
-            "fieldStart",
-            "fieldCount",
-          ],
-        },
-        cursorFieldRecord: {
-          i32Count: WASM_CURSOR_FIELD_RECORD_I32_COUNT,
-          bytes: WASM_CURSOR_FIELD_RECORD_I32_COUNT * WASM_I32_BYTES,
-          fields: ["fieldId", "valueId"],
-        },
-        cursorValueRecord: {
-          i32Count: WASM_CURSOR_VALUE_RECORD_I32_COUNT,
-          bytes: WASM_CURSOR_VALUE_RECORD_I32_COUNT * WASM_I32_BYTES,
-          fields: ["kind", "numberOrItemTail", "itemHead", "itemCount"],
-        },
-        cursorChildRecord: {
-          i32Count: WASM_CURSOR_CHILD_RECORD_I32_COUNT,
-          bytes: WASM_CURSOR_CHILD_RECORD_I32_COUNT * WASM_I32_BYTES,
-          fields: ["reference", "nextNode"],
-        },
-        cursorValueItemRecord: {
-          i32Count: WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
-          bytes: WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT * WASM_I32_BYTES,
-          fields: ["valueId", "nextNode"],
-        },
       },
       exports: [
         {
@@ -491,118 +432,6 @@ function wasmAbiDescriptor(): unknown {
           name: "lex_one",
           params: ["sourcePtr", "sourceLength", "offset", "resultPtr"],
           result: "matchedFlag",
-        },
-        {
-          name: "parser_action",
-          params: ["state", "terminal"],
-          result: "encodedAction",
-        },
-        {
-          name: "parser_actions",
-          params: ["state", "terminal", "actionPtr", "actionCapacity"],
-          result: "actionCountOrMinusOne",
-        },
-        {
-          name: "parser_select_action",
-          params: [
-            "state",
-            "acceptingState",
-            "fallbackSpecIndex",
-            "selectionPtr",
-          ],
-          result:
-            "selectionStatusOneSelectedZeroUnexpectedTwoMultipleChoicesMinusOneInvalid",
-        },
-        {
-          name: "parser_select_incremental",
-          params: [
-            "state",
-            "acceptingState",
-            "fallbackSpecIndex",
-            "sourcePtr",
-            "sourceLength",
-            "tokenEnd",
-            "selectionPtr",
-          ],
-          result:
-            "selectionStatusOneSelectedZeroUnexpectedTwoTriviaMinusOneInvalid",
-        },
-        {
-          name: "validate",
-          params: [
-            "sourcePtr",
-            "sourceLength",
-            "resultPtr",
-            "stackPtr",
-            "stackCapacity",
-            "memoPtr",
-            "memoCapacity",
-            "maxParserActions",
-          ],
-          result:
-            "parseStatusZeroOkOneUnexpectedTwoInternalFourActionLimitFiveAmbiguousSixMemoRequired",
-        },
-        {
-          name: "parse_cursor",
-          params: [
-            "sourcePtr",
-            "sourceLength",
-            "tokenPtr",
-            "tokenCapacity",
-            "rulePtr",
-            "ruleCapacity",
-            "childPtr",
-            "childCapacity",
-            "fieldPtr",
-            "fieldCapacity",
-            "valuePtr",
-            "valueCapacity",
-            "valueItemPtr",
-            "valueItemCapacity",
-            "resultPtr",
-            "stateStackPtr",
-            "fragmentStackPtr",
-            "fragmentCapacity",
-            "memoPtr",
-            "memoCapacity",
-            "preserveTrivia",
-            "maxParserActions",
-          ],
-          result:
-            "cursorStatusZeroOkOneUnexpectedTwoInternalThreeCapacityFourTraceLimitFiveAmbiguous",
-        },
-        {
-          name: "parse_cursor_records",
-          params: [
-            "sourcePtr",
-            "sourceLength",
-            "tokenPtr",
-            "rawTokenCount",
-            "tokenCapacity",
-            "rulePtr",
-            "ruleCapacity",
-            "childPtr",
-            "childCapacity",
-            "fieldPtr",
-            "fieldCapacity",
-            "valuePtr",
-            "valueCapacity",
-            "valueItemPtr",
-            "valueItemCapacity",
-            "resultPtr",
-            "stateStackPtr",
-            "fragmentStackPtr",
-            "fragmentCapacity",
-            "preserveTrivia",
-            "maxParserActions",
-          ],
-          result:
-            "cursorStatusZeroOkOneUnexpectedTwoInternalThreeCapacityFourTraceLimitFiveAmbiguous",
-        },
-        {
-          name: "parser_goto",
-          params: ["state", "nonterminal"],
-          result: "stateOrMinusOne",
         },
         {
           name: "lex_all",
@@ -702,11 +531,6 @@ function wasmAbiDescriptor(): unknown {
           result: "i32",
         },
         {
-          name: "validate_result_i32_count",
-          params: [],
-          result: "i32",
-        },
-        {
           name: "host_ownership_model",
           params: [],
           result: "i32",
@@ -728,15 +552,6 @@ function wasmAbiDescriptor(): unknown {
         type: "WasmSourceBuffer",
         staleAfter: ["reset", "writeSource(different source)"],
       },
-    },
-    parseStatuses: {
-      ok: WASM_PARSE_STATUS_OK,
-      unexpected: WASM_PARSE_STATUS_UNEXPECTED,
-      internal: WASM_PARSE_STATUS_INTERNAL,
-      cursorCapacity: WASM_PARSE_STATUS_CURSOR_CAPACITY,
-      actionLimit: WASM_PARSE_STATUS_ACTION_LIMIT,
-      ambiguous: WASM_PARSE_STATUS_AMBIGUOUS,
-      memoRequired: WASM_PARSE_STATUS_MEMO_REQUIRED,
     },
     parserDiagnosticCodes: {
       parseLexicalError: PARSER_DIAGNOSTIC_CODES.parseLexicalError,
@@ -975,6 +790,14 @@ function createWasmRuntimeMetadata(
         left - right;
     });
   });
+  const fieldNames = runtime.portable.symbols.fields.map((field, index) => {
+    if (field.id !== index) {
+      throw new Error(
+        `Portable field '${field.name}' has id ${field.id}, expected ${index}.`,
+      );
+    }
+    return field.name;
+  });
   return {
     portablePlan: runtime.portableMetadata,
     runtimeImplementation: RUNTIME_IMPLEMENTATION_METADATA,
@@ -985,6 +808,7 @@ function createWasmRuntimeMetadata(
     lexerSpecs,
     acceptCandidates,
     terminals,
+    fieldNames,
     fields: collectRuleFieldSchemas(analyzed),
     gpuFrontend,
   };
@@ -993,14 +817,9 @@ function createWasmRuntimeMetadata(
 function compactWasmRuntimeMetadata(
   metadata: WasmRuntimeMetadata,
 ): unknown {
-  const fieldIds = new Map<string, number>();
-  for (const schema of metadata.fields) {
-    for (const field of schema.fields) {
-      if (!fieldIds.has(field.name)) {
-        fieldIds.set(field.name, fieldIds.size);
-      }
-    }
-  }
+  const fieldIds = new Map(
+    metadata.fieldNames.map((fieldName, fieldId) => [fieldName, fieldId]),
+  );
   return {
     m: [
       parserPlanRuntimeMetadataVersion,
@@ -1045,7 +864,7 @@ function compactWasmRuntimeMetadata(
       return [terminal.id, 2, terminal.display, terminal.literalId];
     }),
     f: [
-      [...fieldIds.keys()],
+      metadata.fieldNames,
       metadata.fields.map((schema) => [
         schema.ruleId,
         schema.fields.map((field) => {
@@ -1069,11 +888,8 @@ function compactWasmRuntimeMetadata(
 }
 
 function wasmCoreRuntimeMetadata(
-  analyzed: AnalyzedGrammar,
   runtime: RuntimeParserPlan,
 ): {
-  readonly eofTerminal: number;
-  readonly terminalBySpec: readonly number[];
   readonly acceptCandidates: readonly (readonly number[])[];
   readonly specs: readonly {
     readonly contextual: boolean;
@@ -1082,72 +898,7 @@ function wasmCoreRuntimeMetadata(
     readonly notFollowedBy: Dfa | undefined;
     readonly excludedWords: readonly string[];
   }[];
-  readonly productions: readonly {
-    readonly lhs: number;
-    readonly rhsLength: number;
-    readonly reducerKind: number;
-    readonly reducerArg: number;
-  }[];
 } {
-  const fieldIds = new Map<string, number>();
-  for (const schema of collectRuleFieldSchemas(analyzed)) {
-    for (const field of schema.fields) {
-      if (!fieldIds.has(field.name)) {
-        fieldIds.set(field.name, fieldIds.size);
-      }
-    }
-  }
-  const terminalByNamedTokenId = new Map<number, number>();
-  const terminalByLiteralId = new Map<number, number>();
-  for (const terminal of runtime.bnf.terminals) {
-    if (terminal.kind === "named") {
-      if (terminal.tokenId === undefined) {
-        throw new Error(
-          `Wasm terminal ${terminal.id} is missing its named token id.`,
-        );
-      }
-      terminalByNamedTokenId.set(terminal.tokenId, terminal.id);
-    }
-    if (terminal.kind === "literal") {
-      if (terminal.literalId === undefined) {
-        throw new Error(
-          `Wasm terminal ${terminal.id} is missing its literal id.`,
-        );
-      }
-      terminalByLiteralId.set(terminal.literalId, terminal.id);
-    }
-  }
-  const terminalBySpec: number[] = [];
-  for (const token of analyzed.tokens) {
-    if (
-      token.kind !== "skip" && !analyzed.reachableTokens.has(token.id)
-    ) {
-      continue;
-    }
-    if (token.kind === "skip") {
-      terminalBySpec.push(-1);
-      continue;
-    }
-    const terminal = terminalByNamedTokenId.get(token.id);
-    if (terminal === undefined) {
-      throw new Error(
-        `Wasm named token ${token.id} has no parser terminal.`,
-      );
-    }
-    terminalBySpec.push(terminal);
-  }
-  for (const literal of analyzed.literals) {
-    if (!analyzed.reachableLiterals.has(literal.id)) {
-      continue;
-    }
-    const terminal = terminalByLiteralId.get(literal.id);
-    if (terminal === undefined) {
-      throw new Error(
-        `Wasm literal ${literal.id} has no parser terminal.`,
-      );
-    }
-    terminalBySpec.push(terminal);
-  }
   const acceptCandidates = runtime.portable.lexer.states.map((state) => {
     return [...state.accepts].sort((left, right) => {
       const leftSpec = runtime.portable.lexer.specifications[left];
@@ -1178,81 +929,7 @@ function wasmCoreRuntimeMetadata(
         left - right;
     });
   });
-  const productions = runtime.bnf.productions.map((production, index) => {
-    if (production.id !== index) {
-      throw new Error(
-        `Wasm BNF production ${production.id} is not dense at index ${index}.`,
-      );
-    }
-    let reducerKind: number;
-    let reducerArg = -1;
-    const reducer: ReducerSpec = production.reducer;
-    switch (reducer.kind) {
-      case "start":
-        reducerKind = 0;
-        break;
-      case "rule":
-        reducerKind = 1;
-        reducerArg = reducer.ruleId;
-        break;
-      case "terminal":
-        reducerKind = 2;
-        break;
-      case "ruleRef":
-        reducerKind = 3;
-        break;
-      case "identity":
-        reducerKind = 4;
-        break;
-      case "sequence":
-        reducerKind = 5;
-        break;
-      case "optionalEmpty":
-        reducerKind = 6;
-        break;
-      case "optionalSome":
-        reducerKind = 7;
-        break;
-      case "repeatEmpty":
-        reducerKind = 8;
-        break;
-      case "repeatAppend":
-        reducerKind = 9;
-        break;
-      case "repeat1First":
-        reducerKind = 10;
-        break;
-      case "repeat1Append":
-        reducerKind = 11;
-        break;
-      case "separatedFirst":
-        reducerKind = 12;
-        break;
-      case "separatedAppend":
-        reducerKind = 13;
-        break;
-      case "field": {
-        reducerKind = 14;
-        const fieldId = fieldIds.get(reducer.name);
-        if (fieldId === undefined) {
-          throw new Error(
-            `Wasm field reducer '${reducer.name}' has no runtime field id.`,
-          );
-        }
-        reducerArg = fieldId;
-        break;
-      }
-    }
-    return {
-      lhs: production.lhs,
-      rhsLength: production.rhs.length,
-      reducerKind,
-      reducerArg,
-    };
-  });
   return {
-    eofTerminal: runtime.bnf.eofTerminal,
-    terminalBySpec,
     acceptCandidates,
     specs: runtime.portable.lexer.specifications.map((spec) => {
       const trailingContext = spec.trailingContext;
@@ -1273,7 +950,6 @@ function wasmCoreRuntimeMetadata(
         excludedWords: trailingContext.excludedWords,
       };
     }),
-    productions,
   };
 }
 
@@ -1338,8 +1014,6 @@ interface WasmGeneratedByteLengths {
 function wasmGeneratedByteLengths(
   _analyzed: AnalyzedGrammar,
   runtimePlan: RuntimeParserPlan,
-  _bnf: BnfGrammar,
-  _lr: LrTable,
   wasm: WasmModuleImage,
   parserPlanBytes: Uint8Array,
   options: WasmTargetOptions,
@@ -1364,7 +1038,6 @@ function parserStatsDiagnostic(
   runtimePlan: RuntimeParserPlan,
   generatedBytes: WasmGeneratedByteLengths,
 ): Diagnostic {
-  const stats = runtimePlan.lr.stats;
   const portableStats = runtimePlan.portable.statistics;
   return {
     code: "WASM_PARSER_STATS",
@@ -1392,13 +1065,6 @@ function parserStatsDiagnostic(
       `grammar SCCs: ${runtimePlan.analysisStats.grammar.stronglyConnectedComponents}`,
       `nullable iterations: ${runtimePlan.analysisStats.grammar.nullableIterations}`,
       `productive iterations: ${runtimePlan.analysisStats.grammar.productiveIterations}`,
-      `LR states: ${stats.states}`,
-      `LR core items: ${stats.coreItems}`,
-      `LR items: ${stats.items}`,
-      `LR closure work: ${stats.closureWork}`,
-      `ACTION entries: ${stats.actionEntries}`,
-      `GOTO entries: ${stats.gotoEntries}`,
-      `table entries: ${stats.tableEntries}`,
       `diagnostics emitted: ${runtimePlan.analysisStats.diagnosticsEmitted}`,
       `diagnostics suppressed: ${runtimePlan.analysisStats.diagnosticsSuppressed}`,
       `generated bytes: ${generatedBytes.total}`,

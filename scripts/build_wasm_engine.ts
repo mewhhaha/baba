@@ -7,7 +7,7 @@ const outputPath = new URL(
   import.meta.url,
 );
 const wasmPath = new URL(
-  "../src/targets/runtime/wasm_engine_rs/target/wasm32-unknown-unknown/release/baba_wasm_parser_engine.wasm",
+  "../src/targets/runtime/wasm_engine_rs/target/wasm32-unknown-unknown/release/baba_wasm_lexer_engine.wasm",
   import.meta.url,
 );
 const checkOnly = Deno.args.includes("--check");
@@ -30,7 +30,7 @@ if (!result.success) {
 
 const bytes = await Deno.readFile(wasmPath);
 if (!WebAssembly.validate(bytes)) {
-  throw new Error("Built Rust parser engine is not valid WebAssembly.");
+  throw new Error("Built Rust lexer engine is not valid WebAssembly.");
 }
 
 let binary = "";

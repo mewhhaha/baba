@@ -1,346 +1,137 @@
 # Baba Wasm ABI
 
-Status: versioned core ABI for generated Wasm parser artifacts.
+Status: versioned lexer-core ABI for generated Wasm artifacts.
 
-This document defines the contract between Baba's generated Wasm core module,
-the generated JavaScript adapter, and non-JavaScript hosts that choose to call
-the core module directly. The current target kind is
-`javascript-hosted-core-wasm`: Baba emits a generic core WebAssembly module, an
-external parser plan, plus a JavaScript adapter. It does not yet emit a Wasm
-Component Model package, WIT bindings, WASI library, or browser-only package.
+Baba emits a generic lexer WebAssembly module, an external grammar plan, and a
+TypeScript adapter. The core module deliberately has no parser state machine.
+The adapter provides strict island parsing with the separately embedded shared
+SIMD runtime.
 
-Generated Wasm bundles also include `wasm/abi.json` and `wasm/parser.plan`.
-Hosts should treat the JSON file as the machine-readable descriptor for the
-generic core ABI. Grammar-specific runtime data lives in `parser.plan`. The
-generic core module is built ahead of time from Baba's `no_std` Rust engine
-source and embedded in the package; the ABI is the compatibility contract, not
-the Rust source layout.
+Generated bundles include `wasm/abi.json`, `wasm/parser.wasm`, and
+`wasm/parser.plan`. Direct non-JavaScript hosts should treat `abi.json` as the
+machine-readable contract and must not infer layouts from Baba's Rust sources.
 
-## Versioning
+## Versions
 
-The generated descriptor has:
+The current contract is:
 
 ```json
 {
   "format": "baba-wasm-abi",
   "version": 1,
   "parserPlan": {
-    "version": 2,
-    "runtimeMetadataVersion": 3
+    "version": 3,
+    "runtimeMetadataVersion": 5
   },
   "core": {
-    "abiVersion": 12
+    "abiVersion": 13
   }
 }
 ```
 
-The core module exports `load_plan(planPtr, planLength) -> i32`,
-`plan_buffer_base() -> i32`, `input_base() -> i32`, `abi_version() -> i32`,
-`plan_version() -> i32`, and `semantics_version() -> i32`. For ABI version 12,
-the generated adapter writes `parser.plan` into linear memory at or after
-`plan_buffer_base()`, calls `load_plan`, and then checks that the descriptor and
-core exports agree before the adapter uses the module.
-
-The descriptor also records:
-
-- `parserPlan.format`, `parserPlan.version`,
-  `parserPlan.runtimeMetadataVersion`, `parserPlan.semantics`, and the external
-  storage layout;
-- `runtimeImplementation.format`, `runtimeImplementation.version`,
-  `runtimeImplementation.semantics`, and `runtimeImplementation.hash`;
-- the numeric parser diagnostic code table and diagnostic detail schemas.
+Core plan encoding version 8 stores the DFA lexer tables. The retired LR header
+slots must be zero. Baba accepts only the current ABI, core plan, runtime
+metadata, and parser-plan versions; regenerate older artifacts together.
 
 ## Core Exports
 
-ABI version 12 core modules export:
+ABI version 13 exports:
 
-| Export                               | Kind     | Contract                                                                         |
-| ------------------------------------ | -------- | -------------------------------------------------------------------------------- |
-| `memory`                             | memory   | Linear memory owned by the instance.                                             |
-| `lex_one`                            | function | Writes one lexical result and returns `1`, or returns `0` when no token matches. |
-| `lex_all`                            | function | Writes token records and returns the token count, or a negative status.          |
-| `lex_incremental`                    | function | Writes dependency-bearing token records for a source range.                      |
-| `lex_memo_i32_per_position`          | function | Returns the i32 the lexer failure memo needs per source position.                |
-| `parser_action`                      | function | Returns the first encoded LR action for deterministic callers.                   |
-| `parser_actions`                     | function | Writes all encoded LR actions for a state/terminal pair and returns their count. |
-| `parser_select_action`               | function | Selects an unguarded contextual token/action pair for a parser state.            |
-| `parser_select_incremental`          | function | Selects a source-aware token/action pair, including guarded trivia.              |
-| `validate`                           | function | Parses without materializing token, action, or cursor tapes.                     |
-| `parse_cursor`                       | function | Parses directly into cursor tapes.                                               |
-| `parse_cursor_records`               | function | Parses externally supplied raw lexer records directly into cursor tapes.         |
-| `parser_goto`                        | function | Returns a parser state, or `-1` when absent.                                     |
-| `load_plan`                          | function | Loads the external parser plan and returns `1` when accepted.                    |
-| `abi_version`                        | function | Returns the core ABI version.                                                    |
-| `plan_version`                       | function | Returns the loaded portable parser-plan version, or `0` before `load_plan`.      |
-| `semantics_version`                  | function | Returns the runtime implementation semantics version.                            |
-| `reset`                              | function | Clears reusable core runtime state.                                              |
-| `plan_buffer_base`                   | function | Returns the first implementation-safe offset where the host may copy the plan.   |
-| `input_base`                         | function | Returns the first byte offset available for host input.                          |
-| `max_pages`                          | function | Returns the configured maximum linear-memory page count.                         |
-| `source_encoding`                    | function | Returns the source encoding enum.                                                |
-| `span_unit`                          | function | Returns the public span unit enum.                                               |
-| `lex_result_i32_count`               | function | Returns the width of a lexical result record.                                    |
-| `token_record_i32_count`             | function | Returns the width of a token record.                                             |
-| `incremental_token_record_i32_count` | function | Returns the width of an incremental token record.                                |
-| `validate_result_i32_count`          | function | Returns the width of a validation result record.                                 |
-| `host_ownership_model`               | function | Returns the input/result ownership enum.                                         |
-| `result_lifetime_model`              | function | Returns the raw result lifetime enum.                                            |
+| Export                               | Contract                                                |
+| ------------------------------------ | ------------------------------------------------------- |
+| `memory`                             | Instance-owned linear memory.                           |
+| `lex_one`                            | Writes one lexical match result.                        |
+| `lex_all`                            | Writes token records for a complete source.             |
+| `lex_incremental`                    | Writes dependency-bearing token records for a range.    |
+| `lex_memo_i32_per_position`          | Returns the optional lexer memo width.                  |
+| `load_plan`                          | Loads and validates the external plan.                  |
+| `abi_version`                        | Returns 13.                                             |
+| `plan_version`                       | Returns the loaded parser-plan version.                 |
+| `semantics_version`                  | Returns the runtime semantics version.                  |
+| `reset`                              | Clears reusable lexer state.                            |
+| `plan_buffer_base`                   | Returns the first safe plan offset.                     |
+| `input_base`                         | Returns the first safe input offset after plan loading. |
+| `max_pages`                          | Returns the configured memory-page limit.               |
+| `source_encoding`                    | Returns the UTF-16 encoding enum.                       |
+| `span_unit`                          | Returns the UTF-16 span enum.                           |
+| `lex_result_i32_count`               | Returns 2.                                              |
+| `token_record_i32_count`             | Returns 4.                                              |
+| `incremental_token_record_i32_count` | Returns 5.                                              |
+| `host_ownership_model`               | Returns the caller-managed ownership enum.              |
+| `result_lifetime_model`              | Returns the caller-buffer lifetime enum.                |
 
-`parser_select_action` has no source pointer, so it does not select tokens with
-trailing guards. `validate` and the cursor parsers evaluate those guards against
-the source text.
+The LR exports from ABI 12, including `parser_action`, `parser_goto`,
+`validate`, and `parse_cursor`, do not exist in ABI 13.
 
-All numeric parameters and results use WebAssembly `i32`. Linear-memory byte
-offsets and lengths are non-negative 32-bit values. Multi-byte fields use
-little-endian WebAssembly memory order and 4-byte alignment for `i32` records.
-The generated `wasm/abi.json` descriptor records the exact parameter lists for
-each exported function.
+## Source And Records
 
-## External Plan
+Sources and public spans use UTF-16 code units. Non-BMP characters therefore
+occupy two source units.
 
-ABI version 12 keeps grammar-specific DFA and LR table data outside
-`parser.wasm`. The generated `parser.plan` starts with the core table section
-expected by `load_plan`, followed by shared runtime metadata used by the
-TypeScript adapter. The host calls `plan_buffer_base()`, writes `parser.plan`
-bytes at that nonzero offset, and calls `load_plan(planPtr, planLength)`. The
-adapter treats any result other than `1` as an invalid plan. After a successful
-load, `input_base()` returns the first byte offset after the loaded core table
-section, aligned for caller-managed input.
+`lex_one` writes two `i32` values:
 
-The current core table section uses format version 7. It keeps section offsets
-in the header and may store dense DFA/LR helper sections as compact `i16` or
-`u16` cells when all generated values fit. This compact encoding is an internal
-core-plan detail; hosts should validate the plan with `wasm/abi.json` and
-`load_plan` rather than decoding those tables directly.
+| Field       | Offset |
+| ----------- | -----: |
+| `specIndex` |      0 |
+| `end`       |      4 |
 
-The runtime metadata subsection is independently versioned and currently uses
-version `4`. It contains only runtime identity, trivia policy, rule names,
-token/literal mappings, lexer specifications and accept candidates, terminal
-displays, and cursor field schemas. DFA transitions, LR actions and gotos,
-productions, reducers, and planning statistics are not duplicated in host
-metadata. Older metadata versions are rejected with an instruction to regenerate
-the plan.
+`lex_all` writes four-`i32` token records:
 
-The descriptor exposes plan metadata under `core.plan`, including the plan
-storage mode, the `load_plan` export name, the generated `parser.plan` path, and
-the combined plan layout.
+| Field            | Offset |
+| ---------------- | -----: |
+| `specIndex`      |      0 |
+| `start`          |      4 |
+| `end`            |      8 |
+| `acceptingState` |     12 |
 
-## Source And Spans
+`lex_incremental` appends `dependencyEnd` at byte offset 16. A host invalidates
+a record when an edit touches `[start, dependencyEnd]`, because insertion at
+either boundary may affect maximal munch or a trailing contextual guard.
 
-ABI version 12 uses source encoding enum value `1`, meaning UTF-16 code units.
-The host writes the source into linear memory as contiguous unsigned 16-bit code
-units. `sourceLength` is a count of UTF-16 code units, not bytes.
+`tokenCapacity` counts records and must be at least `sourceLength`, the
+one-error-record-per-code-unit worst case. `lex_all` returns `-1` when the token
+capacity is short and writes nothing beyond the records it returns.
 
-Span unit enum value `1` means public spans are UTF-16 code-unit offsets. This
-matches JavaScript string indexing and the generated Wasm adapter. Non-BMP
-characters therefore occupy two units in public spans.
+The failure memo is demand-driven. Call with `memoPtr = 0` and
+`memoCapacity = 0`. If scanning crosses the activation threshold, the lexer
+returns `-2`; allocate `(sourceLength + 1) * lex_memo_i32_per_position()` `i32`
+values and retry. Memo contents are private and do not survive a call.
 
-## Record Layouts
+## Strict Parser Adapter
 
-`lex_one` writes a lexical result record at `resultPtr`:
+The public generated TypeScript adapter retains `parse`, `validate`, and cursor
+result shapes. Those operations require a compiler-proven GPU frontend plan with
+`throughput: "strict"` and this narrower shape:
 
-| Field       | Type  | Offset |
-| ----------- | ----- | -----: |
-| `specIndex` | `i32` |    `0` |
-| `end`       | `i32` |    `4` |
+- exactly one repeated root island;
+- a terminated repeated region;
+- a terminal-only region transducer;
+- dense start state zero;
+- one to seven region states.
 
-`lex_all(sourcePtr, sourceLength, mode, tokenPtr, tokenCapacity, memoPtr, memoCapacity)`
-writes token records at `tokenPtr`. The current mode value is `0`.
+The adapter lexes with the core module, partitions records at the terminating
+terminal, validates each region with the shared `simd128` island module, and
+materializes the root and region cursor tapes. A plan without strict GPU
+metadata remains usable through `lex`; `parse`, `validate`, and parse/validate
+documents throw an explicit unsupported-plan error. A strict plan that cannot
+meet the subset is rejected during generation with a `WASM_ISLAND_*` diagnostic.
 
-| Field            | Type  | Offset |
-| ---------------- | ----- | -----: |
-| `specIndex`      | `i32` |    `0` |
-| `start`          | `i32` |    `4` |
-| `end`            | `i32` |    `8` |
-| `acceptingState` | `i32` |   `12` |
+`maxParserActions` now bounds island transitions. Incremental documents retain
+their public result and work-counter shapes, but parsing reparses the complete
+structural token stream and reports zero LR checkpoints because LR checkpoints
+no longer exist.
 
-`lex_incremental(sourcePtr, sourceLength, start, minimumEnd, tokenPtr,
-tokenCapacity, memoPtr, memoCapacity)`
-starts at a known token boundary and writes five-i32 records until the lexer
-reaches `minimumEnd`:
+## Ownership, Lifetime, And Errors
 
-| Field            | Type  | Offset |
-| ---------------- | ----- | -----: |
-| `specIndex`      | `i32` |    `0` |
-| `start`          | `i32` |    `4` |
-| `end`            | `i32` |    `8` |
-| `acceptingState` | `i32` |   `12` |
-| `dependencyEnd`  | `i32` |   `16` |
+The host owns input and result buffers at or after `input_base()`. Low-level
+results remain valid until overwritten, `reset()` is called, or memory grows.
+Recreate JavaScript views after `memory.grow()`.
 
-`dependencyEnd` is the exclusive end of the source inspected to decide the
-record, including maximal-munch failure and trailing contextual guards. A host
-must invalidate a record when an edit intersects `[start, dependencyEnd)`;
-insertions at either boundary are treated as dependencies because they can
-change the next transition or guard result.
+Each generated parser owns one `WebAssembly.Instance`, loaded plan, source
+buffers, and disposal lifecycle. Instances are isolated, not reentrant. Use
+separate instances for concurrent calls.
 
-`tokenCapacity` counts records and must be at least `sourceLength`. That is the
-worst case `lex_all` can emit - one error token per code point - and it is the
-same bound the raw cursor lexer enforces. Only the first `count` records a call
-returns are meaningful; `lex_all` writes no record past `count`.
-
-`memoPtr` optionally points at scratch for the lexer's failure memo and
-`memoCapacity` counts i32. The full requirement is
-`(sourceLength + 1) * lex_memo_i32_per_position()`. The memo is one bit per
-(source position, DFA state), so `lex_memo_i32_per_position()` returns
-`ceil(dfaStateCount / 32)`; it needs a loaded plan and returns `0` before
-`load_plan`. The buffer contents are private to the engine, need no
-initialisation, and carry nothing between calls. Call first with
-`memoPtr = memoCapacity = 0`; ordinary inputs complete without reserving the
-memo. If discarded scanning crosses the activation threshold, `lex_all` returns
-`-2`; allocate the full requirement and retry. This keeps `lex_all` out of
-O(n^2) backtracking (`docs/performance.md`, "Lexer backtracking worst case").
-
-`lex_all` returns the token count, or a negative status:
-
-| Status | Meaning                                                                   |
-| -----: | ------------------------------------------------------------------------- |
-|   `-1` | `tokenCapacity` is smaller than `sourceLength`.                           |
-|   `-2` | Pathological discarded scanning requires a full failure memo and a retry. |
-
-`validate` uses the same demand-driven memo protocol, returning status `6` when
-the host must allocate the full memo and retry. The generated adapter handles
-both retries internally.
-
-`parse_cursor_records` takes `rawTokenCount` immediately after `tokenPtr`,
-followed by `tokenCapacity` and the same cursor arena parameters as
-`parse_cursor`. It does not take lexer memo parameters and does not call
-`lex_all`. The supplied records must use the four-i32 layout above, cover the
-source contiguously from `0` through `sourceLength`, and fit within
-`tokenCapacity`. The parser resolves contextual candidates, filters trivia, and
-compacts selected records in place exactly as `parse_cursor` does.
-
-`validate` writes a validation result record at `resultPtr`:
-
-| Field               | Type  | Offset |
-| ------------------- | ----- | -----: |
-| `parserActionCount` | `i32` |    `0` |
-| `errorState`        | `i32` |    `4` |
-| `errorSpecIndex`    | `i32` |    `8` |
-| `errorStart`        | `i32` |   `12` |
-| `errorEnd`          | `i32` |   `16` |
-
-`parse_cursor` writes a cursor result record at `resultPtr`:
-
-| Field              | Type  | Offset |
-| ------------------ | ----- | -----: |
-| `tokenRecordCount` | `i32` |    `0` |
-| `ruleRecordCount`  | `i32` |    `4` |
-| `childRefCount`    | `i32` |    `8` |
-| `fieldRecordCount` | `i32` |   `12` |
-| `valueRecordCount` | `i32` |   `16` |
-| `valueItemCount`   | `i32` |   `20` |
-| `rootRef`          | `i32` |   `24` |
-| `errorOffset`      | `i32` |   `28` |
-| `errorState`       | `i32` |   `32` |
-| `tokenReadCount`   | `i32` |   `36` |
-
-Cursor rule records contain rule id, source span, token range, the head of the
-rule's child-edge list plus its length, and its field slice. Cursor field
-records contain field id and value id. Cursor value records encode null, element
-references, and arrays.
-
-Child edges and array items are singly linked node arenas, not contiguous
-slices. `childRefCount` and `valueItemCount` in the cursor result record are
-node watermarks for those arenas, not the length of any one list.
-
-Cursor child records:
-
-| Field       | Type  | Offset | Meaning                                  |
-| ----------- | ----- | -----: | ---------------------------------------- |
-| `reference` | `i32` |    `0` | Child rule or token reference.           |
-| `nextNode`  | `i32` |    `4` | Next node index, or `-1` at a list tail. |
-
-Cursor value-item records:
-
-| Field      | Type  | Offset | Meaning                                  |
-| ---------- | ----- | -----: | ---------------------------------------- |
-| `valueId`  | `i32` |    `0` | Value record index of the array element. |
-| `nextNode` | `i32` |    `4` | Next node index, or `-1` at a list tail. |
-
-A rule reads its children by walking `childCount` nodes from `childHead`. An
-array value reads its items by walking `itemCount` nodes from `itemHead`. Lists
-may share a suffix of nodes with a list captured earlier; a reader that walks
-exactly `count` nodes never observes the difference. This representation is what
-makes appending to a repetition accumulator constant time instead of copying the
-whole accumulated list on every element.
-
-The descriptor exposes these widths under `core.layouts`, including `lexResult`,
-`tokenRecord`, `validateResult`, `parseCursorResult`, `cursorRuleRecord`,
-`cursorFieldRecord`, `cursorValueRecord`, `cursorChildRecord`, and
-`cursorValueItemRecord`.
-
-## Memory Ownership And Lifetime
-
-Host ownership model enum value `1` means caller-managed linear memory buffers.
-The host chooses writable input, result, and token-record offsets at or after
-`input_base()`. `input_base()` is only stable after `load_plan` succeeds. The
-generated TypeScript adapter uses the instance memory, copies JavaScript source
-text into UTF-16 memory, and allocates result buffers after the source.
-
-Result lifetime enum value `1` means low-level core results remain valid in the
-caller-provided buffers until the host overwrites those buffers, calls
-`reset()`, or grows memory. Memory growth invalidates existing JavaScript
-typed-array and `DataView` objects; hosts must recreate views after any
-operation that can call `memory.grow()`.
-
-The generated adapter never intentionally retains a view across a possible
-growth.
-
-## Reset, Disposal, And Reentrancy
-
-`reset()` clears reusable core runtime state and invalidates adapter-owned
-handles. It does not promise to shrink linear memory; repeated parses may reuse
-the previous high-water allocation.
-
-ABI version 12 has instance-owned core memory. Generated adapters expose
-`createParser()` and `createParserAsync()` as the public lifecycle API. Each
-parser instance owns its `WebAssembly.Instance`, memory, loaded plan, and
-disposed state. `reset()` on a parser instance clears reusable core state.
-`dispose()` invalidates the parser instance; subsequent `lex()`, `parse()`, or
-`validate()` calls on that instance throw from the shared adapter.
-
-Generated adapters create isolated instances with
-`createParser({ bytes, plan })`, `createParser({ module, plan })`, or
-`createParserAsync({ url, planUrl })`.
-
-Calls into one core instance are not specified as thread-safe or reentrant.
-Hosts that need interleaved parsing should use separate parser instances. CI
-coverage includes interleaved instances and concurrent JavaScript module workers
-where the host permits workers.
-
-## Limits And Overflow
-
-ABI version 12 uses 65,536-byte WebAssembly pages and a configured maximum of
-65,535 pages. Adapter-side offset arithmetic checks multiplication, addition,
-alignment, and page-count growth against the 32-bit Wasm address space before
-calling `memory.grow()`.
-
-The generated public parse API exposes `maxParserActions`. `PARSER_TRACE_LIMIT`
-reports parser-action exhaustion.
-
-An input whose buffers cannot fit in the 65,535-page address space is reported
-as the structured `PARSER_INPUT_TOO_LARGE` diagnostic, naming the requested byte
-count, the limit, and the source size. It is not thrown. See `docs/limits.md`.
-
-The descriptor's `parseStatuses` table maps low-level parse status numbers to
-the generated adapter constants.
-
-## Error And Trap Policy
-
-Expected parse failures are reported as structured parser diagnostics, whose
-numeric low-level codes and public schemas are listed in `wasm/abi.json`.
-Malformed adapter inputs, stale capabilities, and uninitialized external modules
-throw JavaScript `TypeError`, `RangeError`, or `Error` from the generated
-adapter. An input too large for the address space is a structured diagnostic,
-not a throw.
-
-The core module assumes the host respects pointer, length, alignment, and
-capacity contracts. Direct core callers are responsible for validating their own
-arguments before crossing the ABI boundary.
-
-## Host Validation
-
-Generated bundles are expected to validate the core module with
-`WebAssembly.validate()` where available, then load and validate `parser.plan`
-before use. Repository tests also validate with independent tools when
-installed, including `wasm-tools validate` and a Wasmtime low-level smoke test.
+Malformed low-level arguments may trap or return failure as documented by the
+export. The TypeScript adapter converts expected lexical and strict-island
+failures into structured diagnostics, including `PARSE_LEXICAL_ERROR`,
+`PARSE_UNEXPECTED_TOKEN`, `PARSER_TRACE_LIMIT`, and `PARSER_INPUT_TOO_LARGE`.

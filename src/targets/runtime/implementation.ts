@@ -6,17 +6,17 @@ export interface RuntimeImplementationSourceMetadata {
 
 export interface RuntimeImplementationMetadata {
   readonly format: "baba-runtime-implementation";
-  readonly version: 3;
-  readonly semantics: "baba-runtime-portable-v3";
+  readonly version: 4;
+  readonly semantics: "baba-runtime-island-v4";
   readonly hash: string;
   readonly sources: readonly RuntimeImplementationSourceMetadata[];
 }
 
 export const RUNTIME_IMPLEMENTATION_FORMAT =
   "baba-runtime-implementation" as const;
-export const RUNTIME_IMPLEMENTATION_VERSION = 3 as const;
+export const RUNTIME_IMPLEMENTATION_VERSION = 4 as const;
 export const RUNTIME_IMPLEMENTATION_SEMANTICS =
-  "baba-runtime-portable-v3" as const;
+  "baba-runtime-island-v4" as const;
 
 export const RUNTIME_IMPLEMENTATION_SOURCES:
   readonly RuntimeImplementationSourceMetadata[] = [
@@ -28,17 +28,27 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/parser_plan_contract.ts",
       role: "parser-plan-contract",
-      hash: "fnv1a64:e6537d107aa080f4",
+      hash: "fnv1a64:e7ebb45f57314620",
     },
     {
       path: "src/runtime/wasm_plan.ts",
       role: "combined-wasm-parser-plan-format",
-      hash: "fnv1a64:18def7012d9189cb",
+      hash: "fnv1a64:36d120fda37a4902",
     },
     {
       path: "src/runtime/generated_wasm.ts",
       role: "generated-wasm-parser-loader",
-      hash: "fnv1a64:9ddef77e7b7e85ec",
+      hash: "fnv1a64:94fe3de8993e6c10",
+    },
+    {
+      path: "src/runtime/island_parser.ts",
+      role: "island-parser-loader",
+      hash: "fnv1a64:395fd09f8ef60ad3",
+    },
+    {
+      path: "src/runtime/island_parser_wasm_bytes.ts",
+      role: "island-parser-embedded-bytes",
+      hash: "fnv1a64:1108930ae1512602",
     },
     {
       path: "src/targets/runtime/diagnostic_codes.ts",
@@ -48,27 +58,32 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_abi.ts",
       role: "wasm-abi-constants",
-      hash: "fnv1a64:bf164743204354d2",
+      hash: "fnv1a64:2c06d6d73c840f54",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime.ts",
       role: "wasm-core-runtime",
-      hash: "fnv1a64:7f8d80629e382ed9",
+      hash: "fnv1a64:02f5e75b7a08a5bb",
     },
     {
       path: "scripts/build_wasm_engine.ts",
       role: "wasm-core-runtime-build-script",
-      hash: "fnv1a64:b62d924a8f339796",
+      hash: "fnv1a64:0e3f0c814ca30bd8",
+    },
+    {
+      path: "scripts/build_island_parser.ts",
+      role: "island-parser-build-script",
+      hash: "fnv1a64:b0cd2fc4023c7894",
     },
     {
       path: "src/targets/runtime/wasm_engine_rs/Cargo.toml",
       role: "wasm-core-runtime-rust-manifest",
-      hash: "fnv1a64:8072742c77eb16c0",
+      hash: "fnv1a64:9d747b0a9befa263",
     },
     {
       path: "src/targets/runtime/wasm_engine_rs/Cargo.lock",
       role: "wasm-core-runtime-rust-lockfile",
-      hash: "fnv1a64:0a819286a77f8fe7",
+      hash: "fnv1a64:5ed2c17013d131d2",
     },
     {
       path: "src/targets/runtime/wasm_engine_rs/.cargo/config.toml",
@@ -78,12 +93,32 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_engine_rs/src/lib.rs",
       role: "wasm-core-runtime-rust-source",
-      hash: "fnv1a64:fb1250ce9e81c12b",
+      hash: "fnv1a64:fed348c42145d9fe",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime_bytes.ts",
       role: "wasm-core-runtime-embedded-bytes",
-      hash: "fnv1a64:bc66aee0f89d9eba",
+      hash: "fnv1a64:b1b869c653d7cda5",
+    },
+    {
+      path: "src/targets/runtime/island_parser_rs/Cargo.toml",
+      role: "island-parser-rust-manifest",
+      hash: "fnv1a64:0456d7fe8bba5611",
+    },
+    {
+      path: "src/targets/runtime/island_parser_rs/Cargo.lock",
+      role: "island-parser-rust-lockfile",
+      hash: "fnv1a64:a4524c6c4311d2f5",
+    },
+    {
+      path: "src/targets/runtime/island_parser_rs/.cargo/config.toml",
+      role: "island-parser-rust-build-config",
+      hash: "fnv1a64:c6144287f9966f55",
+    },
+    {
+      path: "src/targets/runtime/island_parser_rs/src/lib.rs",
+      role: "island-parser-rust-source",
+      hash: "fnv1a64:67237226793bd205",
     },
     {
       path: "src/targets/runtime/provenance.ts",
@@ -92,7 +127,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:ddf00cad9e8e2821" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:505696a538c387dd" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

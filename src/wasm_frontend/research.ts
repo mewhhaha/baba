@@ -1,23 +1,15 @@
 import {
   WASM_ABI_VERSION,
-  WASM_CURSOR_CHILD_RECORD_I32_COUNT,
-  WASM_CURSOR_FIELD_RECORD_I32_COUNT,
-  WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT,
-  WASM_CURSOR_RULE_RECORD_I32_COUNT,
-  WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
-  WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
-  WASM_PARSE_CURSOR_RESULT_I32_COUNT,
   WASM_RESULT_LIFETIME_CALLER_BUFFER,
   WASM_SOURCE_ENCODING_UTF16,
   WASM_SPAN_UNIT_UTF16,
   WASM_TARGET_KIND,
   WASM_TOKEN_RECORD_I32_COUNT,
-  WASM_VALIDATE_RESULT_I32_COUNT,
 } from "../targets/runtime/wasm_abi.ts";
 
 export type WasmFrontendCandidateStatus =
@@ -64,14 +56,6 @@ export interface WasmFrontendRequirements {
   readonly lexResultI32Count: number;
   readonly tokenRecordI32Count: number;
   readonly incrementalTokenRecordI32Count: number;
-  readonly validateResultI32Count: number;
-  readonly parseCursorResultI32Count: number;
-  readonly cursorRuleRecordI32Count: number;
-  readonly cursorFieldRecordI32Count: number;
-  readonly cursorValueRecordI32Count: number;
-  readonly cursorChildRecordI32Count: number;
-  readonly cursorValueItemRecordI32Count: number;
-  readonly cursorFragmentRecordI32Count: number;
   readonly requiredExports: readonly string[];
   readonly forbiddenDefaultDependencies: readonly string[];
 }
@@ -116,25 +100,9 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
   lexResultI32Count: WASM_LEX_RESULT_I32_COUNT,
   tokenRecordI32Count: WASM_TOKEN_RECORD_I32_COUNT,
   incrementalTokenRecordI32Count: WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
-  validateResultI32Count: WASM_VALIDATE_RESULT_I32_COUNT,
-  parseCursorResultI32Count: WASM_PARSE_CURSOR_RESULT_I32_COUNT,
-  cursorRuleRecordI32Count: WASM_CURSOR_RULE_RECORD_I32_COUNT,
-  cursorFieldRecordI32Count: WASM_CURSOR_FIELD_RECORD_I32_COUNT,
-  cursorValueRecordI32Count: WASM_CURSOR_VALUE_RECORD_I32_COUNT,
-  cursorChildRecordI32Count: WASM_CURSOR_CHILD_RECORD_I32_COUNT,
-  cursorValueItemRecordI32Count: WASM_CURSOR_VALUE_ITEM_RECORD_I32_COUNT,
-  cursorFragmentRecordI32Count: WASM_CURSOR_FRAGMENT_RECORD_I32_COUNT,
   requiredExports: [
     "memory",
     "lex_one",
-    "parser_action",
-    "parser_actions",
-    "parser_select_action",
-    "parser_select_incremental",
-    "validate",
-    "parse_cursor",
-    "parse_cursor_records",
-    "parser_goto",
     "lex_all",
     "lex_incremental",
     "lex_memo_i32_per_position",
@@ -151,7 +119,6 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "lex_result_i32_count",
     "token_record_i32_count",
     "incremental_token_record_i32_count",
-    "validate_result_i32_count",
     "host_ownership_model",
     "result_lifetime_model",
   ],
@@ -179,13 +146,13 @@ export const wasmFrontendCandidates: readonly WasmFrontendCandidate[] = [
       "src/targets/runtime/wasm_core_runtime.ts",
     ],
     notes: [
-      "Current correctness oracle for the raw parser/lexer ABI.",
-      "Keeps DFA and LR tables in generated core Wasm with no language runtime.",
+      "Current correctness oracle for the raw lexer ABI.",
+      "Keeps DFA tables in generated core Wasm with no language runtime.",
     ],
     requiredSpikeChecks: [
       "Generated parser.wasm validates with WebAssembly.validate.",
       "Generated abi.json matches babaWasmFrontendRequirements.",
-      "No per-grammar parser runtime is emitted into the public bundle.",
+      "Strict parsing is provided by the shared SIMD island runtime.",
     ],
   },
   {

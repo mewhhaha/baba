@@ -152,8 +152,8 @@ conflicts:
 ```
 
 Unresolved conflicts produce diagnostics with stable conflict IDs and suggested
-metadata entries. The Wasm target accepts deterministic resolutions and rejects
-declared branching conflicts during generation.
+metadata entries. The reference planning pipeline retains this information; the
+Wasm parser accepts only the strict island subset described below.
 
 ## CLI
 
@@ -188,7 +188,7 @@ Each `createParser()` call owns its own `WebAssembly.Instance`, memory, parser
 state, source buffers, and disposal lifecycle.
 
 `createParser()` does not load defaults: both the plan and exactly one Wasm
-module source are required. Parser plans use runtime metadata version 3;
+module source are required. Parser plans use runtime metadata version 5;
 regenerate plans produced by earlier Baba versions. Baba emits and accepts only
 the current parser-plan contract; it does not migrate older plans. Breaking
 changes for each release are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -201,8 +201,13 @@ Parser instances expose a Wasm-first runtime surface:
   interfaces with typed `field("name")` overloads for consumer code.
 - `lex(source, options?)` returns a lazy token tape. Use `tokenTape.token(i)`
   for indexed access to token records.
-- `validate(source, options?)` runs the Wasm trace validator and returns
+- `validate(source, options?)` runs strict SIMD island validation and returns
   diagnostics without building token objects or an object tree.
+
+Wasm parsing requires `gpuFrontend.throughput: "strict"`, one repeated root
+island, and a terminated terminal-only region with at most seven states. Other
+plans remain usable with `lex()`, but parser operations report that their plan
+is unsupported.
 
 ## Experimental WebGPU Frontend
 
