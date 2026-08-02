@@ -66,11 +66,6 @@ function measure(
   iterations: number,
   tokenCount: number,
 ): { readonly milliseconds: number; readonly millionTokensPerSecond: number } {
-  for (let iteration = 0; iteration < 100; iteration += 1) {
-    if (!validate()) {
-      throw new Error("Benchmark input was rejected during warmup.");
-    }
-  }
   const started = performance.now();
   for (let iteration = 0; iteration < iterations; iteration += 1) {
     if (!validate()) {
@@ -84,6 +79,18 @@ function measure(
     milliseconds,
     millionTokensPerSecond: tokenCount * iterations / milliseconds / 1_000,
   };
+}
+
+function medianMeasurement(
+  samples: readonly {
+    readonly milliseconds: number;
+    readonly millionTokensPerSecond: number;
+  }[],
+): { readonly milliseconds: number; readonly millionTokensPerSecond: number } {
+  const ordered = [...samples].sort((left, right) =>
+    left.milliseconds - right.milliseconds
+  );
+  return ordered[Math.floor(ordered.length / 2)];
 }
 
 const built = compile(GRAMMAR, {
@@ -108,27 +115,64 @@ const rows: Array<Record<string, number | string>> = [];
 for (const tokenCount of [64, 4_096, 65_536]) {
   const tokens = acceptedTokens(program, tokenCount);
   const runner = await IslandSimdRunner.create(program, tokens);
-  let iterations = Math.floor(64_000_000 / tokenCount);
-  if (iterations < 1_000) {
-    iterations = 1_000;
+  let iterations = Math.floor(16_000_000 / tokenCount);
+  if (iterations < 250) {
+    iterations = 250;
   }
-  const scalar = measure(
-    () => runner.validateScalar(),
-    iterations,
-    tokenCount,
-  );
-  const simd = measure(
-    () => runner.validateSimd(),
-    iterations,
-    tokenCount,
-  );
-  const lr = measure(
-    () => runner.validateLr(),
-    iterations,
-    tokenCount,
-  );
+  for (let warmup = 0; warmup < 100; warmup += 1) {
+    if (
+      !runner.validateLr() ||
+      !runner.validateScalar() ||
+      !runner.validateSimd()
+    ) {
+      throw new Error("Benchmark input was rejected during warmup.");
+    }
+  }
+
+  const lrSamples = [];
+  const scalarSamples = [];
+  const simdSamples = [];
+  for (let sample = 0; sample < 5; sample += 1) {
+    if (sample % 2 === 0) {
+      scalarSamples.push(measure(
+        () => runner.validateScalar(),
+        iterations,
+        tokenCount,
+      ));
+      simdSamples.push(measure(
+        () => runner.validateSimd(),
+        iterations,
+        tokenCount,
+      ));
+      lrSamples.push(measure(
+        () => runner.validateLr(),
+        iterations,
+        tokenCount,
+      ));
+      continue;
+    }
+    lrSamples.push(measure(
+      () => runner.validateLr(),
+      iterations,
+      tokenCount,
+    ));
+    simdSamples.push(measure(
+      () => runner.validateSimd(),
+      iterations,
+      tokenCount,
+    ));
+    scalarSamples.push(measure(
+      () => runner.validateScalar(),
+      iterations,
+      tokenCount,
+    ));
+  }
+  const lr = medianMeasurement(lrSamples);
+  const scalar = medianMeasurement(scalarSamples);
+  const simd = medianMeasurement(simdSamples);
   rows.push({
     tokens: tokenCount,
+    samples: 5,
     iterations,
     lr_ms: lr.milliseconds.toFixed(2),
     scalar_ms: scalar.milliseconds.toFixed(2),
