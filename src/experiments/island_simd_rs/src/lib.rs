@@ -190,17 +190,17 @@ pub extern "C" fn validate_island_scalar(
     let mut index = 0;
     while index < token_count {
         let terminal = unsafe { load_token(tokens, index) };
-        if terminal < 0 || terminal >= terminal_count {
+        if terminal >= terminal_count {
             return STATUS_INVALID_TERMINAL;
         }
         let address = transitions + terminal * 16 + state;
         state = unsafe { core::ptr::read_unaligned(address as usize as *const u8) as i32 };
-        if state == failure_state {
-            return 0;
-        }
         index += 1;
     }
 
+    if state == failure_state {
+        return 0;
+    }
     acceptance_status(state, accepting_mask)
 }
 
@@ -224,7 +224,7 @@ pub extern "C" fn validate_island_simd(
     let mut index = 0;
     while index < token_count {
         let terminal = unsafe { load_token(tokens, index) };
-        if terminal < 0 || terminal >= terminal_count {
+        if terminal >= terminal_count {
             return STATUS_INVALID_TERMINAL;
         }
         let transition =
