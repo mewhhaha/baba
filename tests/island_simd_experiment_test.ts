@@ -58,10 +58,15 @@ function compileExperimentPlan(
 }
 
 Deno.test("Rust SIMD island validation matches the scalar transducer", async () => {
+  const planBytes = compileExperimentPlan(
+    GRAMMAR,
+    "island_simd_experiment_test",
+  );
   const program = compileIslandSimdProgram(
-    compileExperimentPlan(GRAMMAR, "island_simd_experiment_test"),
+    planBytes,
     1,
   );
+  planBytes.fill(0);
   let repeated = -1;
   let repeatedState = -1;
   let terminating = -1;

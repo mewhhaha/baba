@@ -141,7 +141,7 @@ export function compileIslandSimdProgram(
     startState: island.startState,
     acceptingMask,
     transitions,
-    parserPlan: planBytes,
+    parserPlan: planBytes.slice(),
   };
 }
 
