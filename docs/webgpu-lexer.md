@@ -20,8 +20,8 @@ backend produces the same four-`i32` records, in the same order, with the same
 values, from the same plan bytes.
 
 Nothing has to be regenerated. There is no plan-format change, no grammar
-change, and no semantic difference. Terminal identity is still resolved by the
-parser at parse time from `(acceptingState, LR state)`, exactly as before.
+change, and no semantic difference. Token identity is resolved from each DFA
+accepting state's ordered candidates and contextual guards.
 
 The design and the measurements are recorded in
 [ADR 0001](adr/0001-webgpu-lexer-backend.md). Regenerate the numbers with
@@ -152,7 +152,7 @@ nor bandwidth. It is host-device synchronization: `await mapAsync()` costs about
 clock is that one wait. The whole pipeline is therefore one command encoder, one
 `queue.submit()` and one `mapAsync()`, and it still cannot get under the floor.
 
-Cross-check on a second grammar (`thunkwasm`, periodic input): 0.94x at 1 MiB,
+Cross-check on a second grammar (`gpu-duck`, periodic input): 0.94x at 1 MiB,
 2.05x at 16 MiB. It is slower than `funcfuck` despite having fewer DFA states
 (65 against 81), because the kernel's per-state table read has a data-dependent
 shared-memory bank pattern. **State count alone does not predict cost**, though
@@ -224,9 +224,8 @@ one-token-per-unit input reaches roughly 23x across device and host memory.
 **`parse()` no longer fails below the sizes this backend targets.** It used to
 throw above roughly 8 KiB of repetition-heavy source, misrecorded here as
 "roughly 750 KiB". Cursor materialization is now linear in the token count and
-`examples/brainfuck`, the densest possible shape, parses 6 MiB; an input that
-still does not fit reports `PARSER_INPUT_TOO_LARGE` rather than throwing. See
-`docs/limits.md`.
+The densest measured grammar shape parses 6 MiB; an input that still does not
+fit reports `PARSER_INPUT_TOO_LARGE` rather than throwing. See `docs/limits.md`.
 
 ## Correctness
 
@@ -250,7 +249,7 @@ example grammars, with multi-MiB corpora and failure-mode guards. It needs
 
 ```sh
 deno task bench:webgpu-lexer
-deno task bench:webgpu-lexer --grammar thunkwasm --runs 7 --json out.json
+deno task bench:webgpu-lexer --grammar gpu-duck --runs 7 --json out.json
 deno task bench:webgpu-lexer:pathological
 # Explicit software-adapter experiment only; never report this as hardware data.
 deno task bench:webgpu-lexer --allow-fallback-adapter

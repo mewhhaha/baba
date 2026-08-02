@@ -33,7 +33,6 @@ const CORE_HEADER_ASCII_TRANSITIONS = 6;
 const CORE_HEADER_TRANSITION_ROWS = 7;
 const CORE_HEADER_TRANSITIONS = 8;
 const CORE_HEADER_SPEC_COUNT = 14;
-const CORE_HEADER_SPEC_TERMINALS = 16;
 const CORE_HEADER_ACCEPT_CANDIDATE_ROWS = 17;
 const CORE_HEADER_ACCEPT_CANDIDATES = 18;
 const CORE_HEADER_SPEC_FLAGS = 21;
@@ -101,7 +100,6 @@ export interface LexerPlanTables {
    * See `guardFree` — this collapse is only valid when it holds.
    */
   readonly acceptSpecByState: Int32Array;
-  readonly specTerminals: Int32Array;
   readonly guardFree: boolean;
   readonly guardDiagnostics: readonly string[];
 }
@@ -321,12 +319,6 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
     "lexer accept candidates",
   );
 
-  const specTerminals = readPlainI32Array(
-    planBytes,
-    headerI32(planBytes, CORE_HEADER_SPEC_TERMINALS),
-    specCount,
-    "lexer spec terminals",
-  );
   const specFlags = readPlainI32Array(
     planBytes,
     headerI32(planBytes, CORE_HEADER_SPEC_FLAGS),
@@ -447,7 +439,6 @@ export function decodeLexerPlanTables(planBytes: Uint8Array): LexerPlanTables {
     transitionRows,
     transitions,
     acceptSpecByState,
-    specTerminals,
     guardFree,
     guardDiagnostics,
   };

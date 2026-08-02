@@ -14,10 +14,7 @@ import {
   computeNullableRules,
   isExpressionNullable,
 } from "./analyzed_grammar.ts";
-import type {
-  PortableParserPlan,
-  TerminalPlan,
-} from "../targets/runtime/portable_plan.ts";
+import type { LexerPlan } from "../targets/runtime/lexer_plan.ts";
 
 export const GPU_FRONTEND_FORMAT = "baba-gpu-frontend" as const;
 export const GPU_FRONTEND_PLAN_VERSION = 3 as const;
@@ -239,7 +236,7 @@ interface NfaFragment {
 
 interface IslandCompilationContext {
   readonly analyzed: AnalyzedGrammar;
-  readonly portable: PortableParserPlan;
+  readonly compilerPlan: GpuFrontendCompilerPlan;
   readonly islandByRule: ReadonlyMap<RuleId, number>;
   readonly fieldIds: ReadonlyMap<string, number>;
   readonly nullableRules: ReadonlySet<RuleId>;
@@ -250,9 +247,29 @@ interface IslandCompilationContext {
   nextState: number;
 }
 
+export interface GpuFrontendCompilerPlan {
+  readonly lexer: LexerPlan;
+  readonly symbols: {
+    readonly terminals: readonly TerminalPlan[];
+    readonly fields: readonly {
+      readonly id: number;
+      readonly name: string;
+    }[];
+  };
+}
+
+interface TerminalPlan {
+  readonly id: number;
+  readonly kind: "eof" | "named" | "literal";
+  readonly key: string;
+  readonly display: string;
+  readonly tokenId?: number;
+  readonly literalId?: number;
+}
+
 export function compileGpuFrontendPlan(
   analyzed: AnalyzedGrammar,
-  portable: PortableParserPlan,
+  compilerPlan: GpuFrontendCompilerPlan,
   metadata: GpuFrontendMetadata,
 ): GpuFrontendPlan | { readonly diagnostics: readonly Diagnostic[] } {
   const diagnostics: Diagnostic[] = [];
@@ -325,27 +342,15 @@ export function compileGpuFrontendPlan(
       });
     }
   }
-  for (const row of portable.parser.actions) {
-    for (const entry of row.entries) {
-      if (entry.actions.length > 1) {
-        diagnostics.push({
-          code: "GPU_FRONTEND_PARSER_CONFLICT",
-          severity: "error",
-          backend: "webgpu",
-          message:
-            `Parser state ${row.state} has ${entry.actions.length} actions for terminal ${entry.terminal}; GPU islands require resolved deterministic syntax.`,
-        });
+  const terminalClassification = compilerPlan.lexer.specifications.map(
+    (spec) => {
+      if (spec.terminalId === null) {
+        return -1;
       }
-    }
-  }
-
-  const terminalClassification = portable.lexer.specifications.map((spec) => {
-    if (spec.terminalId === null) {
-      return -1;
-    }
-    return spec.terminalId;
-  });
-  for (const state of portable.lexer.states) {
+      return spec.terminalId;
+    },
+  );
+  for (const state of compilerPlan.lexer.states) {
     if (state.accepts.length === 0) {
       continue;
     }
@@ -367,7 +372,7 @@ export function compileGpuFrontendPlan(
   for (let index = 0; index < metadata.islands.length; index += 1) {
     const boundary = compileBoundary(
       metadata.islands[index].boundary,
-      portable.symbols.terminals,
+      compilerPlan.symbols.terminals,
       diagnostics,
       `metadata.gpuFrontend.islands[${index}].boundary`,
     );
@@ -413,17 +418,17 @@ export function compileGpuFrontendPlan(
       MAX_CONTRACTION_ROUNDS,
     ));
   }
-  if (portable.lexer.states.length > maxLexerStates) {
+  if (compilerPlan.lexer.states.length > maxLexerStates) {
     diagnostics.push(limitDiagnostic(
       "GPU_FRONTEND_LEXER_STATE_LIMIT",
       "lexer states",
-      portable.lexer.states.length,
+      compilerPlan.lexer.states.length,
       maxLexerStates,
     ));
   }
 
   const fieldIds = new Map(
-    portable.symbols.fields.map((field) => [field.name, field.id]),
+    compilerPlan.symbols.fields.map((field) => [field.name, field.id]),
   );
   const islands: GpuIslandTransducerPlan[] = [];
   for (let index = 0; index < islandRules.length; index += 1) {
@@ -435,7 +440,7 @@ export function compileGpuFrontendPlan(
       index,
       rule,
       analyzed,
-      portable,
+      compilerPlan,
       islandByRule,
       fieldIds,
       diagnostics,
@@ -541,7 +546,7 @@ export function compileGpuFrontendPlan(
   const execution = compileExecutionPlan(
     islands,
     boundaries,
-    portable.symbols.terminals,
+    compilerPlan.symbols.terminals,
     capacity,
     throughput,
     diagnostics,
@@ -575,7 +580,7 @@ export function compileGpuFrontendPlan(
     capacity,
   };
   const statisticsWithoutPackedBytes = {
-    lexerStates: portable.lexer.states.length,
+    lexerStates: compilerPlan.lexer.states.length,
     islandStates,
     islandTransitions,
     semanticOpcodes,
@@ -1094,7 +1099,7 @@ function compileIsland(
   id: number,
   rule: AnalyzedRule,
   analyzed: AnalyzedGrammar,
-  portable: PortableParserPlan,
+  compilerPlan: GpuFrontendCompilerPlan,
   islandByRule: ReadonlyMap<RuleId, number>,
   fieldIds: ReadonlyMap<string, number>,
   diagnostics: Diagnostic[],
@@ -1102,7 +1107,7 @@ function compileIsland(
 ): GpuIslandTransducerPlan | undefined {
   const context: IslandCompilationContext = {
     analyzed,
-    portable,
+    compilerPlan,
     islandByRule,
     fieldIds,
     nullableRules: computeNullableRules(analyzed),
@@ -1150,7 +1155,7 @@ function compileExpression(
     );
   }
   if (expression.kind === "literal") {
-    const terminal = context.portable.symbols.terminals.find((candidate) =>
+    const terminal = context.compilerPlan.symbols.terminals.find((candidate) =>
       candidate.kind === "literal" &&
       candidate.literalId === expression.literalId
     );
@@ -1167,7 +1172,9 @@ function compileExpression(
       expression.reference.kind === "skip"
     ) {
       const tokenId = expression.reference.tokenId;
-      const terminal = context.portable.symbols.terminals.find((candidate) =>
+      const terminal = context.compilerPlan.symbols.terminals.find((
+        candidate,
+      ) =>
         candidate.kind === "named" &&
         candidate.tokenId === tokenId
       );

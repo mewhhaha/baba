@@ -90,7 +90,7 @@ Software adapters are rejected unless explicitly requested:
 deno task run:fallback
 ```
 
-Run the same source through the ordinary Wasm lexer and parser:
+Run the same source through the CPU island frontend:
 
 ```sh
 deno task cpu

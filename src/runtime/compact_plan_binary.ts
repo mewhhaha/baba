@@ -30,7 +30,6 @@ export interface CompactPlanBinaryInfo {
   readonly metadata?: {
     readonly runtimeMetadataVersion?: number;
     readonly parserPlanVersion?: number;
-    readonly parserPlanHash?: string;
     readonly runtimeImplementationHash?: string;
   };
 }
@@ -110,7 +109,6 @@ function compactMetadata(value: unknown): CompactPlanBinaryInfo["metadata"] {
       const metadata: {
         runtimeMetadataVersion: number;
         parserPlanVersion?: number;
-        parserPlanHash?: string;
         runtimeImplementationHash?: string;
       } = {
         runtimeMetadataVersion: PARSER_PLAN_RUNTIME_METADATA_VERSION,
@@ -118,11 +116,8 @@ function compactMetadata(value: unknown): CompactPlanBinaryInfo["metadata"] {
       if (typeof meta[2] === "number") {
         metadata.parserPlanVersion = meta[2];
       }
-      if (typeof meta[4] === "string") {
-        metadata.parserPlanHash = meta[4];
-      }
-      if (typeof meta[8] === "string") {
-        metadata.runtimeImplementationHash = meta[8];
+      if (typeof meta[7] === "string") {
+        metadata.runtimeImplementationHash = meta[7];
       }
       return metadata;
     }

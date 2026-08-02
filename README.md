@@ -135,25 +135,28 @@ parser-target support constraints.
 
 ## Metadata
 
-Metadata is optional. The primary parser metadata today resolves parser
-conflicts:
+Metadata is optional. Strict Wasm parsing uses the island frontend profile:
 
 ```json
 {
-  "parser": {
-    "resolutions": [
+  "gpuFrontend": {
+    "version": 3,
+    "throughput": "strict",
+    "root": "module",
+    "islands": [
+      { "rule": "module", "boundary": { "kind": "root" } },
       {
-        "conflict": "c_0123456789abcdef",
-        "prefer": "shift"
+        "rule": "statement",
+        "boundary": { "kind": "terminated", "terminal": ";" }
       }
-    ]
+    ],
+    "semantics": { "rules": {} }
   }
 }
 ```
 
-Unresolved conflicts produce diagnostics with stable conflict IDs and suggested
-metadata entries. The reference planning pipeline retains this information; the
-Wasm parser accepts only the strict island subset described below.
+The Wasm parser accepts the strict island subset described below. Tree-sitter
+shaping and query metadata remain available independently.
 
 ## CLI
 
@@ -171,9 +174,9 @@ Useful options:
 - `--name tiny` sets generated identity metadata.
 - `--wasm-dir parser` changes the output directory.
 - `--preserve-trivia` and `--discard-trivia` control skip token emission.
-- `--parser-stats` emits parser planning statistics.
-- Limit flags such as `--lexer-state-limit`, `--parser-state-limit`, and
-  `--parser-table-entry-limit` cap generated runtime planning work.
+- `--wasm-stats` emits lexer and island planning statistics.
+- Limit flags such as `--lexer-state-limit`, `--regex-nfa-state-limit`, and
+  `--regex-overlap-state-limit` cap Wasm planning work.
 
 ## Runtime Shape
 
@@ -188,7 +191,7 @@ Each `createParser()` call owns its own `WebAssembly.Instance`, memory, parser
 state, source buffers, and disposal lifecycle.
 
 `createParser()` does not load defaults: both the plan and exactly one Wasm
-module source are required. Parser plans use runtime metadata version 5;
+module source are required. Parser plans use runtime metadata version 6;
 regenerate plans produced by earlier Baba versions. Baba emits and accepts only
 the current parser-plan contract; it does not migrate older plans. Breaking
 changes for each release are listed in [CHANGELOG.md](CHANGELOG.md).

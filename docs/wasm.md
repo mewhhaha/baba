@@ -29,7 +29,7 @@ Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded in the Baba
 package; grammar generation does not invoke Cargo or require Rust on the user's
 machine. `parser.plan` contains generated DFA data, contextual trailing-guard
 DFAs and excluded-word tables, GPU island data when configured, and runtime
-metadata version 5. The shared strict island parser is a second, 653-byte Rust
+metadata version 6. The shared strict island parser is a second, 653-byte Rust
 Wasm module built with the standardized `simd128` extension and embedded in the
 runtime package rather than each generated bundle. `mod.ts` is a thin wrapper
 around `@mewhhaha/baba/runtime/generated-wasm`; `syntax.ts` is the typed

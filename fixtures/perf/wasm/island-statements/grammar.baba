@@ -1,0 +1,5 @@
+token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
+skip WS = /[ \t\r\n]+/ ;
+
+module = statements:statement* ;
+statement = "let" name:IDENT "=" value:IDENT ";" ;

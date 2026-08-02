@@ -4,7 +4,7 @@ use core::arch::wasm32::{i32x4_splat, v128, v128_store};
 use core::panic::PanicInfo;
 
 const WASM_ABI_VERSION: i32 = 13;
-const RUNTIME_IMPLEMENTATION_VERSION: i32 = 4;
+const RUNTIME_IMPLEMENTATION_VERSION: i32 = 5;
 const MAX_WASM_PAGES: i32 = 65_535;
 const SOURCE_ENCODING_UTF16: i32 = 1;
 const SPAN_UNIT_UTF16: i32 = 1;

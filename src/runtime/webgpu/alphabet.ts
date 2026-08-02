@@ -26,10 +26,9 @@
  *     log2(rangeCount) dependent loads on *every* codepoint.
  *   - A fully direct-mapped table over the whole codepoint space would be 4 MiB
  *     and would not fit anywhere useful.
- *   - The range list must still be exact: `feature-tour` has a class
- *     (U+2028..U+2029) that exists *only* above ASCII, and `brainfuck` /
- *     `feature-tour` have negated character classes whose "catch-all" class is
- *     live rather than dead. So the fallback is a real search, not a constant.
+ *   - The range list must still be exact because above-ASCII and negated
+ *     character classes can make the fallback class live rather than dead. So
+ *     the fallback is a real search, not a constant.
  *   - The range list is gap-free by construction (it is emitted from the same
  *     segment partition), which removes the "not found" branch from the search.
  *

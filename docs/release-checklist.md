@@ -8,7 +8,7 @@ deno task build:grammar-parser:check
 deno task check
 deno task test
 deno task test:fuzz -- --seed 12345 --max-time-ms 30000 --artifacts tmp/fuzz-artifacts
-for d in examples/brainfuck examples/feature-tour examples/funcfuck examples/thunkwasm; do (cd "$d" && deno task test); done
+for d in examples/funcfuck examples/gpu-duck; do (cd "$d" && deno task test); done
 deno task bench:compiler --json compiler-bench.json
 deno task bench:runtime --json runtime-bench.json
 deno task size:check
@@ -23,8 +23,8 @@ Manual review:
   instead of embedding Wasm byte arrays in TypeScript;
 - `fixtures/perf/large-runtime` stays within current budgets and records target
   budget deltas;
-- runtime parser plans do not include debug-only LR item metadata in production
-  artifacts;
+- runtime parser plans contain no LR state, ACTION, GOTO, production, or reducer
+  sections;
 - Wasm cold start and small-file parse numbers are present in the benchmark
   report;
 - embedded Rust `parser.wasm` bytes match `src/targets/runtime/wasm_engine_rs`;

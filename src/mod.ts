@@ -45,10 +45,6 @@ export type {
   GrammarRuleAnnotation,
   GrammarTerminalPattern,
   GrammarTokenDeclaration,
-  ParserConflictDeclarationMetadata,
-  ParserConflictResolutionMetadata,
-  ParserRuntimeMetadata,
-  PortableRuntimePlanningOptions,
   SourceSpan,
   TreeSitterExtra,
   TreeSitterPathMetadata,
@@ -56,6 +52,7 @@ export type {
   TreeSitterRuleToken,
   TreeSitterRuleWrap,
   ValidateOptions,
+  WasmRuntimePlanningOptions,
   WasmTargetOptions,
 } from "./ast.ts";
 

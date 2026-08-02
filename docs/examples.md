@@ -25,8 +25,7 @@ generated query fragments. `bootstrap` rewrites local ignored outputs through
 Baba's manifest-aware generated-file ownership path.
 
 Each example also has its own `generate`, `check`, and `test` tasks. Example
-interpreters and compilers consume the current generated parser API: `parse()`,
-`lex()`, `validate()`, cursor accessors, and lazy token tapes.
+runners consume the current island frontend and generated Wasm lexer APIs.
 
 ## Publish Policy
 
@@ -36,7 +35,7 @@ and user-owned runners:
 - `examples/README.md`;
 - each example `README.md`, `deno.json`, `grammar.baba`, and `baba.json`;
 - sample programs under `examples/*/programs`;
-- example runners such as `interpreter.ts`, `aot.ts`, and `bench.ts`.
+- example runners such as `interpreter.ts` and `demo.ts`.
 
 Consumers that want generated artifacts should regenerate them from the example
 source files.
@@ -46,7 +45,7 @@ source files.
 Each example has a local `deno.json` with a `generate` task:
 
 ```sh
-cd examples/brainfuck
+cd examples/funcfuck
 deno task generate
 deno task check
 deno task run

@@ -1,7 +1,0 @@
-// A compact source file that touches the feature-tour grammar surface.
-# Pair = (Ok, ! Err);
-@ value: Box = make(1, [2, 3], "ok");
-? ((Ok));
-? (Ok, ! Err);
-< x;
-> x;

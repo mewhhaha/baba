@@ -3,8 +3,8 @@
 Status: current metadata guide.
 
 Baba metadata is optional JSON loaded next to a grammar or passed through the
-CLI. It controls standalone parser conflict policy, Tree-sitter grammar shaping,
-and editor query fragments without changing the grammar language itself.
+CLI. It controls the island frontend, Tree-sitter grammar shaping, and editor
+query fragments without changing the grammar language itself.
 
 ## Versioning
 
@@ -141,29 +141,6 @@ See [WebGPU Frontend](webgpu-frontend.md) for runtime capacity behavior,
 performance-oriented grammar guidance, and comparison with other parallel parser
 designs.
 
-### Parser Conflict Policy
-
-The optional `parser` block controls standalone parser conflict handling:
-
-```json
-{
-  "version": 2,
-  "parser": {
-    "resolutions": [
-      { "conflict": "c_91a8...", "prefer": "shift" }
-    ],
-    "conflicts": [
-      { "conflict": "c_ef90..." }
-    ]
-  }
-}
-```
-
-`resolutions` make a conflict deterministic. The Wasm target rejects
-`parser.conflicts` declarations because its generated runtime supports only one
-action per state and terminal. Stable conflict IDs reported by diagnostics are
-required selectors for both fields.
-
 ## Tree-sitter Grammar Metadata
 
 Select `--target tree-sitter` to emit `grammar.js` and non-empty
@@ -194,11 +171,10 @@ Tree-sitter-only declarations live at the metadata root:
 }
 ```
 
-`conflicts` is Tree-sitter's named rule-group declaration; it is distinct from
-the stable conflict IDs under `parser.conflicts`. Baba token `priority` becomes
-Tree-sitter lexical precedence. Rule `wrap` and path `wrap` accept `prec`,
-`prec.left`, and `prec.right`. Path selectors use field names from the Baba
-grammar and can add a field, alias a reference, create a named alias node,
+`conflicts` is Tree-sitter's named rule-group declaration. Baba token `priority`
+becomes Tree-sitter lexical precedence. Rule `wrap` and path `wrap` accept
+`prec`, `prec.left`, and `prec.right`. Path selectors use field names from the
+Baba grammar and can add a field, alias a reference, create a named alias node,
 inline a referenced rule, or hide it. An empty path selects the rule root;
 root-level `hidden_path` emits that rule through Tree-sitter's `inline` list.
 
@@ -211,4 +187,4 @@ the analyzed grammar before `grammar.js` is emitted.
 
 Consumers should treat metadata as user-authored input. Invalid metadata should
 produce structured diagnostics, and generated targets should not depend on
-private metadata object shapes after analysis has built the portable plan.
+private metadata object shapes after target-neutral grammar analysis.

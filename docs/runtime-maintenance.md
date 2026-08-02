@@ -3,10 +3,10 @@
 Keep runtime changes in the layer that owns the behavior:
 
 - shared runtime algorithms: `src/runtime` and `src/targets/runtime`;
-- parser-plan format and validation: `src/targets/runtime/portable_plan.ts` and
-  runtime planning modules;
-- shared BNF/LR lowering helpers: `src/compiler/runtime_plan/bnf.ts` and
-  `src/compiler/runtime_plan/lr1.ts`;
+- Wasm parser-plan format and validation: `src/runtime/wasm_plan.ts` and
+  `src/targets/runtime/parser_plan_contract.ts`;
+- reference grammar/parser lowering: `src/compiler/runtime_plan` and
+  `src/targets/runtime/portable_plan.ts`;
 - Rust grammar frontend work: `src/compiler/grammar_rs`;
 - generated Wasm adapters and core ABI: `src/targets/wasm`,
   `src/targets/runtime/wasm_core_runtime.ts`, and the Rust engine under
@@ -18,7 +18,8 @@ Keep runtime changes in the layer that owns the behavior:
 - size and cold-start benchmarks: `scripts/runtime_bench.ts`;
 - package and generated-output budgets: `size-budgets.json` and
   `scripts/size_report.ts`;
-- performance fixtures: `fixtures/perf`.
+- compiler performance fixtures: `fixtures/perf`;
+- strict island runtime fixtures: `fixtures/perf/wasm`.
 
 Do not add parser-driver logic to generated files.
 

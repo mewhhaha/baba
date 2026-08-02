@@ -43,7 +43,6 @@ Deno.test("runtime planning observer measures every explicit compiler stage", ()
   const result = planPortableRuntime(
     analyzed,
     {},
-    {},
     (measurement) => {
       assert(measurement.durationMs >= 0);
       stages.push(measurement.stage);
@@ -97,7 +96,7 @@ Deno.test("portable parser plan serializes deterministically and round-trips", (
   const secondJson = serializePortableParserPlanJson(second);
   assertEquals(firstJson, secondJson);
   assertEquals(first.version, 3);
-  assertEquals(first.semantics, "baba-island-v3");
+  assertEquals(first.semantics, "baba-portable-v3");
   assertIncludes(firstJson, '"format": "baba-parser-plan"');
   assertIncludes(firstJson, '"stableId": "p_');
   assertIncludes(firstJson, '"reducers": [');

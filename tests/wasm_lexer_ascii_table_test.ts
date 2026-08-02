@@ -99,9 +99,8 @@ const GRAMMAR_PATHS: readonly string[] = [
   "fixtures/perf/parser/expression-heavy",
   "fixtures/perf/parser/normal-subset",
   "fixtures/perf/parser/tiny-dsl",
-  "examples/brainfuck",
   "examples/funcfuck",
-  "examples/thunkwasm",
+  "examples/gpu-duck",
 ];
 
 function planBytesFor(directory: string): Uint8Array | null {

@@ -4,9 +4,9 @@
  * mismatch.
  *
  *   deno task parity:webgpu-lexer
- *   deno task parity:webgpu-lexer --grammar thunkwasm
+ *   deno task parity:webgpu-lexer --grammar gpu-duck
  *
- * This runs the four shipped example grammars against their real generated
+ * This runs the shipped example grammars against their real generated
  * artifacts under `examples/<name>/generated/wasm/`, which is a gitignored local
  * build output. Run `deno task bootstrap` first on a fresh clone.
  *

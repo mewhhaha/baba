@@ -894,25 +894,34 @@ function decodeExternalRuntimeMetadata(
       `Unsupported Wasm parser plan runtime metadata version ${metadataVersion}. Regenerate the parser plan with the current Baba release.`,
     );
   }
+  const parserPlanFormat = expectString(identity[1], "parser plan format");
   const parserPlanVersion = expectNumber(identity[2], "parser plan version");
-  if (parserPlanVersion !== validated.parserPlanVersion) {
+  const parserPlanSemantics = expectString(
+    identity[3],
+    "parser plan semantics",
+  );
+  if (
+    parserPlanFormat !== PARSER_PLAN_FORMAT ||
+    parserPlanVersion !== validated.parserPlanVersion ||
+    parserPlanSemantics !== PARSER_PLAN_SEMANTICS
+  ) {
     throw new Error(
-      `Wasm parser plan version ${validated.parserPlanVersion} does not match runtime metadata version ${parserPlanVersion}.`,
+      `Wasm parser plan identity ${parserPlanFormat}/${parserPlanVersion}/${parserPlanSemantics} does not match ${PARSER_PLAN_FORMAT}/${validated.parserPlanVersion}/${PARSER_PLAN_SEMANTICS}.`,
     );
   }
   const runtimeFormat = expectString(
-    identity[5],
+    identity[4],
     "runtime implementation format",
   );
   const runtimeVersion = expectNumber(
-    identity[6],
+    identity[5],
     "runtime implementation version",
   );
   const runtimeSemantics = expectString(
-    identity[7],
+    identity[6],
     "runtime implementation semantics",
   );
-  const runtimeHash = expectString(identity[8], "runtime implementation hash");
+  const runtimeHash = expectString(identity[7], "runtime implementation hash");
   if (
     runtimeFormat !== RUNTIME_IMPLEMENTATION_METADATA.format ||
     runtimeVersion !== RUNTIME_IMPLEMENTATION_METADATA.version ||

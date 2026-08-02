@@ -1,4 +1,4 @@
-import type { BabaMetadata, Diagnostic } from "../../ast.ts";
+import type { Diagnostic } from "../../ast.ts";
 import {
   type GrammarAnalysisStatistics,
   grammarAnalysisStatistics,
@@ -31,12 +31,20 @@ import {
   type LrTable,
 } from "../../compiler/runtime_plan/lr1.ts";
 import {
-  type ContextualTrailingContextPlan,
   createPortableParserPlan,
   type PortableParserPlan,
   type PortableParserPlanMetadata,
   portableParserPlanMetadata,
 } from "./portable_plan.ts";
+import {
+  type ContextualTrailingContextPlan,
+  createRuntimeLexerPlan,
+  type LexerPlan,
+} from "./lexer_plan.ts";
+import {
+  collectRuntimeFieldSymbols,
+  type RuntimeFieldSymbol,
+} from "./field_schema.ts";
 
 export interface RuntimeParserPlan {
   analyzed: AnalyzedGrammar;
@@ -45,6 +53,16 @@ export interface RuntimeParserPlan {
   dfa: Dfa;
   portable: PortableParserPlan;
   portableMetadata: PortableParserPlanMetadata;
+  analysisStats: RuntimeParserAnalysisStatistics;
+  diagnostics: readonly Diagnostic[];
+}
+
+export interface RuntimeLexerPlan {
+  analyzed: AnalyzedGrammar;
+  bnf: BnfGrammar;
+  dfa: Dfa;
+  lexer: LexerPlan;
+  fields: readonly RuntimeFieldSymbol[];
   analysisStats: RuntimeParserAnalysisStatistics;
   diagnostics: readonly Diagnostic[];
 }
@@ -64,7 +82,7 @@ export interface RuntimeParserAnalysisStatistics {
   readonly diagnosticsSuppressed: number;
 }
 
-export interface RuntimeParserPlanningOptions {
+export interface RuntimeLexerPlanningOptions {
   lexerStateLimit?: number;
   regexSourceLengthLimit?: number;
   regexNestingLimit?: number;
@@ -75,11 +93,15 @@ export interface RuntimeParserPlanningOptions {
   regexOverlapStateLimit?: number;
   regexOverlapPairLimit?: number;
   grammarExpressionDepthLimit?: number;
+  diagnosticLimit?: number;
+}
+
+export interface RuntimeParserPlanningOptions
+  extends RuntimeLexerPlanningOptions {
   parserStateLimit?: number;
   parserItemLimit?: number;
   lrClosureWorkLimit?: number;
   parserTableEntryLimit?: number;
-  diagnosticLimit?: number;
 }
 
 export interface RuntimeParserTargetConfig {
@@ -97,6 +119,7 @@ export type RuntimePlanningStage =
   | "token-overlap"
   | "token-shadowing"
   | "unused-skips"
+  | "lexer-encoding"
   | "portable-encoding"
   | "portable-metadata";
 
@@ -113,6 +136,12 @@ export const PORTABLE_RUNTIME_TARGET_CONFIG: RuntimeParserTargetConfig = {
   backend: "portable",
   codePrefix: "PORTABLE",
   label: "portable runtime",
+};
+
+export const WASM_RUNTIME_TARGET_CONFIG: RuntimeParserTargetConfig = {
+  backend: "wasm",
+  codePrefix: "WASM",
+  label: "Wasm runtime",
 };
 
 const DEFAULT_LEXER_STATE_LIMIT = 50_000;
@@ -150,14 +179,12 @@ interface RuntimeDfaAnalysis {
 export function planPortableRuntime(
   analyzed: AnalyzedGrammar,
   options: RuntimeParserPlanningOptions = {},
-  metadata: BabaMetadata = {},
   observe?: RuntimePlanningObserver,
 ): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } {
   portableRuntimePlanInvocationCountForTesting++;
   return planRuntimeParserTarget(
     analyzed,
     options,
-    metadata,
     PORTABLE_RUNTIME_TARGET_CONFIG,
     observe,
   );
@@ -171,10 +198,192 @@ export function getPortableRuntimePlanInvocationCountForTesting(): number {
   return portableRuntimePlanInvocationCountForTesting;
 }
 
+export function planWasmLexerRuntime(
+  analyzed: AnalyzedGrammar,
+  options: RuntimeLexerPlanningOptions = {},
+  observe?: RuntimePlanningObserver,
+): RuntimeLexerPlan | { diagnostics: readonly Diagnostic[] } {
+  const config = WASM_RUNTIME_TARGET_CONFIG;
+  const optionDiagnostics = runtimeOptionsDiagnostics(options, config);
+  if (hasErrors(optionDiagnostics)) {
+    return { diagnostics: capDiagnostics(optionDiagnostics, options, config) };
+  }
+  const regexLimits = runtimeRegexLimits(options);
+  let stageStarted = 0;
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
+  const regexAnalysis = analyzeRuntimeRegexes(analyzed, regexLimits, config);
+  if (observe !== undefined) {
+    observe({
+      stage: "regex-automata",
+      durationMs: performance.now() - stageStarted,
+    });
+    stageStarted = performance.now();
+  }
+  const literalOverlapAnalysis = runtimeLiteralOverlapDiagnostics(
+    analyzed,
+    regexAnalysis.dfaByTokenId,
+    regexLimits,
+    options,
+    config,
+  );
+  if (observe !== undefined) {
+    observe({
+      stage: "literal-overlap",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
+  const diagnostics: Diagnostic[] = [
+    ...optionDiagnostics,
+    ...regexAnalysis.diagnostics,
+    ...runtimeLiteralDiagnostics(analyzed, config),
+    ...literalOverlapAnalysis.diagnostics,
+  ];
+  if (hasErrors(diagnostics)) {
+    return { diagnostics: capDiagnostics(diagnostics, options, config) };
+  }
+
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
+  const dfaAnalysis = runtimeLexerDfaDiagnostics(
+    analyzed,
+    regexAnalysis.astByTokenId,
+    options,
+    regexLimits,
+    config,
+  );
+  if (observe !== undefined) {
+    observe({
+      stage: "combined-lexer-dfa",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
+  diagnostics.push(...dfaAnalysis.diagnostics);
+  if (hasErrors(diagnostics) || dfaAnalysis.dfa === undefined) {
+    return { diagnostics: capDiagnostics(diagnostics, options, config) };
+  }
+
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
+  const bnf = lowerToBnf(analyzed);
+  if (observe !== undefined) {
+    observe({
+      stage: "bnf-lowering",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
+  diagnostics.push(
+    ...bnf.diagnostics.map((diagnostic) =>
+      retargetRuntimeDiagnostic(diagnostic, config)
+    ),
+  );
+  if (hasErrors(diagnostics)) {
+    return { diagnostics: capDiagnostics(diagnostics, options, config) };
+  }
+
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
+  const tokenOverlapAnalysis = runtimeTokenOverlapDiagnostics(
+    analyzed,
+    regexAnalysis.dfaByTokenId,
+    regexLimits,
+    options,
+    config,
+    bnf,
+    undefined,
+  );
+  if (observe !== undefined) {
+    observe({
+      stage: "token-overlap",
+      durationMs: performance.now() - stageStarted,
+    });
+    stageStarted = performance.now();
+  }
+  diagnostics.push(...tokenOverlapAnalysis.diagnostics);
+  const shadowingAnalysis = runtimeShadowedTokenDiagnostics(
+    analyzed,
+    regexAnalysis.dfaByTokenId,
+    regexLimits,
+    config,
+    bnf,
+    undefined,
+  );
+  if (observe !== undefined) {
+    observe({
+      stage: "token-shadowing",
+      durationMs: performance.now() - stageStarted,
+    });
+    stageStarted = performance.now();
+  }
+  diagnostics.push(...shadowingAnalysis.diagnostics);
+  const unusedSkipAnalysis = runtimeUnusedSkipDiagnostics(
+    analyzed,
+    regexAnalysis.dfaByTokenId,
+    regexLimits,
+    config,
+    bnf,
+  );
+  if (observe !== undefined) {
+    observe({
+      stage: "unused-skips",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
+  diagnostics.push(...unusedSkipAnalysis.diagnostics);
+  if (hasErrors(diagnostics)) {
+    return { diagnostics: capDiagnostics(diagnostics, options, config) };
+  }
+
+  if (observe !== undefined) {
+    stageStarted = performance.now();
+  }
+  const lexer = createRuntimeLexerPlan(
+    analyzed,
+    bnf,
+    dfaAnalysis.dfa,
+    regexAnalysis.trailingContextByTokenId,
+  );
+  const fields = collectRuntimeFieldSymbols(analyzed);
+  if (observe !== undefined) {
+    observe({
+      stage: "lexer-encoding",
+      durationMs: performance.now() - stageStarted,
+    });
+  }
+
+  const cappedDiagnostics = capDiagnostics(diagnostics, options, config);
+  const diagnosticsSuppressed = diagnosticSuppressedCount(diagnostics, options);
+  return {
+    analyzed,
+    bnf,
+    dfa: dfaAnalysis.dfa,
+    lexer,
+    fields,
+    analysisStats: {
+      ...regexAnalysis.stats,
+      ...dfaAnalysis.stats,
+      tokenOverlapPairsCompared: tokenOverlapAnalysis.pairsCompared,
+      literalOverlapPairsCompared: literalOverlapAnalysis.pairsCompared,
+      shadowingAnalyses: shadowingAnalysis.analyses +
+        unusedSkipAnalysis.analyses,
+      grammar: grammarAnalysisStatistics(
+        analyzed.rules,
+        analyzed.reachableRules,
+      ),
+      diagnosticsEmitted: cappedDiagnostics.length,
+      diagnosticsSuppressed,
+    },
+    diagnostics: cappedDiagnostics,
+  };
+}
+
 export function planRuntimeParserTarget(
   analyzed: AnalyzedGrammar,
   options: RuntimeParserPlanningOptions = {},
-  metadata: BabaMetadata = {},
   config: RuntimeParserTargetConfig,
   observe?: RuntimePlanningObserver,
 ): RuntimeParserPlan | { diagnostics: readonly Diagnostic[] } {
@@ -266,8 +475,6 @@ export function planRuntimeParserTarget(
     itemLimit: options.parserItemLimit,
     closureWorkLimit: options.lrClosureWorkLimit,
     tableEntryLimit: options.parserTableEntryLimit,
-    conflictGroups: metadata.parser?.conflicts,
-    conflictResolutions: metadata.parser?.resolutions,
   });
   if (observe !== undefined) {
     observe({
@@ -535,7 +742,7 @@ function runtimeTokenOverlapDiagnostics(
   options: RuntimeParserPlanningOptions,
   config: RuntimeParserTargetConfig,
   bnf: BnfGrammar,
-  lr: LrTable,
+  lr: LrTable | undefined,
 ): { diagnostics: Diagnostic[]; pairsCompared: number } {
   const tokens = analyzed.tokens.filter((token) =>
     token.kind === "skip" ||
@@ -580,9 +787,10 @@ function runtimeTokenOverlapDiagnostics(
       const shadowed = selected === left ? right : left;
       const skipOnly = left.kind === "skip" && right.kind === "skip";
       const mainTokenOnly = left.kind !== "skip" && right.kind !== "skip";
-      const tokenContext = mainTokenOnly
-        ? tokenOverlapContext(left, right, bnf, lr)
-        : { distinguishable: false };
+      let tokenContext = { distinguishable: false };
+      if (mainTokenOnly && lr !== undefined) {
+        tokenContext = tokenOverlapContext(left, right, bnf, lr);
+      }
       if (left.priority !== right.priority) {
         if (skipOnly) {
           diagnostics.push(targetDiagnostic(
@@ -625,10 +833,20 @@ function runtimeTokenOverlapDiagnostics(
               tokenLabel(selected)
             } before ${
               tokenLabel(shadowed)
-            }; the parser token remains reachable, but this input is not trivia for portable targets.`,
+            }; the parser token remains reachable, but this input is not trivia for the ${config.label}.`,
             { span: shadowed.span, related: overlapRelated(left, right) },
           ));
           continue;
+        }
+        let contextMessage =
+          "The lexer priority is the only distinction for this witness.";
+        if (lr !== undefined && tokenContext.distinguishable) {
+          contextMessage = `Contextual parse() can still select ${
+            tokenLabel(shadowed)
+          } when the LR parser state expects it separately.`;
+        } else if (lr !== undefined) {
+          contextMessage =
+            "The LR table has no state pair that expects these tokens separately; the explicit priority is the only portable distinction for this witness.";
         }
         diagnostics.push(targetDiagnostic(
           config,
@@ -638,13 +856,9 @@ function runtimeTokenOverlapDiagnostics(
             JSON.stringify(witness)
           }. Priority ${selected.priority} selects ${
             tokenLabel(selected)
-          } before ${tokenLabel(shadowed)} with standalone lex(). ${
-            tokenContext.distinguishable
-              ? `Contextual parse() can still select ${
-                tokenLabel(shadowed)
-              } when the LR parser state expects it separately.`
-              : "The LR table has no state pair that expects these tokens separately; the explicit priority is the only portable distinction for this witness."
-          }`,
+          } before ${
+            tokenLabel(shadowed)
+          } with standalone lex(). ${contextMessage}`,
           { span: shadowed.span, related: overlapRelated(left, right) },
         ));
         continue;
@@ -657,6 +871,17 @@ function runtimeTokenOverlapDiagnostics(
       } else {
         severity = "error";
       }
+      let selectionReason = "";
+      if (mainTokenOnly && lr !== undefined && tokenContext.distinguishable) {
+        selectionReason =
+          "; contextual parse() may choose another main token when the parser state expects it separately";
+      } else if (mainTokenOnly && lr !== undefined) {
+        selectionReason =
+          ". The LR table has no state pair that expects these tokens separately, so contextual parse() cannot distinguish them. Add an explicit priority if one token should win, merge the tokens, or change the grammar so each token is expected in a distinct parser context";
+      } else if (mainTokenOnly) {
+        selectionReason =
+          ". Add an explicit priority if one token should win, merge the tokens, or make their languages disjoint";
+      }
       diagnostics.push(targetDiagnostic(
         config,
         "LEXER_TOKEN_OVERLAP",
@@ -665,13 +890,7 @@ function runtimeTokenOverlapDiagnostics(
           JSON.stringify(witness)
         }. The standalone lexer would select ${tokenLabel(selected)} before ${
           tokenLabel(shadowed)
-        } for this input by declaration order${
-          mainTokenOnly && tokenContext.distinguishable
-            ? "; contextual parse() may choose another main token when the parser state expects it separately"
-            : mainTokenOnly
-            ? ". The LR table has no state pair that expects these tokens separately, so contextual parse() cannot distinguish them. Add an explicit priority if one token should win, merge the tokens, or change the grammar so each token is expected in a distinct parser context"
-            : ""
-        }.`,
+        } for this input by declaration order${selectionReason}.`,
         { span: right.span, related: overlapRelated(left, right) },
       ));
     }
@@ -692,7 +911,7 @@ function runtimeShadowedTokenDiagnostics(
   limits: RegexCompilerLimits,
   config: RuntimeParserTargetConfig,
   bnf: BnfGrammar,
-  lr: LrTable,
+  lr: LrTable | undefined,
 ): { diagnostics: Diagnostic[]; analyses: number } {
   const diagnostics: Diagnostic[] = [];
   let analyses = 0;
@@ -733,8 +952,9 @@ function runtimeShadowedTokenDiagnostics(
       throw error;
     }
     if (uncovered !== null) continue;
-    const contextual = tokenTerminal !== null &&
-      candidates.some((candidate) =>
+    let contextual = false;
+    if (lr !== undefined && tokenTerminal !== null) {
+      contextual = candidates.some((candidate) =>
         candidate.terminalId !== null &&
         terminalsAreContextuallyDistinguishable(
           tokenTerminal,
@@ -742,17 +962,23 @@ function runtimeShadowedTokenDiagnostics(
           lr,
         )
       );
+    }
+    let recoveryMessage =
+      " The standalone lexer cannot recover it from the covering candidates.";
+    if (contextual) {
+      recoveryMessage =
+        " Contextual parse() can still recover it in parser states that expect the shadowed token separately.";
+    } else if (lr !== undefined) {
+      recoveryMessage =
+        " No parser context can recover it from the covering candidates.";
+    }
     diagnostics.push(targetDiagnostic(
       config,
       "SHADOWED_TOKEN_LANGUAGE",
       "warning",
       `${
         tokenLabel(token)
-      } is completely shadowed by higher-precedence lexer candidates under standalone lex() and cannot be emitted globally.${
-        contextual
-          ? " Contextual parse() can still recover it in parser states that expect the shadowed token separately."
-          : " No parser context can recover it from the covering candidates."
-      }`,
+      } is completely shadowed by higher-precedence lexer candidates under standalone lex() and cannot be emitted globally.${recoveryMessage}`,
       {
         span: token.span,
         related: candidates.slice(0, 5).map((candidate) => ({
@@ -883,7 +1109,7 @@ function runtimeUnusedSkipDiagnostics(
       "warning",
       `${
         tokenLabel(skip)
-      } is completely shadowed by higher-precedence lexer candidates and is never emitted as portable trivia.`,
+      } is completely shadowed by higher-precedence lexer candidates and is never emitted as ${config.label} trivia.`,
       {
         span: skip.span,
         related: candidates.slice(0, 5).map((candidate) => ({

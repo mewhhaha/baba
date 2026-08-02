@@ -234,41 +234,14 @@ function parseArgs(args: string[]): Options {
           arg,
         );
         break;
-      case "--parser-state-limit":
-        options.wasm.parserStateLimit = parsePositiveIntegerArg(
-          args[++i],
-          arg,
-        );
-        break;
-      case "--parser-item-limit":
-        options.wasm.parserItemLimit = parsePositiveIntegerArg(
-          args[++i],
-          arg,
-        );
-        break;
-      case "--lr-closure-work-limit":
-        options.wasm.lrClosureWorkLimit = parsePositiveIntegerArg(
-          args[++i],
-          arg,
-        );
-        break;
-      case "--parser-table-entry-limit":
-        options.wasm.parserTableEntryLimit = parsePositiveIntegerArg(
-          args[++i],
-          arg,
-        );
-        break;
       case "--wasm-generated-byte-limit":
         options.wasm.generatedByteLimit = parsePositiveIntegerArg(
           args[++i],
           arg,
         );
         break;
-      case "--parser-stats":
-        options.wasm.reportParserStats = true;
-        break;
       case "--wasm-stats":
-        options.wasm.reportParserStats = true;
+        options.wasm.reportStats = true;
         break;
       case "--metadata":
       case "--meta": {
@@ -339,20 +312,15 @@ Options:
   --wasm-dir    Wasm target output directory. Defaults to wasm
   --preserve-trivia  Preserve skip matches as trivia tokens
   --discard-trivia   Omit skip matches from generated lexer output
-  --lexer-state-limit  Maximum portable runtime lexer DFA state count
+  --lexer-state-limit  Maximum Wasm runtime lexer DFA state count
   --regex-ast-node-limit       Maximum parsed regex AST node count
   --regex-bounded-repeat-limit  Maximum regex bounded-repeat expansion
   --regex-nfa-state-limit       Maximum regex NFA state count
   --regex-dfa-state-limit       Maximum regex DFA state count
   --regex-overlap-state-limit   Maximum overlap-analysis product states
   --grammar-expression-depth-limit  Maximum nested grammar expression depth
-  --parser-state-limit  Maximum portable runtime LR state count
-  --parser-item-limit   Maximum total portable runtime LR item count
-  --lr-closure-work-limit  Maximum portable runtime LR closure work units
-  --parser-table-entry-limit  Maximum portable runtime ACTION/GOTO entry count
   --wasm-generated-byte-limit  Maximum generated Wasm bytes
-  --parser-stats  Emit Wasm runtime parser planning statistics
-  --wasm-stats   Emit Wasm runtime parser planning statistics
+  --wasm-stats   Emit Wasm lexer/island planning statistics
   --metadata    JSON metadata for parser policy, Tree-sitter shaping, and queries
   --meta        Alias for --metadata
   --diagnostic-format  Diagnostic output format: text or json. Defaults to text

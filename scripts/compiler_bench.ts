@@ -10,8 +10,8 @@ import { DEFAULT_REGEX_NESTING_LIMIT } from "../src/compiler/regex/limits.ts";
 import { parseGrammarSource } from "../src/grammar.ts";
 import { parseMetadata } from "../src/metadata.ts";
 import {
-  planPortableRuntime,
-  type RuntimeParserPlan,
+  planWasmLexerRuntime,
+  type RuntimeLexerPlan,
   type RuntimePlanningMeasurement,
   type RuntimePlanningStage,
 } from "../src/targets/runtime/plan.ts";
@@ -55,10 +55,8 @@ interface CompilerFixtureReport {
   readonly plan: {
     readonly lexerStates: number;
     readonly lexerTransitions: number;
-    readonly parserStates: number;
-    readonly parserActions: number;
-    readonly parserGotos: number;
-    readonly productions: number;
+    readonly islandStates: number;
+    readonly islandTransitions: number;
   };
   readonly output: {
     readonly files: number;
@@ -97,7 +95,8 @@ interface PipelineRun {
     readonly tokens: number;
     readonly literals: number;
   };
-  readonly runtimePlan: RuntimeParserPlan;
+  readonly runtimePlan: RuntimeLexerPlan;
+  readonly wasmPlan: WasmPlan;
   readonly bundle: GeneratedBundle;
 }
 
@@ -108,12 +107,10 @@ const compilerStages: readonly CompilerStage[] = [
   "literal-overlap",
   "combined-lexer-dfa",
   "bnf-lowering",
-  "lr-table",
   "token-overlap",
   "token-shadowing",
   "unused-skips",
-  "portable-encoding",
-  "portable-metadata",
+  "lexer-encoding",
   "runtime-plan-total",
   "wasm-plan",
   "bundle-emission",
@@ -201,6 +198,13 @@ async function benchFixture(
     }
     steadyMs[stage] = distribution(stageSamples);
   }
+  let islandStates = 0;
+  let islandTransitions = 0;
+  if (finalRun.wasmPlan.gpuFrontend !== undefined) {
+    islandStates = finalRun.wasmPlan.gpuFrontend.statistics.islandStates;
+    islandTransitions = finalRun.wasmPlan.gpuFrontend.statistics
+      .islandTransitions;
+  }
   return {
     name,
     path: fixturePath,
@@ -213,10 +217,8 @@ async function benchFixture(
       lexerStates: finalRun.runtimePlan.dfa.states.length,
       lexerTransitions:
         finalRun.runtimePlan.analysisStats.combinedLexerDfaTransitions,
-      parserStates: finalRun.runtimePlan.lr.states.length,
-      parserActions: countTableEntries(finalRun.runtimePlan.lr.actions),
-      parserGotos: countTableEntries(finalRun.runtimePlan.lr.gotos),
-      productions: finalRun.runtimePlan.bnf.productions.length,
+      islandStates,
+      islandTransitions,
     },
     output: {
       files: finalRun.bundle.files.length,
@@ -262,10 +264,9 @@ function runPipeline(
 
   const planningMeasurements: RuntimePlanningMeasurement[] = [];
   stageStarted = performance.now();
-  const runtimePlanResult = planPortableRuntime(
+  const runtimePlanResult = planWasmLexerRuntime(
     analyzed,
     runtimeOptions,
-    metadata,
     (measurement) => planningMeasurements.push(measurement),
   );
   stageMs["runtime-plan-total"] = performance.now() - stageStarted;
@@ -307,6 +308,7 @@ function runPipeline(
       literals: analyzed.literals.length,
     },
     runtimePlan: runtimePlanResult,
+    wasmPlan: wasmPlanResult,
     bundle,
   };
 }
@@ -320,9 +322,9 @@ function emptyStageRecord(): Record<CompilerStage, number> {
 }
 
 function isRuntimePlan(
-  result: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
-): result is RuntimeParserPlan {
-  return "portable" in result;
+  result: RuntimeLexerPlan | { diagnostics: readonly Diagnostic[] },
+): result is RuntimeLexerPlan {
+  return "lexer" in result;
 }
 
 function isWasmPlan(
@@ -350,16 +352,6 @@ function throwOnDiagnostics(
         .join("\n")
     }`,
   );
-}
-
-function countTableEntries<T>(
-  rows: ReadonlyMap<number, ReadonlyMap<number, T>>,
-): number {
-  let count = 0;
-  for (const row of rows.values()) {
-    count += row.size;
-  }
-  return count;
 }
 
 function bundleBytes(bundle: GeneratedBundle): number {
@@ -490,7 +482,7 @@ function renderTextReport(report: CompilerBenchReport): string {
         formatDistribution(fixture.steadyMs["bundle-emission"])
       }`,
       `  output: ${fixture.output.files} files, ${fixture.output.bytes} bytes`,
-      `  plan: ${fixture.plan.lexerStates} lexer states / ${fixture.plan.lexerTransitions} transitions, ${fixture.plan.parserStates} parser states / ${fixture.plan.parserActions} actions / ${fixture.plan.parserGotos} gotos`,
+      `  plan: ${fixture.plan.lexerStates} lexer states / ${fixture.plan.lexerTransitions} transitions, ${fixture.plan.islandStates} island states / ${fixture.plan.islandTransitions} transitions`,
     );
   }
   return lines.join("\n");
@@ -502,12 +494,10 @@ function runtimePlanningStages(): readonly RuntimePlanningStage[] {
     "literal-overlap",
     "combined-lexer-dfa",
     "bnf-lowering",
-    "lr-table",
     "token-overlap",
     "token-shadowing",
     "unused-skips",
-    "portable-encoding",
-    "portable-metadata",
+    "lexer-encoding",
   ];
 }
 

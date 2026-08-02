@@ -1,5 +1,5 @@
-import { createParser } from "./generated/wasm/mod.ts";
 import {
+  CpuFrontend,
   type GpuFrontendResult,
   WebGpuRuntime,
 } from "@mewhhaha/baba/runtime/webgpu";
@@ -9,15 +9,10 @@ const source = await Deno.readTextFile(options.sourcePath);
 const plan = await Deno.readFile("generated/wasm/parser.plan");
 
 if (options.cpu) {
-  const parser = createParser({
-    bytes: await Deno.readFile("generated/wasm/parser.wasm"),
-    plan,
-  });
-  try {
-    printParserResult(parser.parse(source), "CPU lexer + Wasm parser");
-  } finally {
-    parser.dispose();
-  }
+  printGpuFrontendResult(
+    CpuFrontend.create(plan).ingest(source),
+    "CPU island frontend",
+  );
 } else {
   const runtime = await WebGpuRuntime.create({
     powerPreference: "high-performance",
@@ -49,21 +44,6 @@ function printGpuFrontendResult(
   const edgeCount = result.program.edges.length / 4;
   console.log(
     `${backend} accepted ${tokenCount} tokens into ${nodeCount} nodes and ${edgeCount} edges.`,
-  );
-}
-
-function printParserResult(
-  result: ReturnType<ReturnType<typeof createParser>["parse"]>,
-  backend: string,
-): void {
-  if (!result.ok) {
-    const diagnostics = result.diagnostics.map((diagnostic) =>
-      `${diagnostic.code} at ${diagnostic.span.start}: ${diagnostic.message}`
-    ).join("\n");
-    throw new Error(`${backend} failed:\n${diagnostics}`);
-  }
-  console.log(
-    `${backend} accepted a root with ${result.cursor.children().length} children.`,
   );
 }
 

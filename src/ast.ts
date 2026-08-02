@@ -10,7 +10,7 @@ export interface SourceSpan {
   column: number;
 }
 
-/** Optional metadata for generation, query emission, and parser conflict policy. */
+/** Optional metadata for generation and query emission. */
 export interface BabaMetadata {
   /** Metadata schema version. Omit to use the current schema; when present, must be 2. */
   version?: 2;
@@ -28,8 +28,6 @@ export interface BabaMetadata {
   queries?: TreeSitterQueriesMetadata;
   /** Per-rule Tree-sitter shaping metadata. */
   rules?: Record<string, TreeSitterRuleMetadata>;
-  /** Standalone parser runtime conflict policy. */
-  parser?: ParserRuntimeMetadata;
   /** Opt-in deterministic island frontend compiled into parser.plan. */
   gpuFrontend?: GpuFrontendMetadata;
 }
@@ -279,8 +277,8 @@ export interface GrammarExpressionOperator {
 /** Output target selected for a generation run. */
 export type GenerateTarget = "wasm" | "tree-sitter";
 
-/** Shared options for targets backed by the portable standalone runtime. */
-export interface PortableRuntimePlanningOptions {
+/** Planning options for the standalone Wasm runtime. */
+export interface WasmRuntimePlanningOptions {
   /** Preserve skip-token matches as trivia tokens. Defaults to true. */
   preserveTrivia?: boolean;
   /** Maximum generated lexer DFA state count. Defaults to 50,000. */
@@ -303,50 +301,18 @@ export interface PortableRuntimePlanningOptions {
   regexOverlapPairLimit?: number;
   /** Maximum nested grammar expression depth during grammar analysis. Defaults to 1,024. */
   grammarExpressionDepthLimit?: number;
-  /** Maximum canonical LR(1) state count. Defaults to 20,000. */
-  parserStateLimit?: number;
-  /** Maximum total LR(1) item count across all states. Defaults to unlimited. */
-  parserItemLimit?: number;
-  /** Maximum LR(1) closure expansion work units. Defaults to unlimited. */
-  lrClosureWorkLimit?: number;
-  /** Maximum total ACTION and GOTO table entries. Defaults to unlimited. */
-  parserTableEntryLimit?: number;
   /** Maximum runtime-planning diagnostics returned before a summary is appended. Defaults to unlimited. */
   diagnosticLimit?: number;
 }
 
 /** Options for the standalone Wasm lexer/parser target. */
-export interface WasmTargetOptions extends PortableRuntimePlanningOptions {
+export interface WasmTargetOptions extends WasmRuntimePlanningOptions {
   /** Relative directory inside the generated bundle. Defaults to `wasm`. */
   directory?: string;
   /** Maximum generated Wasm adapter/source bytes. Defaults to unlimited. */
   generatedByteLimit?: number;
-  /** Emit an informational parser planning statistics diagnostic. */
-  reportParserStats?: boolean;
-}
-
-/** Conflict policy for standalone parser runtimes. */
-export interface ParserRuntimeMetadata {
-  /** LR conflicts that may be explored by standalone parser runtimes. */
-  conflicts?: ParserConflictDeclarationMetadata[];
-  /** Deterministic conflict resolutions applied while building LR tables. */
-  resolutions?: ParserConflictResolutionMetadata[];
-}
-
-/** One LR parser conflict declaration that enables bounded branch search. */
-export interface ParserConflictDeclarationMetadata {
-  /** Stable conflict ID reported by parser conflict diagnostics. */
-  readonly conflict: string;
-}
-
-/** One deterministic LR parser conflict resolution. */
-export interface ParserConflictResolutionMetadata {
-  /** Stable conflict ID reported by parser conflict diagnostics. */
-  conflict: string;
-  /** Which LR action kind should win. */
-  prefer: "shift" | "reduce";
-  /** Exact rule name or exact expression text to select when more than one reduce action exists. */
-  reduce?: string;
+  /** Emit informational Wasm planning statistics. */
+  reportStats?: boolean;
 }
 
 /** Options for the stable high-level `generate` API. */

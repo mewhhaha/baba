@@ -1,5 +1,0 @@
-.cache/
-.helix/runtime/grammars/
-generated/parser.so
-generated/src/
-*.wasm

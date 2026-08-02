@@ -1074,7 +1074,7 @@ function pathToFileUrl(path: string): URL {
 }
 
 function parseArgs(args: readonly string[]): CliOptions {
-  let fixturesRoot = "fixtures/perf";
+  let fixturesRoot = "fixtures/perf/wasm";
   const fixtureNames: string[] = [];
   let jsonPath: string | undefined;
   let jsonStdout = false;

@@ -4,7 +4,7 @@
   "largestPublishFileBytes": 260000,
   "generatedWasmLoaderSourceBytes": 130000,
   "runtimeBudgets": {
-    "large-runtime": {
+    "island-statements": {
       "wasmBytesMax": {
         "currentBudget": 250000,
         "targetBudget": 50000

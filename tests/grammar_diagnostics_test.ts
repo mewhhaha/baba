@@ -14,6 +14,13 @@ Deno.test("metadata rejects external scanner declarations", () => {
   );
 });
 
+Deno.test("metadata rejects retired LR conflict policy", () => {
+  assertThrowsIncludes(
+    () => parseMetadata('{"version":2,"parser":{"conflicts":[]}}'),
+    "Unknown metadata key 'parser'",
+  );
+});
+
 Deno.test("grammar diagnostics are stable and keep related spans", () => {
   const source = `
     grammar Bad

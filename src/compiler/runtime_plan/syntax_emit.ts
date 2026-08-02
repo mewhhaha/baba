@@ -1,9 +1,16 @@
 import type { AnalyzedGrammar } from "../ir.ts";
 import { collectRuleFieldSchemas } from "../../targets/runtime/field_schema.ts";
 import { generatedSourceBanner } from "../../targets/runtime/provenance.ts";
-import type { PortableParserPlan } from "../../targets/runtime/portable_plan.ts";
 
-export function emitSyntax(analyzed: AnalyzedGrammar): string {
+export interface SyntaxPlanIdentity {
+  readonly version: number;
+  readonly semantics: string;
+}
+
+export function emitSyntax(
+  analyzed: AnalyzedGrammar,
+  planIdentity?: SyntaxPlanIdentity,
+): string {
   const namedTokens = analyzed.tokens.filter((token) =>
     token.kind === "skip" ||
     analyzed.reachableTokens.has(token.id)
@@ -24,6 +31,12 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
     throw new Error(
       `Could not find a generated field schema for root rule ${analyzed.rootRule}.`,
     );
+  }
+  let parserPlanVersion: number | undefined;
+  let parserPlanSemantics: string | undefined;
+  if (planIdentity !== undefined) {
+    parserPlanVersion = planIdentity.version;
+    parserPlanSemantics = planIdentity.semantics;
   }
   return emitSyntaxModel({
     mainTokenKinds: mainTokens.map((token) => token.name),
@@ -48,27 +61,8 @@ export function emitSyntax(analyzed: AnalyzedGrammar): string {
       }),
     })),
     rootNodeType: rootSchema.nodeType,
-    parserPlanVersion: undefined,
-    parserPlanSemantics: undefined,
-  });
-}
-
-export function emitSyntaxFromPortablePlan(
-  plan: PortableParserPlan,
-): string {
-  const namedTokens = plan.symbols.tokens.filter((token) => token.reachable);
-  const mainTokens = namedTokens.filter((token) => token.kind !== "skip");
-  const triviaTokens = namedTokens.filter((token) => token.kind === "skip");
-  const literals = plan.symbols.literals.filter((literal) => literal.reachable);
-  return emitSyntaxModel({
-    mainTokenKinds: mainTokens.map((token) => token.name),
-    triviaTokenKinds: triviaTokens.map((token) => token.name),
-    literalKinds: literals.map((literal) => literal.value),
-    ruleNames: plan.cst.rules.map((rule) => rule.ruleName),
-    fieldSchemas: plan.cst.rules,
-    rootNodeType: plan.cst.rootNodeType,
-    parserPlanVersion: plan.version,
-    parserPlanSemantics: plan.semantics,
+    parserPlanVersion,
+    parserPlanSemantics,
   });
 }
 

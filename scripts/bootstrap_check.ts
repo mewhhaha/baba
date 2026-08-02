@@ -20,22 +20,6 @@ interface ExampleConfig {
 
 const EXAMPLES: readonly ExampleConfig[] = [
   {
-    dir: "examples/brainfuck",
-    name: "brainfuck",
-    rootRule: "module",
-    metadataPath: "baba.json",
-  },
-  {
-    dir: "examples/feature-tour",
-    name: "feature_tour",
-    rootRule: "module",
-    metadataPath: "baba.json",
-    allowedDiagnosticCodes: [
-      "PORTABLE_LEXER_TOKEN_OVERLAP",
-      "PORTABLE_SHADOWED_TOKEN_LANGUAGE",
-    ],
-  },
-  {
     dir: "examples/funcfuck",
     name: "funcfuck",
     rootRule: "module",
@@ -44,12 +28,6 @@ const EXAMPLES: readonly ExampleConfig[] = [
   {
     dir: "examples/gpu-duck",
     name: "gpu_duck",
-    rootRule: "module",
-    metadataPath: "baba.json",
-  },
-  {
-    dir: "examples/thunkwasm",
-    name: "thunkwasm",
     rootRule: "module",
     metadataPath: "baba.json",
   },

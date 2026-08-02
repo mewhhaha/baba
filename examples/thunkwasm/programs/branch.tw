@@ -1,2 +1,0 @@
-fn main x =
-  if likely x < 10 then x + 1 else x * 100;

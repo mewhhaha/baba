@@ -1,8 +1,4 @@
-import type {
-  Diagnostic,
-  ParserConflictDeclarationMetadata,
-  ParserConflictResolutionMetadata,
-} from "../../ast.ts";
+import type { Diagnostic } from "../../ast.ts";
 import type {
   BnfGrammar,
   BnfProduction,
@@ -98,8 +94,6 @@ export function buildCanonicalLr1Table(
     itemLimit?: number;
     closureWorkLimit?: number;
     tableEntryLimit?: number;
-    conflictGroups?: readonly ParserConflictDeclarationMetadata[];
-    conflictResolutions?: readonly ParserConflictResolutionMetadata[];
   },
 ): LrTable {
   const analysis = analyzeFirst(grammar);
@@ -109,7 +103,6 @@ export function buildCanonicalLr1Table(
     construction.states,
     construction.transitions,
     construction.transitionEdges,
-    options,
   );
 
   const diagnostics: Diagnostic[] = [
@@ -264,22 +257,10 @@ function buildActionGotoTable(
   states: readonly LrState[],
   transitions: ReadonlyMap<string, number>,
   transitionEdges: readonly LrTransitionEdge[],
-  options: {
-    conflictGroups?: readonly ParserConflictDeclarationMetadata[];
-    conflictResolutions?: readonly ParserConflictResolutionMetadata[];
-  },
 ): ActionGotoTable {
   const diagnostics: Diagnostic[] = [];
   const actions = new Map<number, Map<number, LrActionSet>>();
   const gotos = new Map<number, Map<number, number>>();
-  const conflictResolutions = options.conflictResolutions ?? [];
-  diagnostics.push(
-    ...duplicateConflictResolutionDiagnostics(conflictResolutions),
-  );
-  const conflictResolutionUseCounts = new Array(conflictResolutions.length)
-    .fill(0);
-  const conflictGroups = options.conflictGroups ?? [];
-  const conflictGroupUseCounts = new Array(conflictGroups.length).fill(0);
 
   const setAction = (
     state: LrState,
@@ -298,24 +279,6 @@ function buildActionGotoTable(
     }
     if (existing.some((candidate) => sameAction(candidate, action))) return;
     const nextActions = [...existing, action];
-    const resolved = resolveConflict(
-      grammar,
-      state,
-      terminal,
-      nextActions,
-      conflictResolutions,
-      conflictGroups,
-      (index) => {
-        conflictResolutionUseCounts[index]++;
-      },
-      (index) => {
-        conflictGroupUseCounts[index]++;
-      },
-    );
-    if (resolved) {
-      row.set(terminal, resolved);
-      return;
-    }
     diagnostics.push(
       conflictDiagnostic(
         grammar,
@@ -362,14 +325,6 @@ function buildActionGotoTable(
       }
     }
   }
-
-  diagnostics.push(
-    ...unusedConflictResolutionDiagnostics(
-      conflictResolutions,
-      conflictResolutionUseCounts,
-    ),
-    ...unusedConflictGroupDiagnostics(conflictGroups, conflictGroupUseCounts),
-  );
 
   return { actions, gotos, diagnostics };
 }
@@ -599,7 +554,7 @@ function conflictDiagnostic(
       context.reductionProductions,
     ),
     ...conflictWitnessLines(grammar, state, terminal, transitionEdges),
-    ...metadataSuggestionLines(grammar, context, isShiftReduce),
+    ...conflictDetailLines(grammar, context, isShiftReduce),
   ].filter((line, index, lines) => line !== "" || lines[index - 1] !== "");
   const primaryOrigin = origins[0];
   return {
@@ -633,47 +588,20 @@ function conflictWitnessLines(
   ];
 }
 
-function metadataSuggestionLines(
+function conflictDetailLines(
   grammar: BnfGrammar,
   context: ConflictContext,
   isShiftReduce: boolean,
 ): string[] {
-  const rules = uniqueRuleNames(context.origins);
-  const terminal = terminalMetadataValue(grammar, context.terminal);
   const stableConflictId = conflictId(grammar, context);
-  const resolution = {
-    rules,
-    on: terminal,
-    prefer: isShiftReduce ? "shift" : "reduce",
-    ...(!isShiftReduce
-      ? { reduce: reduceCandidates(context)[0] ?? rules[0] ?? "" }
-      : {}),
-  };
-  const lines = [
-    "Resolve this in metadata.parser.resolutions with an entry like:",
-    indentJson(resolution),
-    "Stable conflict selector for metadata v2:",
-    indentJson({ conflict: stableConflictId }),
-  ];
+  const lines = [`Conflict ID: ${stableConflictId}`];
   if (isShiftReduce) {
     lines.push(
-      'Use prefer: "reduce" instead if the reduction interpretation should win.',
+      "Rewrite the grammar so this lookahead has one shift or reduce interpretation.",
     );
   } else {
-    const candidates = reduceCandidates(context);
-    if (candidates.length > 0) {
-      lines.push(
-        `Candidate reduce values: ${
-          candidates.map((candidate) => JSON.stringify(candidate)).join(", ")
-        }`,
-      );
-    }
-  }
-
-  if (isShiftReduce && rules.length > 1) {
     lines.push(
-      "If both interpretations are valid, allow branch search with metadata.parser.conflicts:",
-      indentJson([rules]),
+      "Rewrite the grammar so this lookahead selects one production.",
     );
   }
   return lines;
@@ -788,110 +716,6 @@ function compareNumberArrays(
   return left.length - right.length;
 }
 
-function resolveConflict(
-  grammar: BnfGrammar,
-  state: LrState,
-  terminal: number,
-  actions: readonly LrAction[],
-  resolutions: readonly ParserConflictResolutionMetadata[],
-  conflictGroups: readonly ParserConflictDeclarationMetadata[],
-  markResolutionUsed: (index: number) => void,
-  markConflictGroupUsed: (index: number) => void,
-): LrActionSet | undefined {
-  const context = conflictContext(grammar, state, terminal, actions);
-  for (const [index, resolution] of resolutions.entries()) {
-    if (!resolutionMatches(grammar, context, resolution)) continue;
-    const selected = selectResolvedAction(context, resolution);
-    if (selected) {
-      markResolutionUsed(index);
-      return [selected];
-    }
-  }
-  for (const [index, group] of conflictGroups.entries()) {
-    if (conflictDeclarationMatches(grammar, context, group)) {
-      markConflictGroupUsed(index);
-      return sortActions(actions);
-    }
-  }
-  return undefined;
-}
-
-function unusedConflictResolutionDiagnostics(
-  resolutions: readonly ParserConflictResolutionMetadata[],
-  useCounts: readonly number[],
-): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  for (const [index, resolution] of resolutions.entries()) {
-    if ((useCounts[index] ?? 0) > 0) continue;
-    diagnostics.push({
-      code: "RUNTIME_PARSER_CONFLICT_METADATA",
-      severity: "error",
-      backend: "runtime",
-      message:
-        `metadata.parser.resolutions[${index}].conflict references unknown conflict ID ${
-          JSON.stringify(resolution.conflict)
-        }. Regenerate the conflict diagnostic and copy the current stable conflict ID, or remove this stale resolution.`,
-    });
-  }
-  return diagnostics;
-}
-
-function unusedConflictGroupDiagnostics(
-  conflictGroups: readonly ParserConflictDeclarationMetadata[],
-  useCounts: readonly number[],
-): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  for (const [index, group] of conflictGroups.entries()) {
-    if ((useCounts[index] ?? 0) > 0) continue;
-    diagnostics.push({
-      code: "RUNTIME_PARSER_CONFLICT_METADATA",
-      severity: "error",
-      backend: "runtime",
-      message:
-        `metadata.parser.conflicts[${index}] did not match any LR conflict. Regenerate the conflict diagnostic and update this branch declaration, or remove the stale declaration ${
-          JSON.stringify(group)
-        }.`,
-    });
-  }
-  return diagnostics;
-}
-
-function duplicateConflictResolutionDiagnostics(
-  resolutions: readonly ParserConflictResolutionMetadata[],
-): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  const firstByConflict = new Map<string, {
-    index: number;
-    prefer: ParserConflictResolutionMetadata["prefer"];
-    reduce?: string;
-  }>();
-  for (const [index, resolution] of resolutions.entries()) {
-    const previous = firstByConflict.get(resolution.conflict);
-    if (!previous) {
-      firstByConflict.set(resolution.conflict, {
-        index,
-        prefer: resolution.prefer,
-        reduce: resolution.reduce,
-      });
-      continue;
-    }
-    const contradictory = previous.prefer !== resolution.prefer ||
-      previous.reduce !== resolution.reduce;
-    diagnostics.push({
-      code: "RUNTIME_PARSER_CONFLICT_METADATA",
-      severity: "error",
-      backend: "runtime",
-      message:
-        `metadata.parser.resolutions[${index}].conflict duplicates metadata.parser.resolutions[${previous.index}].conflict for ${
-          JSON.stringify(resolution.conflict)
-        }${
-          contradictory ? " with a contradictory resolution" : ""
-        }. Keep exactly one resolution for each stable conflict ID.`,
-    });
-  }
-  return diagnostics;
-}
-
 function conflictId(grammar: BnfGrammar, context: ConflictContext): string {
   const payload = {
     semantics: "baba-lr-conflict-v1",
@@ -1002,58 +826,6 @@ function conflictContext(
   };
 }
 
-function resolutionMatches(
-  grammar: BnfGrammar,
-  context: ConflictContext,
-  resolution: ParserConflictResolutionMetadata,
-): boolean {
-  return resolution.conflict === conflictId(grammar, context);
-}
-
-function conflictDeclarationMatches(
-  grammar: BnfGrammar,
-  context: ConflictContext,
-  declaration: ParserConflictDeclarationMetadata,
-): boolean {
-  return declaration.conflict === conflictId(grammar, context);
-}
-
-function originSelectorMatches(
-  origin: ProductionOrigin,
-  selector: string,
-): boolean {
-  return origin.ruleName === selector || origin.description === selector;
-}
-
-function selectResolvedAction(
-  context: ConflictContext,
-  resolution: ParserConflictResolutionMetadata,
-): LrAction | undefined {
-  if (resolution.prefer === "shift") {
-    return context.actions.find((action) => action.kind === "shift");
-  }
-  const reductions = context.actions.filter((
-    action,
-  ): action is { kind: "reduce"; production: number } =>
-    action.kind === "reduce"
-  );
-  if (reductions.length <= 1 || resolution.reduce === undefined) {
-    return reductions[0];
-  }
-  const reduce = resolution.reduce;
-  return reductions.find((action) => {
-    const production = context.reductionProductions.find((candidate) =>
-      candidate.id === action.production
-    );
-    const origin = production?.origin;
-    return origin ? originSelectorMatches(origin, reduce) : false;
-  });
-}
-
-function sortActions(actions: readonly LrAction[]): LrActionSet {
-  return [...actions].sort(compareActions);
-}
-
 function uniqueOrigins(
   productions: readonly BnfProduction[],
 ): ProductionOrigin[] {
@@ -1086,45 +858,8 @@ function originDescriptions(
   return origins.map((origin) => `${label}:\n  ${origin.description}`);
 }
 
-function uniqueRuleNames(origins: readonly ProductionOrigin[]): string[] {
-  const names: string[] = [];
-  for (const origin of origins) {
-    if (names.includes(origin.ruleName)) continue;
-    names.push(origin.ruleName);
-  }
-  return names;
-}
-
-function terminalMetadataValue(grammar: BnfGrammar, terminal: number): string {
-  const display = grammar.terminals[terminal]?.display ?? String(terminal);
-  if (!display.startsWith('"')) return display;
-  try {
-    const parsed = JSON.parse(display);
-    return typeof parsed === "string" ? parsed : display;
-  } catch {
-    return display;
-  }
-}
-
 function nonterminalDisplay(grammar: BnfGrammar, nonterminal: number): string {
   return grammar.nonterminals[nonterminal]?.name ?? String(nonterminal);
-}
-
-function reduceCandidates(context: ConflictContext): string[] {
-  const candidates: string[] = [];
-  for (const production of context.reductionProductions) {
-    const origin = production.origin;
-    if (!origin) continue;
-    const candidate = origin.description;
-    if (candidates.includes(candidate)) continue;
-    candidates.push(candidate);
-  }
-  return candidates;
-}
-
-function indentJson(value: unknown): string {
-  return JSON.stringify(value, null, 2).split("\n").map((line) => `  ${line}`)
-    .join("\n");
 }
 
 function productionDisplayFallback(
@@ -1154,25 +889,6 @@ function sameAction(left: LrAction, right: LrAction): boolean {
     return left.production === right.production;
   }
   return true;
-}
-
-function compareActions(left: LrAction, right: LrAction): number {
-  const leftRank = actionRank(left);
-  const rightRank = actionRank(right);
-  if (leftRank !== rightRank) return leftRank - rightRank;
-  if (left.kind === "shift" && right.kind === "shift") {
-    return left.state - right.state;
-  }
-  if (left.kind === "reduce" && right.kind === "reduce") {
-    return left.production - right.production;
-  }
-  return 0;
-}
-
-function actionRank(action: LrAction): number {
-  if (action.kind === "shift") return 0;
-  if (action.kind === "reduce") return 1;
-  return 2;
 }
 
 function transitionKey(state: number, symbol: BnfSymbol): string {

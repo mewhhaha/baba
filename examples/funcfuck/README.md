@@ -59,15 +59,12 @@ deno task generate
 That command creates:
 
 - `generated/.baba-manifest.json`: generated-file ownership manifest.
-- `generated/wasm/*`: generated Wasm-backed lexer/parser artifacts.
+- `generated/wasm/*`: generated Wasm lexer and island-frontend artifacts.
 
-Step 4: write `interpreter.ts`, importing the generated parser:
+Step 4: run `interpreter.ts` against the shared CPU frontend:
 
-The interpreter loads `generated/wasm/parser.wasm` and
-`generated/wasm/parser.plan` through the generated Wasm wrapper.
-
-The interpreter walks generated cursors to compile JavaScript functions,
-resolves named definitions lazily, and evaluates each `emit` statement.
+The runner loads `generated/wasm/parser.plan`, executes the same island
+transducers used by the GPU backend, and reports the compact token/node/edge IR.
 
 Step 5: run the sample programs.
 
@@ -77,15 +74,7 @@ deno task fanout
 deno task window
 ```
 
-Expected output:
-
-```text
-[1, 2, 3, 9, 16, 25, 6]
-[21, 12, 12]
-[8, 15, 16, 39, 78]
-```
-
-Validate the generated runtime and interpreter:
+Validate the generated plan and runner:
 
 ```sh
 deno task check

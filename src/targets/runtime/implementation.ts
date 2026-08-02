@@ -6,39 +6,39 @@ export interface RuntimeImplementationSourceMetadata {
 
 export interface RuntimeImplementationMetadata {
   readonly format: "baba-runtime-implementation";
-  readonly version: 4;
-  readonly semantics: "baba-runtime-island-v4";
+  readonly version: 5;
+  readonly semantics: "baba-runtime-island-v5";
   readonly hash: string;
   readonly sources: readonly RuntimeImplementationSourceMetadata[];
 }
 
 export const RUNTIME_IMPLEMENTATION_FORMAT =
   "baba-runtime-implementation" as const;
-export const RUNTIME_IMPLEMENTATION_VERSION = 4 as const;
+export const RUNTIME_IMPLEMENTATION_VERSION = 5 as const;
 export const RUNTIME_IMPLEMENTATION_SEMANTICS =
-  "baba-runtime-island-v4" as const;
+  "baba-runtime-island-v5" as const;
 
 export const RUNTIME_IMPLEMENTATION_SOURCES:
   readonly RuntimeImplementationSourceMetadata[] = [
     {
       path: "src/runtime/compact_plan_binary.ts",
       role: "compact-runtime-metadata-codec",
-      hash: "fnv1a64:0af0371c04f3672a",
+      hash: "fnv1a64:73106fa1e6dec290",
     },
     {
       path: "src/targets/runtime/parser_plan_contract.ts",
       role: "parser-plan-contract",
-      hash: "fnv1a64:e7ebb45f57314620",
+      hash: "fnv1a64:f949fc7319a6ab2f",
     },
     {
       path: "src/runtime/wasm_plan.ts",
       role: "combined-wasm-parser-plan-format",
-      hash: "fnv1a64:36d120fda37a4902",
+      hash: "fnv1a64:3c21ae3a5140dcb7",
     },
     {
       path: "src/runtime/generated_wasm.ts",
       role: "generated-wasm-parser-loader",
-      hash: "fnv1a64:94fe3de8993e6c10",
+      hash: "fnv1a64:5f172231b147c4fb",
     },
     {
       path: "src/runtime/island_parser.ts",
@@ -93,12 +93,12 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/targets/runtime/wasm_engine_rs/src/lib.rs",
       role: "wasm-core-runtime-rust-source",
-      hash: "fnv1a64:fed348c42145d9fe",
+      hash: "fnv1a64:66d17fdb549c6885",
     },
     {
       path: "src/targets/runtime/wasm_core_runtime_bytes.ts",
       role: "wasm-core-runtime-embedded-bytes",
-      hash: "fnv1a64:b1b869c653d7cda5",
+      hash: "fnv1a64:4852a108687cca6b",
     },
     {
       path: "src/targets/runtime/island_parser_rs/Cargo.toml",
@@ -127,7 +127,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:505696a538c387dd" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:c5fac58b632d4b46" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

@@ -13,7 +13,15 @@ import type {
   LrActionSet,
   LrTable,
 } from "../../compiler/runtime_plan/lr1.ts";
-import { collectRuleFieldSchemas } from "./field_schema.ts";
+import {
+  collectRuleFieldSchemas,
+  collectRuntimeFieldSymbols,
+} from "./field_schema.ts";
+import {
+  type ContextualTrailingContextPlan,
+  createRuntimeLexerPlan,
+  type LexerPlan,
+} from "./lexer_plan.ts";
 import {
   canonicalValue,
   fnv1a64Bytes,
@@ -27,27 +35,32 @@ import {
   stringProperty,
   visitJson,
 } from "../../compiler/portable_plan_shared.ts";
-import {
-  PARSER_PLAN_FORMAT,
-  PARSER_PLAN_SEMANTICS,
-  PARSER_PLAN_VERSION,
-} from "./parser_plan_contract.ts";
+export type {
+  ContextualTrailingContextPlan,
+  LexerPlan,
+  LexerSpecificationPlan,
+  LexerStatePlan,
+  LexerTransitionPlan,
+} from "./lexer_plan.ts";
+
+export const PORTABLE_PARSER_PLAN_FORMAT = "baba-parser-plan" as const;
+export const PORTABLE_PARSER_PLAN_VERSION = 3 as const;
+export const PORTABLE_PARSER_PLAN_SEMANTICS = "baba-portable-v3" as const;
 
 const PORTABLE_REDUCER_SEMANTICS = "baba-reducer-v1";
 const PORTABLE_DIAGNOSTIC_SEMANTICS = "baba-runtime-diagnostics-v1";
 const PORTABLE_SOURCE_SPAN_UNIT = "utf16-code-units";
-const PORTABLE_UNICODE_SEMANTICS = "unicode-code-point-v1";
 
 /**
- * Portable parser-plan v2 is a runtime data contract, not a package-versioned
+ * Portable parser-plan v3 is a runtime data contract, not a package-versioned
  * implementation detail. New runtime semantics require a new plan version or a
  * separately versioned subsection; additive debug-only metadata may be ignored
  * by older tools after validation succeeds.
  */
 export interface PortableParserPlan {
-  readonly format: typeof PARSER_PLAN_FORMAT;
-  readonly version: typeof PARSER_PLAN_VERSION;
-  readonly semantics: typeof PARSER_PLAN_SEMANTICS;
+  readonly format: typeof PORTABLE_PARSER_PLAN_FORMAT;
+  readonly version: typeof PORTABLE_PARSER_PLAN_VERSION;
+  readonly semantics: typeof PORTABLE_PARSER_PLAN_SEMANTICS;
   readonly rootRule: number;
   readonly symbols: SymbolPlan;
   readonly lexer: LexerPlan;
@@ -119,59 +132,6 @@ export interface FieldSymbolPlan {
   readonly name: string;
 }
 
-export interface LexerPlan {
-  readonly unicodeSemantics: "unicode-code-point-v1";
-  readonly startState: number;
-  readonly specifications: readonly LexerSpecificationPlan[];
-  readonly states: readonly LexerStatePlan[];
-}
-
-export type LexerSpecificationPlan =
-  | {
-    readonly id: number;
-    readonly type: "named";
-    readonly tokenId: number;
-    readonly terminalId: number | null;
-    readonly channel: "main" | "trivia";
-    readonly priority: number;
-    readonly order: number;
-    readonly literal: false;
-    readonly contextual: boolean;
-    readonly trailingContext: ContextualTrailingContextPlan | undefined;
-  }
-  | {
-    readonly id: number;
-    readonly type: "literal";
-    readonly literalId: number;
-    readonly terminalId: number;
-    readonly channel: "main";
-    readonly priority: number;
-    readonly order: number;
-    readonly literal: true;
-    readonly contextual: false;
-    readonly trailingContext: undefined;
-  };
-
-export interface ContextualTrailingContextPlan {
-  readonly followedBy: Dfa | undefined;
-  readonly followedByEof: boolean;
-  readonly notFollowedBy: Dfa | undefined;
-  readonly excludedWords: readonly string[];
-}
-
-export interface LexerStatePlan {
-  readonly id: number;
-  readonly transitions: readonly LexerTransitionPlan[];
-  readonly accepts: readonly number[];
-  readonly selectedAccept: number | null;
-}
-
-export interface LexerTransitionPlan {
-  readonly start: number;
-  readonly end: number;
-  readonly target: number;
-}
-
 export interface LrParserPlan {
   readonly startState: number;
   readonly eofTerminal: number;
@@ -182,7 +142,6 @@ export interface LrParserPlan {
   readonly productions: readonly ProductionPlan[];
   readonly expectedTerminals: readonly ExpectedTerminalRowPlan[];
   readonly statistics: LrParserStatisticsPlan;
-  readonly conflictPolicy: ConflictPolicyPlan;
 }
 
 export interface LrStatePlan {
@@ -246,10 +205,6 @@ export interface LrParserStatisticsPlan {
   readonly actionEntries: number;
   readonly gotoEntries: number;
   readonly tableEntries: number;
-}
-
-export interface ConflictPolicyPlan {
-  readonly kind: "deterministic-or-declared-branching";
 }
 
 export type PortableReducerPlan =
@@ -335,7 +290,7 @@ export function createPortableParserPlan(
   const rootCstRule = cstRules.find((rule) =>
     rule.ruleId === analyzed.rootRule
   );
-  const fields = fieldSymbols(cstRules);
+  const fields = collectRuntimeFieldSymbols(analyzed);
   const productions = bnf.productions.map((production) =>
     productionPlan(bnf, production)
   );
@@ -345,9 +300,9 @@ export function createPortableParserPlan(
   const expectedTerminals = expectedTerminalRows(lr.actions);
   const parserStatistics = { ...lr.stats };
   const planWithoutStatistics = {
-    format: PARSER_PLAN_FORMAT,
-    version: PARSER_PLAN_VERSION,
-    semantics: PARSER_PLAN_SEMANTICS,
+    format: PORTABLE_PARSER_PLAN_FORMAT,
+    version: PORTABLE_PARSER_PLAN_VERSION,
+    semantics: PORTABLE_PARSER_PLAN_SEMANTICS,
     rootRule: analyzed.rootRule,
     symbols: {
       grammarName: analyzed.name,
@@ -379,25 +334,12 @@ export function createPortableParserPlan(
       })),
       fields,
     },
-    lexer: {
-      unicodeSemantics: PORTABLE_UNICODE_SEMANTICS,
-      startState: dfa.start,
-      specifications: lexerSpecifications(
-        analyzed,
-        bnf,
-        trailingContextByTokenId,
-      ),
-      states: dfa.states.map((state) => ({
-        id: state.id,
-        transitions: state.transitions.map((transition) => ({
-          start: transition.start,
-          end: transition.end,
-          target: transition.target,
-        })),
-        accepts: [...state.accepts],
-        selectedAccept: state.selectedAccept,
-      })),
-    },
+    lexer: createRuntimeLexerPlan(
+      analyzed,
+      bnf,
+      dfa,
+      trailingContextByTokenId,
+    ),
     parser: {
       startState: 0,
       eofTerminal: bnf.eofTerminal,
@@ -415,7 +357,6 @@ export function createPortableParserPlan(
       productions,
       expectedTerminals,
       statistics: parserStatistics,
-      conflictPolicy: { kind: "deterministic-or-declared-branching" },
     },
     reducerSemantics: PORTABLE_REDUCER_SEMANTICS,
     reducers,
@@ -472,64 +413,6 @@ export function portableParserPlanMetadata(
     semantics: plan.semantics,
     hash: hashPortableParserPlan(plan),
   };
-}
-
-function lexerSpecifications(
-  analyzed: AnalyzedGrammar,
-  bnf: BnfGrammar,
-  trailingContextByTokenId: ReadonlyMap<
-    number,
-    ContextualTrailingContextPlan
-  >,
-): LexerSpecificationPlan[] {
-  const specs: LexerSpecificationPlan[] = [];
-  for (const token of analyzed.tokens) {
-    if (
-      token.kind !== "skip" &&
-      !analyzed.reachableTokens.has(token.id)
-    ) {
-      continue;
-    }
-    let trailingContext: ContextualTrailingContextPlan | undefined;
-    if (token.trailingContext !== undefined) {
-      trailingContext = trailingContextByTokenId.get(token.id);
-      if (trailingContext === undefined) {
-        throw new Error(
-          `Missing compiled trailing context for token '${token.name}' (${token.id}).`,
-        );
-      }
-    }
-    specs.push({
-      id: specs.length,
-      type: "named",
-      tokenId: token.id,
-      terminalId: token.kind !== "skip"
-        ? terminalIdForToken(bnf, token.id)
-        : null,
-      channel: token.kind === "skip" ? "trivia" : "main",
-      priority: token.priority,
-      order: token.declarationOrder,
-      literal: false,
-      contextual: token.kind === "contextual",
-      trailingContext,
-    });
-  }
-  for (const literal of analyzed.literals) {
-    if (!analyzed.reachableLiterals.has(literal.id)) continue;
-    specs.push({
-      id: specs.length,
-      type: "literal",
-      literalId: literal.id,
-      terminalId: terminalIdForLiteral(bnf, literal.id),
-      channel: "main",
-      priority: 0,
-      order: literal.sourceOrder,
-      literal: true,
-      contextual: false,
-      trailingContext: undefined,
-    });
-  }
-  return specs;
 }
 
 function actionRows(
@@ -690,26 +573,6 @@ function actionValue(action: LrActionPlan): number {
   if (action.kind === "shift") return action.state;
   if (action.kind === "reduce") return action.production;
   return 0;
-}
-
-function fieldSymbols(
-  cstRules: ReturnType<typeof collectRuleFieldSchemas>,
-): FieldSymbolPlan[] {
-  return [
-    ...new Set(
-      cstRules.flatMap((rule) => rule.fields.map((field) => field.name)),
-    ),
-  ].sort().map((name, id) => ({ id, name }));
-}
-
-function terminalIdForToken(bnf: BnfGrammar, tokenId: number): number | null {
-  return bnf.terminals.find((terminal) => terminal.tokenId === tokenId)?.id ??
-    null;
-}
-
-function terminalIdForLiteral(bnf: BnfGrammar, literalId: number): number {
-  return bnf.terminals.find((terminal) => terminal.literalId === literalId)
-    ?.id ?? -1;
 }
 
 function lookaheadBitset(
@@ -918,14 +781,14 @@ export function validatePortableParserPlan(plan: unknown): Diagnostic[] {
       fail("$", "plan must be an object.");
       return diagnostics;
     }
-    if (plan.format !== PARSER_PLAN_FORMAT) {
-      fail("$.format", `expected ${PARSER_PLAN_FORMAT}.`);
+    if (plan.format !== PORTABLE_PARSER_PLAN_FORMAT) {
+      fail("$.format", `expected ${PORTABLE_PARSER_PLAN_FORMAT}.`);
     }
-    if (plan.version !== PARSER_PLAN_VERSION) {
-      fail("$.version", `expected ${PARSER_PLAN_VERSION}.`);
+    if (plan.version !== PORTABLE_PARSER_PLAN_VERSION) {
+      fail("$.version", `expected ${PORTABLE_PARSER_PLAN_VERSION}.`);
     }
-    if (plan.semantics !== PARSER_PLAN_SEMANTICS) {
-      fail("$.semantics", `expected ${PARSER_PLAN_SEMANTICS}.`);
+    if (plan.semantics !== PORTABLE_PARSER_PLAN_SEMANTICS) {
+      fail("$.semantics", `expected ${PORTABLE_PARSER_PLAN_SEMANTICS}.`);
     }
     if (plan.reducerSemantics !== PORTABLE_REDUCER_SEMANTICS) {
       fail("$.reducerSemantics", `expected ${PORTABLE_REDUCER_SEMANTICS}.`);

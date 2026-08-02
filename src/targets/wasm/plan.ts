@@ -16,10 +16,6 @@ import {
   PARSER_DIAGNOSTIC_SCHEMAS,
 } from "../runtime/diagnostic_codes.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
-import type {
-  PortableParserPlan,
-  PortableParserPlanMetadata,
-} from "../runtime/portable_plan.ts";
 import {
   WASM_ABI_VERSION,
   WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
@@ -36,11 +32,11 @@ import {
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
 } from "../runtime/wasm_abi.ts";
-import { emitSyntaxFromPortablePlan } from "../../compiler/runtime_plan/syntax_emit.ts";
+import { emitSyntax } from "../../compiler/runtime_plan/syntax_emit.ts";
 import {
-  planPortableRuntime,
-  type RuntimeParserPlan,
-  type RuntimeParserPlanningOptions,
+  planWasmLexerRuntime,
+  type RuntimeLexerPlan,
+  type RuntimeLexerPlanningOptions,
 } from "../runtime/plan.ts";
 import { generatedSourceBanner } from "../runtime/provenance.ts";
 import {
@@ -62,7 +58,6 @@ import {
 } from "../../compiler/gpu_frontend.ts";
 
 export interface WasmRuntimeMetadata {
-  readonly portablePlan: PortableParserPlanMetadata;
   readonly runtimeImplementation: typeof RUNTIME_IMPLEMENTATION_METADATA;
   readonly defaultPreserveTrivia: boolean;
   readonly ruleNames: readonly string[];
@@ -109,8 +104,7 @@ export type WasmRuntimeTerminal =
 export interface WasmPlan {
   analyzed: AnalyzedGrammar;
   dfa: Dfa;
-  portable: PortableParserPlan;
-  portableMetadata: PortableParserPlanMetadata;
+  syntaxSource: string;
   runtimeMetadata: WasmRuntimeMetadata;
   gpuFrontend: GpuFrontendPlan | undefined;
   wasm: WasmModuleImage;
@@ -125,20 +119,21 @@ export function planWasmTarget(
   analyzed: AnalyzedGrammar,
   options: WasmTargetOptions = {},
   metadata: BabaMetadata = {},
-  runtimePlanInput?: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
+  runtimePlanInput?: RuntimeLexerPlan | { diagnostics: readonly Diagnostic[] },
 ): WasmPlan | { diagnostics: readonly Diagnostic[] } {
   const diagnostics = [...wasmOptionsDiagnostics(options)];
-  const runtimePlan = runtimePlanInput ??
-    planPortableRuntime(
+  let runtimePlan = runtimePlanInput;
+  if (runtimePlan === undefined) {
+    runtimePlan = planWasmLexerRuntime(
       analyzed,
       runtimePlanningOptions(options),
-      metadata,
     );
-  if (!runtimePlanInput) diagnostics.push(...runtimePlan.diagnostics);
+    diagnostics.push(...runtimePlan.diagnostics);
+  }
   if (hasErrors(diagnostics) || !isRuntimePlan(runtimePlan)) {
     return { diagnostics };
   }
-  const portableDfa = runtimePlan.dfa;
+  const runtimeDfa = runtimePlan.dfa;
   let preserveTrivia = true;
   if (options.preserveTrivia !== undefined) {
     preserveTrivia = options.preserveTrivia;
@@ -147,7 +142,13 @@ export function planWasmTarget(
   if (metadata.gpuFrontend !== undefined) {
     const compiledGpuFrontend = compileGpuFrontendPlan(
       analyzed,
-      runtimePlan.portable,
+      {
+        lexer: runtimePlan.lexer,
+        symbols: {
+          terminals: runtimePlan.bnf.terminals,
+          fields: runtimePlan.fields,
+        },
+      },
       metadata.gpuFrontend,
     );
     if ("diagnostics" in compiledGpuFrontend) {
@@ -221,19 +222,21 @@ export function planWasmTarget(
     gpuFrontend,
   );
   const wasm = emitWasmModule(
-    portableDfa,
+    runtimeDfa,
     wasmCoreRuntimeMetadata(runtimePlan),
   );
   const parserPlanBytes = encodeCombinedWasmParserPlan(
     wasm.planBytes,
     compactWasmRuntimeMetadata(runtimeMetadata),
   );
+  const syntaxSource = emitSyntax(analyzed, {
+    version: PARSER_PLAN_VERSION,
+    semantics: PARSER_PLAN_SEMANTICS,
+  });
   const generatedBytes = wasmGeneratedByteLengths(
-    analyzed,
-    runtimePlan,
+    syntaxSource,
     wasm,
     parserPlanBytes,
-    options,
   );
   if (
     options.generatedByteLimit !== undefined &&
@@ -248,22 +251,21 @@ export function planWasmTarget(
     });
   }
   if (hasErrors(diagnostics)) return { diagnostics };
-  if (options.reportParserStats) {
+  if (options.reportStats) {
     diagnostics.push(
-      parserStatsDiagnostic(analyzed, runtimePlan, generatedBytes),
+      wasmStatsDiagnostic(analyzed, runtimePlan, gpuFrontend, generatedBytes),
     );
   }
   return {
     analyzed,
-    dfa: portableDfa,
-    portable: runtimePlan.portable,
-    portableMetadata: runtimePlan.portableMetadata,
+    dfa: runtimeDfa,
+    syntaxSource,
     runtimeMetadata,
     gpuFrontend,
     wasm,
     parserPlanBytes,
-    directory: options.directory ?? "wasm",
-    preserveTrivia: options.preserveTrivia ?? true,
+    directory: wasmOutputDirectory(options),
+    preserveTrivia,
     generatedBytes: generatedBytes.total,
     diagnostics,
   };
@@ -308,7 +310,7 @@ export function emitWasmTarget(
     },
     {
       path: `${dir}/syntax.ts`,
-      content: emitSyntaxFromPortablePlan(plan.portable),
+      content: plan.syntaxSource,
       kind: "source",
       encoding: "utf-8",
     },
@@ -697,7 +699,7 @@ export async function createParserAsync(
 
 function createWasmRuntimeMetadata(
   analyzed: AnalyzedGrammar,
-  runtime: RuntimeParserPlan,
+  runtime: RuntimeLexerPlan,
   preserveTrivia: boolean,
   gpuFrontend: GpuFrontendPlan | undefined,
 ): WasmRuntimeMetadata {
@@ -760,10 +762,10 @@ function createWasmRuntimeMetadata(
       literalId: terminal.literalId,
     });
   }
-  const acceptCandidates = runtime.portable.lexer.states.map((state) => {
+  const acceptCandidates = runtime.lexer.states.map((state) => {
     return [...state.accepts].sort((left, right) => {
-      const leftSpec = runtime.portable.lexer.specifications[left];
-      const rightSpec = runtime.portable.lexer.specifications[right];
+      const leftSpec = runtime.lexer.specifications[left];
+      const rightSpec = runtime.lexer.specifications[right];
       if (leftSpec === undefined || rightSpec === undefined) {
         return left - right;
       }
@@ -790,16 +792,15 @@ function createWasmRuntimeMetadata(
         left - right;
     });
   });
-  const fieldNames = runtime.portable.symbols.fields.map((field, index) => {
+  const fieldNames = runtime.fields.map((field, index) => {
     if (field.id !== index) {
       throw new Error(
-        `Portable field '${field.name}' has id ${field.id}, expected ${index}.`,
+        `Wasm field '${field.name}' has id ${field.id}, expected ${index}.`,
       );
     }
     return field.name;
   });
   return {
-    portablePlan: runtime.portableMetadata,
     runtimeImplementation: RUNTIME_IMPLEMENTATION_METADATA,
     defaultPreserveTrivia: preserveTrivia,
     ruleNames: analyzed.rules.map((rule) => rule.name),
@@ -823,10 +824,9 @@ function compactWasmRuntimeMetadata(
   return {
     m: [
       parserPlanRuntimeMetadataVersion,
-      metadata.portablePlan.format,
-      metadata.portablePlan.version,
-      metadata.portablePlan.semantics,
-      metadata.portablePlan.hash,
+      PARSER_PLAN_FORMAT,
+      PARSER_PLAN_VERSION,
+      PARSER_PLAN_SEMANTICS,
       metadata.runtimeImplementation.format,
       metadata.runtimeImplementation.version,
       metadata.runtimeImplementation.semantics,
@@ -888,7 +888,7 @@ function compactWasmRuntimeMetadata(
 }
 
 function wasmCoreRuntimeMetadata(
-  runtime: RuntimeParserPlan,
+  runtime: RuntimeLexerPlan,
 ): {
   readonly acceptCandidates: readonly (readonly number[])[];
   readonly specs: readonly {
@@ -899,10 +899,10 @@ function wasmCoreRuntimeMetadata(
     readonly excludedWords: readonly string[];
   }[];
 } {
-  const acceptCandidates = runtime.portable.lexer.states.map((state) => {
+  const acceptCandidates = runtime.lexer.states.map((state) => {
     return [...state.accepts].sort((left, right) => {
-      const leftSpec = runtime.portable.lexer.specifications[left];
-      const rightSpec = runtime.portable.lexer.specifications[right];
+      const leftSpec = runtime.lexer.specifications[left];
+      const rightSpec = runtime.lexer.specifications[right];
       if (leftSpec === undefined || rightSpec === undefined) {
         return left - right;
       }
@@ -931,7 +931,7 @@ function wasmCoreRuntimeMetadata(
   });
   return {
     acceptCandidates,
-    specs: runtime.portable.lexer.specifications.map((spec) => {
+    specs: runtime.lexer.specifications.map((spec) => {
       const trailingContext = spec.trailingContext;
       if (trailingContext === undefined) {
         return {
@@ -955,7 +955,7 @@ function wasmCoreRuntimeMetadata(
 
 function runtimePlanningOptions(
   options: WasmTargetOptions,
-): RuntimeParserPlanningOptions {
+): RuntimeLexerPlanningOptions {
   return {
     lexerStateLimit: options.lexerStateLimit,
     regexSourceLengthLimit: options.regexSourceLengthLimit,
@@ -967,10 +967,6 @@ function runtimePlanningOptions(
     regexOverlapStateLimit: options.regexOverlapStateLimit,
     regexOverlapPairLimit: options.regexOverlapPairLimit,
     grammarExpressionDepthLimit: options.grammarExpressionDepthLimit,
-    parserStateLimit: options.parserStateLimit,
-    parserItemLimit: options.parserItemLimit,
-    lrClosureWorkLimit: options.lrClosureWorkLimit,
-    parserTableEntryLimit: options.parserTableEntryLimit,
     diagnosticLimit: options.diagnosticLimit,
   };
 }
@@ -978,7 +974,7 @@ function runtimePlanningOptions(
 export { runtimePlanningOptions as wasmRuntimePlanningOptions };
 
 function wasmOptionsDiagnostics(options: WasmTargetOptions): Diagnostic[] {
-  const directory = options.directory ?? "wasm";
+  const directory = wasmOutputDirectory(options);
   const diagnostics: Diagnostic[] = [];
   if (!isSafeRelativeDirectory(directory)) {
     diagnostics.push({
@@ -1012,18 +1008,15 @@ interface WasmGeneratedByteLengths {
 }
 
 function wasmGeneratedByteLengths(
-  _analyzed: AnalyzedGrammar,
-  runtimePlan: RuntimeParserPlan,
+  syntaxSource: string,
   wasm: WasmModuleImage,
   parserPlanBytes: Uint8Array,
-  options: WasmTargetOptions,
 ): WasmGeneratedByteLengths {
-  void options;
   const source = byteLength([
     wasmAbiDescriptorSource(),
     wasmRuntimeManifestSource(),
     wasmModSource(),
-    emitSyntaxFromPortablePlan(runtimePlan.portable),
+    syntaxSource,
   ].join(""));
   return {
     total: source + wasm.bytes.length + parserPlanBytes.length,
@@ -1033,28 +1026,50 @@ function wasmGeneratedByteLengths(
   };
 }
 
-function parserStatsDiagnostic(
+function wasmStatsDiagnostic(
   analyzed: AnalyzedGrammar,
-  runtimePlan: RuntimeParserPlan,
+  runtimePlan: RuntimeLexerPlan,
+  gpuFrontend: GpuFrontendPlan | undefined,
   generatedBytes: WasmGeneratedByteLengths,
 ): Diagnostic {
-  const portableStats = runtimePlan.portable.statistics;
+  let lexerAcceptCandidates = 0;
+  let lexerMaxAcceptCandidates = 0;
+  let lexerAmbiguousAcceptStates = 0;
+  for (const state of runtimePlan.lexer.states) {
+    lexerAcceptCandidates += state.accepts.length;
+    lexerMaxAcceptCandidates = Math.max(
+      lexerMaxAcceptCandidates,
+      state.accepts.length,
+    );
+    if (state.accepts.length > 1) lexerAmbiguousAcceptStates++;
+  }
+  let islandStates = 0;
+  let islandTransitions = 0;
+  if (gpuFrontend !== undefined) {
+    islandStates = gpuFrontend.statistics.islandStates;
+    islandTransitions = gpuFrontend.statistics.islandTransitions;
+  }
+  let averageAcceptCandidates = 0;
+  if (runtimePlan.lexer.states.length > 0) {
+    averageAcceptCandidates = lexerAcceptCandidates /
+      runtimePlan.lexer.states.length;
+  }
   return {
-    code: "WASM_PARSER_STATS",
+    code: "WASM_PLAN_STATS",
     severity: "information",
     backend: "wasm",
     message: [
-      "Wasm parser planning statistics:",
+      "Wasm lexer/island planning statistics:",
       `rules: ${analyzed.reachableRules.size}`,
-      `BNF productions: ${runtimePlan.bnf.productions.length}`,
-      `lexer states: ${portableStats.lexerStates}`,
-      `lexer accept candidates: ${portableStats.lexerAcceptCandidates}`,
+      `lexer states: ${runtimePlan.lexer.states.length}`,
+      `lexer accept candidates: ${lexerAcceptCandidates}`,
       `lexer average accept candidates/state: ${
-        (portableStats.lexerAverageAcceptCandidatesPerStateMilli / 1000)
-          .toFixed(2)
+        averageAcceptCandidates.toFixed(2)
       }`,
-      `lexer max accept candidates/state: ${portableStats.lexerMaxAcceptCandidatesPerState}`,
-      `lexer ambiguous accept states: ${portableStats.lexerAmbiguousAcceptStates}`,
+      `lexer max accept candidates/state: ${lexerMaxAcceptCandidates}`,
+      `lexer ambiguous accept states: ${lexerAmbiguousAcceptStates}`,
+      `island states: ${islandStates}`,
+      `island transitions: ${islandTransitions}`,
       `regex AST nodes: ${runtimePlan.analysisStats.regexAstNodes}`,
       `regex NFA states: ${runtimePlan.analysisStats.regexNfaStates}`,
       `regex DFA states: ${runtimePlan.analysisStats.regexDfaStates}`,
@@ -1079,6 +1094,11 @@ function byteLength(source: string): number {
   return new TextEncoder().encode(source).length;
 }
 
+function wasmOutputDirectory(options: WasmTargetOptions): string {
+  if (options.directory !== undefined) return options.directory;
+  return "wasm";
+}
+
 function isSafeRelativeDirectory(directory: string): boolean {
   if (
     directory.length === 0 ||
@@ -1095,9 +1115,9 @@ function isSafeRelativeDirectory(directory: string): boolean {
 }
 
 function isRuntimePlan(
-  value: RuntimeParserPlan | { diagnostics: readonly Diagnostic[] },
-): value is RuntimeParserPlan {
-  return "bnf" in value;
+  value: RuntimeLexerPlan | { diagnostics: readonly Diagnostic[] },
+): value is RuntimeLexerPlan {
+  return "lexer" in value;
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {

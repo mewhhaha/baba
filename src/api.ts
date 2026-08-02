@@ -24,8 +24,7 @@ import {
   wasmRuntimePlanningOptions,
 } from "./targets/wasm/plan.ts";
 import {
-  planPortableRuntime,
-  type RuntimeParserPlanningOptions,
+  type RuntimeLexerPlanningOptions,
   runtimeRegexLimits,
 } from "./targets/runtime/plan.ts";
 import { emitTreeSitterTarget } from "./targets/tree_sitter_grammar.ts";
@@ -90,19 +89,12 @@ export function validateGrammar(
   if (hasErrors(diagnostics)) return diagnostics;
 
   if (targets.includes("wasm")) {
-    const runtimePlan = planPortableRuntime(
-      analyzed,
-      runtimeOptions,
-      metadata,
-    );
-    diagnostics.push(...runtimePlan.diagnostics);
     try {
       diagnostics.push(
         ...planWasmTarget(
           analyzed,
           options.wasm,
           metadata,
-          runtimePlan,
         ).diagnostics,
       );
     } catch (error) {
@@ -158,23 +150,12 @@ export function compile(
   );
   diagnostics.push(...analyzed.diagnostics);
   let wasmPlan: WasmPlan | { diagnostics: readonly Diagnostic[] } | undefined;
-  let runtimePlan: ReturnType<typeof planPortableRuntime> | undefined;
-  if (targets.includes("wasm")) {
-    runtimePlan = planPortableRuntime(
-      analyzed,
-      runtimeOptions,
-      metadata,
-    );
-    diagnostics.push(...runtimePlan.diagnostics);
-  }
-
-  if (!hasErrors(diagnostics) && runtimePlan !== undefined) {
+  if (!hasErrors(diagnostics) && targets.includes("wasm")) {
     try {
       wasmPlan = planWasmTarget(
         analyzed,
         options.wasm,
         metadata,
-        runtimePlan,
       );
     } catch (error) {
       diagnostics.push({
@@ -245,7 +226,7 @@ export { BabaError, formatDiagnostic };
 
 function sharedRuntimePlanningOptions(
   options: CompileOptions | ValidateOptions,
-): RuntimeParserPlanningOptions {
+): RuntimeLexerPlanningOptions {
   if (options.wasm !== undefined) {
     return wasmRuntimePlanningOptions(options.wasm);
   }
@@ -320,7 +301,7 @@ function selectedGrammarName(
 
 interface PlannedGrammar {
   readonly analyzed: AnalyzedGrammar;
-  readonly runtimeOptions: RuntimeParserPlanningOptions;
+  readonly runtimeOptions: RuntimeLexerPlanningOptions;
   readonly metadata: BabaMetadata;
 }
 
@@ -345,7 +326,7 @@ function analyzeForPlanning(
 }
 
 function regexNestingLimit(
-  options: RuntimeParserPlanningOptions,
+  options: RuntimeLexerPlanningOptions,
 ): number {
   if (options.regexNestingLimit !== undefined) {
     return options.regexNestingLimit;

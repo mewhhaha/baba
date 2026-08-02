@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Wasm compilation no longer constructs or consumes the portable LR plan. Its
+  public limits, statistics, benchmark stages, metadata identity, and generated
+  syntax now describe only DFA lexing and strict island parsing.
+- Wasm island plan 4, runtime metadata 6, and runtime implementation 5 identify
+  the LR-free compiler/runtime boundary; regenerate generated artifacts.
+- Removed the unused public LR conflict-policy metadata and branching/resolution
+  machinery. The internal portable reference plan is now deterministic-only v3.
+- Removed the Brainfuck, feature-tour, and ThunkWasm examples because their
+  grammars are outside the strict island subset and their Wasm parser commands
+  could no longer run.
+
 ## 8.0.0
 
 ### Changed

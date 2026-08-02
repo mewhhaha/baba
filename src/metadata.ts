@@ -6,9 +6,6 @@ import type {
   GpuFrontendMetadata,
   GpuFrontendRuleSemanticMetadata,
   GpuFrontendSemanticMetadata,
-  ParserConflictDeclarationMetadata,
-  ParserConflictResolutionMetadata,
-  ParserRuntimeMetadata,
   TreeSitterCaptureQueryEntry,
   TreeSitterCaptureQueryMetadata,
   TreeSitterCaptureSelectorMetadata,
@@ -58,7 +55,6 @@ function parseMetadataObject(
     "inline",
     "queries",
     "rules",
-    "parser",
     "gpuFrontend",
   ]);
 
@@ -107,12 +103,6 @@ function parseMetadataObject(
       );
     }
     metadata.rules = rules;
-  }
-  if (hasKey(object, "parser")) {
-    metadata.parser = parseParserRuntimeMetadata(
-      object.parser,
-      `${path}.parser`,
-    );
   }
   if (hasKey(object, "gpuFrontend")) {
     metadata.gpuFrontend = parseGpuFrontendMetadata(
@@ -343,67 +333,6 @@ function parseTreeSitterExtra(value: unknown, path: string): TreeSitterExtra {
     return { kind, name: expectString(object.name, `${path}.name`) };
   }
   throwMetadataShape(`Invalid ${path}.kind '${kind}'`);
-}
-
-function parseParserRuntimeMetadata(
-  value: unknown,
-  path: string,
-): ParserRuntimeMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["conflicts", "resolutions"]);
-  const metadata: ParserRuntimeMetadata = {};
-  if (hasKey(object, "conflicts")) {
-    metadata.conflicts = expectArray(object.conflicts, `${path}.conflicts`)
-      .map((conflict, index) =>
-        parseParserConflictDeclaration(
-          conflict,
-          `${path}.conflicts[${index}]`,
-        )
-      );
-  }
-  if (hasKey(object, "resolutions")) {
-    metadata.resolutions = expectArray(
-      object.resolutions,
-      `${path}.resolutions`,
-    ).map((resolution, index) =>
-      parseParserConflictResolution(
-        resolution,
-        `${path}.resolutions[${index}]`,
-      )
-    );
-  }
-  return metadata;
-}
-
-function parseParserConflictDeclaration(
-  value: unknown,
-  path: string,
-): ParserConflictDeclarationMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["conflict"]);
-  return { conflict: expectString(object.conflict, `${path}.conflict`) };
-}
-
-function parseParserConflictResolution(
-  value: unknown,
-  path: string,
-): ParserConflictResolutionMetadata {
-  const object = expectObject(value, path);
-  assertKnownKeys(object, path, ["conflict", "prefer", "reduce"]);
-  const prefer = expectString(object.prefer, `${path}.prefer`);
-  if (prefer !== "shift" && prefer !== "reduce") {
-    throwMetadataShape(
-      `Invalid ${path}.prefer '${prefer}', expected 'shift' or 'reduce'`,
-    );
-  }
-  const resolution: ParserConflictResolutionMetadata = {
-    conflict: expectString(object.conflict, `${path}.conflict`),
-    prefer,
-  };
-  if (hasKey(object, "reduce")) {
-    resolution.reduce = expectString(object.reduce, `${path}.reduce`);
-  }
-  return resolution;
 }
 
 function parseQueriesMetadata(

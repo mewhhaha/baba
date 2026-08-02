@@ -2,7 +2,7 @@
  * CPU (Wasm `lex_all`) vs GPU (WebGPU kernel) lexing throughput.
  *
  *   deno task bench:webgpu-lexer
- *   deno task bench:webgpu-lexer --grammar thunkwasm
+ *   deno task bench:webgpu-lexer --grammar gpu-duck
  *   deno task bench:webgpu-lexer --runs 7 --json out.json
  *   deno task bench:webgpu-lexer --allow-fallback-adapter
  *

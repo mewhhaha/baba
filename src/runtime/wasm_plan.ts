@@ -16,23 +16,23 @@ const CORE_HEADER_MAGIC = 0;
 const CORE_HEADER_FORMAT_VERSION = 1;
 const CORE_HEADER_PARSER_PLAN_VERSION = 2;
 const CORE_HEADER_DFA_STATE_COUNT = 3;
-const CORE_HEADER_PARSER_STATE_COUNT = 4;
+const CORE_HEADER_RETIRED_PARSER_STATE_COUNT = 4;
 const CORE_HEADER_FAST_SPECS = 5;
 const CORE_HEADER_ASCII_TRANSITIONS = 6;
 const CORE_HEADER_TRANSITION_ROWS = 7;
 const CORE_HEADER_TRANSITIONS = 8;
-const CORE_HEADER_ACTION_ROWS = 9;
-const CORE_HEADER_ACTION_PAIRS = 10;
-const CORE_HEADER_GOTO_ROWS = 11;
-const CORE_HEADER_GOTO_PAIRS = 12;
+const CORE_HEADER_RETIRED_ACTION_ROWS = 9;
+const CORE_HEADER_RETIRED_ACTION_PAIRS = 10;
+const CORE_HEADER_RETIRED_GOTO_ROWS = 11;
+const CORE_HEADER_RETIRED_GOTO_PAIRS = 12;
 const CORE_HEADER_BYTE_LENGTH = 13;
 const CORE_HEADER_SPEC_COUNT = 14;
-const CORE_HEADER_EOF_TERMINAL = 15;
-const CORE_HEADER_SPEC_TERMINALS = 16;
+const CORE_HEADER_RETIRED_EOF_TERMINAL = 15;
+const CORE_HEADER_RETIRED_SPEC_TERMINALS = 16;
 const CORE_HEADER_ACCEPT_CANDIDATE_ROWS = 17;
 const CORE_HEADER_ACCEPT_CANDIDATES = 18;
-const CORE_HEADER_PRODUCTION_COUNT = 19;
-const CORE_HEADER_PRODUCTIONS = 20;
+const CORE_HEADER_RETIRED_PRODUCTION_COUNT = 19;
+const CORE_HEADER_RETIRED_PRODUCTIONS = 20;
 const CORE_HEADER_SPEC_FLAGS = 21;
 const CORE_HEADER_SPEC_FOLLOW_STARTS = 22;
 const CORE_HEADER_SPEC_NOT_FOLLOW_STARTS = 23;
@@ -273,14 +273,14 @@ function validateCorePlan(planBytes: Uint8Array): {
     CORE_HEADER_DFA_STATE_COUNT,
     "DFA state count",
   );
-  const parserStateCount = readNonNegativeI32(
+  const retiredParserStateCount = readNonNegativeI32(
     planBytes,
-    CORE_HEADER_PARSER_STATE_COUNT,
+    CORE_HEADER_RETIRED_PARSER_STATE_COUNT,
     "parser state count",
   );
-  if (parserStateCount !== 0) {
+  if (retiredParserStateCount !== 0) {
     throw new Error(
-      `Wasm island plan carries ${parserStateCount} retired LR parser states.`,
+      `Wasm island plan carries ${retiredParserStateCount} retired LR parser states.`,
     );
   }
   const coreByteLength = readNonNegativeI32(
@@ -307,13 +307,13 @@ function validateCorePlan(planBytes: Uint8Array): {
   const transitions = readI32(planBytes, CORE_HEADER_TRANSITIONS);
   for (
     const retiredHeader of [
-      CORE_HEADER_ACTION_ROWS,
-      CORE_HEADER_ACTION_PAIRS,
-      CORE_HEADER_GOTO_ROWS,
-      CORE_HEADER_GOTO_PAIRS,
-      CORE_HEADER_SPEC_TERMINALS,
-      CORE_HEADER_PRODUCTION_COUNT,
-      CORE_HEADER_PRODUCTIONS,
+      CORE_HEADER_RETIRED_ACTION_ROWS,
+      CORE_HEADER_RETIRED_ACTION_PAIRS,
+      CORE_HEADER_RETIRED_GOTO_ROWS,
+      CORE_HEADER_RETIRED_GOTO_PAIRS,
+      CORE_HEADER_RETIRED_SPEC_TERMINALS,
+      CORE_HEADER_RETIRED_PRODUCTION_COUNT,
+      CORE_HEADER_RETIRED_PRODUCTIONS,
     ]
   ) {
     if (readI32(planBytes, retiredHeader) !== 0) {
@@ -327,7 +327,7 @@ function validateCorePlan(planBytes: Uint8Array): {
     CORE_HEADER_SPEC_COUNT,
     "lexer spec count",
   );
-  if (readI32(planBytes, CORE_HEADER_EOF_TERMINAL) !== -1) {
+  if (readI32(planBytes, CORE_HEADER_RETIRED_EOF_TERMINAL) !== -1) {
     throw new Error("Wasm island plan retired EOF terminal must be -1.");
   }
   const acceptCandidateRows = decodeCompactOffset(

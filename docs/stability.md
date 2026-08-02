@@ -59,14 +59,12 @@ release.
 
 ## Parser-Plan Format
 
-`PortableParserPlan` is a versioned runtime data contract, not a package
-implementation detail. Plan version `3` is stable for its current serialized
-fields, canonical ordering, reducer opcodes, diagnostic schema, and validation
-rules. Breaking changes require a new plan version or a separately versioned
-subsection.
+`PortableParserPlan` is a reference-runtime data contract, not the Wasm parser
+plan. Its current version is `3` with deterministic-only `baba-portable-v3`
+semantics.
 
 Generated `parser.plan` files currently use runtime metadata subsection version
-`5` and portable parser-plan version `3`. The loader accepts only this current
+`6` and Wasm island plan version `4`. The loader accepts only this current
 contract; regenerate plans produced by earlier Baba releases.
 
 These numbers version independent contracts, not concurrently supported parser
@@ -74,9 +72,10 @@ generations. Baba emits and accepts one combination:
 
 | Contract                         | Current version |
 | -------------------------------- | --------------: |
-| Portable parser plan             |               3 |
+| Portable reference parser plan   |               3 |
+| Wasm island parser plan          |               4 |
 | Wasm core table encoding         |               8 |
-| Wasm runtime metadata subsection |               5 |
+| Wasm runtime metadata subsection |               6 |
 | Compact metadata container       |               1 |
 | Optional GPU frontend section    |               3 |
 
@@ -85,13 +84,13 @@ compiler always emits the versions above, and each loader rejects a different
 version at its input boundary.
 
 The binary core table section that `load_plan` reads carries its own format
-version, currently `8`. It is an internal encoding, not part of the
-`PortableParserPlan` contract: hosts are expected to validate a plan through
-`wasm/abi.json` and `load_plan` rather than to decode the tables themselves.
-Adding, removing, or reordering a header slot or a section changes that version,
-and the loader rejects any other value outright rather than guessing at a
-layout. A reader that does not understand the current core format version must
-regenerate the plan; there is no forward-compatible partial read.
+version, currently `8`. It is an internal encoding inside the Wasm island plan;
+hosts are expected to validate a plan through `wasm/abi.json` and `load_plan`
+rather than to decode the tables themselves. Adding, removing, or reordering a
+header slot or a section changes that version, and the loader rejects any other
+value outright rather than guessing at a layout. A reader that does not
+understand the current core format version must regenerate the plan; there is no
+forward-compatible partial read.
 
 The current layout stores the explicit DFA start state and alphabet equivalence
 classes. Dense-eligible DFAs store complete ASCII transitions in a direct table

@@ -14,6 +14,11 @@ export interface RuleFieldSchema {
   fields: readonly RuleFieldInfo[];
 }
 
+export interface RuntimeFieldSymbol {
+  readonly id: number;
+  readonly name: string;
+}
+
 interface Occurrence {
   min: number;
   max: number | null;
@@ -56,6 +61,18 @@ export function collectRuleFieldSchemas(
         fields,
       };
     });
+}
+
+export function collectRuntimeFieldSymbols(
+  analyzed: AnalyzedGrammar,
+): RuntimeFieldSymbol[] {
+  const fieldNames = new Set<string>();
+  for (const rule of collectRuleFieldSchemas(analyzed)) {
+    for (const field of rule.fields) {
+      fieldNames.add(field.name);
+    }
+  }
+  return [...fieldNames].sort().map((name, id) => ({ id, name }));
 }
 
 export function nodeTypeName(ruleName: string): string {
