@@ -7,7 +7,7 @@ import {
 } from "./helpers.ts";
 import {
   compileIslandSimdProgram,
-  IslandSimdRunner,
+  IslandValidationSession,
 } from "../src/experiments/island_simd.ts";
 
 const GRAMMAR = String.raw`
@@ -97,12 +97,12 @@ Deno.test("Rust SIMD island validation matches the scalar transducer", async () 
   tokens.fill(repeated, 0, tokens.length - 1);
   tokens[tokens.length - 1] = terminating;
 
-  const accepted = await IslandSimdRunner.create(program, tokens);
+  const accepted = await IslandValidationSession.create(program, tokens);
   assertEquals(accepted.validateLr(), true);
   assertEquals(accepted.validateScalar(), true);
   assertEquals(accepted.validateSimd(), true);
 
-  const incomplete = await IslandSimdRunner.create(
+  const incomplete = await IslandValidationSession.create(
     program,
     new Uint16Array([repeated]),
   );
@@ -110,7 +110,7 @@ Deno.test("Rust SIMD island validation matches the scalar transducer", async () 
   assertEquals(incomplete.validateScalar(), false);
   assertEquals(incomplete.validateSimd(), false);
 
-  const invalidTerminal = await IslandSimdRunner.create(
+  const invalidTerminal = await IslandValidationSession.create(
     program,
     new Uint16Array([program.terminalCount]),
   );
@@ -137,10 +137,10 @@ Deno.test("Rust SIMD island validation composes all six cycle states", async () 
     tokens[index] = index % 4 + 1;
   }
   tokens[tokens.length - 1] = 5;
-  const runner = await IslandSimdRunner.create(program, tokens);
-  assertEquals(runner.validateLr(), true);
-  assertEquals(runner.validateScalar(), true);
-  assertEquals(runner.validateSimd(), true);
+  const session = await IslandValidationSession.create(program, tokens);
+  assertEquals(session.validateLr(), true);
+  assertEquals(session.validateScalar(), true);
+  assertEquals(session.validateSimd(), true);
 });
 
 Deno.test("Rust SIMD island compilation rejects the recursive root island", () => {

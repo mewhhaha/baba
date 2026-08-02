@@ -2,7 +2,7 @@ import { compile, parseMetadata } from "../src/mod.ts";
 import {
   compileIslandSimdProgram,
   type IslandSimdProgram,
-  IslandSimdRunner,
+  IslandValidationSession,
 } from "../src/experiments/island_simd.ts";
 
 const BENCHMARKS = [
@@ -225,16 +225,16 @@ for (
   for (const targetTokenCount of [64, 4_096, 65_536]) {
     const tokens = acceptedTokens(program, targetTokenCount);
     const tokenCount = tokens.length;
-    const runner = await IslandSimdRunner.create(program, tokens);
+    const session = await IslandValidationSession.create(program, tokens);
     let iterations = Math.floor(16_000_000 / tokenCount);
     if (iterations < 250) {
       iterations = 250;
     }
     for (let warmup = 0; warmup < 100; warmup += 1) {
       if (
-        !runner.validateLr() ||
-        !runner.validateScalar() ||
-        !runner.validateSimd()
+        !session.validateLr() ||
+        !session.validateScalar() ||
+        !session.validateSimd()
       ) {
         throw new Error("Benchmark input was rejected during warmup.");
       }
@@ -246,34 +246,34 @@ for (
     for (let sample = 0; sample < 5; sample += 1) {
       if (sample % 2 === 0) {
         scalarSamples.push(measure(
-          () => runner.validateScalar(),
+          () => session.validateScalar(),
           iterations,
           tokenCount,
         ));
         simdSamples.push(measure(
-          () => runner.validateSimd(),
+          () => session.validateSimd(),
           iterations,
           tokenCount,
         ));
         lrSamples.push(measure(
-          () => runner.validateLr(),
+          () => session.validateLr(),
           iterations,
           tokenCount,
         ));
         continue;
       }
       lrSamples.push(measure(
-        () => runner.validateLr(),
+        () => session.validateLr(),
         iterations,
         tokenCount,
       ));
       simdSamples.push(measure(
-        () => runner.validateSimd(),
+        () => session.validateSimd(),
         iterations,
         tokenCount,
       ));
       scalarSamples.push(measure(
-        () => runner.validateScalar(),
+        () => session.validateScalar(),
         iterations,
         tokenCount,
       ));

@@ -145,7 +145,7 @@ export function compileIslandSimdProgram(
   };
 }
 
-export class IslandSimdRunner {
+export class IslandValidationSession {
   readonly #program: IslandSimdProgram;
   readonly #exports: IslandSimdExports;
   readonly #transitionsAddress: number;
@@ -178,7 +178,7 @@ export class IslandSimdRunner {
   static async create(
     program: IslandSimdProgram,
     tokens: Uint16Array,
-  ): Promise<IslandSimdRunner> {
+  ): Promise<IslandValidationSession> {
     if (compiledIslandSimdModule === undefined) {
       const wasmBytes = islandSimdWasmBytes();
       compiledIslandSimdModule = WebAssembly.compile(
@@ -216,7 +216,7 @@ export class IslandSimdRunner {
       new Uint8Array(tokens.buffer, tokens.byteOffset, tokens.byteLength),
       tokensAddress,
     );
-    return new IslandSimdRunner(
+    return new IslandValidationSession(
       program,
       exports,
       transitionsAddress,
