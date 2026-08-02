@@ -122,22 +122,22 @@ fn decode_compact_action(raw: i32) -> i32 {
     0
 }
 
+#[inline]
 fn table_lookup(
     plan: i32,
     state: i32,
     key: i32,
-    rows_header: i32,
-    pairs_header: i32,
+    state_count: i32,
+    rows: i32,
+    pairs: i32,
     missing: i32,
     decode_action: bool,
 ) -> i32 {
-    if state < 0 || state >= header(plan, PLAN_HEADER_PARSER_STATE_COUNT) {
+    if state < 0 || state >= state_count {
         return missing;
     }
-    let rows = header(plan, rows_header);
     let mut index = table_value(plan, rows, state);
     let end = table_value(plan, rows, state + 1);
-    let pairs = header(plan, pairs_header);
     if is_compact_u16_offset(pairs) {
         let offset = -pairs - COMPACT_U16_OFFSET_BASE;
         let mut address = plan + offset + index * 4;
@@ -260,6 +260,15 @@ pub extern "C" fn validate_lr(
         return STATUS_STACK_CAPACITY;
     }
 
+    let parser_state_count = header(plan, PLAN_HEADER_PARSER_STATE_COUNT);
+    let action_rows = header(plan, PLAN_HEADER_ACTION_ROWS);
+    let action_pairs = header(plan, PLAN_HEADER_ACTION_PAIRS);
+    let goto_rows = header(plan, PLAN_HEADER_GOTO_ROWS);
+    let goto_pairs = header(plan, PLAN_HEADER_GOTO_PAIRS);
+    let eof_terminal = header(plan, PLAN_HEADER_EOF_TERMINAL);
+    let production_count = header(plan, PLAN_HEADER_PRODUCTION_COUNT);
+    let productions = plan + header(plan, PLAN_HEADER_PRODUCTIONS);
+
     unsafe { store_i32(stack, 0) };
     let mut stack_count = 1;
     let mut token_index = 0;
@@ -272,14 +281,15 @@ pub extern "C" fn validate_lr(
         let terminal = if token_index < token_count {
             unsafe { load_token(tokens, token_index) }
         } else {
-            header(plan, PLAN_HEADER_EOF_TERMINAL)
+            eof_terminal
         };
         let action = table_lookup(
             plan,
             state,
             terminal,
-            PLAN_HEADER_ACTION_ROWS,
-            PLAN_HEADER_ACTION_PAIRS,
+            parser_state_count,
+            action_rows,
+            action_pairs,
             0,
             true,
         );
@@ -303,10 +313,10 @@ pub extern "C" fn validate_lr(
             continue;
         }
         if kind == ACTION_REDUCE {
-            if payload >= header(plan, PLAN_HEADER_PRODUCTION_COUNT) {
+            if payload >= production_count {
                 return STATUS_INVALID_PLAN;
             }
-            let production = plan + header(plan, PLAN_HEADER_PRODUCTIONS) + payload * 16;
+            let production = productions + payload * 16;
             let lhs = unsafe { load_i32(production) };
             let rhs_length = unsafe { load_i32(production + 4) };
             if rhs_length < 0 || stack_count <= rhs_length {
@@ -318,8 +328,9 @@ pub extern "C" fn validate_lr(
                 plan,
                 source_state,
                 lhs,
-                PLAN_HEADER_GOTO_ROWS,
-                PLAN_HEADER_GOTO_PAIRS,
+                parser_state_count,
+                goto_rows,
+                goto_pairs,
                 -1,
                 false,
             );
