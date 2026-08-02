@@ -1,5 +1,6 @@
 #![no_std]
 
+use core::arch::wasm32::{i32x4_splat, v128, v128_store};
 use core::panic::PanicInfo;
 
 const WASM_ABI_VERSION: i32 = 12;
@@ -442,11 +443,39 @@ fn memo_set(memo: i32, words: i32, position: i32, state: i32) {
     unsafe { store_i32(address, word | (1 << (state & 31))) };
 }
 
-fn memo_clear(memo: i32, word_count: i32) {
+#[target_feature(enable = "simd128")]
+unsafe fn memo_clear(memo: i32, word_count: i32) {
+    if word_count < 4 {
+        if word_count > 0 {
+            store_i32(memo, 0);
+        }
+        if word_count > 1 {
+            store_i32(memo + 4, 0);
+        }
+        if word_count > 2 {
+            store_i32(memo + 8, 0);
+        }
+        return;
+    }
+
     let mut index = 0;
-    while index < word_count {
-        unsafe { store_i32(memo + index * 4, 0) };
-        index += 1;
+    let zeroes = i32x4_splat(0);
+    while index + 16 <= word_count {
+        let address = memo + index * 4;
+        v128_store(address as usize as *mut v128, zeroes);
+        v128_store((address + 16) as usize as *mut v128, zeroes);
+        v128_store((address + 32) as usize as *mut v128, zeroes);
+        v128_store((address + 48) as usize as *mut v128, zeroes);
+        index += 16;
+    }
+    while index + 4 <= word_count {
+        let address = memo + index * 4;
+        v128_store(address as usize as *mut v128, zeroes);
+        index += 4;
+    }
+    if index < word_count {
+        let address = memo + (word_count - 4) * 4;
+        v128_store(address as usize as *mut v128, zeroes);
     }
 }
 
@@ -552,7 +581,7 @@ impl RawLexerCursor {
         let memo_words = lex_memo_i32_per_position();
         let mut memo_enabled = false;
         if memo > 0 && memo_required > 0 && memo_capacity >= memo_required {
-            memo_clear(memo, memo_required);
+            unsafe { memo_clear(memo, memo_required) };
             memo_enabled = true;
         }
         RawLexerCursor {

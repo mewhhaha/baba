@@ -27,9 +27,10 @@ selected.
 `parser.wasm` contains the generic lexer/parser lookup runtime. The engine is
 authored in Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded
 in the Baba package; grammar generation does not invoke Cargo or require Rust on
-the user's machine. `parser.plan` contains the generated DFA/LR core data,
-contextual trailing-guard DFAs and excluded-word tables, plus runtime metadata
-version 4 used for runtime identity, token and literal names, trivia policy,
+the user's machine. The module uses the standardized WebAssembly `simd128`
+extension. `parser.plan` contains the generated DFA/LR core data, contextual
+trailing-guard DFAs and excluded-word tables, plus runtime metadata version 4
+used for runtime identity, token and literal names, trivia policy,
 expected-token displays, and cursor field schemas. DFA transitions, LR tables,
 productions, reducers, and contextual guards remain solely in the core section.
 `mod.ts` is a thin wrapper around `@mewhhaha/baba/runtime/generated-wasm`;

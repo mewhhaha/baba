@@ -139,6 +139,17 @@ That last control also means the engine sits on a ~30% `parse_trace` codegen
 cliff on thunkwasm-shaped grammars. That is real time, but it is
 compiler-version-dependent and must not be chased with dead code.
 
+### SIMD in the parser table scans (rejected)
+
+Comparing four compact `u16` key/value pairs with one `i16x8.eq` looked like a
+fit for long action rows, but it was slower in the actual parser. Applying it to
+every four-entry group made hot validation and parsing 10-16% slower on the
+standard runtime fixtures. Restricting it to rows with at least eight entries
+still made those paths 11-17% slower. The vector load is cheap; splatting the
+key, extracting the bitmask, and finding the first matching lane cost more than
+the predictable scalar walk they replaced. Parser action and GOTO lookup stay
+scalar.
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that
@@ -307,6 +318,28 @@ There is no cap: a cap would silently reintroduce the quadratic case for
 grammars above it, and the requirement is visible to the host through the export
 instead. The buffer is only touched once the memo switches on, so on ordinary
 source it costs address space and a `memory.grow`, not traffic.
+
+### SIMD memo initialization
+
+`memo_clear` uses four unrolled `v128.store` instructions per loop iteration,
+clearing 64 bytes before checking the loop condition again. The final partial
+vector overlaps the preceding store so every vector write remains within the
+caller-owned memo; buffers shorter than one vector use scalar stores. SIMD is
+enabled only for this function with `#[target_feature(enable = "simd128")]`,
+leaving DFA transitions and LR table decisions scalar.
+
+Measured on the `BYTES` worst-case shape above at 262,144 UTF-16 code units,
+with scalar and SIMD modules instantiated in one Deno process and alternated for
+15 measured calls after five warmups:
+
+| trial | scalar ms | SIMD ms | delta |
+| ----: | --------: | ------: | ----: |
+|     1 |    10.615 |  10.186 | -4.0% |
+|     2 |    10.623 |  10.212 | -3.9% |
+
+All 262,144 four-i32 token records were equal in the parity trial. The core
+module also shrank from 17,983 to 17,606 bytes under rustc 1.94.0; that size
+change is compiler output, not a format or ABI change.
 
 ### What it costs on ordinary source
 
