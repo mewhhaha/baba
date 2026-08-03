@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 9.0.0
 
 - Wasm compilation no longer constructs or consumes the portable LR plan. Its
   public limits, statistics, benchmark stages, metadata identity, and generated
