@@ -1237,9 +1237,7 @@ fn cursor_value_address(values: i32, index: i32) -> i32 {
     values + index * CURSOR_VALUE_RECORD_I32_COUNT * 4
 }
 
-fn store_cursor_rule(
-    rules: i32,
-    index: i32,
+struct CursorRuleRecord {
     rule: i32,
     span_start: i32,
     span_end: i32,
@@ -1249,78 +1247,80 @@ fn store_cursor_rule(
     child_count: i32,
     field_start: i32,
     field_count: i32,
-) {
-    let record = cursor_rule_address(rules, index);
-    unsafe {
-        store_i32(record, rule);
-        store_i32(record + 4, span_start);
-        store_i32(record + 8, span_end);
-        store_i32(record + 12, token_start);
-        store_i32(record + 16, token_end);
-        store_i32(record + 20, child_start);
-        store_i32(record + 24, child_count);
-        store_i32(record + 28, field_start);
-        store_i32(record + 32, field_count);
-    }
 }
 
-fn append_cursor_child(
+struct CursorTapeArena {
+    rules: i32,
+    rule_capacity: i32,
+    rule_count: i32,
     children: i32,
     child_capacity: i32,
-    child_count: &mut i32,
-    previous: i32,
-    reference: i32,
-) -> i32 {
-    if *child_count >= child_capacity {
-        return -1;
-    }
-    let node = *child_count;
-    let record = cursor_child_address(children, node);
-    unsafe {
-        store_i32(record, reference);
-        store_i32(record + 4, -1);
-        if previous >= 0 {
-            store_i32(cursor_child_address(children, previous) + 4, node);
-        }
-    }
-    *child_count += 1;
-    node
-}
-
-fn append_cursor_field(
+    child_count: i32,
     fields: i32,
     field_capacity: i32,
-    field_count: &mut i32,
+    field_count: i32,
     values: i32,
     value_capacity: i32,
-    value_count: &mut i32,
-    field: i32,
-    reference: i32,
-) -> bool {
-    if *field_count >= field_capacity || *value_count >= value_capacity {
-        return false;
-    }
-    let value_id = *value_count;
-    let value_record = cursor_value_address(values, value_id);
-    unsafe {
-        store_i32(value_record, CURSOR_VALUE_REF);
-        store_i32(value_record + 4, reference);
-        store_i32(value_record + 8, 0);
-        store_i32(value_record + 12, 0);
-    }
-    let field_record = cursor_field_address(fields, *field_count);
-    unsafe {
-        store_i32(field_record, field);
-        store_i32(field_record + 4, value_id);
-    }
-    *field_count += 1;
-    *value_count += 1;
-    true
+    value_count: i32,
 }
 
-fn finalize_cursor_region(
-    tokens: i32,
-    rules: i32,
+impl CursorTapeArena {
+    fn store_rule(&self, index: i32, rule: CursorRuleRecord) {
+        let record = cursor_rule_address(self.rules, index);
+        unsafe {
+            store_i32(record, rule.rule);
+            store_i32(record + 4, rule.span_start);
+            store_i32(record + 8, rule.span_end);
+            store_i32(record + 12, rule.token_start);
+            store_i32(record + 16, rule.token_end);
+            store_i32(record + 20, rule.child_start);
+            store_i32(record + 24, rule.child_count);
+            store_i32(record + 28, rule.field_start);
+            store_i32(record + 32, rule.field_count);
+        }
+    }
+
+    fn append_child(&mut self, previous: i32, reference: i32) -> i32 {
+        if self.child_count >= self.child_capacity {
+            return -1;
+        }
+        let node = self.child_count;
+        let record = cursor_child_address(self.children, node);
+        unsafe {
+            store_i32(record, reference);
+            store_i32(record + 4, -1);
+            if previous >= 0 {
+                store_i32(cursor_child_address(self.children, previous) + 4, node);
+            }
+        }
+        self.child_count += 1;
+        node
+    }
+
+    fn append_field(&mut self, field: i32, reference: i32) -> bool {
+        if self.field_count >= self.field_capacity || self.value_count >= self.value_capacity {
+            return false;
+        }
+        let value_id = self.value_count;
+        let value_record = cursor_value_address(self.values, value_id);
+        unsafe {
+            store_i32(value_record, CURSOR_VALUE_REF);
+            store_i32(value_record + 4, reference);
+            store_i32(value_record + 8, 0);
+            store_i32(value_record + 12, 0);
+        }
+        let field_record = cursor_field_address(self.fields, self.field_count);
+        unsafe {
+            store_i32(field_record, field);
+            store_i32(field_record + 4, value_id);
+        }
+        self.field_count += 1;
+        self.value_count += 1;
+        true
+    }
+}
+
+struct RegionCursorRange {
     rule_index: i32,
     record_start: i32,
     record_end: i32,
@@ -1328,26 +1328,29 @@ fn finalize_cursor_region(
     child_count: i32,
     field_start: i32,
     field_count: i32,
-) -> bool {
-    if record_end <= record_start {
+}
+
+fn finalize_cursor_region(tokens: i32, tape: &CursorTapeArena, region: RegionCursorRange) -> bool {
+    if region.record_end <= region.record_start {
         return false;
     }
-    let start_record = token_record_address(tokens, record_start);
-    let end_record = token_record_address(tokens, record_end - 1);
+    let start_record = token_record_address(tokens, region.record_start);
+    let end_record = token_record_address(tokens, region.record_end - 1);
     let span_start = unsafe { load_i32(start_record + 4) };
     let span_end = unsafe { load_i32(end_record + 8) };
-    store_cursor_rule(
-        rules,
-        rule_index,
-        island_config(ISLAND_CONFIG_REGION_RULE),
-        span_start,
-        span_end,
-        record_start,
-        record_end,
-        child_start,
-        child_count,
-        field_start,
-        field_count,
+    tape.store_rule(
+        region.rule_index,
+        CursorRuleRecord {
+            rule: island_config(ISLAND_CONFIG_REGION_RULE),
+            span_start,
+            span_end,
+            token_start: region.record_start,
+            token_end: region.record_end,
+            child_start: region.child_start,
+            child_count: region.child_count,
+            field_start: region.field_start,
+            field_count: region.field_count,
+        },
     );
     true
 }
@@ -1393,10 +1396,20 @@ pub extern "C" fn materialize_island_records(
     let boundary_terminal = island_config(ISLAND_CONFIG_BOUNDARY_TERMINAL);
     let mut state = start_state;
     let mut cursor_token_count = 0;
-    let mut rule_count = 1;
-    let mut child_count = 0;
-    let mut field_count = 0;
-    let mut value_count = 0;
+    let mut tape = CursorTapeArena {
+        rules,
+        rule_capacity,
+        rule_count: 1,
+        children,
+        child_capacity,
+        child_count: 0,
+        fields,
+        field_capacity,
+        field_count: 0,
+        values,
+        value_capacity,
+        value_count: 0,
+    };
     let mut region_count = 0;
     let mut region_token_count = 0;
     let mut region_rule = -1;
@@ -1429,25 +1442,27 @@ pub extern "C" fn materialize_island_records(
             };
             if !finalize_cursor_region(
                 tokens,
-                rules,
-                region_rule,
-                region_record_start,
-                record_end,
-                region_child_start,
-                region_child_count,
-                region_field_start,
-                region_field_count,
+                &tape,
+                RegionCursorRange {
+                    rule_index: region_rule,
+                    record_start: region_record_start,
+                    record_end,
+                    child_start: region_child_start,
+                    child_count: region_child_count,
+                    field_start: region_field_start,
+                    field_count: region_field_count,
+                },
             ) {
                 return ISLAND_STATUS_INVALID;
             }
             pending_region = false;
         }
         if region_token_count == 0 {
-            if rule_count >= rule_capacity {
+            if tape.rule_count >= tape.rule_capacity {
                 return ISLAND_STATUS_CAPACITY;
             }
-            region_rule = rule_count;
-            rule_count += 1;
+            region_rule = tape.rule_count;
+            tape.rule_count += 1;
             region_record_start = if preserve_trivia == 1 {
                 if region_count == 0 {
                     0
@@ -1457,9 +1472,9 @@ pub extern "C" fn materialize_island_records(
             } else {
                 cursor_token_count
             };
-            region_child_start = child_count;
+            region_child_start = tape.child_count;
             region_child_count = 0;
-            region_field_start = field_count;
+            region_field_start = tape.field_count;
             region_field_count = 0;
             previous_region_child = -1;
         }
@@ -1478,13 +1493,7 @@ pub extern "C" fn materialize_island_records(
             cursor_token_count
         };
         cursor_token_count += 1;
-        let child = append_cursor_child(
-            children,
-            child_capacity,
-            &mut child_count,
-            previous_region_child,
-            cursor_token_index * 2 + 1,
-        );
+        let child = tape.append_child(previous_region_child, cursor_token_index * 2 + 1);
         if child < 0 {
             return ISLAND_STATUS_CAPACITY;
         }
@@ -1496,16 +1505,7 @@ pub extern "C" fn materialize_island_records(
         }
         let field = island_transition_field(terminal, state);
         if field >= 0 {
-            if !append_cursor_field(
-                fields,
-                field_capacity,
-                &mut field_count,
-                values,
-                value_capacity,
-                &mut value_count,
-                field,
-                cursor_token_index * 2 + 1,
-            ) {
+            if !tape.append_field(field, cursor_token_index * 2 + 1) {
                 return ISLAND_STATUS_CAPACITY;
             }
             region_field_count += 1;
@@ -1516,13 +1516,7 @@ pub extern "C" fn materialize_island_records(
             if !island_accepts(state) {
                 return ISLAND_STATUS_INVALID;
             }
-            let root_child = append_cursor_child(
-                children,
-                child_capacity,
-                &mut child_count,
-                previous_root_child,
-                region_rule * 2,
-            );
+            let root_child = tape.append_child(previous_root_child, region_rule * 2);
             if root_child < 0 {
                 return ISLAND_STATUS_CAPACITY;
             }
@@ -1545,39 +1539,32 @@ pub extern "C" fn materialize_island_records(
         };
         if !finalize_cursor_region(
             tokens,
-            rules,
-            region_rule,
-            region_record_start,
-            record_end,
-            region_child_start,
-            region_child_count,
-            region_field_start,
-            region_field_count,
+            &tape,
+            RegionCursorRange {
+                rule_index: region_rule,
+                record_start: region_record_start,
+                record_end,
+                child_start: region_child_start,
+                child_count: region_child_count,
+                field_start: region_field_start,
+                field_count: region_field_count,
+            },
         ) {
             return ISLAND_STATUS_INVALID;
         }
     }
-    if region_token_count != 0 || rule_count != region_count + 1 {
+    if region_token_count != 0 || tape.rule_count != region_count + 1 {
         return ISLAND_STATUS_INVALID;
     }
     if preserve_trivia == 1 {
         cursor_token_count = raw_count;
     }
-    let root_field_start = field_count;
+    let root_field_start = tape.field_count;
     let root_field = island_config(ISLAND_CONFIG_ROOT_FIELD);
     if root_field >= 0 {
         let mut region = 0;
         while region < region_count {
-            if !append_cursor_field(
-                fields,
-                field_capacity,
-                &mut field_count,
-                values,
-                value_capacity,
-                &mut value_count,
-                root_field,
-                (region + 1) * 2,
-            ) {
+            if !tape.append_field(root_field, (region + 1) * 2) {
                 return ISLAND_STATUS_CAPACITY;
             }
             region += 1;
@@ -1590,25 +1577,26 @@ pub extern "C" fn materialize_island_records(
     if root_child_start < 0 {
         root_child_start = 0;
     }
-    store_cursor_rule(
-        rules,
+    tape.store_rule(
         0,
-        island_config(ISLAND_CONFIG_ROOT_RULE),
-        0,
-        source_length,
-        0,
-        cursor_token_count,
-        root_child_start,
-        region_count,
-        root_field_start,
-        root_field_count,
+        CursorRuleRecord {
+            rule: island_config(ISLAND_CONFIG_ROOT_RULE),
+            span_start: 0,
+            span_end: source_length,
+            token_start: 0,
+            token_end: cursor_token_count,
+            child_start: root_child_start,
+            child_count: region_count,
+            field_start: root_field_start,
+            field_count: root_field_count,
+        },
     );
     unsafe {
         store_i32(result + ISLAND_RESULT_TOKEN_COUNT * 4, cursor_token_count);
-        store_i32(result + ISLAND_RESULT_RULE_COUNT * 4, rule_count);
-        store_i32(result + ISLAND_RESULT_CHILD_COUNT * 4, child_count);
-        store_i32(result + ISLAND_RESULT_FIELD_COUNT * 4, field_count);
-        store_i32(result + ISLAND_RESULT_VALUE_COUNT * 4, value_count);
+        store_i32(result + ISLAND_RESULT_RULE_COUNT * 4, tape.rule_count);
+        store_i32(result + ISLAND_RESULT_CHILD_COUNT * 4, tape.child_count);
+        store_i32(result + ISLAND_RESULT_FIELD_COUNT * 4, tape.field_count);
+        store_i32(result + ISLAND_RESULT_VALUE_COUNT * 4, tape.value_count);
         store_i32(result + ISLAND_RESULT_ROOT_REF * 4, 0);
         store_i32(result + ISLAND_RESULT_ERROR_RECORD * 4, raw_count);
         store_i32(result + ISLAND_RESULT_ERROR_STATE * 4, state);
