@@ -45,7 +45,15 @@ import {
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_I32_BYTES,
   WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
+  WASM_ISLAND_RESULT_CHILD_COUNT,
+  WASM_ISLAND_RESULT_ERROR_RECORD,
+  WASM_ISLAND_RESULT_ERROR_STATE,
+  WASM_ISLAND_RESULT_FIELD_COUNT,
   WASM_ISLAND_RESULT_I32_COUNT,
+  WASM_ISLAND_RESULT_ROOT_REF,
+  WASM_ISLAND_RESULT_RULE_COUNT,
+  WASM_ISLAND_RESULT_TOKEN_COUNT,
+  WASM_ISLAND_RESULT_VALUE_COUNT,
   WASM_ISLAND_STATUS_LEXICAL,
   WASM_ISLAND_STATUS_OK,
   WASM_ISLAND_STATUS_TRACE_LIMIT,
@@ -3000,10 +3008,16 @@ function analyzeExternalIslandInRust(
       )],
     };
   }
-  const structuralTokenCount = view.getInt32(resultPtr, true);
-  const regionCount = view.getInt32(resultPtr + WASM_I32_BYTES, true);
+  const structuralTokenCount = view.getInt32(
+    resultPtr + WASM_ISLAND_RESULT_TOKEN_COUNT * WASM_I32_BYTES,
+    true,
+  );
+  const regionCount = view.getInt32(
+    resultPtr + WASM_ISLAND_RESULT_RULE_COUNT * WASM_I32_BYTES,
+    true,
+  );
   const transitionFieldCount = view.getInt32(
-    resultPtr + WASM_I32_BYTES * 2,
+    resultPtr + WASM_ISLAND_RESULT_CHILD_COUNT * WASM_I32_BYTES,
     true,
   );
   if (
@@ -3127,10 +3141,13 @@ function externalIslandStatusDiagnostic(
   maxParserActions: number,
 ): ExternalParseDiagnostic {
   const recordIndex = view.getInt32(
-    resultPtr + WASM_I32_BYTES * 6,
+    resultPtr + WASM_ISLAND_RESULT_ERROR_RECORD * WASM_I32_BYTES,
     true,
   );
-  const state = view.getInt32(resultPtr + WASM_I32_BYTES * 7, true);
+  const state = view.getInt32(
+    resultPtr + WASM_ISLAND_RESULT_ERROR_STATE * WASM_I32_BYTES,
+    true,
+  );
   if (status === externalIslandStatusLexical) {
     const record = externalWasmTokenRecord(
       view,
@@ -3314,25 +3331,28 @@ function materializeExternalIslandCursorInRust(
     );
   }
   const view = new DataView(wasm.memory.buffer);
-  const returnedTokenCount = view.getInt32(analysis.resultPtr, true);
+  const returnedTokenCount = view.getInt32(
+    analysis.resultPtr + WASM_ISLAND_RESULT_TOKEN_COUNT * WASM_I32_BYTES,
+    true,
+  );
   const returnedRuleCount = view.getInt32(
-    analysis.resultPtr + WASM_I32_BYTES,
+    analysis.resultPtr + WASM_ISLAND_RESULT_RULE_COUNT * WASM_I32_BYTES,
     true,
   );
   const returnedChildCount = view.getInt32(
-    analysis.resultPtr + WASM_I32_BYTES * 2,
+    analysis.resultPtr + WASM_ISLAND_RESULT_CHILD_COUNT * WASM_I32_BYTES,
     true,
   );
   const returnedFieldCount = view.getInt32(
-    analysis.resultPtr + WASM_I32_BYTES * 3,
+    analysis.resultPtr + WASM_ISLAND_RESULT_FIELD_COUNT * WASM_I32_BYTES,
     true,
   );
   const returnedValueCount = view.getInt32(
-    analysis.resultPtr + WASM_I32_BYTES * 4,
+    analysis.resultPtr + WASM_ISLAND_RESULT_VALUE_COUNT * WASM_I32_BYTES,
     true,
   );
   const rootRef = view.getInt32(
-    analysis.resultPtr + WASM_I32_BYTES * 5,
+    analysis.resultPtr + WASM_ISLAND_RESULT_ROOT_REF * WASM_I32_BYTES,
     true,
   );
   if (

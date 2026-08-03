@@ -48,6 +48,16 @@ const LEX_RESULT_I32_COUNT: i32 = 2;
 const TOKEN_RECORD_I32_COUNT: i32 = 4;
 const INCREMENTAL_TOKEN_RECORD_I32_COUNT: i32 = 5;
 const ISLAND_RESULT_I32_COUNT: i32 = 10;
+const ISLAND_RESULT_TOKEN_COUNT: i32 = 0;
+const ISLAND_RESULT_RULE_COUNT: i32 = 1;
+const ISLAND_RESULT_CHILD_COUNT: i32 = 2;
+const ISLAND_RESULT_FIELD_COUNT: i32 = 3;
+const ISLAND_RESULT_VALUE_COUNT: i32 = 4;
+const ISLAND_RESULT_ROOT_REF: i32 = 5;
+const ISLAND_RESULT_ERROR_RECORD: i32 = 6;
+const ISLAND_RESULT_ERROR_STATE: i32 = 7;
+const ISLAND_RESULT_STRUCTURAL_COUNT: i32 = 8;
+const ISLAND_RESULT_REGION_COUNT: i32 = 9;
 const CURSOR_RULE_RECORD_I32_COUNT: i32 = 9;
 const CURSOR_CHILD_RECORD_I32_COUNT: i32 = 2;
 const CURSOR_FIELD_RECORD_I32_COUNT: i32 = 2;
@@ -1057,8 +1067,8 @@ fn initialize_island_result(result: i32) {
 
 fn return_island_failure(status: i32, result: i32, record: i32, state: i32) -> i32 {
     unsafe {
-        store_i32(result + 6 * 4, record);
-        store_i32(result + 7 * 4, state);
+        store_i32(result + ISLAND_RESULT_ERROR_RECORD * 4, record);
+        store_i32(result + ISLAND_RESULT_ERROR_STATE * 4, state);
     }
     status
 }
@@ -1091,6 +1101,9 @@ pub extern "C" fn analyze_island_records(
     max_actions: i32,
     result: i32,
 ) -> i32 {
+    if result <= 0 {
+        return ISLAND_STATUS_INVALID;
+    }
     initialize_island_result(result);
     if !island_runtime_is_available() || tokens <= 0 || raw_count < 0 || max_actions < 1 {
         return ISLAND_STATUS_INVALID;
@@ -1127,8 +1140,11 @@ pub extern "C" fn analyze_island_records(
         record_index += 1;
     }
     unsafe {
-        store_i32(result, structural_count);
-        store_i32(result + 8 * 4, structural_count);
+        store_i32(result + ISLAND_RESULT_TOKEN_COUNT * 4, structural_count);
+        store_i32(
+            result + ISLAND_RESULT_STRUCTURAL_COUNT * 4,
+            structural_count,
+        );
     }
     if limit_record >= 0 {
         return return_island_failure(
@@ -1189,11 +1205,14 @@ pub extern "C" fn analyze_island_records(
         return return_island_failure(ISLAND_STATUS_UNEXPECTED, result, raw_count, state);
     }
     unsafe {
-        store_i32(result + 1 * 4, region_count);
-        store_i32(result + 2 * 4, transition_field_count);
-        store_i32(result + 6 * 4, raw_count);
-        store_i32(result + 7 * 4, state);
-        store_i32(result + 9 * 4, region_count);
+        store_i32(result + ISLAND_RESULT_RULE_COUNT * 4, region_count);
+        store_i32(
+            result + ISLAND_RESULT_CHILD_COUNT * 4,
+            transition_field_count,
+        );
+        store_i32(result + ISLAND_RESULT_ERROR_RECORD * 4, raw_count);
+        store_i32(result + ISLAND_RESULT_ERROR_STATE * 4, state);
+        store_i32(result + ISLAND_RESULT_REGION_COUNT * 4, region_count);
     }
     ISLAND_STATUS_OK
 }
@@ -1349,6 +1368,9 @@ pub extern "C" fn materialize_island_records(
     value_capacity: i32,
     result: i32,
 ) -> i32 {
+    if result <= 0 {
+        return ISLAND_STATUS_INVALID;
+    }
     initialize_island_result(result);
     if !island_runtime_is_available()
         || source_length < 0
@@ -1582,16 +1604,19 @@ pub extern "C" fn materialize_island_records(
         root_field_count,
     );
     unsafe {
-        store_i32(result, cursor_token_count);
-        store_i32(result + 1 * 4, rule_count);
-        store_i32(result + 2 * 4, child_count);
-        store_i32(result + 3 * 4, field_count);
-        store_i32(result + 4 * 4, value_count);
-        store_i32(result + 5 * 4, 0);
-        store_i32(result + 6 * 4, raw_count);
-        store_i32(result + 7 * 4, state);
-        store_i32(result + 8 * 4, cursor_token_count);
-        store_i32(result + 9 * 4, region_count);
+        store_i32(result + ISLAND_RESULT_TOKEN_COUNT * 4, cursor_token_count);
+        store_i32(result + ISLAND_RESULT_RULE_COUNT * 4, rule_count);
+        store_i32(result + ISLAND_RESULT_CHILD_COUNT * 4, child_count);
+        store_i32(result + ISLAND_RESULT_FIELD_COUNT * 4, field_count);
+        store_i32(result + ISLAND_RESULT_VALUE_COUNT * 4, value_count);
+        store_i32(result + ISLAND_RESULT_ROOT_REF * 4, 0);
+        store_i32(result + ISLAND_RESULT_ERROR_RECORD * 4, raw_count);
+        store_i32(result + ISLAND_RESULT_ERROR_STATE * 4, state);
+        store_i32(
+            result + ISLAND_RESULT_STRUCTURAL_COUNT * 4,
+            cursor_token_count,
+        );
+        store_i32(result + ISLAND_RESULT_REGION_COUNT * 4, region_count);
     }
     ISLAND_STATUS_OK
 }

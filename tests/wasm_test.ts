@@ -16,6 +16,7 @@ import {
 } from "../src/targets/runtime/implementation.ts";
 import {
   WASM_I32_BYTES,
+  WASM_ISLAND_STATUS_INVALID,
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
 } from "../src/targets/runtime/wasm_abi.ts";
@@ -224,7 +225,66 @@ interface RawWasmLexerExports {
     memoCapacity: number,
   ): number;
   lex_memo_i32_per_position(): number;
+  analyze_island_records(
+    tokenPtr: number,
+    rawTokenCount: number,
+    maxParserActions: number,
+    resultPtr: number,
+  ): number;
+  materialize_island_records(
+    sourceLength: number,
+    tokenPtr: number,
+    rawTokenCount: number,
+    preserveTrivia: number,
+    rulePtr: number,
+    ruleCapacity: number,
+    childPtr: number,
+    childCapacity: number,
+    fieldPtr: number,
+    fieldCapacity: number,
+    valuePtr: number,
+    valueCapacity: number,
+    resultPtr: number,
+  ): number;
 }
+
+Deno.test("core island exports reject missing result buffers", async () => {
+  const { dir, bytes } = await materialize(STATEMENT_GRAMMAR);
+  try {
+    const instantiated = await WebAssembly.instantiate(
+      bytes,
+      {},
+    ) as unknown as {
+      instance: WebAssembly.Instance;
+    };
+    const wasm = instantiated.instance
+      .exports as unknown as RawWasmLexerExports;
+    assertEquals(
+      wasm.analyze_island_records(0, 0, 1, -1),
+      WASM_ISLAND_STATUS_INVALID,
+    );
+    assertEquals(
+      wasm.materialize_island_records(
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        -1,
+      ),
+      WASM_ISLAND_STATUS_INVALID,
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
 
 interface GeneratedWasmModule {
   createParser(options: unknown): GeneratedParser;
