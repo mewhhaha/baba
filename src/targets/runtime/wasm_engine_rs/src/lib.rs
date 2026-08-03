@@ -290,7 +290,7 @@ pub extern "C" fn load_plan(ptr: i32, len: i32) -> i32 {
     }
     let island_state_count = header_at(ptr, PLAN_HEADER_ISLAND_STATE_COUNT);
     let island_plan = header_at(ptr, PLAN_HEADER_ISLAND_PLAN);
-    if island_state_count < 0 || island_state_count > 7 {
+    if !(0..=7).contains(&island_state_count) {
         return 0;
     }
     if island_state_count == 0 && island_plan != 0 {
@@ -459,8 +459,8 @@ unsafe fn memo_clear(memo: i32, word_count: i32) {
 /// again is the same deterministic future over the same input - `transition`
 /// and `selected_global_spec` both depend only on `(src, len, position, state)`
 /// - so it cannot accept either and the scan stops. Every tail step therefore
-/// either lands on a (position, state) pair never seen before in this call or
-/// ends the scan, which bounds total scan work at `O(len * stateCount)`.
+///   either lands on a (position, state) pair never seen before in this call or
+///   ends the scan, which bounds total scan work at `O(len * stateCount)`.
 ///
 /// The memo is exact in the direction that matters: a set bit is a true fact
 /// about the input, so it can only stop a scan that was going to fail anyway,
@@ -700,9 +700,9 @@ fn decode_code_point(src: i32, index: i32, len: i32) -> DecodedCodePoint {
     let unit = unsafe { load_u16(src + index * 2) };
     let mut code_point = unit;
     let mut width = 1;
-    if unit >= 0xd800 && unit <= 0xdbff && index + 1 < len {
+    if (0xd800..=0xdbff).contains(&unit) && index + 1 < len {
         let next = unsafe { load_u16(src + (index + 1) * 2) };
-        if next >= 0xdc00 && next <= 0xdfff {
+        if (0xdc00..=0xdfff).contains(&next) {
             code_point = ((unit - 0xd800) << 10) + (next - 0xdc00) + 0x1_0000;
             width = 2;
         }
@@ -723,7 +723,7 @@ fn transition(state: i32, code_point: i32) -> i32 {
     // removes ASCII ranges from the CSR rows in that case, so falling through
     // cannot add an answer. Plans above the dense-table size limit carry -1 in
     // this header slot and retain complete CSR rows.
-    if code_point >= 0 && code_point < 128 {
+    if (0..128).contains(&code_point) {
         let ascii_offset = header(PLAN_HEADER_ASCII_TRANSITIONS);
         if ascii_offset >= 0 {
             let value = table_value(ascii_offset, state * 128 + code_point);
@@ -973,8 +973,7 @@ fn island_plan_is_valid(base: i32, core_length: i32, offset: i32, state_count: i
         || root_rule < 0
         || region_rule < 0
         || root_field < -1
-        || root_accepts_empty < 0
-        || root_accepts_empty > 1
+        || !(0..=1).contains(&root_accepts_empty)
     {
         return false;
     }

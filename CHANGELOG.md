@@ -12,10 +12,10 @@
   Parser plan 5, runtime metadata 6, and runtime implementation 6 identify the
   Rust parser/materializer boundary; regenerate generated artifacts.
 - On the pinned 262,153-token `island-statements` workload, Rust-owned analysis
-  and tape construction reduce hot p25 validation from 7.69 to 5.85 ms, parse
-  from 15.32 to 7.67 ms, and incremental validation from 4.39 to 2.88 ms. Hot
+  and tape construction reduce hot p25 validation from 7.69 to 5.86 ms, parse
+  from 15.32 to 7.76 ms, and incremental validation from 4.39 to 2.86 ms. Hot
   lexing and the 193-page high-water mark are unchanged within measurement
-  noise; the generic Wasm core grows by 4,161 bytes and this fixture's core plan
+  noise; the generic Wasm core grows by 4,158 bytes and this fixture's core plan
   by 292 bytes.
 - Removed the unused public LR conflict-policy metadata and branching/resolution
   machinery. The internal portable reference plan is now deterministic-only v3.
