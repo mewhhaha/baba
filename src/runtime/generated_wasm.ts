@@ -2682,12 +2682,6 @@ function lexExternalIncrementalRecords(
   };
 }
 
-const externalIslandStatusUnexpected = WASM_ISLAND_STATUS_UNEXPECTED;
-const externalIslandStatusOk = WASM_ISLAND_STATUS_OK;
-const externalIslandStatusLexical = WASM_ISLAND_STATUS_LEXICAL;
-const externalIslandStatusTraceLimit = WASM_ISLAND_STATUS_TRACE_LIMIT;
-const externalIslandStatusTrailing = WASM_ISLAND_STATUS_TRAILING;
-
 interface ExternalWasmIslandRecords {
   readonly tokenPtr: number;
   readonly rawTokenCount: number;
@@ -2995,7 +2989,7 @@ function analyzeExternalIslandInRust(
     resultPtr,
   );
   const view = new DataView(wasm.memory.buffer);
-  if (status !== externalIslandStatusOk) {
+  if (status !== WASM_ISLAND_STATUS_OK) {
     return {
       ok: false,
       diagnostics: [externalIslandStatusDiagnostic(
@@ -3150,7 +3144,7 @@ function externalIslandStatusDiagnostic(
     resultPtr + WASM_ISLAND_RESULT_ERROR_STATE * WASM_I32_BYTES,
     true,
   );
-  if (status === externalIslandStatusLexical) {
+  if (status === WASM_ISLAND_STATUS_LEXICAL) {
     const record = externalWasmTokenRecord(
       view,
       records,
@@ -3170,7 +3164,7 @@ function externalIslandStatusDiagnostic(
       found: JSON.stringify(source.slice(record.start, record.end)),
     };
   }
-  if (status === externalIslandStatusTraceLimit) {
+  if (status === WASM_ISLAND_STATUS_TRACE_LIMIT) {
     const record = externalWasmTokenRecord(
       view,
       records,
@@ -3183,8 +3177,8 @@ function externalIslandStatusDiagnostic(
     );
   }
   if (
-    status !== externalIslandStatusUnexpected &&
-    status !== externalIslandStatusTrailing
+    status !== WASM_ISLAND_STATUS_UNEXPECTED &&
+    status !== WASM_ISLAND_STATUS_TRAILING
   ) {
     return externalParseDiagnostic(
       "PARSER_INTERNAL_ERROR",
@@ -3234,7 +3228,7 @@ function externalIslandStatusDiagnostic(
   );
   const found = externalCursorTokenDisplay(metadata, source, token);
   let code: ExternalParseDiagnostic["code"] = "PARSE_UNEXPECTED_TOKEN";
-  if (status === externalIslandStatusTrailing) {
+  if (status === WASM_ISLAND_STATUS_TRAILING) {
     code = "PARSE_TRAILING_INPUT";
   }
   return {
@@ -3327,7 +3321,7 @@ function materializeExternalIslandCursorInRust(
     valueCount,
     analysis.resultPtr,
   );
-  if (status !== externalIslandStatusOk) {
+  if (status !== WASM_ISLAND_STATUS_OK) {
     throw new Error(
       `Rust island materializer failed with status ${status}.`,
     );
