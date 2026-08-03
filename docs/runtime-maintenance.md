@@ -8,10 +8,10 @@ Keep runtime changes in the layer that owns the behavior:
 - reference grammar/parser lowering: `src/compiler/runtime_plan` and
   `src/targets/runtime/portable_plan.ts`;
 - Rust grammar frontend work: `src/compiler/grammar_rs`;
-- generated Wasm adapters and core ABI: `src/targets/wasm`,
-  `src/targets/runtime/wasm_core_runtime.ts`, and the Rust engine under
-  `src/targets/runtime/wasm_engine_rs`;
-- strict SIMD island parsing: `src/runtime/island_parser.ts` and
+- generated Wasm adapters, strict island execution, compact cursor tapes, and
+  core ABI: `src/targets/wasm`, `src/targets/runtime/wasm_core_runtime.ts`, and
+  the Rust engine under `src/targets/runtime/wasm_engine_rs`;
+- isolated SIMD island-kernel benchmarks: `src/runtime/island_parser.ts` and
   `src/targets/runtime/island_parser_rs`;
 - generated Wasm TypeScript loader API: `src/runtime/generated_wasm.ts`;
 - compiler-stage benchmarks: `scripts/compiler_bench.ts`;

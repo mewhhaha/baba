@@ -16,12 +16,12 @@ const CORE_HEADER_MAGIC = 0;
 const CORE_HEADER_FORMAT_VERSION = 1;
 const CORE_HEADER_PARSER_PLAN_VERSION = 2;
 const CORE_HEADER_DFA_STATE_COUNT = 3;
-const CORE_HEADER_RETIRED_PARSER_STATE_COUNT = 4;
+const CORE_HEADER_ISLAND_STATE_COUNT = 4;
 const CORE_HEADER_FAST_SPECS = 5;
 const CORE_HEADER_ASCII_TRANSITIONS = 6;
 const CORE_HEADER_TRANSITION_ROWS = 7;
 const CORE_HEADER_TRANSITIONS = 8;
-const CORE_HEADER_RETIRED_ACTION_ROWS = 9;
+const CORE_HEADER_ISLAND_PLAN = 9;
 const CORE_HEADER_RETIRED_ACTION_PAIRS = 10;
 const CORE_HEADER_RETIRED_GOTO_ROWS = 11;
 const CORE_HEADER_RETIRED_GOTO_PAIRS = 12;
@@ -273,14 +273,14 @@ function validateCorePlan(planBytes: Uint8Array): {
     CORE_HEADER_DFA_STATE_COUNT,
     "DFA state count",
   );
-  const retiredParserStateCount = readNonNegativeI32(
+  const islandStateCount = readNonNegativeI32(
     planBytes,
-    CORE_HEADER_RETIRED_PARSER_STATE_COUNT,
-    "parser state count",
+    CORE_HEADER_ISLAND_STATE_COUNT,
+    "island state count",
   );
-  if (retiredParserStateCount !== 0) {
+  if (islandStateCount > 7) {
     throw new Error(
-      `Wasm island plan carries ${retiredParserStateCount} retired LR parser states.`,
+      `Wasm island plan has ${islandStateCount} states, expected at most 7.`,
     );
   }
   const coreByteLength = readNonNegativeI32(
@@ -307,7 +307,6 @@ function validateCorePlan(planBytes: Uint8Array): {
   const transitions = readI32(planBytes, CORE_HEADER_TRANSITIONS);
   for (
     const retiredHeader of [
-      CORE_HEADER_RETIRED_ACTION_ROWS,
       CORE_HEADER_RETIRED_ACTION_PAIRS,
       CORE_HEADER_RETIRED_GOTO_ROWS,
       CORE_HEADER_RETIRED_GOTO_PAIRS,
@@ -327,6 +326,22 @@ function validateCorePlan(planBytes: Uint8Array): {
     CORE_HEADER_SPEC_COUNT,
     "lexer spec count",
   );
+  const islandPlan = readI32(planBytes, CORE_HEADER_ISLAND_PLAN);
+  if (islandStateCount === 0) {
+    if (islandPlan !== 0) {
+      throw new Error(
+        `Lexer-only Wasm plan has island section offset ${islandPlan}.`,
+      );
+    }
+  } else {
+    validateIslandPlan(
+      planBytes,
+      islandPlan,
+      islandStateCount,
+      specCount,
+      coreByteLength,
+    );
+  }
   if (readI32(planBytes, CORE_HEADER_RETIRED_EOF_TERMINAL) !== -1) {
     throw new Error("Wasm island plan retired EOF terminal must be -1.");
   }
@@ -1079,6 +1094,121 @@ function validateSection(
   }
   if (offset + byteLength > coreByteLength) {
     throw new Error(`Wasm parser plan ${name} section exceeds core length.`);
+  }
+}
+
+function validateIslandPlan(
+  bytes: Uint8Array,
+  offset: number,
+  stateCount: number,
+  specCount: number,
+  coreByteLength: number,
+): void {
+  const fixedI32Count = 8;
+  validateSection(
+    "island plan",
+    offset,
+    fixedI32Count * I32_BYTES,
+    coreByteLength,
+  );
+  const terminalCount = readI32AtByteOffset(bytes, offset);
+  if (terminalCount < 1) {
+    throw new Error(
+      `Wasm parser plan island terminal count ${terminalCount} is invalid.`,
+    );
+  }
+  const transitionCount = checkedMul(
+    stateCount,
+    terminalCount,
+    "island transition count",
+  );
+  const sectionI32Count = fixedI32Count + specCount + transitionCount * 2;
+  if (!Number.isSafeInteger(sectionI32Count)) {
+    throw new Error("Wasm parser plan island section length is unsafe.");
+  }
+  validateSection(
+    "island plan",
+    offset,
+    checkedMul(sectionI32Count, I32_BYTES, "island plan byte length"),
+    coreByteLength,
+  );
+  const startState = readI32AtByteOffset(bytes, offset + I32_BYTES);
+  if (startState !== 0) {
+    throw new Error(
+      `Wasm parser plan island starts at state ${startState}, expected 0.`,
+    );
+  }
+  const acceptingMask = readI32AtByteOffset(bytes, offset + I32_BYTES * 2);
+  const validAcceptingMask = (1 << stateCount) - 1;
+  if (acceptingMask < 0 || (acceptingMask & ~validAcceptingMask) !== 0) {
+    throw new Error(
+      `Wasm parser plan island accepting mask ${acceptingMask} is invalid for ${stateCount} states.`,
+    );
+  }
+  const boundaryTerminal = readI32AtByteOffset(
+    bytes,
+    offset + I32_BYTES * 3,
+  );
+  if (boundaryTerminal < 0 || boundaryTerminal >= terminalCount) {
+    throw new Error(
+      `Wasm parser plan island boundary terminal ${boundaryTerminal} is outside [0, ${terminalCount}).`,
+    );
+  }
+  for (
+    const [field, name] of [
+      [4, "root rule"],
+      [5, "region rule"],
+    ] as const
+  ) {
+    const value = readI32AtByteOffset(bytes, offset + I32_BYTES * field);
+    if (value < 0) {
+      throw new Error(
+        `Wasm parser plan island ${name} id ${value} is invalid.`,
+      );
+    }
+  }
+  const rootField = readI32AtByteOffset(bytes, offset + I32_BYTES * 6);
+  if (rootField < -1) {
+    throw new Error(
+      `Wasm parser plan island root field ${rootField} is invalid.`,
+    );
+  }
+  const rootAcceptsEmpty = readI32AtByteOffset(
+    bytes,
+    offset + I32_BYTES * 7,
+  );
+  if (rootAcceptsEmpty !== 0 && rootAcceptsEmpty !== 1) {
+    throw new Error(
+      `Wasm parser plan island empty-root flag ${rootAcceptsEmpty} is invalid.`,
+    );
+  }
+  let cursor = offset + fixedI32Count * I32_BYTES;
+  for (let spec = 0; spec < specCount; spec += 1) {
+    const terminal = readI32AtByteOffset(bytes, cursor);
+    if (terminal < -1 || terminal >= terminalCount) {
+      throw new Error(
+        `Wasm parser plan lexer spec ${spec} has island terminal ${terminal}.`,
+      );
+    }
+    cursor += I32_BYTES;
+  }
+  for (let transition = 0; transition < transitionCount; transition += 1) {
+    const target = readI32AtByteOffset(bytes, cursor);
+    if (target < 0 || target > stateCount) {
+      throw new Error(
+        `Wasm parser plan island transition ${transition} targets state ${target}.`,
+      );
+    }
+    cursor += I32_BYTES;
+  }
+  for (let transition = 0; transition < transitionCount; transition += 1) {
+    const field = readI32AtByteOffset(bytes, cursor);
+    if (field < -1) {
+      throw new Error(
+        `Wasm parser plan island transition ${transition} has field ${field}.`,
+      );
+    }
+    cursor += I32_BYTES;
   }
 }
 

@@ -254,6 +254,7 @@ Deno.test("plans above the dense ASCII limit retain complete CSR transitions", (
       notFollowedBy: undefined,
       excludedWords: [],
     }],
+    island: undefined,
   });
   const plan = encodeCombinedWasmParserPlan(image.planBytes, {});
   const tables = decodeLexerPlanTables(plan);

@@ -4,6 +4,10 @@ import { islandParserWasmBytes } from "./island_parser_wasm_bytes.ts";
 
 const SIMD_LANES = 16;
 const MAX_SIMD_STATES = 7;
+const CORE_HEADER_ISLAND_STATE_COUNT = 4;
+const CORE_HEADER_ISLAND_PLAN = 9;
+const CORE_HEADER_SPEC_COUNT = 14;
+const ISLAND_CONFIG_I32_COUNT = 8;
 let compiledIslandParserModule: Promise<WebAssembly.Module> | undefined;
 let synchronousIslandParserModule: WebAssembly.Module | undefined;
 
@@ -142,9 +146,21 @@ export function compileStrictIslandParserProgram(
     );
   }
 
+  const validation = compileIslandProgram(plan, region.id);
+  const terminalBySpec = Int32Array.from(plan.terminalClassification);
+  assertStrictIslandCoreParity(
+    planBytes,
+    validation,
+    terminalBySpec,
+    boundary.terminal,
+    root.ruleId,
+    region.ruleId,
+    rootField,
+    rootStartState.accepting,
+  );
   return {
-    validation: compileIslandProgram(plan, region.id),
-    terminalBySpec: Int32Array.from(plan.terminalClassification),
+    validation,
+    terminalBySpec,
     rootIsland: root.id,
     rootRuleId: root.ruleId,
     rootRuleName: root.ruleName,
@@ -155,6 +171,117 @@ export function compileStrictIslandParserProgram(
     boundaryTerminal: boundary.terminal,
     rootField,
   };
+}
+
+function assertStrictIslandCoreParity(
+  planBytes: Uint8Array,
+  validation: IslandSimdProgram,
+  terminalBySpec: Int32Array,
+  boundaryTerminal: number,
+  rootRuleId: number,
+  regionRuleId: number,
+  rootField: number,
+  rootAcceptsEmpty: boolean,
+): void {
+  const view = new DataView(
+    planBytes.buffer,
+    planBytes.byteOffset,
+    planBytes.byteLength,
+  );
+  const stateCount = view.getInt32(
+    CORE_HEADER_ISLAND_STATE_COUNT * Int32Array.BYTES_PER_ELEMENT,
+    true,
+  );
+  const islandOffset = view.getInt32(
+    CORE_HEADER_ISLAND_PLAN * Int32Array.BYTES_PER_ELEMENT,
+    true,
+  );
+  const specCount = view.getInt32(
+    CORE_HEADER_SPEC_COUNT * Int32Array.BYTES_PER_ELEMENT,
+    true,
+  );
+  if (stateCount !== validation.stateCount) {
+    throw new Error(
+      `Strict island metadata has ${validation.stateCount} states, but the Rust core plan has ${stateCount}.`,
+    );
+  }
+  if (islandOffset <= 0 || specCount !== terminalBySpec.length) {
+    throw new Error(
+      `Strict island Rust core section ${islandOffset} classifies ${specCount} specs, expected ${terminalBySpec.length}.`,
+    );
+  }
+  const config = [
+    validation.terminalCount,
+    validation.startState,
+    validation.acceptingMask,
+    boundaryTerminal,
+    rootRuleId,
+    regionRuleId,
+    rootField,
+  ];
+  for (let index = 0; index < config.length; index += 1) {
+    const actual = view.getInt32(
+      islandOffset + index * Int32Array.BYTES_PER_ELEMENT,
+      true,
+    );
+    const expected = config[index];
+    if (actual !== expected) {
+      throw new Error(
+        `Strict island Rust core config ${index} is ${actual}, expected ${expected}.`,
+      );
+    }
+  }
+  let expectedRootAcceptsEmpty = 0;
+  if (rootAcceptsEmpty) {
+    expectedRootAcceptsEmpty = 1;
+  }
+  const coreRootAcceptsEmpty = view.getInt32(
+    islandOffset + 7 * Int32Array.BYTES_PER_ELEMENT,
+    true,
+  );
+  if (coreRootAcceptsEmpty !== expectedRootAcceptsEmpty) {
+    throw new Error(
+      `Strict island Rust core empty-root flag is ${coreRootAcceptsEmpty}, expected ${expectedRootAcceptsEmpty}.`,
+    );
+  }
+  let cursor = islandOffset +
+    ISLAND_CONFIG_I32_COUNT * Int32Array.BYTES_PER_ELEMENT;
+  for (let spec = 0; spec < terminalBySpec.length; spec += 1) {
+    const actual = view.getInt32(cursor, true);
+    const expected = terminalBySpec[spec];
+    if (actual !== expected) {
+      throw new Error(
+        `Strict island Rust core classifies lexer spec ${spec} as ${actual}, expected ${expected}.`,
+      );
+    }
+    cursor += Int32Array.BYTES_PER_ELEMENT;
+  }
+  for (let terminal = 0; terminal < validation.terminalCount; terminal += 1) {
+    for (let state = 0; state < validation.stateCount; state += 1) {
+      const actual = view.getInt32(cursor, true);
+      const expected = validation.transitions[terminal * SIMD_LANES + state];
+      if (actual !== expected) {
+        throw new Error(
+          `Strict island Rust core transition (${terminal}, ${state}) targets ${actual}, expected ${expected}.`,
+        );
+      }
+      cursor += Int32Array.BYTES_PER_ELEMENT;
+    }
+  }
+  for (let terminal = 0; terminal < validation.terminalCount; terminal += 1) {
+    for (let state = 0; state < validation.stateCount; state += 1) {
+      const actual = view.getInt32(cursor, true);
+      const expected = validation.transitionFields[
+        terminal * SIMD_LANES + state
+      ];
+      if (actual !== expected) {
+        throw new Error(
+          `Strict island Rust core transition (${terminal}, ${state}) has field ${actual}, expected ${expected}.`,
+        );
+      }
+      cursor += Int32Array.BYTES_PER_ELEMENT;
+    }
+  }
 }
 
 function compileIslandProgram(

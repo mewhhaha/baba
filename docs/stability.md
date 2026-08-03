@@ -117,16 +117,17 @@ runtime helper internals.
 ## Wasm ABI
 
 The generated Wasm core ABI is versioned separately from package and parser-plan
-versions. ABI version `13` is documented in `docs/wasm-abi.md` and described by
+versions. ABI version `14` is documented in `docs/wasm-abi.md` and described by
 each generated `wasm/abi.json`. Changes to exported core functions, record
 layouts, source encoding, span units, ownership, result lifetime, or numeric
 status tables require an ABI version change.
 
 How much of a caller-owned buffer an export may write is part of that contract,
-and so is the capacity argument that bounds it. ABI version 13 removes all LR
-parser exports and layouts from the core. The generated TypeScript adapter owns
-strict SIMD island validation and cursor construction. `lex_all` retains its
-explicit token and memo capacities and never writes records it does not return.
+and so is the capacity argument that bounds it. ABI version 14 adds strict
+island analysis and compact cursor-tape materialization over caller-owned raw
+token records. The TypeScript adapter owns public diagnostics and lazy cursor
+objects. `lex_all` retains its explicit token and memo capacities and never
+writes records it does not return.
 
 The TypeScript Wasm adapter API is stable at the generated module entrypoint.
 Generated modules import their loader from

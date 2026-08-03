@@ -42,6 +42,22 @@ interface PlanDataLayout {
 export interface WasmCoreRuntimeMetadata {
   readonly acceptCandidates: readonly (readonly number[])[];
   readonly specs: readonly WasmCoreLexerSpecMetadata[];
+  readonly island: WasmCoreIslandPlan | undefined;
+}
+
+export interface WasmCoreIslandPlan {
+  readonly stateCount: number;
+  readonly terminalCount: number;
+  readonly startState: number;
+  readonly acceptingMask: number;
+  readonly boundaryTerminal: number;
+  readonly rootRuleId: number;
+  readonly regionRuleId: number;
+  readonly rootField: number;
+  readonly rootAcceptsEmpty: boolean;
+  readonly terminalBySpec: readonly number[];
+  readonly transitions: readonly number[];
+  readonly transitionFields: readonly number[];
 }
 
 export interface WasmCoreLexerSpecMetadata {
@@ -61,6 +77,7 @@ export function emitWasmModule(
   metadata: WasmCoreRuntimeMetadata = {
     acceptCandidates: [],
     specs: [],
+    island: undefined,
   },
 ): WasmModuleImage {
   const layout = buildPlanDataLayout(dfa, metadata);
@@ -310,6 +327,56 @@ function buildPlanDataLayout(
   }
   const alphabetRangesOffset = appendI32s(alphabetRangeValues);
 
+  let islandStateCount = 0;
+  let islandPlanOffset = 0;
+  const island = metadata.island;
+  if (island !== undefined) {
+    if (island.stateCount < 1 || island.stateCount > 7) {
+      throw new Error(
+        `Wasm core island plan has ${island.stateCount} states, expected 1..7.`,
+      );
+    }
+    if (island.terminalCount < 1) {
+      throw new Error(
+        `Wasm core island plan has ${island.terminalCount} terminals.`,
+      );
+    }
+    if (island.terminalBySpec.length !== metadata.specs.length) {
+      throw new Error(
+        `Wasm core island plan classifies ${island.terminalBySpec.length} lexer specs, expected ${metadata.specs.length}.`,
+      );
+    }
+    const transitionCount = island.stateCount * island.terminalCount;
+    if (island.transitions.length !== transitionCount) {
+      throw new Error(
+        `Wasm core island plan has ${island.transitions.length} transitions, expected ${transitionCount}.`,
+      );
+    }
+    if (island.transitionFields.length !== transitionCount) {
+      throw new Error(
+        `Wasm core island plan has ${island.transitionFields.length} transition fields, expected ${transitionCount}.`,
+      );
+    }
+    islandStateCount = island.stateCount;
+    let rootAcceptsEmpty = 0;
+    if (island.rootAcceptsEmpty) {
+      rootAcceptsEmpty = 1;
+    }
+    islandPlanOffset = appendI32s([
+      island.terminalCount,
+      island.startState,
+      island.acceptingMask,
+      island.boundaryTerminal,
+      island.rootRuleId,
+      island.regionRuleId,
+      island.rootField,
+      rootAcceptsEmpty,
+      ...island.terminalBySpec,
+      ...island.transitions,
+      ...island.transitionFields,
+    ]);
+  }
+
   if (dfa.start < 0 || dfa.start >= dfa.states.length) {
     throw new Error(
       `Wasm core plan DFA start state ${dfa.start} is outside [0, ${dfa.states.length}).`,
@@ -322,12 +389,12 @@ function buildPlanDataLayout(
     WASM_CORE_PLAN_FORMAT_VERSION,
     PARSER_PLAN_VERSION,
     dfa.states.length,
-    0,
+    islandStateCount,
     fastSpecsOffset,
     encodedAsciiTransitionsOffset,
     transitionRowsOffset,
     transitionsOffset,
-    0,
+    islandPlanOffset,
     0,
     0,
     0,

@@ -19,9 +19,21 @@ import { RUNTIME_IMPLEMENTATION_METADATA } from "../runtime/implementation.ts";
 import {
   WASM_ABI_VERSION,
   WASM_ADAPTER_HANDLE_CAPABILITY_EPOCH,
+  WASM_CURSOR_CHILD_RECORD_I32_COUNT,
+  WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+  WASM_CURSOR_RULE_RECORD_I32_COUNT,
+  WASM_CURSOR_VALUE_RECORD_I32_COUNT,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_I32_BYTES,
   WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
+  WASM_ISLAND_RESULT_I32_COUNT,
+  WASM_ISLAND_STATUS_CAPACITY,
+  WASM_ISLAND_STATUS_INVALID,
+  WASM_ISLAND_STATUS_LEXICAL,
+  WASM_ISLAND_STATUS_OK,
+  WASM_ISLAND_STATUS_TRACE_LIMIT,
+  WASM_ISLAND_STATUS_TRAILING,
+  WASM_ISLAND_STATUS_UNEXPECTED,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
@@ -41,6 +53,7 @@ import {
 import { generatedSourceBanner } from "../runtime/provenance.ts";
 import {
   emitWasmModule,
+  type WasmCoreIslandPlan,
   type WasmModuleImage,
 } from "../runtime/wasm_core_runtime.ts";
 import {
@@ -223,7 +236,7 @@ export function planWasmTarget(
   );
   const wasm = emitWasmModule(
     runtimeDfa,
-    wasmCoreRuntimeMetadata(runtimePlan),
+    wasmCoreRuntimeMetadata(runtimePlan, gpuFrontend),
   );
   const parserPlanBytes = encodeCombinedWasmParserPlan(
     wasm.planBytes,
@@ -424,6 +437,47 @@ function wasmAbiDescriptor(): unknown {
             "dependencyEnd",
           ],
         },
+        islandResult: {
+          i32Count: WASM_ISLAND_RESULT_I32_COUNT,
+          bytes: WASM_ISLAND_RESULT_I32_COUNT * WASM_I32_BYTES,
+          fields: [
+            "tokenCount",
+            "ruleCount",
+            "childCount",
+            "fieldCount",
+            "valueCount",
+            "rootRef",
+            "errorRecord",
+            "errorState",
+            "structuralTokenCount",
+            "regionCount",
+          ],
+        },
+        cursorRuleRecord: {
+          i32Count: WASM_CURSOR_RULE_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_RULE_RECORD_I32_COUNT * WASM_I32_BYTES,
+        },
+        cursorChildRecord: {
+          i32Count: WASM_CURSOR_CHILD_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_CHILD_RECORD_I32_COUNT * WASM_I32_BYTES,
+        },
+        cursorFieldRecord: {
+          i32Count: WASM_CURSOR_FIELD_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_FIELD_RECORD_I32_COUNT * WASM_I32_BYTES,
+        },
+        cursorValueRecord: {
+          i32Count: WASM_CURSOR_VALUE_RECORD_I32_COUNT,
+          bytes: WASM_CURSOR_VALUE_RECORD_I32_COUNT * WASM_I32_BYTES,
+        },
+      },
+      islandStatuses: {
+        unexpected: WASM_ISLAND_STATUS_UNEXPECTED,
+        ok: WASM_ISLAND_STATUS_OK,
+        invalid: WASM_ISLAND_STATUS_INVALID,
+        lexical: WASM_ISLAND_STATUS_LEXICAL,
+        traceLimit: WASM_ISLAND_STATUS_TRACE_LIMIT,
+        capacity: WASM_ISLAND_STATUS_CAPACITY,
+        trailing: WASM_ISLAND_STATUS_TRAILING,
       },
       exports: [
         {
@@ -466,6 +520,35 @@ function wasmAbiDescriptor(): unknown {
           name: "lex_memo_i32_per_position",
           params: [],
           result: "memoI32CountPerSourcePosition",
+        },
+        {
+          name: "analyze_island_records",
+          params: [
+            "tokenPtr",
+            "rawTokenCount",
+            "maxParserActions",
+            "resultPtr",
+          ],
+          result: "islandStatus",
+        },
+        {
+          name: "materialize_island_records",
+          params: [
+            "sourceLength",
+            "tokenPtr",
+            "rawTokenCount",
+            "preserveTrivia",
+            "rulePtr",
+            "ruleCapacity",
+            "childPtr",
+            "childCapacity",
+            "fieldPtr",
+            "fieldCapacity",
+            "valuePtr",
+            "valueCapacity",
+            "resultPtr",
+          ],
+          result: "islandStatus",
         },
         {
           name: "load_plan",
@@ -529,6 +612,11 @@ function wasmAbiDescriptor(): unknown {
         },
         {
           name: "incremental_token_record_i32_count",
+          params: [],
+          result: "i32",
+        },
+        {
+          name: "island_result_i32_count",
           params: [],
           result: "i32",
         },
@@ -889,6 +977,7 @@ function compactWasmRuntimeMetadata(
 
 function wasmCoreRuntimeMetadata(
   runtime: RuntimeLexerPlan,
+  gpuFrontend: GpuFrontendPlan | undefined,
 ): {
   readonly acceptCandidates: readonly (readonly number[])[];
   readonly specs: readonly {
@@ -898,6 +987,7 @@ function wasmCoreRuntimeMetadata(
     readonly notFollowedBy: Dfa | undefined;
     readonly excludedWords: readonly string[];
   }[];
+  readonly island: WasmCoreIslandPlan | undefined;
 } {
   const acceptCandidates = runtime.lexer.states.map((state) => {
     return [...state.accepts].sort((left, right) => {
@@ -950,6 +1040,149 @@ function wasmCoreRuntimeMetadata(
         excludedWords: trailingContext.excludedWords,
       };
     }),
+    island: strictWasmCoreIslandPlan(runtime, gpuFrontend),
+  };
+}
+
+function strictWasmCoreIslandPlan(
+  runtime: RuntimeLexerPlan,
+  gpuFrontend: GpuFrontendPlan | undefined,
+): WasmCoreIslandPlan | undefined {
+  if (gpuFrontend === undefined || gpuFrontend.throughput !== "strict") {
+    return undefined;
+  }
+  const rootLoop = gpuFrontend.execution.rootLoop;
+  if (rootLoop === null) {
+    throw new Error(
+      "Strict Wasm island planning requires a compiler-proven root loop.",
+    );
+  }
+  const root = gpuFrontend.islands[gpuFrontend.rootIsland];
+  if (root === undefined) {
+    throw new Error(
+      `Strict Wasm island planning cannot find root island ${gpuFrontend.rootIsland}.`,
+    );
+  }
+  const region = gpuFrontend.islands[rootLoop.island];
+  if (region === undefined) {
+    throw new Error(
+      `Strict Wasm island planning cannot find region island ${rootLoop.island}.`,
+    );
+  }
+  const boundary = gpuFrontend.boundaries[region.id];
+  if (boundary === undefined || boundary.kind !== "terminated") {
+    throw new Error(
+      `Strict Wasm island ${region.id} has no terminated boundary.`,
+    );
+  }
+  const rootState = root.states[rootLoop.state];
+  if (rootState === undefined) {
+    throw new Error(
+      `Strict Wasm root island ${root.id} has no loop state ${rootLoop.state}.`,
+    );
+  }
+  const rootTransition = rootState.transitions.find((transition) => {
+    return transition.inputKind === "island" &&
+      transition.input === region.id;
+  });
+  if (
+    rootTransition === undefined || rootTransition.emit.kind !== "placeholder"
+  ) {
+    throw new Error(
+      `Strict Wasm root loop state ${rootLoop.state} has no placeholder transition for island ${region.id}.`,
+    );
+  }
+  let rootField = rootTransition.emit.field;
+  for (const state of root.states) {
+    for (const transition of state.transitions) {
+      if (
+        transition.inputKind !== "island" ||
+        transition.input !== region.id ||
+        transition.emit.kind !== "placeholder" ||
+        transition.emit.field < 0
+      ) {
+        continue;
+      }
+      if (rootField >= 0 && rootField !== transition.emit.field) {
+        throw new Error(
+          `Strict Wasm root island ${root.id} emits region ${region.id} into fields ${rootField} and ${transition.emit.field}.`,
+        );
+      }
+      rootField = transition.emit.field;
+    }
+  }
+  const rootStartState = root.states[root.startState];
+  if (rootStartState === undefined) {
+    throw new Error(
+      `Strict Wasm root island ${root.id} has no start state ${root.startState}.`,
+    );
+  }
+  const stateCount = region.states.length;
+  const terminalCount = gpuFrontend.execution.denseTransitions.terminalSymbols;
+  const transitions = new Array<number>(stateCount * terminalCount).fill(
+    stateCount,
+  );
+  const transitionFields = new Array<number>(
+    stateCount * terminalCount,
+  ).fill(-1);
+  let acceptingMask = 0;
+  for (
+    let specIndex = 0;
+    specIndex < gpuFrontend.terminalClassification.length;
+    specIndex += 1
+  ) {
+    const terminal = gpuFrontend.terminalClassification[specIndex];
+    const spec = runtime.lexer.specifications[specIndex];
+    if (terminal === undefined || spec === undefined) {
+      throw new Error(
+        `Strict Wasm island plan has no lexer specification ${specIndex}.`,
+      );
+    }
+    if (terminal < 0 && spec.channel !== "trivia") {
+      throw new Error(
+        `Strict Wasm island plan cannot classify main-channel lexer spec ${specIndex}.`,
+      );
+    }
+    if (terminal >= 0 && spec.channel === "trivia") {
+      throw new Error(
+        `Strict Wasm island plan classifies trivia lexer spec ${specIndex} as terminal ${terminal}.`,
+      );
+    }
+  }
+  for (let stateIndex = 0; stateIndex < stateCount; stateIndex += 1) {
+    const state = region.states[stateIndex];
+    if (state === undefined || state.id !== stateIndex) {
+      throw new Error(
+        `Strict Wasm island ${region.id} has no dense state ${stateIndex}.`,
+      );
+    }
+    if (state.accepting) {
+      acceptingMask |= 1 << stateIndex;
+    }
+    for (const transition of state.transitions) {
+      if (transition.inputKind !== "terminal") {
+        throw new Error(
+          `Strict Wasm island ${region.id} state ${state.id} contains an island transition.`,
+        );
+      }
+      const transitionIndex = transition.input * stateCount + state.id;
+      transitions[transitionIndex] = transition.target;
+      transitionFields[transitionIndex] = transition.emit.field;
+    }
+  }
+  return {
+    stateCount,
+    terminalCount,
+    startState: region.startState,
+    acceptingMask,
+    boundaryTerminal: boundary.terminal,
+    rootRuleId: root.ruleId,
+    regionRuleId: region.ruleId,
+    rootField,
+    rootAcceptsEmpty: rootStartState.accepting,
+    terminalBySpec: gpuFrontend.terminalClassification,
+    transitions,
+    transitionFields,
   };
 }
 

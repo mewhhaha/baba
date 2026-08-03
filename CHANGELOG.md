@@ -5,8 +5,18 @@
 - Wasm compilation no longer constructs or consumes the portable LR plan. Its
   public limits, statistics, benchmark stages, metadata identity, and generated
   syntax now describe only DFA lexing and strict island parsing.
-- Wasm island plan 4, runtime metadata 6, and runtime implementation 5 identify
-  the LR-free compiler/runtime boundary; regenerate generated artifacts.
+- Wasm ABI 14 moves strict island analysis and compact cursor-tape
+  materialization into the Rust core. The TypeScript adapter retains public
+  diagnostics, source snapshots, and lazy cursor objects.
+- Core plan format 9 stores exact strict-island transition and field tables.
+  Parser plan 5, runtime metadata 6, and runtime implementation 6 identify the
+  Rust parser/materializer boundary; regenerate generated artifacts.
+- On the pinned 262,153-token `island-statements` workload, Rust-owned analysis
+  and tape construction reduce hot p25 validation from 7.69 to 5.99 ms, parse
+  from 15.32 to 7.76 ms, and incremental validation from 4.39 to 2.87 ms. Hot
+  lexing and the 193-page high-water mark are unchanged within measurement
+  noise; the generic Wasm core grows by 4,032 bytes and this fixture's core plan
+  by 292 bytes.
 - Removed the unused public LR conflict-policy metadata and branching/resolution
   machinery. The internal portable reference plan is now deterministic-only v3.
 - Removed the Brainfuck, feature-tour, and ThunkWasm examples because their

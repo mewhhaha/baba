@@ -44,6 +44,9 @@ interface GeneratedAbiDescriptor {
       readonly incrementalTokenRecord: {
         readonly i32Count: number;
       };
+      readonly islandResult: {
+        readonly i32Count: number;
+      };
     };
     readonly exports: readonly {
       readonly name: string;
@@ -53,7 +56,7 @@ interface GeneratedAbiDescriptor {
 
 Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.abiName, "baba-wasm-abi");
-  assertEquals(babaWasmFrontendRequirements.abiVersion, 13);
+  assertEquals(babaWasmFrontendRequirements.abiVersion, 14);
   assertEquals(
     babaWasmFrontendRequirements.targetKind,
     "javascript-hosted-core-wasm",
@@ -69,9 +72,10 @@ Deno.test("Wasm frontend scaffold records the core Baba ABI gate", () => {
   assertEquals(babaWasmFrontendRequirements.lexResultI32Count, 2);
   assertEquals(babaWasmFrontendRequirements.tokenRecordI32Count, 4);
   assertEquals(babaWasmFrontendRequirements.incrementalTokenRecordI32Count, 5);
+  assertEquals(babaWasmFrontendRequirements.islandResultI32Count, 10);
   assertEquals(
     babaWasmFrontendRequirements.requiredExports.join(","),
-    "memory,lex_one,lex_all,lex_incremental,lex_memo_i32_per_position,load_plan,abi_version,plan_version,semantics_version,reset,plan_buffer_base,input_base,max_pages,source_encoding,span_unit,lex_result_i32_count,token_record_i32_count,incremental_token_record_i32_count,host_ownership_model,result_lifetime_model",
+    "memory,lex_one,lex_all,lex_incremental,lex_memo_i32_per_position,analyze_island_records,materialize_island_records,load_plan,abi_version,plan_version,semantics_version,reset,plan_buffer_base,input_base,max_pages,source_encoding,span_unit,lex_result_i32_count,token_record_i32_count,incremental_token_record_i32_count,island_result_i32_count,host_ownership_model,result_lifetime_model",
   );
   assertIncludes(
     babaWasmFrontendRequirements.forbiddenDefaultDependencies.join(","),
@@ -237,6 +241,10 @@ Deno.test("Wasm frontend scaffold stays aligned with generated artifacts", () =>
   assertEquals(
     abi.core.layouts.incrementalTokenRecord.i32Count,
     babaWasmFrontendRequirements.incrementalTokenRecordI32Count,
+  );
+  assertEquals(
+    abi.core.layouts.islandResult.i32Count,
+    babaWasmFrontendRequirements.islandResultI32Count,
   );
   assertEquals(
     abi.core.exports.map((entry) => entry.name).join(","),

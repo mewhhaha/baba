@@ -652,10 +652,13 @@ Deno.test("combined parser plans round-trip current runtime metadata with exact 
   );
 });
 
-// Core plan format version 8 header slots. Named here rather than imported
+// Core plan format version 9 header slots. Named here rather than imported
 // because the encoder and the validator both keep them module-private, and a
 // test that reads the bytes is exactly the place that should re-state them.
 const CORE_HEADER_DFA_STATE_COUNT = 3;
+const CORE_HEADER_ISLAND_STATE_COUNT = 4;
+const CORE_HEADER_ISLAND_PLAN = 9;
+const CORE_HEADER_SPEC_COUNT = 14;
 const CORE_HEADER_DFA_START_STATE = 31;
 const CORE_HEADER_ALPHABET_CLASS_COUNT = 32;
 const CORE_HEADER_ALPHABET_ASCII_CLASSES = 33;
@@ -841,6 +844,34 @@ Deno.test("core plan validation rejects a corrupted alphabet section", () => {
   assertThrowsIncludes(
     () => validateCombinedWasmParserPlan(mergedClasses),
     `alphabet class ${mergedInto} is not an equivalence class`,
+  );
+});
+
+Deno.test("core plan validation rejects corrupted strict island tables", () => {
+  const plan = corePlanBytes(STATEMENT_GRAMMAR);
+  const stateCount = planHeader(plan, CORE_HEADER_ISLAND_STATE_COUNT);
+  const islandOffset = planHeader(plan, CORE_HEADER_ISLAND_PLAN);
+  const specCount = planHeader(plan, CORE_HEADER_SPEC_COUNT);
+  assert(stateCount > 0, "Expected a strict island state table.");
+  assert(islandOffset > 0, "Expected a strict island plan section.");
+
+  const invalidStateCount = new Uint8Array(plan);
+  setPlanI32(
+    invalidStateCount,
+    CORE_HEADER_ISLAND_STATE_COUNT * WASM_I32_BYTES,
+    8,
+  );
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(invalidStateCount),
+    "expected at most 7",
+  );
+
+  const invalidTransition = new Uint8Array(plan);
+  const transitionOffset = islandOffset + (8 + specCount) * WASM_I32_BYTES;
+  setPlanI32(invalidTransition, transitionOffset, stateCount + 1);
+  assertThrowsIncludes(
+    () => validateCombinedWasmParserPlan(invalidTransition),
+    `targets state ${stateCount + 1}`,
   );
 });
 

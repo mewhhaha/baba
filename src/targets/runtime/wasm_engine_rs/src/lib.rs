@@ -3,8 +3,8 @@
 use core::arch::wasm32::{i32x4_splat, v128, v128_store};
 use core::panic::PanicInfo;
 
-const WASM_ABI_VERSION: i32 = 13;
-const RUNTIME_IMPLEMENTATION_VERSION: i32 = 5;
+const WASM_ABI_VERSION: i32 = 14;
+const RUNTIME_IMPLEMENTATION_VERSION: i32 = 6;
 const MAX_WASM_PAGES: i32 = 65_535;
 const SOURCE_ENCODING_UTF16: i32 = 1;
 const SPAN_UNIT_UTF16: i32 = 1;
@@ -12,15 +12,17 @@ const HOST_OWNERSHIP_CALLER_MANAGED: i32 = 1;
 const RESULT_LIFETIME_CALLER_BUFFER: i32 = 1;
 
 const PLAN_MAGIC: i32 = 0x3150_5742;
-const PLAN_FORMAT_VERSION: i32 = 8;
+const PLAN_FORMAT_VERSION: i32 = 9;
 const PLAN_HEADER_MAGIC: i32 = 0;
 const PLAN_HEADER_FORMAT_VERSION: i32 = 1;
 const PLAN_HEADER_PARSER_PLAN_VERSION: i32 = 2;
 const PLAN_HEADER_DFA_STATE_COUNT: i32 = 3;
+const PLAN_HEADER_ISLAND_STATE_COUNT: i32 = 4;
 const PLAN_HEADER_FAST_SPECS: i32 = 5;
 const PLAN_HEADER_ASCII_TRANSITIONS: i32 = 6;
 const PLAN_HEADER_TRANSITION_ROWS: i32 = 7;
 const PLAN_HEADER_TRANSITIONS: i32 = 8;
+const PLAN_HEADER_ISLAND_PLAN: i32 = 9;
 const PLAN_HEADER_BYTE_LENGTH: i32 = 13;
 const PLAN_HEADER_SPEC_COUNT: i32 = 14;
 const PLAN_HEADER_ACCEPT_CANDIDATE_ROWS: i32 = 17;
@@ -45,6 +47,28 @@ const COMPACT_U16_OFFSET_BASE: i32 = 0x4000_0000;
 const LEX_RESULT_I32_COUNT: i32 = 2;
 const TOKEN_RECORD_I32_COUNT: i32 = 4;
 const INCREMENTAL_TOKEN_RECORD_I32_COUNT: i32 = 5;
+const ISLAND_RESULT_I32_COUNT: i32 = 10;
+const CURSOR_RULE_RECORD_I32_COUNT: i32 = 9;
+const CURSOR_CHILD_RECORD_I32_COUNT: i32 = 2;
+const CURSOR_FIELD_RECORD_I32_COUNT: i32 = 2;
+const CURSOR_VALUE_RECORD_I32_COUNT: i32 = 4;
+const CURSOR_VALUE_REF: i32 = 1;
+const ISLAND_STATUS_UNEXPECTED: i32 = 0;
+const ISLAND_STATUS_OK: i32 = 1;
+const ISLAND_STATUS_INVALID: i32 = -1;
+const ISLAND_STATUS_LEXICAL: i32 = -2;
+const ISLAND_STATUS_TRACE_LIMIT: i32 = -3;
+const ISLAND_STATUS_CAPACITY: i32 = -4;
+const ISLAND_STATUS_TRAILING: i32 = -5;
+const ISLAND_CONFIG_I32_COUNT: i32 = 8;
+const ISLAND_CONFIG_TERMINAL_COUNT: i32 = 0;
+const ISLAND_CONFIG_START_STATE: i32 = 1;
+const ISLAND_CONFIG_ACCEPTING_MASK: i32 = 2;
+const ISLAND_CONFIG_BOUNDARY_TERMINAL: i32 = 3;
+const ISLAND_CONFIG_ROOT_RULE: i32 = 4;
+const ISLAND_CONFIG_REGION_RULE: i32 = 5;
+const ISLAND_CONFIG_ROOT_FIELD: i32 = 6;
+const ISLAND_CONFIG_ROOT_ACCEPTS_EMPTY: i32 = 7;
 // `lex_all` returns a token count, so its failures are the negative values.
 const LEX_STATUS_TOKEN_CAPACITY: i32 = -1;
 const LEX_STATUS_MEMO_REQUIRED: i32 = -2;
@@ -209,6 +233,11 @@ pub extern "C" fn incremental_token_record_i32_count() -> i32 {
 }
 
 #[no_mangle]
+pub extern "C" fn island_result_i32_count() -> i32 {
+    ISLAND_RESULT_I32_COUNT
+}
+
+#[no_mangle]
 pub extern "C" fn host_ownership_model() -> i32 {
     HOST_OWNERSHIP_CALLER_MANAGED
 }
@@ -247,6 +276,19 @@ pub extern "C" fn load_plan(ptr: i32, len: i32) -> i32 {
     // the transition table from an address that does not belong to a state.
     let start_state = header_at(ptr, PLAN_HEADER_DFA_START_STATE);
     if start_state < 0 || start_state >= header_at(ptr, PLAN_HEADER_DFA_STATE_COUNT) {
+        return 0;
+    }
+    let island_state_count = header_at(ptr, PLAN_HEADER_ISLAND_STATE_COUNT);
+    let island_plan = header_at(ptr, PLAN_HEADER_ISLAND_PLAN);
+    if island_state_count < 0 || island_state_count > 7 {
+        return 0;
+    }
+    if island_state_count == 0 && island_plan != 0 {
+        return 0;
+    }
+    if island_state_count > 0
+        && !island_plan_is_valid(ptr, core_byte_length, island_plan, island_state_count)
+    {
         return 0;
     }
     unsafe {
@@ -894,6 +936,664 @@ fn store_token_record(
         store_i32(record + 8, end);
         store_i32(record + 12, accepting_state);
     }
+}
+
+fn island_plan_is_valid(base: i32, core_length: i32, offset: i32, state_count: i32) -> bool {
+    if offset < PLAN_HEADER_BYTES || offset & 3 != 0 {
+        return false;
+    }
+    if offset > core_length - ISLAND_CONFIG_I32_COUNT * 4 {
+        return false;
+    }
+    let address = base + offset;
+    let terminal_count = unsafe { load_i32(address + ISLAND_CONFIG_TERMINAL_COUNT * 4) };
+    let start_state = unsafe { load_i32(address + ISLAND_CONFIG_START_STATE * 4) };
+    let accepting_mask = unsafe { load_i32(address + ISLAND_CONFIG_ACCEPTING_MASK * 4) };
+    let boundary_terminal = unsafe { load_i32(address + ISLAND_CONFIG_BOUNDARY_TERMINAL * 4) };
+    let root_rule = unsafe { load_i32(address + ISLAND_CONFIG_ROOT_RULE * 4) };
+    let region_rule = unsafe { load_i32(address + ISLAND_CONFIG_REGION_RULE * 4) };
+    let root_field = unsafe { load_i32(address + ISLAND_CONFIG_ROOT_FIELD * 4) };
+    let root_accepts_empty = unsafe { load_i32(address + ISLAND_CONFIG_ROOT_ACCEPTS_EMPTY * 4) };
+    if terminal_count < 1
+        || start_state != 0
+        || accepting_mask < 0
+        || accepting_mask & !((1 << state_count) - 1) != 0
+        || boundary_terminal < 0
+        || boundary_terminal >= terminal_count
+        || root_rule < 0
+        || region_rule < 0
+        || root_field < -1
+        || root_accepts_empty < 0
+        || root_accepts_empty > 1
+    {
+        return false;
+    }
+    let spec_count = header_at(base, PLAN_HEADER_SPEC_COUNT);
+    if spec_count < 0 {
+        return false;
+    }
+    let transition_count = (state_count as i64) * (terminal_count as i64);
+    let section_i32_count =
+        (ISLAND_CONFIG_I32_COUNT as i64) + (spec_count as i64) + transition_count * 2;
+    let section_end = (offset as i64) + section_i32_count * 4;
+    if section_end > core_length as i64 {
+        return false;
+    }
+    let mut spec = 0;
+    while spec < spec_count {
+        let terminal = unsafe { load_i32(address + (ISLAND_CONFIG_I32_COUNT + spec) * 4) };
+        if terminal < -1 || terminal >= terminal_count {
+            return false;
+        }
+        spec += 1;
+    }
+    let transitions = address + (ISLAND_CONFIG_I32_COUNT + spec_count) * 4;
+    let fields = transitions + (transition_count as i32) * 4;
+    let mut index = 0;
+    while index < transition_count as i32 {
+        let target = unsafe { load_i32(transitions + index * 4) };
+        let field = unsafe { load_i32(fields + index * 4) };
+        if target < 0 || target > state_count || field < -1 {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+#[inline]
+fn island_plan_address() -> i32 {
+    plan_addr(header(PLAN_HEADER_ISLAND_PLAN))
+}
+
+#[inline]
+fn island_config(field: i32) -> i32 {
+    unsafe { load_i32(island_plan_address() + field * 4) }
+}
+
+#[inline]
+fn island_spec_terminal(spec: i32) -> i32 {
+    unsafe { load_i32(island_plan_address() + (ISLAND_CONFIG_I32_COUNT + spec) * 4) }
+}
+
+#[inline]
+fn island_transition_index(terminal: i32, state: i32) -> i32 {
+    terminal * header(PLAN_HEADER_ISLAND_STATE_COUNT) + state
+}
+
+#[inline]
+fn island_transition_target(terminal: i32, state: i32) -> i32 {
+    let spec_count = header(PLAN_HEADER_SPEC_COUNT);
+    let index = island_transition_index(terminal, state);
+    unsafe { load_i32(island_plan_address() + (ISLAND_CONFIG_I32_COUNT + spec_count + index) * 4) }
+}
+
+#[inline]
+fn island_transition_field(terminal: i32, state: i32) -> i32 {
+    let spec_count = header(PLAN_HEADER_SPEC_COUNT);
+    let transition_count =
+        island_config(ISLAND_CONFIG_TERMINAL_COUNT) * header(PLAN_HEADER_ISLAND_STATE_COUNT);
+    let index = island_transition_index(terminal, state);
+    unsafe {
+        load_i32(
+            island_plan_address()
+                + (ISLAND_CONFIG_I32_COUNT + spec_count + transition_count + index) * 4,
+        )
+    }
+}
+
+#[inline]
+fn island_accepts(state: i32) -> bool {
+    island_config(ISLAND_CONFIG_ACCEPTING_MASK) & (1 << state) != 0
+}
+
+fn initialize_island_result(result: i32) {
+    let mut index = 0;
+    while index < ISLAND_RESULT_I32_COUNT {
+        unsafe { store_i32(result + index * 4, 0) };
+        index += 1;
+    }
+}
+
+fn return_island_failure(status: i32, result: i32, record: i32, state: i32) -> i32 {
+    unsafe {
+        store_i32(result + 6 * 4, record);
+        store_i32(result + 7 * 4, state);
+    }
+    status
+}
+
+fn island_runtime_is_available() -> bool {
+    header(PLAN_HEADER_ISLAND_STATE_COUNT) > 0 && header(PLAN_HEADER_ISLAND_PLAN) > 0
+}
+
+fn next_structural_record(tokens: i32, raw_count: i32, start: i32) -> i32 {
+    let spec_count = header(PLAN_HEADER_SPEC_COUNT);
+    let mut record_index = start;
+    while record_index < raw_count {
+        let record = token_record_address(tokens, record_index);
+        let spec = unsafe { load_i32(record) };
+        if spec < 0 || spec >= spec_count {
+            return record_index;
+        }
+        if island_spec_terminal(spec) >= 0 {
+            return record_index;
+        }
+        record_index += 1;
+    }
+    raw_count
+}
+
+#[no_mangle]
+pub extern "C" fn analyze_island_records(
+    tokens: i32,
+    raw_count: i32,
+    max_actions: i32,
+    result: i32,
+) -> i32 {
+    initialize_island_result(result);
+    if !island_runtime_is_available() || tokens <= 0 || raw_count < 0 || max_actions < 1 {
+        return ISLAND_STATUS_INVALID;
+    }
+    let spec_count = header(PLAN_HEADER_SPEC_COUNT);
+    let terminal_count = island_config(ISLAND_CONFIG_TERMINAL_COUNT);
+    let mut structural_count = 0;
+    let mut limit_record = -1;
+    let mut record_index = 0;
+    while record_index < raw_count {
+        let record = token_record_address(tokens, record_index);
+        let spec = unsafe { load_i32(record) };
+        if spec < 0 {
+            return return_island_failure(
+                ISLAND_STATUS_LEXICAL,
+                result,
+                record_index,
+                island_config(ISLAND_CONFIG_START_STATE),
+            );
+        }
+        if spec >= spec_count {
+            return ISLAND_STATUS_INVALID;
+        }
+        let terminal = island_spec_terminal(spec);
+        if terminal >= 0 {
+            if terminal >= terminal_count {
+                return ISLAND_STATUS_INVALID;
+            }
+            if structural_count == max_actions && limit_record < 0 {
+                limit_record = record_index;
+            }
+            structural_count += 1;
+        }
+        record_index += 1;
+    }
+    unsafe {
+        store_i32(result, structural_count);
+        store_i32(result + 8 * 4, structural_count);
+    }
+    if limit_record >= 0 {
+        return return_island_failure(
+            ISLAND_STATUS_TRACE_LIMIT,
+            result,
+            limit_record,
+            island_config(ISLAND_CONFIG_START_STATE),
+        );
+    }
+
+    let start_state = island_config(ISLAND_CONFIG_START_STATE);
+    let boundary_terminal = island_config(ISLAND_CONFIG_BOUNDARY_TERMINAL);
+    let state_count = header(PLAN_HEADER_ISLAND_STATE_COUNT);
+    let mut state = start_state;
+    let mut region_count = 0;
+    let mut transition_field_count = 0;
+    let mut region_token_count = 0;
+    record_index = 0;
+    while record_index < raw_count {
+        let record = token_record_address(tokens, record_index);
+        let spec = unsafe { load_i32(record) };
+        let terminal = island_spec_terminal(spec);
+        if terminal < 0 {
+            record_index += 1;
+            continue;
+        }
+        let target = island_transition_target(terminal, state);
+        if target == state_count {
+            let mut status = ISLAND_STATUS_UNEXPECTED;
+            if state == start_state && region_count > 0 {
+                status = ISLAND_STATUS_TRAILING;
+            }
+            return return_island_failure(status, result, record_index, state);
+        }
+        if target < 0 || target >= state_count {
+            return ISLAND_STATUS_INVALID;
+        }
+        if island_transition_field(terminal, state) >= 0 {
+            transition_field_count += 1;
+        }
+        state = target;
+        region_token_count += 1;
+        if terminal == boundary_terminal {
+            if !island_accepts(state) {
+                let unexpected = next_structural_record(tokens, raw_count, record_index + 1);
+                return return_island_failure(ISLAND_STATUS_UNEXPECTED, result, unexpected, state);
+            }
+            region_count += 1;
+            region_token_count = 0;
+            state = start_state;
+        }
+        record_index += 1;
+    }
+    if structural_count == 0 && island_config(ISLAND_CONFIG_ROOT_ACCEPTS_EMPTY) == 0 {
+        return return_island_failure(ISLAND_STATUS_UNEXPECTED, result, raw_count, start_state);
+    }
+    if region_token_count > 0 {
+        return return_island_failure(ISLAND_STATUS_UNEXPECTED, result, raw_count, state);
+    }
+    unsafe {
+        store_i32(result + 1 * 4, region_count);
+        store_i32(result + 2 * 4, transition_field_count);
+        store_i32(result + 6 * 4, raw_count);
+        store_i32(result + 7 * 4, state);
+        store_i32(result + 9 * 4, region_count);
+    }
+    ISLAND_STATUS_OK
+}
+
+#[inline]
+fn cursor_rule_address(rules: i32, index: i32) -> i32 {
+    rules + index * CURSOR_RULE_RECORD_I32_COUNT * 4
+}
+
+#[inline]
+fn cursor_child_address(children: i32, index: i32) -> i32 {
+    children + index * CURSOR_CHILD_RECORD_I32_COUNT * 4
+}
+
+#[inline]
+fn cursor_field_address(fields: i32, index: i32) -> i32 {
+    fields + index * CURSOR_FIELD_RECORD_I32_COUNT * 4
+}
+
+#[inline]
+fn cursor_value_address(values: i32, index: i32) -> i32 {
+    values + index * CURSOR_VALUE_RECORD_I32_COUNT * 4
+}
+
+fn store_cursor_rule(
+    rules: i32,
+    index: i32,
+    rule: i32,
+    span_start: i32,
+    span_end: i32,
+    token_start: i32,
+    token_end: i32,
+    child_start: i32,
+    child_count: i32,
+    field_start: i32,
+    field_count: i32,
+) {
+    let record = cursor_rule_address(rules, index);
+    unsafe {
+        store_i32(record, rule);
+        store_i32(record + 4, span_start);
+        store_i32(record + 8, span_end);
+        store_i32(record + 12, token_start);
+        store_i32(record + 16, token_end);
+        store_i32(record + 20, child_start);
+        store_i32(record + 24, child_count);
+        store_i32(record + 28, field_start);
+        store_i32(record + 32, field_count);
+    }
+}
+
+fn append_cursor_child(
+    children: i32,
+    child_capacity: i32,
+    child_count: &mut i32,
+    previous: i32,
+    reference: i32,
+) -> i32 {
+    if *child_count >= child_capacity {
+        return -1;
+    }
+    let node = *child_count;
+    let record = cursor_child_address(children, node);
+    unsafe {
+        store_i32(record, reference);
+        store_i32(record + 4, -1);
+        if previous >= 0 {
+            store_i32(cursor_child_address(children, previous) + 4, node);
+        }
+    }
+    *child_count += 1;
+    node
+}
+
+fn append_cursor_field(
+    fields: i32,
+    field_capacity: i32,
+    field_count: &mut i32,
+    values: i32,
+    value_capacity: i32,
+    value_count: &mut i32,
+    field: i32,
+    reference: i32,
+) -> bool {
+    if *field_count >= field_capacity || *value_count >= value_capacity {
+        return false;
+    }
+    let value_id = *value_count;
+    let value_record = cursor_value_address(values, value_id);
+    unsafe {
+        store_i32(value_record, CURSOR_VALUE_REF);
+        store_i32(value_record + 4, reference);
+        store_i32(value_record + 8, 0);
+        store_i32(value_record + 12, 0);
+    }
+    let field_record = cursor_field_address(fields, *field_count);
+    unsafe {
+        store_i32(field_record, field);
+        store_i32(field_record + 4, value_id);
+    }
+    *field_count += 1;
+    *value_count += 1;
+    true
+}
+
+fn finalize_cursor_region(
+    tokens: i32,
+    rules: i32,
+    rule_index: i32,
+    record_start: i32,
+    record_end: i32,
+    child_start: i32,
+    child_count: i32,
+    field_start: i32,
+    field_count: i32,
+) -> bool {
+    if record_end <= record_start {
+        return false;
+    }
+    let start_record = token_record_address(tokens, record_start);
+    let end_record = token_record_address(tokens, record_end - 1);
+    let span_start = unsafe { load_i32(start_record + 4) };
+    let span_end = unsafe { load_i32(end_record + 8) };
+    store_cursor_rule(
+        rules,
+        rule_index,
+        island_config(ISLAND_CONFIG_REGION_RULE),
+        span_start,
+        span_end,
+        record_start,
+        record_end,
+        child_start,
+        child_count,
+        field_start,
+        field_count,
+    );
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn materialize_island_records(
+    source_length: i32,
+    tokens: i32,
+    raw_count: i32,
+    preserve_trivia: i32,
+    rules: i32,
+    rule_capacity: i32,
+    children: i32,
+    child_capacity: i32,
+    fields: i32,
+    field_capacity: i32,
+    values: i32,
+    value_capacity: i32,
+    result: i32,
+) -> i32 {
+    initialize_island_result(result);
+    if !island_runtime_is_available()
+        || source_length < 0
+        || tokens <= 0
+        || raw_count < 0
+        || (preserve_trivia != 0 && preserve_trivia != 1)
+        || rules <= 0
+        || rule_capacity < 1
+        || children <= 0
+        || child_capacity < 0
+        || fields <= 0
+        || field_capacity < 0
+        || values <= 0
+        || value_capacity < 0
+    {
+        return ISLAND_STATUS_INVALID;
+    }
+    let state_count = header(PLAN_HEADER_ISLAND_STATE_COUNT);
+    let start_state = island_config(ISLAND_CONFIG_START_STATE);
+    let boundary_terminal = island_config(ISLAND_CONFIG_BOUNDARY_TERMINAL);
+    let mut state = start_state;
+    let mut cursor_token_count = 0;
+    let mut rule_count = 1;
+    let mut child_count = 0;
+    let mut field_count = 0;
+    let mut value_count = 0;
+    let mut region_count = 0;
+    let mut region_token_count = 0;
+    let mut region_rule = -1;
+    let mut region_record_start = 0;
+    let mut region_child_start = 0;
+    let mut region_child_count = 0;
+    let mut region_field_start = 0;
+    let mut region_field_count = 0;
+    let mut previous_region_child = -1;
+    let mut pending_region = false;
+    let mut root_child_start = -1;
+    let mut previous_root_child = -1;
+    let mut record_index = 0;
+    while record_index < raw_count {
+        let raw_record = token_record_address(tokens, record_index);
+        let spec = unsafe { load_i32(raw_record) };
+        if spec < 0 || spec >= header(PLAN_HEADER_SPEC_COUNT) {
+            return ISLAND_STATUS_INVALID;
+        }
+        let terminal = island_spec_terminal(spec);
+        if terminal < 0 {
+            record_index += 1;
+            continue;
+        }
+        if pending_region {
+            let record_end = if preserve_trivia == 1 {
+                record_index
+            } else {
+                cursor_token_count
+            };
+            if !finalize_cursor_region(
+                tokens,
+                rules,
+                region_rule,
+                region_record_start,
+                record_end,
+                region_child_start,
+                region_child_count,
+                region_field_start,
+                region_field_count,
+            ) {
+                return ISLAND_STATUS_INVALID;
+            }
+            pending_region = false;
+        }
+        if region_token_count == 0 {
+            if rule_count >= rule_capacity {
+                return ISLAND_STATUS_CAPACITY;
+            }
+            region_rule = rule_count;
+            rule_count += 1;
+            region_record_start = if preserve_trivia == 1 {
+                if region_count == 0 {
+                    0
+                } else {
+                    record_index
+                }
+            } else {
+                cursor_token_count
+            };
+            region_child_start = child_count;
+            region_child_count = 0;
+            region_field_start = field_count;
+            region_field_count = 0;
+            previous_region_child = -1;
+        }
+        let cursor_token_index = if preserve_trivia == 1 {
+            record_index
+        } else {
+            if cursor_token_count != record_index {
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        raw_record as usize as *const i32,
+                        token_record_address(tokens, cursor_token_count) as usize as *mut i32,
+                        TOKEN_RECORD_I32_COUNT as usize,
+                    );
+                }
+            }
+            cursor_token_count
+        };
+        cursor_token_count += 1;
+        let child = append_cursor_child(
+            children,
+            child_capacity,
+            &mut child_count,
+            previous_region_child,
+            cursor_token_index * 2 + 1,
+        );
+        if child < 0 {
+            return ISLAND_STATUS_CAPACITY;
+        }
+        previous_region_child = child;
+        region_child_count += 1;
+        let target = island_transition_target(terminal, state);
+        if target < 0 || target >= state_count {
+            return ISLAND_STATUS_INVALID;
+        }
+        let field = island_transition_field(terminal, state);
+        if field >= 0 {
+            if !append_cursor_field(
+                fields,
+                field_capacity,
+                &mut field_count,
+                values,
+                value_capacity,
+                &mut value_count,
+                field,
+                cursor_token_index * 2 + 1,
+            ) {
+                return ISLAND_STATUS_CAPACITY;
+            }
+            region_field_count += 1;
+        }
+        state = target;
+        region_token_count += 1;
+        if terminal == boundary_terminal {
+            if !island_accepts(state) {
+                return ISLAND_STATUS_INVALID;
+            }
+            let root_child = append_cursor_child(
+                children,
+                child_capacity,
+                &mut child_count,
+                previous_root_child,
+                region_rule * 2,
+            );
+            if root_child < 0 {
+                return ISLAND_STATUS_CAPACITY;
+            }
+            if root_child_start < 0 {
+                root_child_start = root_child;
+            }
+            previous_root_child = root_child;
+            region_count += 1;
+            region_token_count = 0;
+            state = start_state;
+            pending_region = true;
+        }
+        record_index += 1;
+    }
+    if pending_region {
+        let record_end = if preserve_trivia == 1 {
+            raw_count
+        } else {
+            cursor_token_count
+        };
+        if !finalize_cursor_region(
+            tokens,
+            rules,
+            region_rule,
+            region_record_start,
+            record_end,
+            region_child_start,
+            region_child_count,
+            region_field_start,
+            region_field_count,
+        ) {
+            return ISLAND_STATUS_INVALID;
+        }
+    }
+    if region_token_count != 0 || rule_count != region_count + 1 {
+        return ISLAND_STATUS_INVALID;
+    }
+    if preserve_trivia == 1 {
+        cursor_token_count = raw_count;
+    }
+    let root_field_start = field_count;
+    let root_field = island_config(ISLAND_CONFIG_ROOT_FIELD);
+    if root_field >= 0 {
+        let mut region = 0;
+        while region < region_count {
+            if !append_cursor_field(
+                fields,
+                field_capacity,
+                &mut field_count,
+                values,
+                value_capacity,
+                &mut value_count,
+                root_field,
+                (region + 1) * 2,
+            ) {
+                return ISLAND_STATUS_CAPACITY;
+            }
+            region += 1;
+        }
+    }
+    let mut root_field_count = 0;
+    if root_field >= 0 {
+        root_field_count = region_count;
+    }
+    if root_child_start < 0 {
+        root_child_start = 0;
+    }
+    store_cursor_rule(
+        rules,
+        0,
+        island_config(ISLAND_CONFIG_ROOT_RULE),
+        0,
+        source_length,
+        0,
+        cursor_token_count,
+        root_child_start,
+        region_count,
+        root_field_start,
+        root_field_count,
+    );
+    unsafe {
+        store_i32(result, cursor_token_count);
+        store_i32(result + 1 * 4, rule_count);
+        store_i32(result + 2 * 4, child_count);
+        store_i32(result + 3 * 4, field_count);
+        store_i32(result + 4 * 4, value_count);
+        store_i32(result + 5 * 4, 0);
+        store_i32(result + 6 * 4, raw_count);
+        store_i32(result + 7 * 4, state);
+        store_i32(result + 8 * 4, cursor_token_count);
+        store_i32(result + 9 * 4, region_count);
+    }
+    ISLAND_STATUS_OK
 }
 
 #[panic_handler]

@@ -24,16 +24,15 @@ locals, folds, tags, textobjects, or injections also get corresponding
 contract. `grammar.js` is emitted separately when the `tree-sitter` target is
 selected.
 
-`parser.wasm` contains the generic DFA lexer runtime. The engine is authored in
-Rust, built ahead of time for `wasm32-unknown-unknown`, and embedded in the Baba
-package; grammar generation does not invoke Cargo or require Rust on the user's
-machine. `parser.plan` contains generated DFA data, contextual trailing-guard
-DFAs and excluded-word tables, GPU island data when configured, and runtime
-metadata version 6. The shared strict island parser is a second, 653-byte Rust
-Wasm module built with the standardized `simd128` extension and embedded in the
-runtime package rather than each generated bundle. `mod.ts` is a thin wrapper
-around `@mewhhaha/baba/runtime/generated-wasm`; `syntax.ts` is the typed
-token/cursor surface and does not contain runtime tables.
+`parser.wasm` contains the generic DFA lexer, strict island analyzer, and
+compact cursor-tape materializer. The engine is authored in Rust, built ahead of
+time for `wasm32-unknown-unknown`, and embedded in the Baba package; grammar
+generation does not invoke Cargo or require Rust on the user's machine.
+`parser.plan` contains generated DFA data, contextual trailing-guard DFAs and
+excluded-word tables, exact strict-island transition/field tables when
+configured, and runtime metadata version 6. `mod.ts` is a thin wrapper around
+`@mewhhaha/baba/runtime/generated-wasm`; `syntax.ts` is the typed token/cursor
+surface and does not contain runtime tables.
 
 The Rust grammar frontend lives under `src/compiler/grammar_rs` and is embedded
 as `src/grammar_parser_wasm_bytes.ts`. It is checked with
@@ -111,7 +110,7 @@ throw an explicit unsupported-plan error.
 - memory layout constants
 - exported Wasm function names
 - external plan path and storage layout
-- token and lex-result record layouts
+- token, island-result, and compact cursor-tape record layouts
 - parser diagnostic code schemas
 
 Non-JavaScript hosts should use `abi.json`, `parser.wasm`, and `parser.plan`

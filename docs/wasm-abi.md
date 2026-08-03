@@ -1,11 +1,11 @@
 # Baba Wasm ABI
 
-Status: versioned lexer-core ABI for generated Wasm artifacts.
+Status: versioned lexer/island-runtime ABI for generated Wasm artifacts.
 
-Baba emits a generic lexer WebAssembly module, an external grammar plan, and a
-TypeScript adapter. The core module deliberately has no parser state machine.
-The adapter provides strict island parsing with the separately embedded shared
-SIMD runtime.
+Baba emits a generic WebAssembly module, an external grammar plan, and a
+TypeScript adapter. The Rust core owns DFA lexing, strict island analysis, and
+compact cursor-tape materialization. The adapter owns public diagnostics, source
+snapshots, and lazy cursor objects.
 
 Generated bundles include `wasm/abi.json`, `wasm/parser.wasm`, and
 `wasm/parser.plan`. Direct non-JavaScript hosts should treat `abi.json` as the
@@ -20,22 +20,22 @@ The current contract is:
   "format": "baba-wasm-abi",
   "version": 1,
   "parserPlan": {
-    "version": 3,
-    "runtimeMetadataVersion": 5
+    "version": 5,
+    "runtimeMetadataVersion": 6
   },
   "core": {
-    "abiVersion": 13
+    "abiVersion": 14
   }
 }
 ```
 
-Core plan encoding version 8 stores the DFA lexer tables. The retired LR header
-slots must be zero. Baba accepts only the current ABI, core plan, runtime
+Core plan encoding version 9 stores the DFA lexer tables and an optional exact
+strict-island section. Baba accepts only the current ABI, core plan, runtime
 metadata, and parser-plan versions; regenerate older artifacts together.
 
 ## Core Exports
 
-ABI version 13 exports:
+ABI version 14 exports:
 
 | Export                               | Contract                                                |
 | ------------------------------------ | ------------------------------------------------------- |
@@ -44,8 +44,10 @@ ABI version 13 exports:
 | `lex_all`                            | Writes token records for a complete source.             |
 | `lex_incremental`                    | Writes dependency-bearing token records for a range.    |
 | `lex_memo_i32_per_position`          | Returns the optional lexer memo width.                  |
+| `analyze_island_records`             | Validates raw records and reports exact tape counts.    |
+| `materialize_island_records`         | Writes compact cursor tapes for valid raw records.      |
 | `load_plan`                          | Loads and validates the external plan.                  |
-| `abi_version`                        | Returns 13.                                             |
+| `abi_version`                        | Returns 14.                                             |
 | `plan_version`                       | Returns the loaded parser-plan version.                 |
 | `semantics_version`                  | Returns the runtime semantics version.                  |
 | `reset`                              | Clears reusable lexer state.                            |
@@ -57,11 +59,13 @@ ABI version 13 exports:
 | `lex_result_i32_count`               | Returns 2.                                              |
 | `token_record_i32_count`             | Returns 4.                                              |
 | `incremental_token_record_i32_count` | Returns 5.                                              |
+| `island_result_i32_count`            | Returns 10.                                             |
 | `host_ownership_model`               | Returns the caller-managed ownership enum.              |
 | `result_lifetime_model`              | Returns the caller-buffer lifetime enum.                |
 
-The LR exports from ABI 12, including `parser_action`, `parser_goto`,
-`validate`, and `parse_cursor`, do not exist in ABI 13.
+The retired LR exports, including `parser_action`, `parser_goto`, `validate`,
+and `parse_cursor`, remain absent. Island execution consumes the compact
+strict-island plan instead of LR tables.
 
 ## Source And Records
 
@@ -97,7 +101,7 @@ The failure memo is demand-driven. Call with `memoPtr = 0` and
 returns `-2`; allocate `(sourceLength + 1) * lex_memo_i32_per_position()` `i32`
 values and retry. Memo contents are private and do not survive a call.
 
-## Strict Parser Adapter
+## Strict Island Runtime
 
 The public generated TypeScript adapter retains `parse`, `validate`, and cursor
 result shapes. Those operations require a compiler-proven GPU frontend plan with
@@ -109,12 +113,27 @@ result shapes. Those operations require a compiler-proven GPU frontend plan with
 - dense start state zero;
 - one to seven region states.
 
-The adapter lexes with the core module, partitions records at the terminating
-terminal, validates each region with the shared `simd128` island module, and
-materializes the root and region cursor tapes. A plan without strict GPU
-metadata remains usable through `lex`; `parse`, `validate`, and parse/validate
-documents throw an explicit unsupported-plan error. A strict plan that cannot
-meet the subset is rejected during generation with a `WASM_ISLAND_*` diagnostic.
+The adapter calls `lex_all`, leaves its raw records in core memory, and passes
+them to `analyze_island_records`. Analysis filters trivia logically, partitions
+terminated regions, executes the transition table, and reports structural,
+region, and field counts without allocating output tapes. `validate()` ends
+there. `parse()` allocates exact caller-owned tape ranges and calls
+`materialize_island_records`, which replays valid transitions while emitting
+rule, child, field, and value records. Only the completed tapes are copied out
+so returned cursors survive later Wasm calls and memory growth.
+
+A plan without strict GPU metadata remains usable through `lex`; `parse`,
+`validate`, and parse/validate documents throw an explicit unsupported-plan
+error. A strict plan that cannot meet the subset is rejected during generation
+with a `WASM_ISLAND_*` diagnostic.
+
+Both island exports return `1` on success. Analysis returns `0` for an
+unexpected token, `-2` for a lexical error, `-3` for the parser-action limit,
+and `-5` for trailing input. `-1` identifies an invalid plan or argument and
+`-4` identifies insufficient materialization capacity. The ten-`i32` result
+record contains token, rule, child, field, and value counts; the root reference;
+the error record and state; and structural-token and region counts. Generated
+`abi.json` records the exact field order and compact tape widths.
 
 `maxParserActions` now bounds island transitions. Incremental documents retain
 their public result and work-counter shapes, but parsing reparses the complete

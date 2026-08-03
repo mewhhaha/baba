@@ -2,6 +2,7 @@ import {
   WASM_ABI_VERSION,
   WASM_HOST_OWNERSHIP_CALLER_MANAGED,
   WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
+  WASM_ISLAND_RESULT_I32_COUNT,
   WASM_LEX_RESULT_I32_COUNT,
   WASM_MAX_PAGES,
   WASM_PAGE_BYTES,
@@ -56,6 +57,7 @@ export interface WasmFrontendRequirements {
   readonly lexResultI32Count: number;
   readonly tokenRecordI32Count: number;
   readonly incrementalTokenRecordI32Count: number;
+  readonly islandResultI32Count: number;
   readonly requiredExports: readonly string[];
   readonly forbiddenDefaultDependencies: readonly string[];
 }
@@ -100,12 +102,15 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
   lexResultI32Count: WASM_LEX_RESULT_I32_COUNT,
   tokenRecordI32Count: WASM_TOKEN_RECORD_I32_COUNT,
   incrementalTokenRecordI32Count: WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
+  islandResultI32Count: WASM_ISLAND_RESULT_I32_COUNT,
   requiredExports: [
     "memory",
     "lex_one",
     "lex_all",
     "lex_incremental",
     "lex_memo_i32_per_position",
+    "analyze_island_records",
+    "materialize_island_records",
     "load_plan",
     "abi_version",
     "plan_version",
@@ -119,6 +124,7 @@ export const babaWasmFrontendRequirements: WasmFrontendRequirements = {
     "lex_result_i32_count",
     "token_record_i32_count",
     "incremental_token_record_i32_count",
+    "island_result_i32_count",
     "host_ownership_model",
     "result_lifetime_model",
   ],
@@ -152,7 +158,7 @@ export const wasmFrontendCandidates: readonly WasmFrontendCandidate[] = [
     requiredSpikeChecks: [
       "Generated parser.wasm validates with WebAssembly.validate.",
       "Generated abi.json matches babaWasmFrontendRequirements.",
-      "Strict parsing is provided by the shared SIMD island runtime.",
+      "Strict island analysis and compact cursor materialization run in the Rust core.",
     ],
   },
   {

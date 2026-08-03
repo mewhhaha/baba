@@ -204,8 +204,8 @@ Parser instances expose a Wasm-first runtime surface:
   interfaces with typed `field("name")` overloads for consumer code.
 - `lex(source, options?)` returns a lazy token tape. Use `tokenTape.token(i)`
   for indexed access to token records.
-- `validate(source, options?)` runs strict SIMD island validation and returns
-  diagnostics without building token objects or an object tree.
+- `validate(source, options?)` runs output-free Rust island validation and
+  returns diagnostics without building token objects or an object tree.
 
 Wasm parsing requires `gpuFrontend.throughput: "strict"`, one repeated root
 island, and a terminated terminal-only region with at most seven states. Other
