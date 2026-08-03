@@ -16,7 +16,16 @@ import {
 } from "../src/targets/runtime/implementation.ts";
 import {
   WASM_I32_BYTES,
+  WASM_ISLAND_RESULT_CHILD_COUNT,
+  WASM_ISLAND_RESULT_FIELD_COUNT,
+  WASM_ISLAND_RESULT_I32_COUNT,
+  WASM_ISLAND_RESULT_REGION_COUNT,
+  WASM_ISLAND_RESULT_RULE_COUNT,
+  WASM_ISLAND_RESULT_STRUCTURAL_COUNT,
+  WASM_ISLAND_RESULT_TOKEN_COUNT,
+  WASM_ISLAND_RESULT_VALUE_COUNT,
   WASM_ISLAND_STATUS_INVALID,
+  WASM_ISLAND_STATUS_OK,
   WASM_TOKEN_RECORD_I32_COUNT,
   WASM_UTF16_UNIT_BYTES,
 } from "../src/targets/runtime/wasm_abi.ts";
@@ -1610,7 +1619,12 @@ Deno.test("Wasm parser consumes externally supplied lexer records", async () => 
     const memoPtr = alignTest(tokenPtr + tokenBytes, WASM_I32_BYTES);
     const memoCapacity = (source.length + 1) *
       wasm.lex_memo_i32_per_position();
-    const requiredBytes = memoPtr + memoCapacity * WASM_I32_BYTES;
+    const analysisResultPtr = alignTest(
+      memoPtr + memoCapacity * WASM_I32_BYTES,
+      WASM_I32_BYTES,
+    );
+    const requiredBytes = analysisResultPtr +
+      WASM_ISLAND_RESULT_I32_COUNT * WASM_I32_BYTES;
     if (wasm.memory.buffer.byteLength < requiredBytes) {
       const missing = requiredBytes - wasm.memory.buffer.byteLength;
       wasm.memory.grow(Math.ceil(missing / 65_536));
@@ -1633,6 +1647,27 @@ Deno.test("Wasm parser consumes externally supplied lexer records", async () => 
       memoCapacity,
     );
     assert(recordCount > 0, "Expected raw lexer records.");
+    assertEquals(
+      wasm.analyze_island_records(
+        tokenPtr,
+        recordCount,
+        1_000,
+        analysisResultPtr,
+      ),
+      WASM_ISLAND_STATUS_OK,
+    );
+    const analysisResult = new Int32Array(
+      wasm.memory.buffer,
+      analysisResultPtr,
+      WASM_ISLAND_RESULT_I32_COUNT,
+    );
+    assertEquals(analysisResult[WASM_ISLAND_RESULT_TOKEN_COUNT], 0);
+    assertEquals(analysisResult[WASM_ISLAND_RESULT_RULE_COUNT], 0);
+    assertEquals(analysisResult[WASM_ISLAND_RESULT_CHILD_COUNT], 0);
+    assertEquals(analysisResult[WASM_ISLAND_RESULT_FIELD_COUNT], 2);
+    assertEquals(analysisResult[WASM_ISLAND_RESULT_VALUE_COUNT], 0);
+    assertEquals(analysisResult[WASM_ISLAND_RESULT_STRUCTURAL_COUNT], 5);
+    assertEquals(analysisResult[WASM_ISLAND_RESULT_REGION_COUNT], 1);
     const records = new Int32Array(
       wasm.memory.buffer,
       tokenPtr,

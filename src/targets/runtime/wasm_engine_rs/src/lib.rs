@@ -1140,7 +1140,6 @@ pub extern "C" fn analyze_island_records(
         record_index += 1;
     }
     unsafe {
-        store_i32(result + ISLAND_RESULT_TOKEN_COUNT * 4, structural_count);
         store_i32(
             result + ISLAND_RESULT_STRUCTURAL_COUNT * 4,
             structural_count,
@@ -1205,9 +1204,8 @@ pub extern "C" fn analyze_island_records(
         return return_island_failure(ISLAND_STATUS_UNEXPECTED, result, raw_count, state);
     }
     unsafe {
-        store_i32(result + ISLAND_RESULT_RULE_COUNT * 4, region_count);
         store_i32(
-            result + ISLAND_RESULT_CHILD_COUNT * 4,
+            result + ISLAND_RESULT_FIELD_COUNT * 4,
             transition_field_count,
         );
         store_i32(result + ISLAND_RESULT_ERROR_RECORD * 4, raw_count);

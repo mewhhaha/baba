@@ -132,8 +132,11 @@ unexpected token, `-2` for a lexical error, `-3` for the parser-action limit,
 and `-5` for trailing input. `-1` identifies an invalid plan or argument and
 `-4` identifies insufficient materialization capacity. The ten-`i32` result
 record contains token, rule, child, field, and value counts; the root reference;
-the error record and state; and structural-token and region counts. Generated
-`abi.json` records the exact field order and compact tape widths.
+the error record and state; and structural-token and region counts. Analysis
+writes only `fieldCount`, `structuralTokenCount`, `regionCount`, and failure
+location fields; materialization writes the final tape counts and root
+reference. Generated `abi.json` records the exact field order and compact tape
+widths.
 
 `maxParserActions` now bounds island transitions. Incremental documents retain
 their public result and work-counter shapes, but parsing reparses the complete
