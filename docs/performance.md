@@ -77,6 +77,27 @@ Inspect a generated binary parser plan with:
 deno task inspect-plan generated/wasm/parser.plan
 ```
 
+## Wasm Hot Paths
+
+The scanner caches plan headers per call and skips per-character dependency
+tracking for full lexing. Source copies use UTF-16 arrays on little-endian
+hosts. Island analysis checks records and runs transitions in one pass,
+preserving lexical > action limit > syntax diagnostic priority.
+
+Local `island-statements` measurements with Deno 2.9.4 / V8 15.0.245.2-rusty,
+524,304 UTF-16 units, 12 warmups and 50 samples (p25 / median milliseconds):
+
+| Operation              | Before      | After       |
+| ---------------------- | ----------- | ----------- |
+| `lex()`                | 6.16 / 6.42 | 3.58 / 3.70 |
+| `validate()`           | 6.20 / 6.68 | 3.17 / 3.53 |
+| `parse()`              | 8.18 / 9.26 | 5.12 / 5.92 |
+| Incremental validation | 2.95 / 3.25 | 2.59 / 2.74 |
+
+Engine size: 10,165 -> 12,694 bytes; plan size and the 193-page memory
+high-water mark are unchanged. Results vary by machine. Compare the same plan
+and adapter with `bench:runtime --wasm-core before.wasm`.
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that

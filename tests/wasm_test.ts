@@ -38,6 +38,10 @@ import {
 } from "../src/runtime/wasm_plan.ts";
 import type { BabaMetadata } from "../src/ast.ts";
 import {
+  CpuReferenceLexer,
+  toUtf16,
+} from "../scripts/webgpu_lexer_cpu_reference.ts";
+import {
   getPortableRuntimePlanInvocationCountForTesting,
   resetPortableRuntimePlanInvocationCountForTesting,
 } from "../src/targets/runtime/plan.ts";
@@ -1155,6 +1159,117 @@ Deno.test("shared Wasm adapter preserves lexer and parser behavior", async () =>
   }
 });
 
+Deno.test("Wasm island analysis preserves diagnostic priority and the first failure", async () => {
+  const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
+  const parser = mod.createParser({ bytes, plan });
+  try {
+    const lexer = CpuReferenceLexer.create(bytes, plan);
+    const cases: readonly {
+      readonly source: string;
+      readonly maxParserActions: number;
+      readonly diagnostic: DiagnosticLike;
+    }[] = [
+      {
+        source: "let = 42; #",
+        maxParserActions: 1,
+        diagnostic: {
+          code: "PARSE_LEXICAL_ERROR",
+          span: { start: 10, end: 11 },
+          found: '"#"',
+        },
+      },
+      {
+        source: "let = 42; #",
+        maxParserActions: 100,
+        diagnostic: {
+          code: "PARSE_LEXICAL_ERROR",
+          span: { start: 10, end: 11 },
+          found: '"#"',
+        },
+      },
+      {
+        source: "let = 42;",
+        maxParserActions: 2,
+        diagnostic: {
+          code: "PARSER_TRACE_LIMIT",
+          span: { start: 6, end: 6 },
+        },
+      },
+      {
+        source: "let = 42;",
+        maxParserActions: 4,
+        diagnostic: {
+          code: "PARSE_UNEXPECTED_TOKEN",
+          span: { start: 4, end: 5 },
+          expected: ["IDENT"],
+          found: '"="',
+        },
+      },
+      {
+        source: "let = ; = ;",
+        maxParserActions: 100,
+        diagnostic: {
+          code: "PARSE_UNEXPECTED_TOKEN",
+          span: { start: 4, end: 5 },
+          expected: ["IDENT"],
+          found: '"="',
+        },
+      },
+      {
+        source: "let x = 42; x = 1;",
+        maxParserActions: 100,
+        diagnostic: {
+          code: "PARSE_TRAILING_INPUT",
+          span: { start: 12, end: 13 },
+          expected: ['"let"'],
+          found: "IDENT",
+        },
+      },
+      {
+        source: "let x = 42;",
+        maxParserActions: 4,
+        diagnostic: {
+          code: "PARSER_TRACE_LIMIT",
+          span: { start: 10, end: 10 },
+        },
+      },
+    ];
+    for (const testCase of cases) {
+      const { source, maxParserActions, diagnostic } = testCase;
+      const records = lexer.lex(toUtf16(source)).records;
+      const results = [
+        parser.validate(source, { maxParserActions }),
+        parser.parse(source, { maxParserActions }),
+        parser.parseRecords(source, records, { maxParserActions }),
+      ];
+      for (const result of results) {
+        assertEquals(result.ok, false, source);
+        assertEquals(result.diagnostics.length, 1, source);
+        const actual = result.diagnostics[0];
+        assertEquals(actual.code, diagnostic.code, source);
+        assertEquals(actual.span?.start, diagnostic.span?.start, source);
+        assertEquals(actual.span?.end, diagnostic.span?.end, source);
+        assertEquals(actual.found, diagnostic.found, source);
+        assertEquals(
+          JSON.stringify(actual.expected),
+          JSON.stringify(diagnostic.expected),
+          source,
+        );
+      }
+    }
+
+    const source = "let x = 42;";
+    const options = { maxParserActions: 5 };
+    const records = lexer.lex(toUtf16(source)).records;
+    assertEquals(parser.validate(source, options).ok, true);
+    assertEquals(parser.parse(source, options).ok, true);
+    assertEquals(parser.parseRecords(source, records, options).ok, true);
+  } finally {
+    parser.dispose();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("Wasm documents reuse lexer records across edits", async () => {
   const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
   try {
@@ -1476,6 +1591,76 @@ Deno.test("Wasm documents preserve parity across compound edit shapes", async ()
     document.dispose();
     parser.dispose();
   } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Wasm source writes preserve UTF-16 across full and incremental copies", async () => {
+  const { dir, mod, bytes, plan } = await materialize(
+    "token CHAR = /./; module = CHAR*;",
+  );
+  const parser = mod.createParser({ bytes, plan });
+  try {
+    const assertSourceTokens = (lexed: LexTapeResultLike, source: string) => {
+      const characters = [...source];
+      assertEquals(lexed.diagnostics.length, 0);
+      assertEquals(lexed.tokenTape.length, characters.length + 1);
+      let offset = 0;
+      for (let index = 0; index < characters.length; index++) {
+        const text = characters[index];
+        const token = lexed.tokenTape.token(index);
+        assert(token);
+        assertEquals(token.type, "named");
+        assertEquals(token.kind, "CHAR");
+        assertEquals(token.channel, "main");
+        assertEquals(token.text, text);
+        assertEquals(token.span.start, offset);
+        offset += text.length;
+        assertEquals(token.span.end, offset);
+      }
+      const eof = lexed.tokenTape.token(characters.length);
+      assert(eof);
+      assertEquals(eof.type, "eof");
+      assertEquals(eof.span.start, source.length);
+      assertEquals(eof.span.end, source.length);
+    };
+    const initial = "aé😀\ud800z\udc00";
+    const saved = parser.lex(initial);
+    assertSourceTokens(saved, initial);
+    const document = parser.createDocument(initial, { goal: "lex" });
+    try {
+      for (
+        const { edits, source } of [
+          {
+            edits: [{ start: 1, oldEnd: 2, newText: "ø" }],
+            source: "aø😀\ud800z\udc00",
+          },
+          {
+            edits: [{ start: 2, oldEnd: 4, newText: "界" }],
+            source: "aø界\ud800z\udc00",
+          },
+          {
+            edits: [
+              { start: 0, oldEnd: 1, newText: "😀" },
+              { start: 5, oldEnd: 6, newText: "é" },
+            ],
+            source: "😀ø界\ud800zé",
+          },
+        ]
+      ) {
+        document.applyEdits(edits);
+        assertEquals(document.snapshot.text(), source);
+        assertSourceTokens(document.lex(), source);
+      }
+      parser.lex("unrelated");
+      document.applyEdits([{ start: 0, oldEnd: 2, newText: "🦆" }]);
+      assertSourceTokens(document.lex(), "🦆ø界\ud800zé");
+      assertSourceTokens(saved, initial);
+    } finally {
+      document.dispose();
+    }
+  } finally {
+    parser.dispose();
     await Deno.remove(dir, { recursive: true });
   }
 });

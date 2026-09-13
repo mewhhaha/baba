@@ -310,21 +310,29 @@ pub extern "C" fn load_plan(ptr: i32, len: i32) -> i32 {
 
 #[no_mangle]
 pub extern "C" fn lex_one(src: i32, len: i32, offset: i32, result: i32) -> i32 {
-    let start_state = header(PLAN_HEADER_DFA_START_STATE);
-    let mut state = start_state;
+    let tables = LexerTables::new();
+    let mut state = tables.start_state;
     let mut index = offset;
     let mut best_spec = -1;
     let mut best_end = offset;
 
     while index < len {
         let decoded = decode_code_point(src, index, len);
-        let target = transition(state, decoded.code_point);
+        let target = transition(&tables, state, decoded.code_point);
         if target < 0 {
             break;
         }
         index += decoded.width;
         state = target;
-        let accept = selected_global_spec(src, len, index, state);
+        let mut dependency_end = index;
+        let accept = selected_global_spec_tracked(
+            tables.fast_specs,
+            src,
+            len,
+            index,
+            state,
+            &mut dependency_end,
+        );
         if accept >= 0 {
             best_spec = accept;
             best_end = index;
@@ -491,7 +499,7 @@ pub extern "C" fn lex_all(
     let mut count = 0;
     let mut token = EMPTY_RAW_TOKEN;
     loop {
-        let status = next_raw_token(&mut cursor, src, len, &mut token);
+        let status = next_raw_token::<false>(&mut cursor, src, len, &mut token);
         if status == 0 {
             return count;
         }
@@ -528,6 +536,7 @@ const EMPTY_RAW_TOKEN: RawToken = RawToken {
 };
 
 struct RawLexerCursor {
+    tables: LexerTables,
     offset: i32,
     memo: i32,
     memo_words: i32,
@@ -552,6 +561,7 @@ impl RawLexerCursor {
             memo_enabled = true;
         }
         RawLexerCursor {
+            tables: LexerTables::new(),
             offset,
             memo,
             memo_words,
@@ -562,13 +572,18 @@ impl RawLexerCursor {
     }
 }
 
-#[inline]
-fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut RawToken) -> i32 {
+#[inline(always)]
+fn next_raw_token<const TRACK_DEPENDENCY: bool>(
+    cursor: &mut RawLexerCursor,
+    src: i32,
+    len: i32,
+    token: &mut RawToken,
+) -> i32 {
     if cursor.offset >= len {
         return 0;
     }
 
-    let start_state = header(PLAN_HEADER_DFA_START_STATE);
+    let start_state = cursor.tables.start_state;
     let start = cursor.offset;
     let mut state = start_state;
     let mut index = start;
@@ -583,8 +598,10 @@ fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut R
 
     while index < len {
         let decoded = decode_code_point(src, index, len);
-        dependency_end = dependency_end.max(index + decoded.width);
-        let target = transition(state, decoded.code_point);
+        if TRACK_DEPENDENCY {
+            dependency_end = dependency_end.max(index + decoded.width);
+        }
+        let target = transition(&cursor.tables, state, decoded.code_point);
         if target < 0 {
             break;
         }
@@ -597,7 +614,14 @@ fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut R
             dependency_end = len;
             break;
         }
-        let accept = selected_global_spec_tracked(src, len, index, state, &mut dependency_end);
+        let accept = selected_global_spec_tracked(
+            cursor.tables.fast_specs,
+            src,
+            len,
+            index,
+            state,
+            &mut dependency_end,
+        );
         if accept >= 0 {
             best_spec = accept;
             best_end = index;
@@ -617,7 +641,7 @@ fn next_raw_token(cursor: &mut RawLexerCursor, src: i32, len: i32, token: &mut R
         }
         while memo_index < scan_end {
             let decoded = decode_code_point(src, memo_index, len);
-            let target = transition(memo_state, decoded.code_point);
+            let target = transition(&cursor.tables, memo_state, decoded.code_point);
             if target < 0 {
                 break;
             }
@@ -671,7 +695,7 @@ pub extern "C" fn lex_incremental(
     let mut count = 0;
     let mut token = EMPTY_RAW_TOKEN;
     while cursor.offset < minimum_end {
-        let status = next_raw_token(&mut cursor, src, len, &mut token);
+        let status = next_raw_token::<true>(&mut cursor, src, len, &mut token);
         if status == 0 {
             return count;
         }
@@ -713,8 +737,28 @@ fn decode_code_point(src: i32, index: i32, len: i32) -> DecodedCodePoint {
     }
 }
 
-fn transition(state: i32, code_point: i32) -> i32 {
-    if state < 0 || state >= header(PLAN_HEADER_DFA_STATE_COUNT) {
+// A plan can change between lexer calls; its headers are fixed during a scan.
+struct LexerTables {
+    start_state: i32,
+    state_count: i32,
+    ascii_transitions: i32,
+    fast_specs: i32,
+}
+
+impl LexerTables {
+    fn new() -> LexerTables {
+        LexerTables {
+            start_state: header(PLAN_HEADER_DFA_START_STATE),
+            state_count: header(PLAN_HEADER_DFA_STATE_COUNT),
+            ascii_transitions: header(PLAN_HEADER_ASCII_TRANSITIONS),
+            fast_specs: plan_addr(header(PLAN_HEADER_FAST_SPECS)),
+        }
+    }
+}
+
+#[inline(always)]
+fn transition(tables: &LexerTables, state: i32, code_point: i32) -> i32 {
+    if state < 0 || state >= tables.state_count {
         return -1;
     }
 
@@ -724,7 +768,7 @@ fn transition(state: i32, code_point: i32) -> i32 {
     // cannot add an answer. Plans above the dense-table size limit carry -1 in
     // this header slot and retain complete CSR rows.
     if (0..128).contains(&code_point) {
-        let ascii_offset = header(PLAN_HEADER_ASCII_TRANSITIONS);
+        let ascii_offset = tables.ascii_transitions;
         if ascii_offset >= 0 {
             let value = table_value(ascii_offset, state * 128 + code_point);
             if value >= 0 {
@@ -758,22 +802,31 @@ fn transition(state: i32, code_point: i32) -> i32 {
     -1
 }
 
-fn selected_global_spec(src: i32, len: i32, end: i32, accepting_state: i32) -> i32 {
-    let mut dependency_end = end;
-    selected_global_spec_tracked(src, len, end, accepting_state, &mut dependency_end)
-}
-
+#[inline(always)]
 fn selected_global_spec_tracked(
+    fast_specs: i32,
     src: i32,
     len: i32,
     end: i32,
     accepting_state: i32,
     dependency_end: &mut i32,
 ) -> i32 {
-    let fast_spec = header_table_value(PLAN_HEADER_FAST_SPECS, accepting_state);
+    // Fast specs are always i32, unlike the compact transition and candidate rows.
+    let fast_spec = unsafe { load_i32(fast_specs + accepting_state * 4) };
     if fast_spec >= 0 {
         return fast_spec;
     }
+    select_accept_candidate_tracked(src, len, end, accepting_state, dependency_end)
+}
+
+#[inline(never)]
+fn select_accept_candidate_tracked(
+    src: i32,
+    len: i32,
+    end: i32,
+    accepting_state: i32,
+    dependency_end: &mut i32,
+) -> i32 {
     let rows = header(PLAN_HEADER_ACCEPT_CANDIDATE_ROWS);
     let mut index = table_value(rows, accepting_state);
     let stop = table_value(rows, accepting_state + 1);
@@ -1109,32 +1162,77 @@ pub extern "C" fn analyze_island_records(
     }
     let spec_count = header(PLAN_HEADER_SPEC_COUNT);
     let terminal_count = island_config(ISLAND_CONFIG_TERMINAL_COUNT);
+    let start_state = island_config(ISLAND_CONFIG_START_STATE);
+    let boundary_terminal = island_config(ISLAND_CONFIG_BOUNDARY_TERMINAL);
+    let state_count = header(PLAN_HEADER_ISLAND_STATE_COUNT);
     let mut structural_count = 0;
-    let mut limit_record = -1;
+    let mut state = start_state;
+    let mut region_count = 0;
+    let mut transition_field_count = 0;
+    let mut region_token_count = 0;
+    let mut parse_status = ISLAND_STATUS_OK;
+    let mut error_record = raw_count;
     let mut record_index = 0;
     while record_index < raw_count {
         let record = token_record_address(tokens, record_index);
         let spec = unsafe { load_i32(record) };
         if spec < 0 {
-            return return_island_failure(
-                ISLAND_STATUS_LEXICAL,
-                result,
-                record_index,
-                island_config(ISLAND_CONFIG_START_STATE),
-            );
+            return return_island_failure(ISLAND_STATUS_LEXICAL, result, record_index, start_state);
         }
         if spec >= spec_count {
             return ISLAND_STATUS_INVALID;
         }
         let terminal = island_spec_terminal(spec);
-        if terminal >= 0 {
-            if terminal >= terminal_count {
-                return ISLAND_STATUS_INVALID;
+        if terminal < 0 {
+            record_index += 1;
+            continue;
+        }
+        if terminal >= terminal_count {
+            return ISLAND_STATUS_INVALID;
+        }
+        if structural_count == max_actions {
+            parse_status = ISLAND_STATUS_TRACE_LIMIT;
+            error_record = record_index;
+            state = start_state;
+        }
+        structural_count += 1;
+        // Lexical errors outrank action limits, which outrank syntax errors.
+        // Finish checking records after either limit or syntax failure without
+        // executing more parser transitions or making a second token pass.
+        if parse_status != ISLAND_STATUS_OK {
+            record_index += 1;
+            continue;
+        }
+        let target = island_transition_target(terminal, state);
+        if target == state_count {
+            parse_status = ISLAND_STATUS_UNEXPECTED;
+            if state == start_state && region_count > 0 {
+                parse_status = ISLAND_STATUS_TRAILING;
             }
-            if structural_count == max_actions && limit_record < 0 {
-                limit_record = record_index;
+            error_record = record_index;
+            record_index += 1;
+            continue;
+        }
+        if target < 0 || target >= state_count {
+            parse_status = ISLAND_STATUS_INVALID;
+            record_index += 1;
+            continue;
+        }
+        if island_transition_field(terminal, state) >= 0 {
+            transition_field_count += 1;
+        }
+        state = target;
+        region_token_count += 1;
+        if terminal == boundary_terminal {
+            if !island_accepts(state) {
+                parse_status = ISLAND_STATUS_UNEXPECTED;
+                error_record = next_structural_record(tokens, raw_count, record_index + 1);
+                record_index += 1;
+                continue;
             }
-            structural_count += 1;
+            region_count += 1;
+            region_token_count = 0;
+            state = start_state;
         }
         record_index += 1;
     }
@@ -1144,57 +1242,11 @@ pub extern "C" fn analyze_island_records(
             structural_count,
         );
     }
-    if limit_record >= 0 {
-        return return_island_failure(
-            ISLAND_STATUS_TRACE_LIMIT,
-            result,
-            limit_record,
-            island_config(ISLAND_CONFIG_START_STATE),
-        );
+    if parse_status == ISLAND_STATUS_INVALID {
+        return ISLAND_STATUS_INVALID;
     }
-
-    let start_state = island_config(ISLAND_CONFIG_START_STATE);
-    let boundary_terminal = island_config(ISLAND_CONFIG_BOUNDARY_TERMINAL);
-    let state_count = header(PLAN_HEADER_ISLAND_STATE_COUNT);
-    let mut state = start_state;
-    let mut region_count = 0;
-    let mut transition_field_count = 0;
-    let mut region_token_count = 0;
-    record_index = 0;
-    while record_index < raw_count {
-        let record = token_record_address(tokens, record_index);
-        let spec = unsafe { load_i32(record) };
-        let terminal = island_spec_terminal(spec);
-        if terminal < 0 {
-            record_index += 1;
-            continue;
-        }
-        let target = island_transition_target(terminal, state);
-        if target == state_count {
-            let mut status = ISLAND_STATUS_UNEXPECTED;
-            if state == start_state && region_count > 0 {
-                status = ISLAND_STATUS_TRAILING;
-            }
-            return return_island_failure(status, result, record_index, state);
-        }
-        if target < 0 || target >= state_count {
-            return ISLAND_STATUS_INVALID;
-        }
-        if island_transition_field(terminal, state) >= 0 {
-            transition_field_count += 1;
-        }
-        state = target;
-        region_token_count += 1;
-        if terminal == boundary_terminal {
-            if !island_accepts(state) {
-                let unexpected = next_structural_record(tokens, raw_count, record_index + 1);
-                return return_island_failure(ISLAND_STATUS_UNEXPECTED, result, unexpected, state);
-            }
-            region_count += 1;
-            region_token_count = 0;
-            state = start_state;
-        }
-        record_index += 1;
+    if parse_status != ISLAND_STATUS_OK {
+        return return_island_failure(parse_status, result, error_record, state);
     }
     if structural_count == 0 && island_config(ISLAND_CONFIG_ROOT_ACCEPTS_EMPTY) == 0 {
         return return_island_failure(ISLAND_STATUS_UNEXPECTED, result, raw_count, start_state);

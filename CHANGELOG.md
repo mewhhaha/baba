@@ -1,5 +1,10 @@
 # Changelog
 
+## 9.0.1
+
+- Speed up Wasm scanning, UTF-16 copies, and island parsing. See
+  [performance measurements](docs/performance.md#wasm-hot-paths).
+
 ## 9.0.0
 
 - Wasm compilation no longer constructs or consumes the portable LR plan. Its

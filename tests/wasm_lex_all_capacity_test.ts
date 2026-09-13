@@ -25,6 +25,22 @@ interface RawLexExports {
   readonly input_base: () => number;
   readonly load_plan: (pointer: number, length: number) => number;
   readonly lex_memo_i32_per_position: () => number;
+  readonly lex_one: (
+    source: number,
+    length: number,
+    offset: number,
+    result: number,
+  ) => number;
+  readonly lex_incremental: (
+    source: number,
+    length: number,
+    start: number,
+    minimumEnd: number,
+    tokens: number,
+    tokenCapacity: number,
+    memo: number,
+    memoCapacity: number,
+  ) => number;
   readonly lex_all: (
     source: number,
     length: number,
@@ -242,6 +258,61 @@ Deno.test("lex_all writes nothing past the token records it returns", () => {
       sentinel,
       `lex_all wrote ${after[index]} at i32 ${index} past the token records.`,
     );
+  }
+});
+
+Deno.test("lexer scans refresh table headers when the loaded plan changes", () => {
+  const wordPlan = planFor("token WORD = /[a-z]+/; module = WORD*;");
+  const characterPlan = planFor(
+    "token CHARACTER = /a/; token SUFFIX = /bb/; module = (CHARACTER | SUFFIX)*;",
+  );
+  const exports = loadEngine(wordPlan);
+  const planPointer = exports.plan_buffer_base();
+  const cases = [
+    { plan: wordPlan, tokenCount: 1, firstEnd: 2 },
+    { plan: characterPlan, tokenCount: 2, firstEnd: 1 },
+    { plan: wordPlan, tokenCount: 1, firstEnd: 2 },
+  ];
+  for (const { plan, tokenCount, firstEnd } of cases) {
+    growTo(exports.memory, planPointer + plan.byteLength + 128);
+    new Uint8Array(exports.memory.buffer, planPointer, plan.byteLength).set(
+      plan,
+    );
+    assertEquals(exports.load_plan(planPointer, plan.byteLength), 1);
+    const sourcePointer = exports.input_base();
+    new Uint16Array(exports.memory.buffer, sourcePointer, 2).set([97, 97]);
+    const tokenPointer = sourcePointer + 8;
+    const resultPointer = tokenPointer + 64;
+
+    assertEquals(exports.lex_one(sourcePointer, 2, 0, resultPointer), 1);
+    const result = new Int32Array(exports.memory.buffer, resultPointer, 2);
+    assertEquals(result[0], 0);
+    assertEquals(result[1], firstEnd);
+
+    assertEquals(
+      exports.lex_all(sourcePointer, 2, 0, tokenPointer, 2, 0, 0),
+      tokenCount,
+    );
+    const tokens = new Int32Array(exports.memory.buffer, tokenPointer, 8);
+    assertEquals(tokens[0], 0);
+    assertEquals(tokens[1], 0);
+    assertEquals(tokens[2], firstEnd);
+
+    assertEquals(
+      exports.lex_incremental(sourcePointer, 2, 0, 2, tokenPointer, 2, 0, 0),
+      tokenCount,
+    );
+    const incremental = new Int32Array(exports.memory.buffer, tokenPointer, 10);
+    assertEquals(incremental[0], 0);
+    assertEquals(incremental[1], 0);
+    assertEquals(incremental[2], firstEnd);
+    assertEquals(incremental[4], 2);
+    if (tokenCount === 2) {
+      assertEquals(incremental[5], 0);
+      assertEquals(incremental[6], 1);
+      assertEquals(incremental[7], 2);
+      assertEquals(incremental[9], 2);
+    }
   }
 });
 

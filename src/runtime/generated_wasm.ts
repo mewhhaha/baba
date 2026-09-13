@@ -4309,13 +4309,7 @@ function writeExternalWasmSource(
     return view;
   }
   if (update === undefined || cache.source !== update.previousSource) {
-    for (let index = 0; index < source.length; index++) {
-      view.setUint16(
-        sourcePtr + index * WASM_UTF16_UNIT_BYTES,
-        source.charCodeAt(index),
-        true,
-      );
-    }
+    writeExternalWasmSourceRange(view, sourcePtr, source, 0, source.length);
     cache.source = source;
     return view;
   }
@@ -4333,14 +4327,13 @@ function writeExternalWasmSource(
   }
   if (preservesLength) {
     for (const edit of update.edits) {
-      for (let index = 0; index < edit.newText.length; index++) {
-        view.setUint16(
-          sourcePtr +
-            (edit.start + index) * WASM_UTF16_UNIT_BYTES,
-          edit.newText.charCodeAt(index),
-          true,
-        );
-      }
+      writeExternalWasmSourceRange(
+        view,
+        sourcePtr + edit.start * WASM_UTF16_UNIT_BYTES,
+        edit.newText,
+        0,
+        edit.newText.length,
+      );
     }
     cache.source = source;
     return view;
@@ -4355,13 +4348,40 @@ function writeExternalWasmSource(
     sourcePtr + oldSuffixStart * WASM_UTF16_UNIT_BYTES,
     sourcePtr + update.previousSource.length * WASM_UTF16_UNIT_BYTES,
   );
-  for (let index = firstEdit.start; index < newSuffixStart; index++) {
+  writeExternalWasmSourceRange(
+    view,
+    sourcePtr,
+    source,
+    firstEdit.start,
+    newSuffixStart,
+  );
+  cache.source = source;
+  return view;
+}
+
+function writeExternalWasmSourceRange(
+  view: DataView,
+  sourcePtr: number,
+  source: string,
+  start: number,
+  end: number,
+): void {
+  if (hostLittleEndian) {
+    const units = new Uint16Array(
+      view.buffer,
+      sourcePtr + start * WASM_UTF16_UNIT_BYTES,
+      end - start,
+    );
+    for (let index = start; index < end; index++) {
+      units[index - start] = source.charCodeAt(index);
+    }
+    return;
+  }
+  for (let index = start; index < end; index++) {
     view.setUint16(
       sourcePtr + index * WASM_UTF16_UNIT_BYTES,
       source.charCodeAt(index),
       true,
     );
   }
-  cache.source = source;
-  return view;
 }
