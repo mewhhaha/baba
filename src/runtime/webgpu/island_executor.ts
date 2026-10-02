@@ -2471,7 +2471,11 @@ fn regions(@builtin(global_invocation_id) invocation: vec3<u32>) {
     }
     set_candidate_word(0u, 15u, arena[1u]);
   }
-  if (candidate_slot < arena[9u]) {
+  // Lookup consumers only address live tokens. Leave capacity padding untouched.
+  if (candidate_slot >= arena[1u] * arena[22u]) {
+    return;
+  }
+  if (candidate_slot < arena[1u]) {
     arena[arena[18u] + candidate_slot] = 0xffffffffu;
     arena[arena[19u] + candidate_slot] = 0xffffffffu;
     arena[arena[25u] + candidate_slot] = 0xffffffffu;
@@ -3132,9 +3136,25 @@ fn scan_level(
   if (arena[0u] != 0u) {
     return;
   }
-  let index = linear_workgroup_index(workgroup) * 256u + lane;
+  let group = linear_workgroup_index(workgroup);
+  let first = group * 256u;
+  var count = dispatch_params.count;
+  if (dispatch_params.mode == 0u || dispatch_params.mode == 1u) {
+    count = min(count, arena[20u]);
+  } else if (dispatch_params.mode == 5u) {
+    count = min(count, arena[1u] * arena[22u]);
+  }
+  // Upper scan levels still consume every reserved block sum, so explicitly
+  // zero the padding block without running the scan or writing unused offsets.
+  if (first >= count) {
+    if (lane == 0u) {
+      scan_scratch[dispatch_params.block_sums_offset + group] = 0u;
+    }
+    return;
+  }
+  let index = first + lane;
   var value = 0u;
-  if (index < dispatch_params.count) {
+  if (index < count) {
     if (dispatch_params.mode == 0u) {
       if (index < arena[20u]) {
         value = candidate_word(index, 2u);
@@ -3212,7 +3232,7 @@ fn scan_level(
     }
     stride /= 2u;
   }
-  if (index < dispatch_params.count) {
+  if (index < count) {
     scan_scratch[dispatch_params.output_offset + index] = scan_values[lane];
   }
 }
@@ -3223,7 +3243,13 @@ fn add_scan_offsets(@builtin(global_invocation_id) invocation: vec3<u32>) {
     return;
   }
   let index = linear_invocation_index(invocation);
-  if (index >= dispatch_params.count) {
+  var count = dispatch_params.count;
+  if (dispatch_params.mode == 0u || dispatch_params.mode == 1u) {
+    count = min(count, arena[20u]);
+  } else if (dispatch_params.mode == 5u) {
+    count = min(count, arena[1u] * arena[22u]);
+  }
+  if (index >= count) {
     return;
   }
   let block = index / 256u;

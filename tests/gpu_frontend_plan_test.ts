@@ -505,7 +505,17 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       gpuLong.program.edges.join(","),
       cpuLong.program.edges.join(","),
     );
-    for (const smallSource of ["", ";\n", "\nx ;"]) {
+    for (
+      const smallSource of [
+        "",
+        ";\n",
+        "\nx ;",
+        // Keep the reserved hierarchy large while its live population shrinks.
+        `${" ".repeat(longSource.length - 1)};`,
+        `;${" ".repeat(longSource.length - 1)}`,
+        `${" ".repeat(longSource.length - 3)}x ;`,
+      ]
+    ) {
       const cpuSmall = cpuLongFrontend.ingest(smallSource);
       const gpuSmall = await longFrontend.ingest(smallSource, {
         stageTimings: "collect",

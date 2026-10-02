@@ -15,13 +15,16 @@ import {
   AUX_HEADER_U32,
   buildKernelSource,
   chooseChunkLog2,
+  chooseSegmentLog2,
   MAX_WORKGROUP_INVOCATIONS,
+  MIN_SEG_LOG2,
   type PackedTables,
   packTables,
   PASS_Z_WORKGROUP,
   passXWorkgroup,
   passXWorkgroupBytes,
   SCAN_WORKGROUP,
+  SEG_LOG2,
   SEG_SIZE,
   SEG_SUMMARY_U32_PER_STATE,
   STORAGE_BINDING_COUNT,
@@ -703,6 +706,30 @@ export class WebGpuLexer {
       });
 
       for (const stage of STAGES) {
+        if (stage.entryPoint === "pass_x" || stage.entryPoint === "pass_z") {
+          // Create every supported segment specialization once per shared
+          // kernel. Dispatches keep their canonical stage names for timings.
+          for (
+            let segmentLog2 = MIN_SEG_LOG2;
+            segmentLog2 <= SEG_LOG2;
+            segmentLog2 += 1
+          ) {
+            const pipelineKey = `${stage.label}:${segmentLog2}`;
+            pipelines.set(
+              pipelineKey,
+              device.createComputePipeline({
+                layout: pipelineLayout,
+                compute: {
+                  module,
+                  entryPoint: stage.entryPoint,
+                  constants: { SEG_LOG2: segmentLog2 },
+                },
+                label: pipelineKey,
+              }),
+            );
+          }
+          continue;
+        }
         pipelines.set(
           stage.label,
           device.createComputePipeline({
@@ -1215,7 +1242,8 @@ export class WebGpuLexer {
       const numBlocks = Math.ceil(numChunks / SCAN_WORKGROUP);
       const numChunksAlloc = Math.max(1, numChunks);
       const numBlocksAlloc = Math.max(1, numBlocks);
-      const numSeg = Math.ceil(n / SEG_SIZE);
+      const segmentLog2 = chooseSegmentLog2(n);
+      const numSeg = Math.ceil(n / (1 << segmentLog2));
       const numSegAlloc = Math.max(1, numSeg);
       let capacityRecords = n;
       if (requestedCapacity !== undefined) {
@@ -1246,7 +1274,7 @@ export class WebGpuLexer {
       );
       const passDfWorkgroups = Math.min(
         perDimension,
-        Math.max(1, Math.ceil(numChunks / SCAN_WORKGROUP)),
+        Math.max(1, numChunks),
       );
       const passE1Workgroups = Math.max(1, numBlocks);
       this.#checkLimits(
@@ -1361,7 +1389,7 @@ export class WebGpuLexer {
         passXWorkgroups,
         passZWorkgroups * PASS_Z_WORKGROUP,
         passBWorkgroups,
-        passDfWorkgroups * SCAN_WORKGROUP,
+        passDfWorkgroups,
       ]);
       this.device.queue.writeBuffer(this.#paramsBuffer, 0, params);
 
@@ -1369,16 +1397,16 @@ export class WebGpuLexer {
       const sourceBuffer = this.#src.buffer;
       const recordsBuffer = this.#records.buffer;
       const metadataBuffer = this.#aux.buffer;
-      const dispatches: readonly [string, number][] = [
-        ["pass_x_sweep", passXWorkgroups],
-        ["pass_y_segscan", 1],
-        ["pass_z_finalize", passZWorkgroups],
-        ["pass_b_double", passBWorkgroups],
-        ["pass_c_entries", 1],
-        ["pass_d_counts", passDfWorkgroups],
-        ["pass_e1_blockscan", passE1Workgroups],
-        ["pass_e2_blockoffsets", 1],
-        ["pass_f_emit", passDfWorkgroups],
+      const dispatches: readonly [string, number, string][] = [
+        ["pass_x_sweep", passXWorkgroups, `pass_x_sweep:${segmentLog2}`],
+        ["pass_y_segscan", 1, "pass_y_segscan"],
+        ["pass_z_finalize", passZWorkgroups, `pass_z_finalize:${segmentLog2}`],
+        ["pass_b_double", passBWorkgroups, "pass_b_double"],
+        ["pass_c_entries", 1, "pass_c_entries"],
+        ["pass_d_counts", passDfWorkgroups, "pass_d_counts"],
+        ["pass_e1_blockscan", passE1Workgroups, "pass_e1_blockscan"],
+        ["pass_e2_blockoffsets", 1, "pass_e2_blockoffsets"],
+        ["pass_f_emit", passDfWorkgroups, "pass_f_emit"],
       ];
       let released = false;
       return {
@@ -1394,10 +1422,10 @@ export class WebGpuLexer {
             const pass = encoder.beginComputePass({
               label: "baba integrated lexer",
             });
-            for (const [stage, workgroups] of dispatches) {
-              const pipeline = this.#kernel.pipelines.get(stage);
+            for (const [stage, workgroups, pipelineKey] of dispatches) {
+              const pipeline = this.#kernel.pipelines.get(pipelineKey);
               if (pipeline === undefined) {
-                throw new Error(`Missing compute pipeline for stage ${stage}.`);
+                throw new Error(`Missing compute pipeline ${pipelineKey}.`);
               }
               pass.pushDebugGroup(stage);
               pass.setPipeline(pipeline);
@@ -1409,10 +1437,10 @@ export class WebGpuLexer {
             return;
           }
           for (let index = 0; index < dispatches.length; index += 1) {
-            const [stage, workgroups] = dispatches[index];
-            const pipeline = this.#kernel.pipelines.get(stage);
+            const [stage, workgroups, pipelineKey] = dispatches[index];
+            const pipeline = this.#kernel.pipelines.get(pipelineKey);
             if (pipeline === undefined) {
-              throw new Error(`Missing compute pipeline for stage ${stage}.`);
+              throw new Error(`Missing compute pipeline ${pipelineKey}.`);
             }
             const descriptor: GPUComputePassDescriptor = { label: stage };
             if (querySet !== null) {
@@ -1469,9 +1497,10 @@ export class WebGpuLexer {
     const numBlocks = Math.ceil(numChunks / SCAN_WORKGROUP);
     const numChunksAlloc = Math.max(1, numChunks);
     const numBlocksAlloc = Math.max(1, numBlocks);
-    // pass_x segments are independent of pass_b chunks: their size is fixed by
-    // SEG_LOG2 rather than by the device's workgroup-storage limit.
-    const numSeg = Math.ceil(n / SEG_SIZE);
+    // pass_x segments are independent of pass_b chunks. Small inputs shorten
+    // the sweep while keeping at most 512 segments for the serial suffix scan.
+    const segmentLog2 = chooseSegmentLog2(n);
+    const numSeg = Math.ceil(n / (1 << segmentLog2));
     const numSegAlloc = Math.max(1, numSeg);
 
     let capacityRecords = n;
@@ -1508,7 +1537,7 @@ export class WebGpuLexer {
     const passBWorkgroups = Math.min(perDimension, Math.max(1, numChunks));
     const passDfWorkgroups = Math.min(
       perDimension,
-      Math.max(1, Math.ceil(numChunks / SCAN_WORKGROUP)),
+      Math.max(1, numChunks),
     );
     const passE1Workgroups = Math.max(1, numBlocks);
 
@@ -1649,7 +1678,7 @@ export class WebGpuLexer {
         passXWorkgroups,
         passZWorkgroups * PASS_Z_WORKGROUP,
         passBWorkgroups,
-        passDfWorkgroups * SCAN_WORKGROUP,
+        passDfWorkgroups,
       ]);
       this.device.queue.writeBuffer(this.#paramsBuffer, 0, params);
       uploadEnd = performance.now();
@@ -1657,22 +1686,22 @@ export class WebGpuLexer {
       // --- encode -------------------------------------------------------------
       encodeStart = performance.now();
       const encoder = this.device.createCommandEncoder();
-      const dispatches: readonly [string, number][] = [
-        ["pass_x_sweep", passXWorkgroups],
-        ["pass_y_segscan", 1],
-        ["pass_z_finalize", passZWorkgroups],
-        ["pass_b_double", passBWorkgroups],
-        ["pass_c_entries", 1],
-        ["pass_d_counts", passDfWorkgroups],
-        ["pass_e1_blockscan", passE1Workgroups],
-        ["pass_e2_blockoffsets", 1],
-        ["pass_f_emit", passDfWorkgroups],
+      const dispatches: readonly [string, number, string][] = [
+        ["pass_x_sweep", passXWorkgroups, `pass_x_sweep:${segmentLog2}`],
+        ["pass_y_segscan", 1, "pass_y_segscan"],
+        ["pass_z_finalize", passZWorkgroups, `pass_z_finalize:${segmentLog2}`],
+        ["pass_b_double", passBWorkgroups, "pass_b_double"],
+        ["pass_c_entries", 1, "pass_c_entries"],
+        ["pass_d_counts", passDfWorkgroups, "pass_d_counts"],
+        ["pass_e1_blockscan", passE1Workgroups, "pass_e1_blockscan"],
+        ["pass_e2_blockoffsets", 1, "pass_e2_blockoffsets"],
+        ["pass_f_emit", passDfWorkgroups, "pass_f_emit"],
       ];
       for (let index = 0; index < dispatches.length; index += 1) {
-        const [stage, workgroups] = dispatches[index];
-        const pipeline = this.#kernel.pipelines.get(stage);
+        const [stage, workgroups, pipelineKey] = dispatches[index];
+        const pipeline = this.#kernel.pipelines.get(pipelineKey);
         if (pipeline === undefined) {
-          throw new Error(`Missing compute pipeline for stage ${stage}.`);
+          throw new Error(`Missing compute pipeline ${pipelineKey}.`);
         }
         const descriptor: GPUComputePassDescriptor = { label: stage };
         if (this.#querySet !== null) {

@@ -38,13 +38,14 @@
  *   PASS B  one workgroup per chunk (grid-strided): guarded pointer-doubling in
  *           shared memory to get exit(p) = first orbit position >= chunkEnd, for
  *           every p. log2(chunkSize) rounds, entirely in LDS.
- *   PASS C  one thread, serial over chunks: entry(k) = the true orbit position
- *           at which chunk k is entered. Only numChunks dependent loads.
- *   PASS D  one thread per chunk: walk entry(k) .. chunkEnd counting tokens.
+ *   PASS C  one workgroup prefetches short entry windows for blocks of chunks;
+ *           one thread applies the exact entry recurrence, using global loads
+ *           when an entry lies outside its prefetched window.
+ *   PASS D  one workgroup per chunk: cache next in LDS, then count the orbit.
  *   PASS E  two-level exclusive prefix sum over the per-chunk counts.
- *   PASS F  one thread per chunk: walk again, writing a compact pair at the
- *           scanned offset: token end and packed (spec, accepting state). The
- *           host reconstructs each start from the previous token's end.
+ *   PASS F  one workgroup per chunk: cache next in LDS, collect orbit starts,
+ *           then emit the compact pairs in parallel at the scanned offset.
+ *           The host reconstructs each start from the previous token's end.
  *
  * All nine stages are dispatches inside a single command encoder, so the whole
  * lex is ONE queue.submit() and ONE mapAsync(). No CPU is in the loop.
@@ -93,7 +94,8 @@ export const PASS_B_WORKGROUP = 256;
 export const PASS_Z_WORKGROUP = 256;
 export const SCAN_WORKGROUP = 256;
 /**
- * Segment size for `pass_x`, as a power of two. Deliberately NOT tied to the
+ * Maximum preferred segment size for `pass_x`, as a power of two. Small inputs
+ * use shorter segments chosen by `chooseSegmentLog2`. Deliberately not tied to the
  * chunk size: unlike `pass_b`, `pass_x` keeps only four rotating state columns
  * in workgroup storage, so its LDS footprint does not depend on this at all and
  * a floor device does not have to shrink it.
@@ -105,6 +107,27 @@ export const SCAN_WORKGROUP = 256;
  */
 export const SEG_LOG2 = 12;
 export const SEG_SIZE = 1 << SEG_LOG2;
+export const MIN_SEG_LOG2 = 8;
+/**
+ * Keep a short sweep on small inputs while bounding the serial suffix scan.
+ * Large inputs retain the measured 4096-unit segment size.
+ */
+export function chooseSegmentLog2(inputUnits: number): number {
+  if (!Number.isSafeInteger(inputUnits) || inputUnits < 0) {
+    throw new Error(
+      `inputUnits must be a nonnegative safe integer; received ${inputUnits}.`,
+    );
+  }
+  let segmentLog2 = SEG_LOG2;
+  while (segmentLog2 > MIN_SEG_LOG2) {
+    const smallerSegmentCount = Math.ceil(
+      inputUnits / (1 << (segmentLog2 - 1)),
+    );
+    if (smallerSegmentCount > 512) break;
+    segmentLog2 -= 1;
+  }
+  return segmentLog2;
+}
 /**
  * `pass_x` packs the last-accept offset relative to the segment's nominal base
  * into 16 bits. That offset can be one unit past the nominal end when a
@@ -460,13 +483,16 @@ const TBL_RANGES: u32 = ${packed.rangesOffset}u;
 
 const CHUNK_SIZE: u32 = ${CHUNK_SIZE}u;
 const CHUNK_LOG2: u32 = ${chunkLog2}u;
-const SEG_SIZE: u32 = ${SEG_SIZE}u;
-const SEG_LOG2: u32 = ${SEG_LOG2}u;
+// Specialize the shifts per pipeline so large-DFA kernels retain constant
+// segment boundaries while small inputs use shorter sweeps.
+override SEG_LOG2: u32 = ${SEG_LOG2}u;
 const PASS_X_WG: u32 = ${passXWg}u;
 const STATES_PER_THREAD: u32 = ${statesPerThread}u;
 const PASS_Z_WG: u32 = ${PASS_Z_WORKGROUP}u;
 const PASS_B_WG: u32 = ${PASS_B_WORKGROUP}u;
 const SCAN_WG: u32 = ${SCAN_WORKGROUP}u;
+const ENTRY_CHUNKS: u32 = 64u;
+const ENTRY_WINDOW: u32 = CHUNK_SIZE / ENTRY_CHUNKS;
 
 const NO_ENTRY: u32 = 0xFFFFFFFFu;
 /** Absorbing "no transition" state. stateCount is asserted <= 65534 upstream. */
@@ -867,48 +893,82 @@ fn pass_b(
 
 // --- PASS C -----------------------------------------------------------------
 
-@compute @workgroup_size(1)
-fn pass_c() {
+@compute @workgroup_size(${PASS_B_WORKGROUP})
+fn pass_c(@builtin(local_invocation_index) li: u32) {
   let n = params.n;
   var pos: u32 = 0u;
-  var k: u32 = 0u;
+  var blockBase: u32 = 0u;
   loop {
-    if (k >= params.numChunks) { break; }
-    var chunkEnd = (k + 1u) * CHUNK_SIZE;
-    if (chunkEnd > n) { chunkEnd = n; }
-    if (pos < chunkEnd) {
-      aux[params.entryOff + k] = pos;
-      pos = exitPos[pos];
-    } else {
-      // The orbit jumped clean over this chunk (a single token longer than one
-      // chunk). The chunk emits no records.
-      aux[params.entryOff + k] = NO_ENTRY;
+    if (blockBase >= params.numChunks) { break; }
+    workgroupBarrier();
+    // Real entries on ordinary source are near the start of each chunk. Load
+    // those candidates cooperatively so the serial orbit uses LDS latency.
+    // Long tokens and late entries retain the exact global-load fallback.
+    for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) {
+      let k = blockBase + i / ENTRY_WINDOW;
+      let p = k * CHUNK_SIZE + i % ENTRY_WINDOW;
+      var value = n;
+      if (k < params.numChunks && p < n) { value = exitPos[p]; }
+      ja[i] = value;
     }
-    k += 1u;
+    workgroupBarrier();
+    if (li == 0u) {
+      let blockLimit = min(blockBase + ENTRY_CHUNKS, params.numChunks);
+      var k = blockBase;
+      loop {
+        if (k >= blockLimit) { break; }
+        let chunkBase = k * CHUNK_SIZE;
+        let chunkEnd = min(chunkBase + CHUNK_SIZE, n);
+        if (pos < chunkEnd) {
+          aux[params.entryOff + k] = pos;
+          let entryOffset = pos - chunkBase;
+          if (entryOffset < ENTRY_WINDOW) {
+            pos = ja[(k - blockBase) * ENTRY_WINDOW + entryOffset];
+          } else {
+            pos = exitPos[pos];
+          }
+        } else {
+          // A long token's orbit jumped over this entire chunk.
+          aux[params.entryOff + k] = NO_ENTRY;
+        }
+        k += 1u;
+      }
+    }
+    blockBase += ENTRY_CHUNKS;
   }
 }
 
 // --- PASS D -----------------------------------------------------------------
 
-@compute @workgroup_size(${SCAN_WORKGROUP})
-fn pass_d(@builtin(global_invocation_id) gid: vec3<u32>) {
-  var k = gid.x;
+@compute @workgroup_size(${PASS_B_WORKGROUP})
+fn pass_d(
+  @builtin(workgroup_id) wg: vec3<u32>,
+  @builtin(local_invocation_index) li: u32,
+) {
+  var k = wg.x;
   loop {
     if (k >= params.numChunks) { break; }
+    let base = k * CHUNK_SIZE;
     let entry = aux[params.entryOff + k];
-    var count: u32 = 0u;
-    if (entry != NO_ENTRY) {
-      let n = params.n;
-      var chunkEnd = (k + 1u) * CHUNK_SIZE;
-      if (chunkEnd > n) { chunkEnd = n; }
-      var p = entry;
-      loop {
-        if (p >= chunkEnd) { break; }
-        count += 1u;
-        p = nextPos[p];
-      }
+    let chunkEnd = min(base + CHUNK_SIZE, params.n);
+    workgroupBarrier();
+    for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) {
+      let p = base + i;
+      if (p < chunkEnd && entry != NO_ENTRY) { ja[i] = nextPos[p]; }
     }
-    aux[params.countsOff + k] = count;
+    workgroupBarrier();
+    if (li == 0u) {
+      var count: u32 = 0u;
+      if (entry != NO_ENTRY) {
+        var p = entry;
+        loop {
+          if (p >= chunkEnd) { break; }
+          count += 1u;
+          p = ja[p - base];
+        }
+      }
+      aux[params.countsOff + k] = count;
+    }
     k += params.passDfStride;
   }
 }
@@ -964,32 +1024,47 @@ fn pass_e2() {
 
 // --- PASS F -----------------------------------------------------------------
 
-@compute @workgroup_size(${SCAN_WORKGROUP})
-fn pass_f(@builtin(global_invocation_id) gid: vec3<u32>) {
-  var k = gid.x;
+@compute @workgroup_size(${PASS_B_WORKGROUP})
+fn pass_f(
+  @builtin(workgroup_id) wg: vec3<u32>,
+  @builtin(local_invocation_index) li: u32,
+) {
+  var k = wg.x;
   loop {
     if (k >= params.numChunks) { break; }
+    let base = k * CHUNK_SIZE;
     let entry = aux[params.entryOff + k];
-    if (entry != NO_ENTRY) {
-      let blockOffsetBase = params.blockSumOff + params.numBlocks;
-      var out = aux[blockOffsetBase + (k / SCAN_WG)] + aux[params.countsOff + k];
-
-      let n = params.n;
-      var chunkEnd = (k + 1u) * CHUNK_SIZE;
-      if (chunkEnd > n) { chunkEnd = n; }
-
+    let chunkEnd = min(base + CHUNK_SIZE, params.n);
+    workgroupBarrier();
+    for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) {
+      let p = base + i;
+      if (p < chunkEnd && entry != NO_ENTRY) { ja[i] = nextPos[p]; }
+    }
+    workgroupBarrier();
+    if (li == 0u && entry != NO_ENTRY) {
+      var ordinal = 0u;
       var p = entry;
       loop {
         if (p >= chunkEnd) { break; }
-        let end = nextPos[p];
-        let bits = packedRec[p];
-        if (out < params.capacityRecords) {
-          let base = out * 2u;
-          records[base] = end;
-          records[base + 1u] = bits;
-        }
-        out += 1u;
-        p = end;
+        jb[ordinal] = p - base;
+        ordinal += 1u;
+        p = ja[p - base];
+      }
+    }
+    workgroupBarrier();
+    let blockOffsetBase = params.blockSumOff + params.numBlocks;
+    let firstOut = aux[blockOffsetBase + (k / SCAN_WG)] + aux[params.countsOff + k];
+    var afterOut = aux[${AUX_TOTAL_COUNT}u];
+    if (k + 1u < params.numChunks) {
+      afterOut = aux[blockOffsetBase + ((k + 1u) / SCAN_WG)] + aux[params.countsOff + k + 1u];
+    }
+    let count = afterOut - firstOut;
+    for (var ordinal = li; ordinal < count; ordinal += PASS_B_WG) {
+      let local = jb[ordinal];
+      let out = firstOut + ordinal;
+      if (out < params.capacityRecords) {
+        records[out * 2u] = ja[local];
+        records[out * 2u + 1u] = packedRec[base + local];
       }
     }
     k += params.passDfStride;

@@ -38,7 +38,12 @@ import {
   buildAlphabetTables,
   verifyAlphabetAgainstPlan,
 } from "../src/runtime/webgpu/alphabet.ts";
-import { passXWorkgroup, SEG_SIZE } from "../src/runtime/webgpu/kernel_wgsl.ts";
+import {
+  chooseSegmentLog2,
+  passXWorkgroup,
+  SCAN_WORKGROUP,
+  SEG_SIZE,
+} from "../src/runtime/webgpu/kernel_wgsl.ts";
 
 /**
  * A guard-free grammar. Guard-free is a hard requirement of the backend, and
@@ -616,6 +621,84 @@ Deno.test({
       }
     } finally {
       gpu.destroy();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "WebGPU lexer preserves surrogate boundaries and long tokens at every sweep segment size",
+  ignore: noWebGpu,
+  fn: async () => {
+    const { plan, wasm } = compileArtifacts(PARITY_GRAMMAR);
+    const cpu = CpuReferenceLexer.create(wasm, plan);
+    const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
+    try {
+      const inputs = [
+        { units: 9000, segmentSize: 256 },
+        { units: 131073, segmentSize: 512 },
+        { units: 262145, segmentSize: 1024 },
+        { units: 524289, segmentSize: 2048 },
+        { units: 1048577, segmentSize: 4096 },
+      ];
+      for (const input of inputs) {
+        assertEquals(1 << chooseSegmentLog2(input.units), input.segmentSize);
+        const source = `${" ".repeat(input.segmentSize - 1)}\u{1F600}${
+          "a".repeat(input.units - input.segmentSize - 1)
+        }`;
+        assertEquals(source.length, input.units);
+        const units = toUtf16(source);
+        const expected = cpu.lex(units).records;
+        const actual = await gpu.lex(units, {
+          debugMaxWorkgroupsPerDimension: 3,
+        });
+        assertEquals(actual.overflow, false);
+        assertEquals(
+          recordDifference(expected, actual.records),
+          null,
+          `surrogate boundary at segmentSize=${input.segmentSize}`,
+        );
+      }
+    } finally {
+      gpu.destroy();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "WebGPU lexer preserves full chunks and skipped chunks across prefix-scan blocks",
+  ignore: noWebGpu,
+  fn: async () => {
+    const { plan, wasm } = compileArtifacts(PARITY_GRAMMAR);
+    const cpu = CpuReferenceLexer.create(wasm, plan);
+    for (const simulateWorkgroupStorageLimit of [16384, 32768]) {
+      const gpu = await WebGpuLexer.create(plan, {
+        allowFallbackAdapter: true,
+        simulateWorkgroupStorageLimit,
+      });
+      try {
+        const blockUnits = gpu.chunkSize * SCAN_WORKGROUP;
+        const sources = [
+          "@".repeat(blockUnits + gpu.chunkSize + 3),
+          `${"@".repeat(blockUnits - 2)}${"a".repeat(gpu.chunkSize * 2 + 4)}@`,
+        ];
+        for (const source of sources) {
+          const units = toUtf16(source);
+          const expected = cpu.lex(units).records;
+          const actual = await gpu.lex(units, {
+            debugMaxWorkgroupsPerDimension: 3,
+          });
+          assertEquals(actual.overflow, false);
+          assertEquals(
+            recordDifference(expected, actual.records),
+            null,
+            `scan-block boundary at chunkSize=${gpu.chunkSize}`,
+          );
+        }
+      } finally {
+        gpu.destroy();
+      }
     }
   },
 });

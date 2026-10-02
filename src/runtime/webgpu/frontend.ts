@@ -610,110 +610,115 @@ export function executeCompactSemanticRecipes(
   const definitionByName = new Map<string, number>();
   const symbolWords: number[] = [];
   const nodeCount = program.nodes.length / NODE_WORDS;
-  for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
-    const nodeOffset = nodeId * NODE_WORDS;
-    const recipe = recipeByRule.get(program.nodes[nodeOffset]);
-    if (recipe?.opcode !== "define") {
-      continue;
-    }
-    const nameField = recipe.fields.find((field) =>
-      field.target === "binder" || field.target === "name"
-    );
-    if (nameField === undefined) {
-      continue;
-    }
-    const tokenIndex = compactTokenForField(
-      program,
-      nodeId,
-      nameField.field,
-    );
-    if (tokenIndex === undefined) {
-      continue;
-    }
-    const tokenOffset = tokenIndex * TOKEN_WORDS;
-    const tokenStart = program.tokens[tokenOffset + 1];
-    const tokenEnd = program.tokens[tokenOffset + 2];
-    const name = source.slice(tokenStart, tokenEnd);
-    const previous = definitionByName.get(name);
-    if (previous !== undefined) {
-      diagnostics.push({
-        code: DIAGNOSTIC_DUPLICATE_BINDING,
-        start: tokenStart,
-        end: tokenEnd,
-        subjectId: nodeId,
-        parameter0: previous,
-        parameter1: 0,
+  if (plan.semanticRecipes.some((recipe) => recipe.opcode === "define")) {
+    for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
+      const nodeOffset = nodeId * NODE_WORDS;
+      const recipe = recipeByRule.get(program.nodes[nodeOffset]);
+      if (recipe?.opcode !== "define") {
+        continue;
+      }
+      const nameField = recipe.fields.find((field) =>
+        field.target === "binder" || field.target === "name"
+      );
+      if (nameField === undefined) {
+        continue;
+      }
+      const tokenIndex = compactTokenForField(
+        program,
+        nodeId,
+        nameField.field,
+      );
+      if (tokenIndex === undefined) {
+        continue;
+      }
+      const tokenOffset = tokenIndex * TOKEN_WORDS;
+      const tokenStart = program.tokens[tokenOffset + 1];
+      const tokenEnd = program.tokens[tokenOffset + 2];
+      const name = source.slice(tokenStart, tokenEnd);
+      const previous = definitionByName.get(name);
+      if (previous !== undefined) {
+        diagnostics.push({
+          code: DIAGNOSTIC_DUPLICATE_BINDING,
+          start: tokenStart,
+          end: tokenEnd,
+          subjectId: nodeId,
+          parameter0: previous,
+          parameter1: 0,
+        });
+        continue;
+      }
+      const symbol = definitions.length;
+      definitionByName.set(name, symbol);
+      definitions.push({
+        start: program.nodes[nodeOffset + 2],
+        end: program.nodes[nodeOffset + 3],
+        nodeId,
+        symbol,
       });
-      continue;
+      symbolWords.push(0, 0, tokenIndex, -1, -1, nodeId);
     }
-    const symbol = definitions.length;
-    definitionByName.set(name, symbol);
-    definitions.push({
-      start: program.nodes[nodeOffset + 2],
-      end: program.nodes[nodeOffset + 3],
-      nodeId,
-      symbol,
-    });
-    symbolWords.push(0, 0, tokenIndex, -1, -1, nodeId);
   }
 
   const primitiveNames = new Set(
     plan.primitives.map((primitive) => primitive.source),
   );
   const referencesByDefinition = new Map<number, number[]>();
-  for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
-    const nodeOffset = nodeId * NODE_WORDS;
-    const recipe = recipeByRule.get(program.nodes[nodeOffset]);
-    if (recipe?.opcode !== "reference") {
-      continue;
-    }
-    const nameField = recipe.fields.find((field) =>
-      field.target === "name" || field.target === "reference"
-    );
-    if (nameField === undefined) {
-      continue;
-    }
-    const tokenIndex = compactTokenForField(
-      program,
-      nodeId,
-      nameField.field,
-    );
-    if (tokenIndex === undefined) {
-      continue;
-    }
-    const tokenOffset = tokenIndex * TOKEN_WORDS;
-    const tokenStart = program.tokens[tokenOffset + 1];
-    const tokenEnd = program.tokens[tokenOffset + 2];
-    const name = source.slice(tokenStart, tokenEnd);
-    const target = definitionByName.get(name);
-    if (target === undefined) {
-      if (!primitiveNames.has(name)) {
-        diagnostics.push({
-          code: DIAGNOSTIC_UNKNOWN_REFERENCE,
-          start: tokenStart,
-          end: tokenEnd,
-          subjectId: nodeId,
-          parameter0: 0,
-          parameter1: 0,
-        });
+  if (plan.semanticRecipes.some((recipe) => recipe.opcode === "reference")) {
+    for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
+      const nodeOffset = nodeId * NODE_WORDS;
+      const recipe = recipeByRule.get(program.nodes[nodeOffset]);
+      if (recipe?.opcode !== "reference") {
+        continue;
       }
-      continue;
-    }
-    const nodeStart = program.nodes[nodeOffset + 2];
-    const nodeEnd = program.nodes[nodeOffset + 3];
-    const owner = definitions.find((definition) =>
-      nodeStart >= definition.start && nodeEnd <= definition.end
-    );
-    if (owner === undefined) {
-      continue;
-    }
-    const references = referencesByDefinition.get(owner.symbol);
-    if (references === undefined) {
-      referencesByDefinition.set(owner.symbol, [target]);
-    } else {
-      references.push(target);
+      const nameField = recipe.fields.find((field) =>
+        field.target === "name" || field.target === "reference"
+      );
+      if (nameField === undefined) {
+        continue;
+      }
+      const tokenIndex = compactTokenForField(
+        program,
+        nodeId,
+        nameField.field,
+      );
+      if (tokenIndex === undefined) {
+        continue;
+      }
+      const tokenOffset = tokenIndex * TOKEN_WORDS;
+      const tokenStart = program.tokens[tokenOffset + 1];
+      const tokenEnd = program.tokens[tokenOffset + 2];
+      const name = source.slice(tokenStart, tokenEnd);
+      const target = definitionByName.get(name);
+      if (target === undefined) {
+        if (!primitiveNames.has(name)) {
+          diagnostics.push({
+            code: DIAGNOSTIC_UNKNOWN_REFERENCE,
+            start: tokenStart,
+            end: tokenEnd,
+            subjectId: nodeId,
+            parameter0: 0,
+            parameter1: 0,
+          });
+        }
+        continue;
+      }
+      const nodeStart = program.nodes[nodeOffset + 2];
+      const nodeEnd = program.nodes[nodeOffset + 3];
+      const owner = definitions.find((definition) =>
+        nodeStart >= definition.start && nodeEnd <= definition.end
+      );
+      if (owner === undefined) {
+        continue;
+      }
+      const references = referencesByDefinition.get(owner.symbol);
+      if (references === undefined) {
+        referencesByDefinition.set(owner.symbol, [target]);
+      } else {
+        references.push(target);
+      }
     }
   }
+
   reportReferenceCycles(
     definitions,
     referencesByDefinition,
@@ -726,6 +731,14 @@ export function executeCompactSemanticRecipes(
     const tokenStart = program.tokens[tokenOffset + 1];
     const tokenEnd = program.tokens[tokenOffset + 2];
     if (!isDecimalIntegerSpan(source, tokenStart, tokenEnd)) {
+      continue;
+    }
+    let digits = tokenEnd - tokenStart;
+    if (source.charCodeAt(tokenStart) === 45) {
+      digits -= 1;
+    }
+    // Every validated decimal magnitude below ten digits fits in signed i32.
+    if (digits < 10) {
       continue;
     }
     const integer = BigInt(source.slice(tokenStart, tokenEnd));
@@ -747,39 +760,44 @@ export function executeCompactSemanticRecipes(
     }
   }
 
-  for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
-    const nodeOffset = nodeId * NODE_WORDS;
-    const recipe = recipeByRule.get(program.nodes[nodeOffset]);
-    if (recipe?.opcode !== "repeat-limit") {
-      continue;
-    }
-    const countField = recipe.fields.find((field) => field.target === "count");
-    if (countField === undefined) {
-      continue;
-    }
-    const tokenIndex = compactTokenForField(
-      program,
-      nodeId,
-      countField.field,
-    );
-    if (tokenIndex === undefined) {
-      continue;
-    }
-    const tokenOffset = tokenIndex * TOKEN_WORDS;
-    const tokenStart = program.tokens[tokenOffset + 1];
-    const tokenEnd = program.tokens[tokenOffset + 2];
-    const count = BigInt(source.slice(tokenStart, tokenEnd));
-    if (count < 0n || count > 1_000_000n) {
-      diagnostics.push({
-        code: DIAGNOSTIC_REPEAT_LIMIT,
-        start: tokenStart,
-        end: tokenEnd,
-        subjectId: nodeId,
-        parameter0: 1_000_000,
-        parameter1: 0,
-      });
+  if (plan.semanticRecipes.some((recipe) => recipe.opcode === "repeat-limit")) {
+    for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
+      const nodeOffset = nodeId * NODE_WORDS;
+      const recipe = recipeByRule.get(program.nodes[nodeOffset]);
+      if (recipe?.opcode !== "repeat-limit") {
+        continue;
+      }
+      const countField = recipe.fields.find((field) =>
+        field.target === "count"
+      );
+      if (countField === undefined) {
+        continue;
+      }
+      const tokenIndex = compactTokenForField(
+        program,
+        nodeId,
+        countField.field,
+      );
+      if (tokenIndex === undefined) {
+        continue;
+      }
+      const tokenOffset = tokenIndex * TOKEN_WORDS;
+      const tokenStart = program.tokens[tokenOffset + 1];
+      const tokenEnd = program.tokens[tokenOffset + 2];
+      const count = BigInt(source.slice(tokenStart, tokenEnd));
+      if (count < 0n || count > 1_000_000n) {
+        diagnostics.push({
+          code: DIAGNOSTIC_REPEAT_LIMIT,
+          start: tokenStart,
+          end: tokenEnd,
+          subjectId: nodeId,
+          parameter0: 1_000_000,
+          parameter1: 0,
+        });
+      }
     }
   }
+
   return new Int32Array(symbolWords);
 }
 

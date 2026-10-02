@@ -2,13 +2,20 @@
 
 ## Unreleased
 
+- Adapt GPU lexer sweep segments to input size, cache token-chain walks in
+  workgroup memory, and emit compact records in parallel. Precompile segment
+  specializations once per shared lexer context.
 - Remove redundant GPU frontend staging and skip grammar-inapplicable work.
   Reduce shared-memory copies in GPU lexer pointer doubling.
 - Read back only populated frontend arrays and classify lexer source units
   cooperatively before applying DFA transitions. See the
   [GPU frontend](docs/webgpu-frontend.md#populated-readback-and-cooperative-classification)
-  and
-  [lexer measurements](docs/webgpu-lexer.md#cooperative-character-classification).
+  and [lexer measurements](docs/webgpu-lexer.md#kernel-work).
+- Skip inactive GPU frontend lookup and allocation work while clearing padding
+  block sums for buffer reuse. Skip absent semantic recipe classes and avoid
+  `BigInt` conversion for small validated integers. Together with lexer kernel
+  improvements, reduce owned GPU Duck ingestion medians by 19.3% at 1 MiB and
+  21.9% at 4 MiB in repeated paired runs.
 - Share immutable lexer tables and pipelines across context workers while
   keeping execution buffers independent, and reduce exact-byte plan-cache key
   allocation.

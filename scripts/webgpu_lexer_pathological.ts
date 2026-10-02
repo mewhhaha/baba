@@ -33,7 +33,11 @@ import {
   WebGpuLexer,
 } from "../src/runtime/webgpu/lexer.ts";
 import { exampleGrammar } from "./webgpu_lexer_corpus.ts";
-import { SEG_SIZE } from "../src/runtime/webgpu/kernel_wgsl.ts";
+import {
+  chooseSegmentLog2,
+  MIN_SEG_LOG2,
+  SEG_SIZE,
+} from "../src/runtime/webgpu/kernel_wgsl.ts";
 
 const MIB = 1024 * 1024;
 const RUNS = 5;
@@ -95,7 +99,9 @@ const gpu = await WebGpuLexer.create(planBytes, {
 const adapter = await inspectDefaultAdapter();
 
 console.log(
-  `single-token input (funcfuck WS run): states=${gpu.plan.stateCount} segSize=${SEG_SIZE} chunkSize=${gpu.chunkSize}`,
+  `single-token input (funcfuck WS run): states=${gpu.plan.stateCount} segmentRange=${
+    1 << MIN_SEG_LOG2
+  }..${SEG_SIZE} chunkSize=${gpu.chunkSize}`,
 );
 console.log(
   `adapter (default requestAdapter() observation): vendor=${
@@ -118,6 +124,7 @@ console.log(
 console.log("");
 const headers = [
   "chars".padStart(9),
+  "seg units".padStart(9),
   "tokens".padStart(7),
   "parity".padStart(7),
   "cpu records".padStart(11),
@@ -150,6 +157,7 @@ let mismatches = 0;
 let capacitySkipped = 0;
 let attempted = 0;
 for (const chars of sizes) {
+  const segmentSize = 1 << chooseSegmentLog2(chars);
   const units = toUtf16(" ".repeat(chars));
   const expected = cpu.lex(units);
 
@@ -162,7 +170,9 @@ for (const chars of sizes) {
     }
     capacitySkipped += 1;
     console.log(
-      `${String(chars).padStart(9)}  SKIPPED: ${error.message}`,
+      `${String(chars).padStart(9)} ${
+        String(segmentSize).padStart(9)
+      }  SKIPPED: ${error.message}`,
     );
     continue;
   }
@@ -204,6 +214,7 @@ for (const chars of sizes) {
   const totalMs = median(totalSamples);
   const row = [
     String(chars).padStart(9),
+    String(segmentSize).padStart(9),
     String(tokenCount).padStart(7),
     String(equal).padStart(7),
     cpuMs.toFixed(2).padStart(11),
@@ -249,11 +260,10 @@ if (gpu.hasTimestamps) {
   );
 }
 console.log(
-  "Two artefacts to read past. Below ~1 MiB, pass_x is pinned at its latency " +
-    "floor: each workgroup walks SEG_SIZE code units serially, so a segment costs " +
-    "the same wall time whether the input has four segments or four thousand. And " +
-    "below ~1 MiB the gpu/cpu column is set by the ~12 ms host<->device " +
-    "synchronization floor rather than by this input being hard, which is the same " +
-    "floor every other size pays.",
+  "The seg units column reports each input's selected sweep segment size. " +
+    "Shorter segments reduce the small-input serial sweep, while larger inputs " +
+    "keep the 4096-unit preference. Complete calls still include the measured " +
+    "~12 ms host<->device synchronization floor, which can dominate the gpu/cpu " +
+    "ratio on small inputs.",
 );
 gpu.destroy();

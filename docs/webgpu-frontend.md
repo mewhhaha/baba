@@ -189,8 +189,9 @@ reserve that worst-case capacity because the actual token terminals are not
 known until the one submission is running. Recognition now flags those slots,
 scans real locators into dense candidate IDs, and uses indirect dispatches sized
 from the device count. The remaining affine cost is reserved capacity plus a
-one-word lookup per potential slot, not sixteen hot candidate words processed
-for every slot.
+one-word lookup per candidate slot of a live token. First-level candidate and
+allocation scans skip inactive capacity padding after clearing its block sums,
+so upper scan levels remain correct when grow-only scratch buffers are reused.
 
 ## Benchmarks
 
@@ -266,12 +267,11 @@ expose mapped memory directly. Browser throughput remains unmeasured.
 
 The following nine alternating pairs compare the initial cleanup above with
 populated readback and the lexer classification changes described in
-[WebGPU Lexer](webgpu-lexer.md#cooperative-character-classification). They use
-the same GPU Duck plans, default capacity, hardware and Deno version, three
-warmup pairs, and no timestamp collection during timing. Full
-token/node/edge/symbol/type parity was checked before timing. Cells show medians
-and full ranges in milliseconds; encoding and host semantic recipes are
-included, setup is excluded.
+[WebGPU Lexer](webgpu-lexer.md#kernel-work). They use the same GPU Duck plans,
+default capacity, hardware and Deno version, three warmup pairs, and no
+timestamp collection during timing. Full token/node/edge/symbol/type parity was
+checked before timing. Cells show medians and full ranges in milliseconds;
+encoding and host semantic recipes are included, setup is excluded.
 
 | input | initial cleanup         | further changes      | median reduction |
 | ----- | ----------------------- | -------------------- | ---------------- |
@@ -284,9 +284,35 @@ readback reduced medians from 51.54 to 37.01 ms at 1 MiB and from 166.03 to
 not be added. Dispatch and bind-group caching was also measured, but whole-call
 changes stayed within variation and the experiment was discarded.
 
-The GPU runtime changes and expanded measurement documentation raise the package
-payload budget from 1,367,000 to 1,385,000 bytes. The normal Wasm runtime graph
-remains at the reduced size described above.
+The latest comparison against commit `d560268` includes the
+[lexer kernel improvements](webgpu-lexer.md), skipping inactive locator and
+allocation work, and host semantic changes. Node traversals run only for recipe
+classes present in the plan, and validated decimal magnitudes below ten digits
+avoid `BigInt` conversion. Larger integers retain the complete bounds check,
+including signed minimum values and leading zeros. Integer diagnostics still run
+when the plan has no semantic recipes.
+
+On the same GPU Duck corpus, adapter, Deno version, and default capacities, nine
+alternating pairs after three warmup pairs per size gave these owned `ingest()`
+medians and full ranges in milliseconds:
+
+- 1 MiB: 34.60 [31.40, 39.67] → 27.93 [26.04, 31.53], a 19.3% median reduction.
+- 4 MiB: 90.87 [89.58, 94.52] → 70.97 [65.51, 76.11], a 21.9% median reduction.
+
+All eighteen pairs improved. An earlier run of the same final code had higher
+absolute medians: 44.89 → 37.04 ms at 1 MiB and 154.96 → 94.56 ms at 4 MiB,
+again improving in all eighteen pairs. Absolute latencies vary between runs; the
+repeated paired comparisons support the improvement on this adapter.
+
+These times include string encoding, GPU execution, owned token/node/edge
+arrays, and host semantic results; runtime and frontend setup are excluded.
+Timestamp profiles were collected separately. The full-ingestion TypeScript CPU
+oracle checked token/node/edge/symbol/type parity before timing. Generated Wasm
+parsing uses a different grammar subset and output surface.
+
+This round adds about 8 KiB to the published GPU runtime and documentation,
+raising the package payload budget from 1,385,000 to 1,395,000 bytes. The normal
+Wasm runtime graph remains at the reduced size described above.
 
 ### Historical Oracle-Capacity Measurements
 
