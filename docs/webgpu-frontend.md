@@ -314,6 +314,51 @@ This round adds about 8 KiB to the published GPU runtime and documentation,
 raising the package payload budget from 1,385,000 to 1,395,000 bytes. The normal
 Wasm runtime graph remains at the reduced size described above.
 
+### Reference Ownership and Integer Bounds
+
+Reference ownership previously searched every definition for each reference,
+costing O(definitions × references). The host now verifies ordered,
+non-overlapping definition spans, then uses binary search for the first
+containing definition. This costs one linear check plus O(log definitions) per
+reference. Nested or out-of-order spans retain the original search, preserving
+ownership and diagnostic order, including empty references at touching spans.
+
+Tokens shorter than ten UTF-16 units cannot contain an out-of-range decimal i32
+value. Their bounds checks skip character inspection; longer tokens retain the
+existing decimal, sign, and leading-zero checks.
+
+The final comparison against `8e0ae48` used a synthetic Funcfuck program with
+8,192 definitions: `f0` names `id`, later definitions reference `f0`, and a
+final emit references the last definition. The input has 129,981 UTF-16 units.
+On the same RTX 4080 SUPER, driver 615.71.09, Vulkan and Deno 2.9.4, nine
+alternating pairs after three warmup pairs produced these medians and full
+ranges:
+
+| phase           | previous GPU, ms     | current GPU, ms      |
+| --------------- | -------------------- | -------------------- |
+| owned ingestion | 64.36 [61.31, 79.61] | 33.92 [30.50, 37.58] |
+| host semantics  | 36.65 [33.14, 51.97] | 5.58 [3.98, 7.71]    |
+
+Whole-call medians improve 47.3%, with every pair faster. A prior isolated run
+gave 81.93 → 36.65 ms, also improving in all nine pairs. Absolute times vary;
+both runs demonstrate the benefit on the larger reference workload. At 2,048
+definitions, the final whole-call medians were 20.30 → 17.83 ms.
+
+Both versions use default capacities and identical plans. Times include string
+encoding, GPU execution, owned arrays and host semantics; setup is excluded. The
+unmodified CPU oracle verifies token/node/edge/symbol/type parity outside
+timing. This compares GPU versions; generated Wasm parsing has a different
+grammar subset and output surface.
+
+The declaration-only GPU Duck workload benefits less: its host semantic median
+at 4 MiB falls from 8.72 to 3.67 ms, while complete-call ranges overlap and the
+80.09 → 80.68 ms medians remain within variation. Additional round-control
+dispatches, scan clipping and a lexer scratch rewrite were tested and discarded
+because complete-call gains were inconsistent. A malformed-input parity case
+also exposed an existing diagnostic mismatch: GPU root validation now reports
+the first unused token of an accepted prefix, preserving the failed child's
+diagnostic context as the CPU oracle does.
+
 ### Historical Oracle-Capacity Measurements
 
 The broad GPU Duck corpus previously measured on an NVIDIA GeForce RTX 4080

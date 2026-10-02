@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Avoid quadratic reference-owner searches for ordered, disjoint definitions,
+  and skip integer character inspection for short tokens. See the
+  [frontend measurements](docs/webgpu-frontend.md#reference-ownership-and-integer-bounds).
+- Align GPU syntax diagnostics with the CPU oracle when an accepted root prefix
+  leaves an unterminated child.
 - Adapt GPU lexer sweep segments to input size, cache token-chain walks in
   workgroup memory, and emit compact records in parallel. Precompile segment
   specializations once per shared lexer context.

@@ -230,3 +230,129 @@ Deno.test("compact integer bounds retain signs, leading zeros, and i32 limits", 
     }
   }
 });
+
+Deno.test("compact reference ownership preserves definition order across span shapes", () => {
+  const definition = plan.semanticRecipes.find((recipe) =>
+    recipe.opcode === "define"
+  );
+  const reference = plan.semanticRecipes.find((recipe) =>
+    recipe.opcode === "reference"
+  );
+  assert(definition);
+  assert(reference);
+  const definitionField = definition.fields.find((field) =>
+    field.target === "binder"
+  );
+  const referenceField = reference.fields.find((field) =>
+    field.target === "name"
+  );
+  assert(definitionField);
+  assert(referenceField);
+  for (
+    const [
+      source,
+      definitionSpans,
+      binderTokens,
+      referenceSpans,
+      expectedCycles,
+    ] of [
+      [
+        "a b b a",
+        [[0, 3], [4, 7]],
+        [0, 2],
+        [[2, 3], [6, 7]],
+        [[9, 0, 3, 0, 0, 0]],
+      ],
+      [
+        "a b b a",
+        [[4, 7], [0, 3]],
+        [2, 0],
+        [[2, 3], [6, 7]],
+        [[9, 4, 7, 0, 0, 0]],
+      ],
+      ["a b b b", [[0, 7], [4, 7]], [0, 2], [[2, 3], [6, 7]], []],
+      [
+        "a b b a",
+        [[0, 7], [4, 5]],
+        [0, 2],
+        [[2, 3], [6, 7]],
+        [[9, 0, 7, 0, 0, 0]],
+      ],
+      ["a b b b", [[0, 4], [4, 7]], [0, 2], [[2, 3], [4, 4]], []],
+    ] as const
+  ) {
+    const nodeWords: number[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      nodeWords.push(
+        definition.ruleId,
+        0,
+        definitionSpans[index][0],
+        definitionSpans[index][1],
+        index,
+        1,
+        -1,
+        -1,
+      );
+    }
+    for (let index = 0; index < 2; index += 1) {
+      nodeWords.push(
+        reference.ruleId,
+        0,
+        referenceSpans[index][0],
+        referenceSpans[index][1],
+        index + 2,
+        1,
+        -1,
+        -1,
+      );
+    }
+    const program: CompactFrontendProgram = {
+      tokens: new Int32Array([0, 0, 1, 0, 0, 2, 3, 0, 0, 4, 5, 0, 0, 6, 7, 0]),
+      nodes: new Int32Array(nodeWords),
+      edges: new Int32Array([
+        definitionField.field,
+        0,
+        0,
+        binderTokens[0],
+        definitionField.field,
+        0,
+        0,
+        binderTokens[1],
+        referenceField.field,
+        0,
+        0,
+        1,
+        referenceField.field,
+        0,
+        0,
+        3,
+      ]),
+      symbols: new Int32Array(0),
+      types: new Int32Array([0]),
+    };
+    const diagnostics: GpuFrontendDiagnosticRecord[] = [];
+    const symbols = executeCompactSemanticRecipes(
+      program,
+      plan,
+      source,
+      diagnostics,
+    );
+    assertEquals(
+      symbols.join(","),
+      [0, 0, binderTokens[0], -1, -1, 0, 0, 0, binderTokens[1], -1, -1, 1].join(
+        ",",
+      ),
+    );
+    assertEquals(
+      JSON.stringify(diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.start,
+        diagnostic.end,
+        diagnostic.subjectId,
+        diagnostic.parameter0,
+        diagnostic.parameter1,
+      ])),
+      JSON.stringify(expectedCycles),
+    );
+  }
+});

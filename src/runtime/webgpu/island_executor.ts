@@ -2968,7 +2968,12 @@ fn validate_root() {
   }
   var start = 0u;
   var finish = 0u;
-  let rejected = candidate_word(0u, base + 3u);
+  var rejected = candidate_word(0u, base + 3u);
+  // The CPU oracle reports the first unused token of an accepted root prefix,
+  // while retaining the deepest failed child's diagnostic context.
+  if (accepted == 1u) {
+    rejected = end;
+  }
   if (rejected < arena[1u]) {
     start = token_word(rejected, 1u);
     finish = token_word(rejected, 2u);

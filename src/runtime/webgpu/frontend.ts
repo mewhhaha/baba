@@ -664,6 +664,13 @@ export function executeCompactSemanticRecipes(
   );
   const referencesByDefinition = new Map<number, number[]>();
   if (plan.semanticRecipes.some((recipe) => recipe.opcode === "reference")) {
+    let orderedDefinitionSpans = true;
+    for (let index = 1; index < definitions.length; index += 1) {
+      if (definitions[index].start < definitions[index - 1].end) {
+        orderedDefinitionSpans = false;
+        break;
+      }
+    }
     for (let nodeId = 0; nodeId < nodeCount; nodeId += 1) {
       const nodeOffset = nodeId * NODE_WORDS;
       const recipe = recipeByRule.get(program.nodes[nodeOffset]);
@@ -704,9 +711,28 @@ export function executeCompactSemanticRecipes(
       }
       const nodeStart = program.nodes[nodeOffset + 2];
       const nodeEnd = program.nodes[nodeOffset + 3];
-      const owner = definitions.find((definition) =>
-        nodeStart >= definition.start && nodeEnd <= definition.end
-      );
+      let owner: SemanticDefinition | undefined;
+      if (orderedDefinitionSpans) {
+        // The first end covering the reference preserves definition-order
+        // ownership, including empty spans at adjoining definition boundaries.
+        let low = 0;
+        let high = definitions.length;
+        while (low < high) {
+          const middle = low + Math.floor((high - low) / 2);
+          if (definitions[middle].end < nodeEnd) {
+            low = middle + 1;
+          } else {
+            high = middle;
+          }
+        }
+        if (low < definitions.length && definitions[low].start <= nodeStart) {
+          owner = definitions[low];
+        }
+      } else {
+        owner = definitions.find((definition) =>
+          nodeStart >= definition.start && nodeEnd <= definition.end
+        );
+      }
       if (owner === undefined) {
         continue;
       }
@@ -730,6 +756,10 @@ export function executeCompactSemanticRecipes(
     const tokenOffset = tokenIndex * TOKEN_WORDS;
     const tokenStart = program.tokens[tokenOffset + 1];
     const tokenEnd = program.tokens[tokenOffset + 2];
+    // No decimal spelling below ten units can exceed the signed i32 bounds.
+    if (tokenEnd - tokenStart < 10) {
+      continue;
+    }
     if (!isDecimalIntegerSpan(source, tokenStart, tokenEnd)) {
       continue;
     }

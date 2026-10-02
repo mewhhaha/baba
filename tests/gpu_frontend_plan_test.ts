@@ -535,6 +535,40 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       }
     }
 
+    // An accepted root prefix reports its first unused syntax token even when
+    // a failed long child reached EOF. Cover reserved padding and full capacity.
+    const unterminated = "x ".repeat(512);
+    const paddingLength = longSource.length - unterminated.length;
+    for (
+      const [malformed, expectedRecord] of [
+        [
+          unterminated + " ".repeat(paddingLength),
+          [3, 0, 1, 0, 1, 1, 0, 0],
+        ],
+        [
+          " ".repeat(paddingLength) + unterminated,
+          [3, paddingLength, paddingLength + 1, 0, 1, 1, 0, 0],
+        ],
+        [unterminated, [3, 0, 1, 0, 1, 1, 0, 0]],
+        [`;${unterminated}`, [3, 1, 2, 1, 1, 1, 0, 0]],
+      ] as const
+    ) {
+      const cpuFailure = cpuLongFrontend.ingest(malformed);
+      const gpuFailure = await longFrontend.ingest(malformed, {
+        stageTimings: "collect",
+      });
+      assert(!cpuFailure.ok);
+      assert(!gpuFailure.ok);
+      assertEquals(
+        cpuFailure.diagnostics[0].record.join(","),
+        expectedRecord.join(","),
+      );
+      assertEquals(
+        gpuFailure.diagnostics[0].record.join(","),
+        expectedRecord.join(","),
+      );
+    }
+
     const tokenCount = cpu.program.tokens.length / 4;
     const nodeCount = cpu.program.nodes.length / 8;
     const edgeCount = cpu.program.edges.length / 4;
