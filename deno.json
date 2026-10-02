@@ -68,6 +68,7 @@
       "src/runtime/webgpu/frontend.ts",
       "src/runtime/webgpu/frontend_capacity.ts",
       "src/runtime/webgpu/frontend_contract.ts",
+      "src/runtime/webgpu/frontend_plan.ts",
       "src/runtime/webgpu/island_executor.ts",
       "src/runtime/webgpu/kernel_wgsl.ts",
       "src/runtime/webgpu/lexer.ts",

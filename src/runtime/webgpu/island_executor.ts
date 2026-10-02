@@ -50,7 +50,6 @@ const PIPELINE_ENTRY_POINTS = [
   "emit_root_events",
   "emit",
   "emit_long_regions",
-  "staging",
 ] as const;
 const CANDIDATE_DOMAIN_ENTRY_POINTS = new Set<string>([
   "contract_regions",
@@ -171,8 +170,14 @@ function scanLayout(count: number): ScanLayout {
   }
 }
 
-function structuralLayout(tokenCount: number): StructuralLayout {
+function structuralLayout(
+  tokenCount: number,
+  matchesDelimiters: boolean,
+): StructuralLayout {
   const scan = scanLayout(Math.max(1, tokenCount));
+  if (!matchesDelimiters) {
+    return { scan, treeOffset: scan.words, treeLeaves: 0, words: scan.words };
+  }
   let treeLeaves = 1;
   while (treeLeaves < Math.max(1, tokenCount)) {
     treeLeaves *= 2;
@@ -216,7 +221,8 @@ function islandDispatchLabels(
   candidateScan: ScanLayout,
   allocationScan: ScanLayout,
   structural: StructuralLayout,
-  stagingWorkgroups: number,
+  matchesDelimiters: boolean,
+  rootChain: boolean,
 ): readonly IslandDispatch[] {
   const dispatches: IslandDispatch[] = [
     {
@@ -225,88 +231,62 @@ function islandDispatchLabels(
       workgroups: tokenWorkgroups,
       params: [0],
     },
-    {
-      entryPoint: "delimiter_flags",
-      label: "structure_flags",
-      workgroups: tokenWorkgroups,
-      params: [0],
-    },
   ];
-  for (let level = 0; level < structural.scan.levels.length; level += 1) {
-    const scanLevel = structural.scan.levels[level];
-    let scanMode = 2;
-    if (level === 0) {
-      scanMode = 3;
+  if (matchesDelimiters) {
+    dispatches.push(
+      {
+        entryPoint: "delimiter_flags",
+        label: "structure_flags",
+        workgroups: tokenWorkgroups,
+        params: [0],
+      },
+    );
+    for (let level = 0; level < structural.scan.levels.length; level += 1) {
+      const scanLevel = structural.scan.levels[level];
+      let scanMode = 2;
+      if (level === 0) {
+        scanMode = 3;
+      }
+      dispatches.push({
+        entryPoint: "scan_level",
+        label: `structure_scan_${level}`,
+        workgroups: Math.max(1, Math.ceil(scanLevel.count / 256)),
+        params: [
+          0,
+          scanLevel.count,
+          scanLevel.inputOffset,
+          scanLevel.outputOffset,
+          scanLevel.blockSumsOffset,
+          scanMode,
+        ],
+      });
+    }
+    for (
+      let level = structural.scan.levels.length - 2;
+      level >= 0;
+      level -= 1
+    ) {
+      const scanLevel = structural.scan.levels[level];
+      const parent = structural.scan.levels[level + 1];
+      dispatches.push({
+        entryPoint: "add_scan_offsets",
+        label: `structure_add_${level}`,
+        workgroups: Math.max(1, Math.ceil(scanLevel.count / 256)),
+        params: [
+          0,
+          scanLevel.count,
+          0,
+          scanLevel.outputOffset,
+          0,
+          3,
+          parent.outputOffset,
+        ],
+      });
     }
     dispatches.push({
-      entryPoint: "scan_level",
-      label: `structure_scan_${level}`,
-      workgroups: Math.max(1, Math.ceil(scanLevel.count / 256)),
-      params: [
-        0,
-        scanLevel.count,
-        scanLevel.inputOffset,
-        scanLevel.outputOffset,
-        scanLevel.blockSumsOffset,
-        scanMode,
-      ],
-    });
-  }
-  for (
-    let level = structural.scan.levels.length - 2;
-    level >= 0;
-    level -= 1
-  ) {
-    const scanLevel = structural.scan.levels[level];
-    const parent = structural.scan.levels[level + 1];
-    dispatches.push({
-      entryPoint: "add_scan_offsets",
-      label: `structure_add_${level}`,
-      workgroups: Math.max(1, Math.ceil(scanLevel.count / 256)),
-      params: [
-        0,
-        scanLevel.count,
-        0,
-        scanLevel.outputOffset,
-        0,
-        3,
-        parent.outputOffset,
-      ],
-    });
-  }
-  dispatches.push({
-    entryPoint: "structure_tree_leaves",
-    label: "structure_tree_leaves",
-    workgroups: Math.max(1, Math.ceil(structural.treeLeaves / 256)),
-    params: [
-      0,
-      structural.scan.levels[0].count,
-      structural.scan.firstOutputOffset,
-      structural.treeOffset,
-      structural.treeLeaves,
-    ],
-  });
-  let childOffset = structural.treeOffset + structural.treeLeaves;
-  let parentCount = structural.treeLeaves / 2;
-  while (parentCount >= 1) {
-    const parentOffset = structural.treeOffset + parentCount;
-    dispatches.push({
-      entryPoint: "structure_tree_level",
-      label: `structure_tree_${parentCount}`,
-      workgroups: Math.max(1, Math.ceil(parentCount / 256)),
-      params: [0, parentCount, childOffset, parentOffset],
-    });
-    childOffset = parentOffset;
-    if (parentCount === 1) {
-      break;
-    }
-    parentCount /= 2;
-  }
-  dispatches.push(
-    {
-      entryPoint: "match_delimiters",
-      label: "structure_match",
-      workgroups: tokenWorkgroups,
+      entryPoint: "structure_tree_leaves",
+      label: "structure_tree_leaves",
+      workgroups: Math.max(1, Math.ceil(structural.treeLeaves / 256)),
       params: [
         0,
         structural.scan.levels[0].count,
@@ -314,13 +294,45 @@ function islandDispatchLabels(
         structural.treeOffset,
         structural.treeLeaves,
       ],
-    },
-    {
-      entryPoint: "validate_delimiters",
-      label: "structure_validate_pairs",
-      workgroups: tokenWorkgroups,
-      params: [0],
-    },
+    });
+    let childOffset = structural.treeOffset + structural.treeLeaves;
+    let parentCount = structural.treeLeaves / 2;
+    while (parentCount >= 1) {
+      const parentOffset = structural.treeOffset + parentCount;
+      dispatches.push({
+        entryPoint: "structure_tree_level",
+        label: `structure_tree_${parentCount}`,
+        workgroups: Math.max(1, Math.ceil(parentCount / 256)),
+        params: [0, parentCount, childOffset, parentOffset],
+      });
+      childOffset = parentOffset;
+      if (parentCount === 1) {
+        break;
+      }
+      parentCount /= 2;
+    }
+    dispatches.push(
+      {
+        entryPoint: "match_delimiters",
+        label: "structure_match",
+        workgroups: tokenWorkgroups,
+        params: [
+          0,
+          structural.scan.levels[0].count,
+          structural.scan.firstOutputOffset,
+          structural.treeOffset,
+          structural.treeLeaves,
+        ],
+      },
+      {
+        entryPoint: "validate_delimiters",
+        label: "structure_validate_pairs",
+        workgroups: tokenWorkgroups,
+        params: [0],
+      },
+    );
+  }
+  dispatches.push(
     {
       entryPoint: "structure",
       label: "structure_validate",
@@ -440,46 +452,48 @@ function islandDispatchLabels(
       params: [round],
     });
   }
-  dispatches.push({
-    entryPoint: "root_chain_init",
-    label: "root_chain_init",
-    workgroups: tokenWorkgroups,
-    params: [rounds - 1],
-  });
-  dispatches.push(
-    {
-      entryPoint: "root_chain_start",
-      label: "root_chain_start",
-      workgroups: 1,
-      params: [rounds - 1],
-    },
-    {
-      entryPoint: "root_chain_link",
-      label: "root_chain_link",
-      workgroups: tokenWorkgroups,
-      params: [rounds - 1],
-    },
-    {
-      entryPoint: "root_chain_finalize",
-      label: "root_chain_finalize",
-      workgroups: tokenWorkgroups,
-      params: [rounds - 1],
-    },
-  );
-  for (let round = 0; round < chainRounds; round += 1) {
+  if (rootChain) {
     dispatches.push({
-      entryPoint: "root_chain_jump",
-      label: `root_chain_${round}`,
+      entryPoint: "root_chain_init",
+      label: "root_chain_init",
       workgroups: tokenWorkgroups,
-      params: [round],
+      params: [rounds - 1],
+    });
+    dispatches.push(
+      {
+        entryPoint: "root_chain_start",
+        label: "root_chain_start",
+        workgroups: 1,
+        params: [rounds - 1],
+      },
+      {
+        entryPoint: "root_chain_link",
+        label: "root_chain_link",
+        workgroups: tokenWorkgroups,
+        params: [rounds - 1],
+      },
+      {
+        entryPoint: "root_chain_finalize",
+        label: "root_chain_finalize",
+        workgroups: tokenWorkgroups,
+        params: [rounds - 1],
+      },
+    );
+    for (let round = 0; round < chainRounds; round += 1) {
+      dispatches.push({
+        entryPoint: "root_chain_jump",
+        label: `root_chain_${round}`,
+        workgroups: tokenWorkgroups,
+        params: [round],
+      });
+    }
+    dispatches.push({
+      entryPoint: "root_chain_aggregate",
+      label: "root_chain_aggregate",
+      workgroups: tokenWorkgroups,
+      params: [chainRounds - 1],
     });
   }
-  dispatches.push({
-    entryPoint: "root_chain_aggregate",
-    label: "root_chain_aggregate",
-    workgroups: tokenWorkgroups,
-    params: [chainRounds - 1],
-  });
   dispatches.push({
     entryPoint: "contract_root",
     label: "contract_root",
@@ -492,12 +506,14 @@ function islandDispatchLabels(
     workgroups: 1,
     params: [rounds - 1],
   });
-  dispatches.push({
-    entryPoint: "select_root_chain",
-    label: "select_root_chain",
-    workgroups: tokenWorkgroups,
-    params: [chainRounds - 1],
-  });
+  if (rootChain) {
+    dispatches.push({
+      entryPoint: "select_root_chain",
+      label: "select_root_chain",
+      workgroups: tokenWorkgroups,
+      params: [chainRounds - 1],
+    });
+  }
   for (let round = 0; round < rounds; round += 1) {
     dispatches.push({
       entryPoint: "reachability",
@@ -589,14 +605,6 @@ function islandDispatchLabels(
       params: [rounds - 1],
     });
   }
-  dispatches.push(
-    {
-      entryPoint: "staging",
-      label: "staging",
-      workgroups: stagingWorkgroups,
-      params: [rounds - 1],
-    },
-  );
   return dispatches;
 }
 
@@ -622,6 +630,7 @@ export class GpuIslandExecutor {
   readonly plan: GpuFrontendPlan;
   readonly #pipelines: ReadonlyMap<string, GPUComputePipeline>;
   readonly #planBuffer: GPUBuffer;
+  readonly #matchesDelimiters: boolean;
   readonly #slots = new Map<WebGpuLexer, ExecutionSlot>();
 
   private constructor(
@@ -634,6 +643,9 @@ export class GpuIslandExecutor {
     this.plan = plan;
     this.#pipelines = pipelines;
     this.#planBuffer = planBuffer;
+    this.#matchesDelimiters = plan.boundaries.some((boundary) =>
+      boundary.kind === "paired" || boundary.kind === "separated"
+    );
   }
 
   static async create(
@@ -846,7 +858,7 @@ export class GpuIslandExecutor {
     );
     const chainRounds = Math.ceil(Math.log2(Math.max(1, tokenCapacity)) / 2) +
       1;
-    const structural = structuralLayout(tokenCapacity);
+    const structural = structuralLayout(tokenCapacity, this.#matchesDelimiters);
     const candidateScan = offsetScanLayout(
       scanLayout(Math.max(1, candidateSlots)),
       structural.words,
@@ -863,7 +875,8 @@ export class GpuIslandExecutor {
       candidateScan,
       allocationScan,
       structural,
-      Math.max(1, Math.ceil(layout.stagingWords / 256)),
+      this.#matchesDelimiters,
+      this.plan.execution.rootLoop !== null,
     );
     if (
       GPU_LEX_STAGE_LABELS.length + dispatches.length >
@@ -908,9 +921,10 @@ export class GpuIslandExecutor {
       true,
     );
     this.#assertBufferLimit("islandScan", scratchBytes, true);
-    this.#assertBufferLimit("deviceStaging", deviceStagingBytes, true);
     if (resultLocation === "host") {
       this.#assertBufferLimit("islandStaging", stagingBytes, false);
+    } else {
+      this.#assertBufferLimit("deviceStaging", deviceStagingBytes, true);
     }
 
     let slot = this.#slots.get(lexer);
@@ -996,12 +1010,15 @@ export class GpuIslandExecutor {
       GPUBufferUsage.STORAGE,
       "baba gpu frontend scan scratch",
     );
-    slot.deviceStaging = this.#ensureBuffer(
-      slot.deviceStaging,
-      deviceStagingBytes,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      "baba gpu frontend device staging",
-    );
+    if (resultLocation === "device") {
+      slot.deviceStaging = this.#ensureBuffer(
+        slot.deviceStaging,
+        deviceStagingBytes,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC |
+          GPUBufferUsage.COPY_DST,
+        "baba gpu frontend device staging",
+      );
+    }
     if (resultLocation === "host") {
       slot.staging = this.#ensureBuffer(
         slot.staging,
@@ -1014,7 +1031,6 @@ export class GpuIslandExecutor {
     const candidateBuffer = slot.candidates.buffer;
     const candidateTailBuffer = slot.candidateTail.buffer;
     const scratchBuffer = slot.scratch.buffer;
-    const deviceStagingBuffer = slot.deviceStaging.buffer;
     const paramsBuffer = slot.params.buffer;
     const indirectBuffer = slot.indirect.buffer;
     let stagingBuffer: GPUBuffer | null = null;
@@ -1094,23 +1110,6 @@ export class GpuIslandExecutor {
           { binding: 8, resource: { buffer: candidateTailBuffer } },
         ],
       });
-      const stagingBindGroup = this.device.createBindGroup({
-        layout: this.#islandPipeline("staging").getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: integratedLex.recordsBuffer } },
-          { binding: 1, resource: { buffer: integratedLex.sourceBuffer } },
-          { binding: 2, resource: { buffer: this.#planBuffer } },
-          { binding: 3, resource: { buffer: arenaBuffer } },
-          { binding: 4, resource: { buffer: integratedLex.metadataBuffer } },
-          { binding: 5, resource: { buffer: candidateBuffer } },
-          { binding: 6, resource: { buffer: scratchBuffer } },
-          {
-            binding: 7,
-            resource: { buffer: paramsBuffer, size: 32 },
-          },
-          { binding: 8, resource: { buffer: deviceStagingBuffer } },
-        ],
-      });
       const encoder = this.device.createCommandEncoder();
       let executionQuerySet: GPUQuerySet | null = null;
       if (resultLocation === "host" && timingMode === "collect") {
@@ -1146,11 +1145,7 @@ export class GpuIslandExecutor {
           pass.pushDebugGroup(dispatch.label);
         }
         pass.setPipeline(this.#islandPipeline(dispatch.entryPoint));
-        let dispatchBindGroup = bindGroup;
-        if (dispatch.entryPoint === "staging") {
-          dispatchBindGroup = stagingBindGroup;
-        }
-        pass.setBindGroup(0, dispatchBindGroup, [
+        pass.setBindGroup(0, bindGroup, [
           index * DISPATCH_PARAM_BYTES,
         ]);
         if (CANDIDATE_DOMAIN_ENTRY_POINTS.has(dispatch.entryPoint)) {
@@ -1209,8 +1204,9 @@ export class GpuIslandExecutor {
             "GPU frontend host execution has no mapped staging buffer.",
           );
         }
+        // Public token, node, and edge sections are already contiguous in the arena.
         encoder.copyBufferToBuffer(
-          deviceStagingBuffer,
+          arenaBuffer,
           0,
           stagingBuffer,
           timestampBytes,
@@ -1237,9 +1233,29 @@ export class GpuIslandExecutor {
         }
       }
 
+      if (resultLocation === "device") {
+        if (slot.deviceStaging === null) {
+          throw new Error(
+            "GPU frontend resident execution has no output buffer.",
+          );
+        }
+        encoder.copyBufferToBuffer(
+          arenaBuffer,
+          0,
+          slot.deviceStaging.buffer,
+          0,
+          deviceStagingBytes,
+        );
+      }
+
       const started = performance.now();
       this.device.queue.submit([encoder.finish()]);
       if (resultLocation === "device") {
+        if (slot.deviceStaging === null) {
+          throw new Error(
+            "GPU frontend resident execution has no output buffer.",
+          );
+        }
         const finished = performance.now();
         slot.residentHeld = true;
         slot.pendingCompletion = this.device.queue.onSubmittedWorkDone().then(
@@ -1249,7 +1265,7 @@ export class GpuIslandExecutor {
         );
         let released = false;
         return {
-          buffer: deviceStagingBuffer,
+          buffer: slot.deviceStaging.buffer,
           byteLength: deviceStagingBytes,
           headerWords: HEADER_WORDS,
           tokenCapacity: layout.tokenCapacity,
@@ -1276,29 +1292,26 @@ export class GpuIslandExecutor {
           "GPU frontend host execution completed without a mapped staging buffer.",
         );
       }
-      await stagingBuffer.mapAsync(GPUMapMode.READ);
+      await stagingBuffer.mapAsync(GPUMapMode.READ, 0, stagingBytes);
       const finished = performance.now();
-      const mappedRange = stagingBuffer.getMappedRange(0, stagingBytes);
-      let stagesMs: Readonly<Record<string, number>> | null = null;
-      if (executionQuerySet !== null) {
-        stagesMs = decodeStageTimings(
-          new BigUint64Array(mappedRange, 0, queryCount),
-          dispatches,
+      try {
+        let stagesMs: Readonly<Record<string, number>> | null = null;
+        if (executionQuerySet !== null) {
+          stagesMs = decodeStageTimings(
+            new BigUint64Array(stagingBuffer.getMappedRange(0, timestampBytes)),
+            dispatches,
+          );
+        }
+        return decodeExecution(
+          stagingBuffer,
+          timestampBytes,
+          layout,
+          finished - started,
+          stagesMs,
         );
+      } finally {
+        stagingBuffer.unmap();
       }
-      const mapped = new Uint32Array(
-        mappedRange,
-        timestampBytes,
-        layout.stagingWords,
-      );
-      const result = decodeExecution(
-        mapped,
-        layout,
-        finished - started,
-        stagesMs,
-      );
-      stagingBuffer.unmap();
-      return result;
     } finally {
       integratedLex.release();
     }
@@ -1486,10 +1499,7 @@ function executionLayout(
   const candidateSlots = tokenCapacity * candidateMultiplicity;
   const syntaxPrefixOffset = candidateLookupOffset + candidateSlots;
   const arenaWords = syntaxPrefixOffset + tokenCapacity;
-  const stagingWords = HEADER_WORDS +
-    tokenCapacity * TOKEN_WORDS +
-    nodeCapacity * NODE_WORDS +
-    edgeCapacity * EDGE_WORDS;
+  const stagingWords = delimiterOffset;
   return {
     tokenCapacity,
     nodeCapacity,
@@ -1695,42 +1705,67 @@ function packPlan(plan: GpuFrontendPlan): Uint32Array {
 }
 
 function decodeExecution(
-  mapped: Uint32Array,
+  stagingBuffer: GPUBuffer,
+  timestampBytes: number,
   layout: ExecutionLayout,
   submitAndReadbackMs: number,
   stagesMs: Readonly<Record<string, number>> | null,
 ): GpuIslandExecution {
-  const status = mapped[0];
-  const tokenCount = mapped[1];
-  const nodeCount = mapped[2];
-  const edgeCount = mapped[3];
+  const header = new Uint32Array(stagingBuffer.getMappedRange(
+    timestampBytes,
+    HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT,
+  ));
+  const status = header[0];
+  const tokenCount = header[1];
+  const nodeCount = header[2];
+  const edgeCount = header[3];
   if (status !== STATUS_SUCCESS) {
     return {
       status,
       program: null,
       diagnostic: {
-        start: mapped[4],
-        end: mapped[5],
-        subjectId: mapped[6],
-        parameter0: mapped[7] | 0,
-        parameter1: mapped[8] | 0,
+        start: header[4],
+        end: header[5],
+        subjectId: header[6],
+        parameter0: header[7] | 0,
+        parameter1: header[8] | 0,
       },
       submitAndReadbackMs,
       stagesMs,
     };
   }
-  let offset = HEADER_WORDS;
-  const tokens = new Int32Array(
-    mapped.slice(offset, offset + tokenCount * TOKEN_WORDS).buffer,
-  );
-  offset += layout.tokenCapacity * TOKEN_WORDS;
-  const nodes = new Int32Array(
-    mapped.slice(offset, offset + nodeCount * NODE_WORDS).buffer,
-  );
-  offset += layout.nodeCapacity * NODE_WORDS;
-  const edges = new Int32Array(
-    mapped.slice(offset, offset + edgeCount * EDGE_WORDS).buffer,
-  );
+  if (
+    tokenCount > layout.tokenCapacity ||
+    nodeCount > layout.nodeCapacity ||
+    edgeCount > layout.edgeCapacity
+  ) {
+    throw new Error(
+      "GPU frontend returned counts exceeding its output capacities.",
+    );
+  }
+  // getMappedRange copies bytes on Deno. Request only populated records, then
+  // retain explicit owned copies so browser unmap detachment is safe as well.
+  let tokens = new Int32Array(0);
+  if (tokenCount > 0) {
+    tokens = new Int32Array(stagingBuffer.getMappedRange(
+      timestampBytes + layout.tokenOffset * Uint32Array.BYTES_PER_ELEMENT,
+      tokenCount * TOKEN_WORDS * Uint32Array.BYTES_PER_ELEMENT,
+    )).slice();
+  }
+  let nodes = new Int32Array(0);
+  if (nodeCount > 0) {
+    nodes = new Int32Array(stagingBuffer.getMappedRange(
+      timestampBytes + layout.nodeOffset * Uint32Array.BYTES_PER_ELEMENT,
+      nodeCount * NODE_WORDS * Uint32Array.BYTES_PER_ELEMENT,
+    )).slice();
+  }
+  let edges = new Int32Array(0);
+  if (edgeCount > 0) {
+    edges = new Int32Array(stagingBuffer.getMappedRange(
+      timestampBytes + layout.edgeOffset * Uint32Array.BYTES_PER_ELEMENT,
+      edgeCount * EDGE_WORDS * Uint32Array.BYTES_PER_ELEMENT,
+    )).slice();
+  }
   return {
     status,
     program: {
@@ -1747,7 +1782,6 @@ function decodeExecution(
 }
 
 const ISLAND_EXECUTOR_WGSL = String.raw`
-const HEADER_WORDS: u32 = ${HEADER_WORDS}u;
 const TOKEN_WORDS: u32 = ${TOKEN_WORDS}u;
 const NODE_WORDS: u32 = ${NODE_WORDS}u;
 const EDGE_WORDS: u32 = ${EDGE_WORDS}u;
@@ -3511,29 +3545,4 @@ fn emit_long_regions(
   }
 }
 
-@compute @workgroup_size(256)
-fn staging(@builtin(global_invocation_id) invocation: vec3<u32>) {
-  let output = linear_invocation_index(invocation);
-  if (output < HEADER_WORDS) {
-    atomicStore(&candidate_tail[output], arena[output]);
-    return;
-  }
-  var relative = output - HEADER_WORDS;
-  let token_words = arena[10u] * TOKEN_WORDS;
-  if (relative < token_words) {
-    atomicStore(&candidate_tail[output], arena[arena[13u] + relative]);
-    return;
-  }
-  relative -= token_words;
-  let node_words = arena[11u] * NODE_WORDS;
-  if (relative < node_words) {
-    atomicStore(&candidate_tail[output], arena[arena[14u] + relative]);
-    return;
-  }
-  relative -= node_words;
-  let edge_words = arena[12u] * EDGE_WORDS;
-  if (relative < edge_words) {
-    atomicStore(&candidate_tail[output], arena[arena[16u] + relative]);
-  }
-}
 `;

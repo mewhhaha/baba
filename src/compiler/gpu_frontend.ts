@@ -16,9 +16,16 @@ import {
 } from "./analyzed_grammar.ts";
 import type { LexerPlan } from "../targets/runtime/lexer_plan.ts";
 
-export const GPU_FRONTEND_FORMAT = "baba-gpu-frontend" as const;
-export const GPU_FRONTEND_PLAN_VERSION = 3 as const;
-export const GPU_FRONTEND_SEMANTICS = "baba-gpu-frontend-v3" as const;
+import {
+  GPU_FRONTEND_FORMAT,
+  GPU_FRONTEND_PLAN_VERSION,
+  GPU_FRONTEND_SEMANTICS,
+} from "../runtime/webgpu/frontend_contract.ts";
+export {
+  GPU_FRONTEND_FORMAT,
+  GPU_FRONTEND_PLAN_VERSION,
+  GPU_FRONTEND_SEMANTICS,
+} from "../runtime/webgpu/frontend_contract.ts";
 
 const DEFAULT_MAX_LEXER_STATES = 50_000;
 const DEFAULT_MAX_ISLAND_STATES = 20_000;

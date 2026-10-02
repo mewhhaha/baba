@@ -10,9 +10,10 @@ diagnostic ordering in one command submission and reads the result with one
 IR. `ingestResident()` instead keeps the staged syntax IR on the device with no
 map. Neither API is a replacement for the generated synchronous parser.
 
-The profile is deliberately narrower than Baba's ordinary grammar support. That
-restriction is what lets the compiler emit parallel work instead of running a
-conventional parser stack in one GPU invocation.
+The profile requires explicit island boundaries so the compiler can emit
+parallel work. It accepts nested islands beyond the terminal-only strict subset
+supported by the current Wasm cursor parser. `CpuFrontend` supplies the CPU
+implementation of this broader flat-IR surface.
 
 ## Using It
 
@@ -191,7 +192,7 @@ from the device count. The remaining affine cost is reserved capacity plus a
 one-word lookup per potential slot, not sixteen hot candidate words processed
 for every slot.
 
-## Current Measurement
+## Benchmarks
 
 The reproducible command is:
 
@@ -200,18 +201,102 @@ WGPU_BACKENDS=vulkan WGPU_POWER_PREF=high \
   deno task bench:webgpu-frontend --warmup 2 --runs 7
 ```
 
-Add `--resident` to time the no-map resident surface alongside owned `ingest()`.
+The headline compares the TypeScript `CpuFrontend` parity oracle with owned
+`ingest()` using default capacity: one raw token record per UTF-16 code unit.
+Both produce full flat IR and host semantic results. This baseline measures a
+different surface from generated Wasm cursor parsing or output-free validation.
+Sizes that exceed the device's default-capacity limits produce explicit skipped
+rows.
+
+Add `--oracle-capacity` for a separately labeled measurement with the exact
+token count learned from the CPU oracle. That capacity is unavailable to a
+caller that has not already lexed the input.
+
+Add `--resident` to measure the no-map surface using pre-encoded UTF-16 units.
+`residentSubmitMs` covers queue submission, `residentReturnMs` covers the call
+until it returns, and `residentCompletionMs` waits for the submitted GPU work to
+finish. Completion includes device execution but excludes mapped readback and
+host semantic recipes.
 
 The benchmark verifies byte parity before timing, prints progress to stderr, and
 emits JSON containing adapter limits, plan expansion factors, actual compact
 output bytes, full sample ranges, owned source/GPU/semantic phases, resident
-submission timing, and a separate per-stage timestamp profile when the adapter
-supports timestamp queries.
+submission and completion timing, and a separate per-stage timestamp profile
+when the adapter supports timestamp queries.
 
-The current broad GPU Duck corpus measured on an NVIDIA GeForce RTX 4080 SUPER
-with driver 610.43.03 as follows. Each cell is the median and full range of
-seven runs after two warmups. Parity was verified before every size. These are
-not portable crossover promises.
+### Initial Cleanup Measurements
+
+Measured on 2026-10-02 with an RTX 4080 SUPER, driver 615.71.09, Deno 2.9.4, and
+Vulkan. The GPU Duck corpus uses default capacity, seven runs, and three
+warmups. Cells show medians and full ranges in milliseconds. Sizes count UTF-16
+units; setup is excluded.
+
+| input | TypeScript CPU oracle      | owned GPU               | resident completion  |
+| ----- | -------------------------- | ----------------------- | -------------------- |
+| 1 MiB | 330.74 [319.99, 378.04]    | 58.68 [55.45, 64.11]    | 23.77 [23.09, 25.12] |
+| 4 MiB | 1499.82 [1228.69, 1940.93] | 187.49 [158.87, 201.29] | 42.51 [40.02, 43.99] |
+
+This comparison measures the general flat-IR frontend, not a speedup over the
+generated Wasm parser. Resident completion excludes readback and semantic
+recipes. The corpus is synthetic and only one adapter has been measured.
+
+In nine alternating before/after pairs using identical plans and default
+capacity, owned GPU medians changed from 53.76 to 52.24 ms at 1 MiB and from
+178.10 to 176.62 ms at 4 MiB. Ranges overlap; these are not reliable whole-call
+speedups. The cleanup removes a redundant staging shader and one GPU buffer: 80
+MiB at 1 MiB of input units, or 320 MiB at 4 MiB for this profile. Resident
+results retain their public buffer layout through a hardware copy. Plans without
+paired delimiters or a repeated root loop skip the corresponding dispatches.
+
+The shared plan decoder now loads independently of the GPU executor. The normal
+Wasm loader's runtime graph drops from 23 modules / 548,568 source bytes to 11
+modules / 218,826 bytes, without loading GPU execution or compiler code.
+
+### Populated Readback and Cooperative Classification
+
+Owned ingestion maps only the current output layout, reads its header, and
+copies the populated token, node, and edge sections. It skips empty sections and
+unused capacity padding. Results remain owned after unmapping and slot reuse.
+Device allocation and the GPU-to-staging copy still reserve worst-case capacity;
+`ingestResident()` retains its existing layout.
+
+This matters on Deno, where `getMappedRange()` itself copies the requested
+bytes. The explicit record copies also preserve ownership on browsers that
+expose mapped memory directly. Browser throughput remains unmeasured.
+
+The following nine alternating pairs compare the initial cleanup above with
+populated readback and the lexer classification changes described in
+[WebGPU Lexer](webgpu-lexer.md#cooperative-character-classification). They use
+the same GPU Duck plans, default capacity, hardware and Deno version, three
+warmup pairs, and no timestamp collection during timing. Full
+token/node/edge/symbol/type parity was checked before timing. Cells show medians
+and full ranges in milliseconds; encoding and host semantic recipes are
+included, setup is excluded.
+
+| input | initial cleanup         | further changes      | median reduction |
+| ----- | ----------------------- | -------------------- | ---------------- |
+| 1 MiB | 51.62 [48.32, 54.35]    | 35.27 [32.50, 43.60] | 31.7%            |
+| 4 MiB | 146.67 [143.25, 160.72] | 90.53 [86.77, 93.33] | 38.3%            |
+
+Every pair improved. A separate nine-pair experiment isolating populated
+readback reduced medians from 51.54 to 37.01 ms at 1 MiB and from 166.03 to
+91.89 ms at 4 MiB. Different runs have different baselines; these gains should
+not be added. Dispatch and bind-group caching was also measured, but whole-call
+changes stayed within variation and the experiment was discarded.
+
+The GPU runtime changes and expanded measurement documentation raise the package
+payload budget from 1,367,000 to 1,385,000 bytes. The normal Wasm runtime graph
+remains at the reduced size described above.
+
+### Historical Oracle-Capacity Measurements
+
+The broad GPU Duck corpus previously measured on an NVIDIA GeForce RTX 4080
+SUPER with driver 610.43.03 as follows. Each cell is the median and full range
+of seven runs after two warmups. Parity was verified before every size. Both
+owned and resident calls used the exact token count obtained from the CPU
+oracle, which reduced candidate scans, buffer sizes, and readback compared with
+default capacity. These historical results precede the current executor cleanup
+and do not establish default-capacity performance or a portable crossover.
 
 | source | CPU oracle                    | owned `ingest()`           | owned speedup |
 | ------ | ----------------------------- | -------------------------- | ------------- |

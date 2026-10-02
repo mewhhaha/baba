@@ -1,3 +1,7 @@
+export const GPU_FRONTEND_FORMAT = "baba-gpu-frontend" as const;
+export const GPU_FRONTEND_PLAN_VERSION = 3 as const;
+export const GPU_FRONTEND_SEMANTICS = "baba-gpu-frontend-v3" as const;
+
 export const GPU_FRONTEND_HEADER_WORDS = 40;
 export const GPU_FRONTEND_TOKEN_WORDS = 4;
 export const GPU_FRONTEND_NODE_WORDS = 8;

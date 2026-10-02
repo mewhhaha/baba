@@ -7,7 +7,7 @@
  */
 
 import { assert, assertEquals, compile } from "./helpers.ts";
-import { WebGpuRuntime } from "../src/runtime/webgpu/mod.ts";
+import { WebGpuLexer, WebGpuRuntime } from "../src/runtime/webgpu/mod.ts";
 
 const GRAMMAR = `
   token IDENT = /[A-Za-z_][A-Za-z0-9_]*/ ;
@@ -55,18 +55,27 @@ Deno.test({
       return;
     }
     const plan = compilePlan(GRAMMAR);
+    const padded = new Uint8Array(plan.length + 14);
+    padded.fill(0xA5);
+    padded.set(plan, 7);
+    const paddedPlan = padded.subarray(7, 7 + plan.length);
     const runtime = await WebGpuRuntime.create({
       allowFallbackAdapter: true,
       maxInFlight: 2,
     });
     try {
-      const [firstContext, secondContext] = await Promise.all([
+      const [firstContext, secondContext, paddedContext] = await Promise.all([
         runtime.compileLexer(plan),
         runtime.compileLexer(plan.slice()),
+        runtime.compileLexer(paddedPlan),
       ]);
       assert(
         firstContext === secondContext,
         "Equal parser.plan bytes must reuse the compiled context.",
+      );
+      assert(
+        firstContext === paddedContext,
+        "A plan view with a nonzero byte offset must reuse the compiled context.",
       );
       assertEquals(runtime.maxInFlight, 2);
 
@@ -78,6 +87,22 @@ Deno.test({
       assertEquals(second.overflow, false);
       assert(first.tokenCount > 0, "Expected tokens from the first job.");
       assert(second.tokenCount > 0, "Expected tokens from the second job.");
+      const leases = await Promise.all([
+        firstContext.acquireIntegratedLexer(),
+        firstContext.acquireIntegratedLexer(),
+      ]);
+      try {
+        const results = await Promise.all([
+          leases[0].lexer.lex(utf16Units("alpha 1 beta 2")),
+          leases[1].lexer.lex(utf16Units("gamma 3 delta 4")),
+        ]);
+        assertEquals(results[0].records.join(","), first.records.join(","));
+        assertEquals(results[1].records.join(","), second.records.join(","));
+      } finally {
+        for (const lease of leases) {
+          lease.release();
+        }
+      }
 
       const compact = await firstContext.lexCompact(
         utf16Units("alpha 1 beta 2"),
@@ -113,4 +138,66 @@ Deno.test({
       runtime.dispose();
     }
   },
+});
+
+Deno.test("WebGPU worker kernels survive either worker destruction order", async () => {
+  if (!(await hasAdapter())) {
+    return;
+  }
+  const plan = compilePlan(GRAMMAR);
+  const runtime = await WebGpuRuntime.create({ allowFallbackAdapter: true });
+  try {
+    for (const destroySourceFirst of [false, true]) {
+      const source = await WebGpuLexer.create(plan, { runtime });
+      const sibling = await WebGpuLexer.createContextWorker(source);
+      try {
+        const expected = await source.lex(utf16Units("shared 123"));
+        let survivor = source;
+        if (destroySourceFirst) {
+          source.destroy();
+          survivor = sibling;
+        } else {
+          sibling.destroy();
+        }
+        const actual = await survivor.lex(utf16Units("shared 123"));
+        assertEquals(actual.records.join(","), expected.records.join(","));
+      } finally {
+        source.destroy();
+        sibling.destroy();
+      }
+    }
+  } finally {
+    runtime.dispose();
+  }
+});
+
+Deno.test("WebGPU compiles distinct plans concurrently on one device", async () => {
+  if (!(await hasAdapter())) {
+    return;
+  }
+  const identifierPlan = compilePlan(GRAMMAR);
+  const punctuationPlan = compilePlan('module = values:("x" | ";")*;');
+  const runtime = await WebGpuRuntime.create({
+    allowFallbackAdapter: true,
+    maxInFlight: 2,
+  });
+  try {
+    const [identifiers, punctuation] = await Promise.all([
+      runtime.compileLexer(identifierPlan),
+      runtime.compileLexer(punctuationPlan),
+    ]);
+    const [words, symbols] = await Promise.all([
+      identifiers.lex(utf16Units("name 123")),
+      punctuation.lex(utf16Units("x;x;")),
+    ]);
+    assertEquals(words.overflow, false);
+    assertEquals(symbols.overflow, false);
+    assertEquals(words.tokenCount, 3);
+    assertEquals(symbols.tokenCount, 4);
+    const original = words.records.slice();
+    await punctuation.lex(utf16Units(";"));
+    assertEquals(words.records.join(","), original.join(","));
+  } finally {
+    runtime.dispose();
+  }
 });

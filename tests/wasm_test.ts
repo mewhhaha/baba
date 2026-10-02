@@ -551,7 +551,7 @@ Deno.test("Wasm target emits Tree-sitter query fragments from metadata", () => {
 });
 
 Deno.test("runtime manifest contains only active Wasm sources", async () => {
-  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 21);
+  assertEquals(RUNTIME_IMPLEMENTATION_METADATA.sources.length, 23);
   const roles = RUNTIME_IMPLEMENTATION_METADATA.sources.map((source) =>
     source.role
   );
@@ -563,6 +563,8 @@ Deno.test("runtime manifest contains only active Wasm sources", async () => {
       "combined-wasm-parser-plan-format",
       "generated-wasm-parser-loader",
       "island-parser-loader",
+      "island-frontend-plan-decoder",
+      "island-frontend-shared-contract",
       "island-parser-embedded-bytes",
       "parser-diagnostic-codes",
       "wasm-abi-constants",

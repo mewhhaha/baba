@@ -375,8 +375,8 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       ),
       residentReuseMessage,
     );
-    const residentHeader = runtime.device.createBuffer({
-      size: resident.layout.headerWords * Uint32Array.BYTES_PER_ELEMENT,
+    const residentReadback = runtime.device.createBuffer({
+      size: resident.layout.byteLength,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     });
     try {
@@ -384,13 +384,15 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       encoder.copyBufferToBuffer(
         resident.buffer,
         0,
-        residentHeader,
+        residentReadback,
         0,
-        resident.layout.headerWords * Uint32Array.BYTES_PER_ELEMENT,
+        resident.layout.byteLength,
       );
       runtime.device.queue.submit([encoder.finish()]);
-      await residentHeader.mapAsync(GPUMapMode.READ);
-      const header = new Uint32Array(residentHeader.getMappedRange());
+      await residentReadback.mapAsync(GPUMapMode.READ);
+      const mapped = residentReadback.getMappedRange();
+      const header = new Uint32Array(mapped);
+      const records = new Int32Array(mapped);
       assertEquals(header[resident.layout.statusWord], 0);
       assertEquals(
         header[resident.layout.tokenCountWord],
@@ -404,10 +406,34 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
         header[resident.layout.edgeCountWord],
         cpu.program.edges.length / 4,
       );
-      residentHeader.unmap();
+      assertEquals(
+        records.subarray(
+          resident.layout.tokenOffsetWords,
+          resident.layout.tokenOffsetWords +
+            header[resident.layout.tokenCountWord] * 4,
+        ).join(","),
+        cpu.program.tokens.join(","),
+      );
+      assertEquals(
+        records.subarray(
+          resident.layout.nodeOffsetWords,
+          resident.layout.nodeOffsetWords +
+            header[resident.layout.nodeCountWord] * 8,
+        ).join(","),
+        cpu.program.nodes.join(","),
+      );
+      assertEquals(
+        records.subarray(
+          resident.layout.edgeOffsetWords,
+          resident.layout.edgeOffsetWords +
+            header[resident.layout.edgeCountWord] * 4,
+        ).join(","),
+        cpu.program.edges.join(","),
+      );
+      residentReadback.unmap();
     } finally {
       resident.dispose();
-      residentHeader.destroy();
+      residentReadback.destroy();
     }
     const queuedResident = await frontend.ingestResident(residentUnits);
     queuedResident.dispose();
@@ -458,7 +484,8 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
     assert(longInspection);
     assertEquals(longInspection.parallelLongRegionIslands, 1);
     const longSource = `${"x ".repeat(4096)};`;
-    const cpuLong = CpuFrontend.create(longPlanFile.content).ingest(longSource);
+    const cpuLongFrontend = CpuFrontend.create(longPlanFile.content);
+    const cpuLong = cpuLongFrontend.ingest(longSource);
     assert(cpuLong.ok);
     const longFrontend = await runtime.compileFrontend(longPlanFile.content);
     const gpuLong = await longFrontend.ingest(longSource);
@@ -478,6 +505,25 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
       gpuLong.program.edges.join(","),
       cpuLong.program.edges.join(","),
     );
+    for (const smallSource of ["", ";\n", "\nx ;"]) {
+      const cpuSmall = cpuLongFrontend.ingest(smallSource);
+      const gpuSmall = await longFrontend.ingest(smallSource, {
+        stageTimings: "collect",
+      });
+      assert(cpuSmall.ok);
+      assert(gpuSmall.ok);
+      for (const section of ["tokens", "nodes", "edges"] as const) {
+        assertEquals(
+          gpuSmall.program[section].join(","),
+          cpuSmall.program[section].join(","),
+        );
+        // Returned arrays must survive unmapping and reuse of a larger slot.
+        assertEquals(
+          gpuLong.program[section].join(","),
+          cpuLong.program[section].join(","),
+        );
+      }
+    }
 
     const tokenCount = cpu.program.tokens.length / 4;
     const nodeCount = cpu.program.nodes.length / 8;
@@ -717,6 +763,57 @@ Deno.test("GPU and CPU frontend sessions return byte-identical compact IR", asyn
   }
   assert(directlyCreatedFrontend);
   assertEquals(directlyCreatedFrontend.isDisposed, true);
+});
+
+Deno.test("GPU frontend releases its lexer when runtime lease acquisition fails", async () => {
+  if (
+    typeof navigator === "undefined" ||
+    navigator.gpu === undefined ||
+    await navigator.gpu.requestAdapter() === null
+  ) {
+    return;
+  }
+  const built = compile(GRAMMAR, {
+    name: "gpu_frontend_lease_test",
+    rootRule: "module",
+    metadata: METADATA,
+    targets: ["wasm"],
+  });
+  assert(built.bundle);
+  const planFile = built.bundle.files.find((file) =>
+    file.path === "wasm/parser.plan"
+  );
+  assert(planFile);
+  assert(planFile.encoding === "binary");
+  const runtime = await WebGpuRuntime.create({ allowFallbackAdapter: true });
+  const acquireLease = runtime.acquireLease;
+  const failure = new Error("runtime lease rejected");
+  try {
+    for (const resident of [false, true]) {
+      const frontend = await runtime.compileFrontend(planFile.content);
+      const lexer = await runtime.compileLexer(planFile.content);
+      runtime.acquireLease = () => Promise.reject(failure);
+      let caught: unknown;
+      try {
+        if (resident) {
+          await frontend.ingestResident("let value = 1;");
+        } else {
+          await frontend.ingest("let value = 1;");
+        }
+      } catch (error) {
+        caught = error;
+      } finally {
+        runtime.acquireLease = acquireLease;
+      }
+      assertEquals(caught, failure);
+      // Disposal rejects if the failed call retained an integrated lexer lease.
+      lexer.dispose();
+      frontend.dispose();
+    }
+  } finally {
+    runtime.acquireLease = acquireLease;
+    runtime.dispose();
+  }
 });
 
 Deno.test("GPU frontend eligibility failures use stable diagnostics", () => {

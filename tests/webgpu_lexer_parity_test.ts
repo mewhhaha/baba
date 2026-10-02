@@ -2,24 +2,18 @@
  * Byte-exact parity gate for the experimental WebGPU lexer backend
  * (`src/runtime/webgpu/`) against the shipping Rust/Wasm `lex_all`.
  *
- * ===========================================================================
- * THE PARITY PORTION OF THIS FILE DOES NOT RUN IN CI.
+ * The current CI workflow runs `deno task test` without `--unstable-webgpu`.
+ * Adapter-dependent cases are ignored when the probe finds no WebGPU adapter,
+ * so a green CI run does not establish GPU parity. Run this file explicitly:
  *
- * CI is `ubuntu-latest` with no GPU. `requestAdapter()` returns null there (and
- * on a runtime that does not expose WebGPU at all, `navigator.gpu` is simply
- * absent), so every GPU test below is registered with `ignore: true` and
- * silently skips. The byte-exact parity gate for the WebGPU backend is
- * therefore UNENFORCED IN CI. It is enforced only on a machine that has a
- * WebGPU adapter.
+ * deno test --unstable-webgpu --allow-read --allow-write --allow-run tests/webgpu_lexer_parity_test.ts
  *
- * Do not read a green CI run as evidence that GPU parity holds. Run
- * `deno task test` locally on a GPU box, and `deno task parity:webgpu-lexer`
- * for the wider sweep across the four shipped example grammars.
- * ===========================================================================
+ * `deno task parity:webgpu-lexer` sweeps Funcfuck's generated artifacts; add
+ * `--grammar gpu-duck` for the other shipped example. Software-adapter runs
+ * establish correctness, not hardware throughput.
  *
- * The two non-GPU tests at the end of this file (plan decoding / dense
- * alphabet cross-check, and guard refusal) DO run in CI. They cover the
- * host-side table decoding, which is where most of the plan-reading risk is.
+ * The three host-side tests at the end run in CI: create-option validation,
+ * plan decoding with a dense alphabet cross-check, and guard detection.
  *
  * This file never reads `examples/<name>/generated/wasm/*`: that directory is
  * gitignored and absent on a fresh clone. Following `tests/wasm_test.ts`, the
@@ -44,7 +38,7 @@ import {
   buildAlphabetTables,
   verifyAlphabetAgainstPlan,
 } from "../src/runtime/webgpu/alphabet.ts";
-import { SEG_SIZE } from "../src/runtime/webgpu/kernel_wgsl.ts";
+import { passXWorkgroup, SEG_SIZE } from "../src/runtime/webgpu/kernel_wgsl.ts";
 
 /**
  * A guard-free grammar. Guard-free is a hard requirement of the backend, and
@@ -147,10 +141,14 @@ interface NamedInput {
  * because it reaches a branch the others do not.
  *
  * `segSize` is `pass_x`'s segment size and `chunkSize` is `pass_b`'s
- * device-chosen chunk size. They are two independent grids and each one needs
- * its own boundary sweep.
+ * device-chosen chunk size. `tileSize` is the classification tile width chosen
+ * from the plan's state count. Each boundary needs its own inputs.
  */
-function parityInputs(segSize: number, chunkSize: number): NamedInput[] {
+function parityInputs(
+  segSize: number,
+  chunkSize: number,
+  tileSize: number,
+): NamedInput[] {
   const inputs: NamedInput[] = [
     // --- degenerate ---------------------------------------------------------
     { name: "empty", text: "" },
@@ -202,6 +200,67 @@ function parityInputs(segSize: number, chunkSize: number): NamedInput[] {
     { name: "long-comment", text: `//${"c".repeat(9000)}\nx` },
     { name: "only-newlines", text: "\n".repeat(5000) },
   ];
+
+  // --- cooperative classification tiles ------------------------------------
+  // Tiles run backward from the segment's end. A source of three whole tiles
+  // fixes the internal borders at tileSize and 2 * tileSize rather than moving
+  // them when the suffix changes.
+  const tileInputLength = 3 * tileSize;
+  for (let offset = tileSize - 1; offset <= tileSize + 1; offset += 1) {
+    inputs.push({
+      name: `tile-edge-astral-error-${offset}`,
+      text: `${" ".repeat(offset)}\u{1F600}${
+        " ".repeat(tileInputLength - offset - 2)
+      }`,
+    });
+    inputs.push({
+      name: `tile-edge-astral-string-${offset}`,
+      text: `"${"a".repeat(offset - 1)}\u{1F600}${
+        "a".repeat(tileInputLength - offset - 3)
+      }"`,
+    });
+  }
+  for (const surrogate of ["\ud83d", "\ude00"]) {
+    for (const offset of [tileSize - 1, tileSize]) {
+      inputs.push({
+        name: `tile-edge-lone-${surrogate.charCodeAt(0)}-${offset}`,
+        text: `${" ".repeat(offset)}${surrogate}${
+          " ".repeat(tileInputLength - offset - 1)
+        }`,
+      });
+    }
+  }
+  for (
+    const [name, characters] of [
+      ["accepted-bmp", "Àéɏ"],
+      ["bmp-class-edges", "¿Àɏɐ"],
+    ]
+  ) {
+    inputs.push({
+      name: `tile-edge-${name}`,
+      text: `${" ".repeat(tileSize - 1)}${characters}${
+        " ".repeat(tileInputLength - tileSize + 1 - characters.length)
+      }`,
+    });
+  }
+  inputs.push({
+    name: "tile-partial-only-trailing-high-surrogate",
+    text: `${"a".repeat(tileSize - 2)}\ud83d`,
+  });
+  inputs.push({
+    name: "tile-partial-astral-string",
+    text: `"${"a".repeat(tileSize - 3)}\u{1F600}"`,
+  });
+  inputs.push({
+    name: "tile-partial-bmp-run",
+    text: "À".repeat(tileSize + 3),
+  });
+  // A one-unit partial tile shifts the next border to tileSize + 1. The pair
+  // crosses that actual border while the first tile has only one active lane.
+  inputs.push({
+    name: "tile-partial-shifted-astral-border",
+    text: `${" ".repeat(tileSize)}\u{1F600}${" ".repeat(2 * tileSize - 1)}`,
+  });
 
   // --- pass_b chunk boundaries ---------------------------------------------
   inputs.push({
@@ -420,7 +479,7 @@ function recordDifference(
 /**
  * Adapter probe. `navigator.gpu` is absent entirely without `--unstable-webgpu`
  * or on a runtime with no WebGPU at all, and `requestAdapter()` resolves to
- * null on a machine with no usable GPU (which is every CI runner here). An
+ * null when the host has no usable hardware or software adapter. An
  * explicit `if` for each, because AGENTS.md forbids `??` and ternaries.
  */
 async function probeAdapter(): Promise<GPUAdapter | null> {
@@ -463,7 +522,11 @@ Deno.test({
     const cpu = CpuReferenceLexer.create(wasm, plan);
     const gpu = await WebGpuLexer.create(plan, { allowFallbackAdapter: true });
     try {
-      const inputs = parityInputs(SEG_SIZE, gpu.chunkSize);
+      const inputs = parityInputs(
+        SEG_SIZE,
+        gpu.chunkSize,
+        passXWorkgroup(gpu.plan.stateCount),
+      );
       assert(inputs.length > 80, "Expected a substantial parity corpus.");
 
       for (const input of inputs) {
@@ -530,7 +593,13 @@ Deno.test({
         2048,
         "Expected the floor device to halve the chunk size.",
       );
-      for (const input of parityInputs(SEG_SIZE, gpu.chunkSize)) {
+      for (
+        const input of parityInputs(
+          SEG_SIZE,
+          gpu.chunkSize,
+          passXWorkgroup(gpu.plan.stateCount),
+        )
+      ) {
         const units = toUtf16(input.text);
         if (units.length > 64 * 1024) {
           continue;
@@ -714,7 +783,7 @@ Deno.test({
   },
 });
 
-// --- these two run everywhere, including CI ---------------------------------
+// --- these three run everywhere, including CI -------------------------------
 
 Deno.test("WebGPU lexer validates create options before accessing WebGPU", async () => {
   for (

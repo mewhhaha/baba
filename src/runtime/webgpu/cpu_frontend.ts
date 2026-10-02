@@ -6,13 +6,13 @@ import type {
 import {
   assertFrontendAllocationLimits,
   type CompactFrontendProgram,
-  decodeGpuFrontendPlan,
   executeCompactSemanticRecipes,
   type FrontendAllocationLimits,
   type GpuFrontendResult,
   type GpuFrontendTimings,
   materializeDiagnostic,
 } from "./frontend.ts";
+import { decodeGpuFrontendPlan } from "./frontend_plan.ts";
 import {
   GPU_FRONTEND_DIAGNOSTIC_DELIMITER as DIAGNOSTIC_DELIMITER,
   GPU_FRONTEND_DIAGNOSTIC_EDGE_CAPACITY as DIAGNOSTIC_EDGE_CAPACITY,

@@ -1,5 +1,5 @@
 import { inspectCombinedWasmParserPlan } from "../src/runtime/wasm_plan.ts";
-import { inspectGpuFrontendPlan } from "../src/runtime/webgpu/frontend.ts";
+import { inspectGpuFrontendPlan } from "../src/runtime/webgpu/frontend_plan.ts";
 
 if (import.meta.main) {
   const path = Deno.args[0];

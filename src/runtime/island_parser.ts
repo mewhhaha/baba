@@ -1,5 +1,5 @@
 import type { GpuFrontendPlan } from "../compiler/gpu_frontend.ts";
-import { decodeGpuFrontendPlan } from "./webgpu/frontend.ts";
+import { decodeGpuFrontendPlan } from "./webgpu/frontend_plan.ts";
 import { islandParserWasmBytes } from "./island_parser_wasm_bytes.ts";
 
 const SIMD_LANES = 16;

@@ -1,12 +1,17 @@
 /**
- * CPU oracle versus the WebGPU-backed island frontend.
+ * TypeScript CPU parity oracle versus the WebGPU-backed island frontend.
  *
  * Run `deno task bench:webgpu-frontend` after generating the GPU Duck example.
  * Sizes are MiB and may be overridden with `--sizes 1,4`.
+ * The headline uses default GPU capacity; `--oracle-capacity` adds a separately
+ * labeled result with the exact token count learned from the CPU oracle.
+ * `--resident` measures submission, return, and device completion separately.
+ * Resident completion excludes mapped readback and host semantic recipes.
  */
 
 import {
   CpuFrontend,
+  GpuFrontendCapacityError,
   type GpuFrontendResult,
   inspectGpuFrontendPlan,
   WebGpuRuntime,
@@ -20,6 +25,7 @@ interface Options {
   readonly runs: number;
   readonly allowFallbackAdapter: boolean;
   readonly resident: boolean;
+  readonly oracleCapacity: boolean;
 }
 
 interface Distribution {
@@ -35,6 +41,7 @@ function parseOptions(): Options {
   let runs = 7;
   let allowFallbackAdapter = false;
   let resident = false;
+  let oracleCapacity = false;
   for (let index = 0; index < Deno.args.length; index += 1) {
     const argument = Deno.args[index];
     if (argument === "--allow-fallback-adapter") {
@@ -44,6 +51,19 @@ function parseOptions(): Options {
     if (argument === "--resident") {
       resident = true;
       continue;
+    }
+    if (argument === "--oracle-capacity") {
+      oracleCapacity = true;
+      continue;
+    }
+    if (argument === "--help") {
+      console.log(
+        "Usage: deno task bench:webgpu-frontend [--sizes 1,4,16] [--warmup 2] [--runs 7] [--resident] [--oracle-capacity] [--allow-fallback-adapter]\n" +
+          "Headline: TypeScript CpuFrontend versus owned GPU ingestion with default token capacity.\n" +
+          "--oracle-capacity adds exact-token-capacity timings obtained from the CPU oracle.\n" +
+          "--resident adds submission, return, and device-completion timings without readback or host semantics.",
+      );
+      Deno.exit(0);
     }
     if (argument === "--sizes" && index + 1 < Deno.args.length) {
       sizes = Deno.args[index + 1].split(",").map(Number);
@@ -80,7 +100,14 @@ function parseOptions(): Options {
       );
     }
   }
-  return { sizes, warmup, runs, allowFallbackAdapter, resident };
+  return {
+    sizes,
+    warmup,
+    runs,
+    allowFallbackAdapter,
+    resident,
+    oracleCapacity,
+  };
 }
 
 function gpuDuckCorpus(targetBytes: number): string {
@@ -186,133 +213,179 @@ console.log(JSON.stringify({
   adapter: runtime.capabilities,
   plan: planInspection,
   setupMs: { cpu: cpuSetupMs, gpu: gpuSetupMs },
+  comparison: {
+    cpu:
+      "TypeScript CpuFrontend parity oracle with owned flat IR and semantics",
+    gpu: "Owned WebGpuFrontend.ingest with default token capacity",
+    resident:
+      "UTF-16 units to device-resident syntax IR; completion excludes readback and host semantics",
+  },
 }));
 
 try {
   for (const mebibytes of options.sizes) {
     const source = gpuDuckCorpus(mebibytes * MIB);
-    console.error(`${mebibytes} MiB parity`);
     const parityCpuResult = cpu.ingest(source);
     const parityProgram = requireProgram(parityCpuResult, "CPU");
-    const lexerCapacityRecords = parityProgram.tokens.length / 4;
-    const parityGpuResult = await frontend.ingest(source, {
-      lexerCapacityRecords,
-    });
-    assertProgramParity(parityCpuResult, parityGpuResult);
+    const tokenCount = parityProgram.tokens.length / 4;
+    const nodeCount = parityProgram.nodes.length / 8;
+    const edgeCount = parityProgram.edges.length / 4;
+    const compactProgramBytes = parityProgram.tokens.byteLength +
+      parityProgram.nodes.byteLength +
+      parityProgram.edges.byteLength +
+      parityProgram.symbols.byteLength +
+      parityProgram.types.byteLength;
+
     for (let warmup = 0; warmup < options.warmup; warmup += 1) {
       console.error(
-        `${mebibytes} MiB warmup ${warmup + 1}/${options.warmup}`,
+        `${mebibytes} MiB CPU warmup ${warmup + 1}/${options.warmup}`,
       );
-      const cpuResult = cpu.ingest(source);
-      const gpuResult = await frontend.ingest(source, {
-        lexerCapacityRecords,
-      });
-      assertProgramParity(cpuResult, gpuResult);
+      requireProgram(cpu.ingest(source), "CPU");
     }
-
     const cpuSamples: number[] = [];
-    const gpuSamples: number[] = [];
-    const residentSubmitSamples: number[] = [];
-    const residentTotalSamples: number[] = [];
-    const sourceEncodingSamples: number[] = [];
-    const gpuRoundTripSamples: number[] = [];
-    const semanticSamples: number[] = [];
-    let tokenCount = 0;
-    let nodeCount = 0;
-    let edgeCount = 0;
-    let compactProgramBytes = 0;
-    let stagesMs: Readonly<Record<string, number>> | null = null;
     for (let run = 0; run < options.runs; run += 1) {
-      console.error(`${mebibytes} MiB run ${run + 1}/${options.runs}`);
-      const cpuStart = performance.now();
-      const cpuResult = cpu.ingest(source);
-      cpuSamples.push(performance.now() - cpuStart);
-
-      const gpuStart = performance.now();
-      const gpuResult = await frontend.ingest(source, {
-        lexerCapacityRecords,
-      });
-      gpuSamples.push(performance.now() - gpuStart);
-      sourceEncodingSamples.push(gpuResult.timings.uploadMs);
-      gpuRoundTripSamples.push(gpuResult.timings.lexMs);
-      semanticSamples.push(gpuResult.timings.semanticsMs);
-
-      assertProgramParity(cpuResult, gpuResult);
-      const program = requireProgram(gpuResult, "GPU");
-      tokenCount = program.tokens.length / 4;
-      nodeCount = program.nodes.length / 8;
-      edgeCount = program.edges.length / 4;
-      compactProgramBytes = program.tokens.byteLength +
-        program.nodes.byteLength +
-        program.edges.byteLength +
-        program.symbols.byteLength +
-        program.types.byteLength;
+      console.error(`${mebibytes} MiB CPU run ${run + 1}/${options.runs}`);
+      const started = performance.now();
+      const result = cpu.ingest(source);
+      cpuSamples.push(performance.now() - started);
+      requireProgram(result, "CPU");
     }
-    console.error(`${mebibytes} MiB stage profile`);
-    const profiledGpuResult = await frontend.ingest(source, {
-      lexerCapacityRecords,
-      stageTimings: "collect",
-    });
-    assertProgramParity(parityCpuResult, profiledGpuResult);
-    stagesMs = profiledGpuResult.timings.stagesMs;
+    const cpuMs = distribution(cpuSamples);
 
+    let sourceUnits: Uint16Array | undefined;
     if (options.resident) {
-      const sourceUnits = new Uint16Array(source.length);
+      sourceUnits = new Uint16Array(source.length);
       for (let index = 0; index < source.length; index += 1) {
         sourceUnits[index] = source.charCodeAt(index);
       }
-      await runtime.device.queue.onSubmittedWorkDone();
-      for (let warmup = 0; warmup < options.warmup; warmup += 1) {
-        console.error(
-          `${mebibytes} MiB resident warmup ${warmup + 1}/${options.warmup}`,
-        );
-        const resident = await frontend.ingestResident(sourceUnits, {
-          lexerCapacityRecords,
-        });
-        resident.dispose();
-        await runtime.device.queue.onSubmittedWorkDone();
-      }
-      for (let run = 0; run < options.runs; run += 1) {
-        console.error(
-          `${mebibytes} MiB resident run ${run + 1}/${options.runs}`,
-        );
-        const resident = await frontend.ingestResident(sourceUnits, {
-          lexerCapacityRecords,
-        });
-        residentSubmitSamples.push(resident.timings.submitMs);
-        residentTotalSamples.push(resident.timings.totalMs);
-        resident.dispose();
-        await runtime.device.queue.onSubmittedWorkDone();
-      }
     }
+    const capacityModes: ("default" | "oracle-capacity")[] = ["default"];
+    if (options.oracleCapacity) {
+      capacityModes.push("oracle-capacity");
+    }
+    for (const capacityMode of capacityModes) {
+      let lexerCapacityRecords = source.length;
+      const allocationOptions: { lexerCapacityRecords?: number } = {};
+      if (capacityMode === "oracle-capacity") {
+        lexerCapacityRecords = tokenCount;
+        allocationOptions.lexerCapacityRecords = lexerCapacityRecords;
+      }
+      const label = `${mebibytes} MiB ${capacityMode}`;
+      try {
+        console.error(`${label} parity`);
+        const parityGpuResult = await frontend.ingest(
+          source,
+          allocationOptions,
+        );
+        assertProgramParity(parityCpuResult, parityGpuResult);
+        for (let warmup = 0; warmup < options.warmup; warmup += 1) {
+          console.error(`${label} warmup ${warmup + 1}/${options.warmup}`);
+          const gpuResult = await frontend.ingest(source, allocationOptions);
+          assertProgramParity(parityCpuResult, gpuResult);
+        }
 
-    const cpuMs = distribution(cpuSamples);
-    const gpuMs = distribution(gpuSamples);
-    let residentSubmitMs: Distribution | null = null;
-    let residentTotalMs: Distribution | null = null;
-    if (residentSubmitSamples.length > 0) {
-      residentSubmitMs = distribution(residentSubmitSamples);
-      residentTotalMs = distribution(residentTotalSamples);
+        const gpuSamples: number[] = [];
+        const sourceEncodingSamples: number[] = [];
+        const gpuRoundTripSamples: number[] = [];
+        const semanticSamples: number[] = [];
+        for (let run = 0; run < options.runs; run += 1) {
+          console.error(`${label} run ${run + 1}/${options.runs}`);
+          const started = performance.now();
+          const gpuResult = await frontend.ingest(source, allocationOptions);
+          gpuSamples.push(performance.now() - started);
+          sourceEncodingSamples.push(gpuResult.timings.uploadMs);
+          gpuRoundTripSamples.push(gpuResult.timings.lexMs);
+          semanticSamples.push(gpuResult.timings.semanticsMs);
+          assertProgramParity(parityCpuResult, gpuResult);
+        }
+        console.error(`${label} stage profile`);
+        const profiledGpuResult = await frontend.ingest(source, {
+          ...allocationOptions,
+          stageTimings: "collect",
+        });
+        assertProgramParity(parityCpuResult, profiledGpuResult);
+
+        const residentSubmitSamples: number[] = [];
+        const residentReturnSamples: number[] = [];
+        const residentCompletionSamples: number[] = [];
+        if (sourceUnits !== undefined) {
+          await runtime.device.queue.onSubmittedWorkDone();
+          for (let warmup = 0; warmup < options.warmup; warmup += 1) {
+            console.error(
+              `${label} resident warmup ${warmup + 1}/${options.warmup}`,
+            );
+            const resident = await frontend.ingestResident(
+              sourceUnits,
+              allocationOptions,
+            );
+            await runtime.device.queue.onSubmittedWorkDone();
+            resident.dispose();
+          }
+          for (let run = 0; run < options.runs; run += 1) {
+            console.error(`${label} resident run ${run + 1}/${options.runs}`);
+            const started = performance.now();
+            const resident = await frontend.ingestResident(
+              sourceUnits,
+              allocationOptions,
+            );
+            residentSubmitSamples.push(resident.timings.submitMs);
+            residentReturnSamples.push(performance.now() - started);
+            await runtime.device.queue.onSubmittedWorkDone();
+            residentCompletionSamples.push(performance.now() - started);
+            resident.dispose();
+          }
+        }
+
+        const gpuMs = distribution(gpuSamples);
+        let residentSubmitMs: Distribution | null = null;
+        let residentReturnMs: Distribution | null = null;
+        let residentCompletionMs: Distribution | null = null;
+        if (residentSubmitSamples.length > 0) {
+          residentSubmitMs = distribution(residentSubmitSamples);
+          residentReturnMs = distribution(residentReturnSamples);
+          residentCompletionMs = distribution(residentCompletionSamples);
+        }
+        console.log(JSON.stringify({
+          mebibytes,
+          sourceBytes: source.length,
+          capacityMode,
+          status: "measured",
+          lexerCapacityRecords,
+          tokenCount,
+          nodeCount,
+          edgeCount,
+          compactProgramBytes,
+          cpuMs,
+          gpuMs,
+          speedup: cpuMs.median / gpuMs.median,
+          ownedPhasesMs: {
+            sourceEncoding: distribution(sourceEncodingSamples),
+            gpuRoundTrip: distribution(gpuRoundTripSamples),
+            semantics: distribution(semanticSamples),
+          },
+          residentReturnMs,
+          residentSubmitMs,
+          residentCompletionMs,
+          stagesMs: profiledGpuResult.timings.stagesMs,
+        }));
+      } catch (error) {
+        if (!(error instanceof GpuFrontendCapacityError)) {
+          throw error;
+        }
+        console.log(JSON.stringify({
+          mebibytes,
+          sourceBytes: source.length,
+          capacityMode,
+          status: "skipped",
+          lexerCapacityRecords,
+          cpuMs,
+          reason: error.message,
+          bufferName: error.bufferName,
+          requiredBytes: error.required,
+          availableBytes: error.available,
+        }));
+      }
     }
-    console.log(JSON.stringify({
-      mebibytes,
-      sourceBytes: source.length,
-      tokenCount,
-      nodeCount,
-      edgeCount,
-      compactProgramBytes,
-      cpuMs,
-      gpuMs,
-      speedup: cpuMs.median / gpuMs.median,
-      ownedPhasesMs: {
-        sourceEncoding: distribution(sourceEncodingSamples),
-        gpuRoundTrip: distribution(gpuRoundTripSamples),
-        semantics: distribution(semanticSamples),
-      },
-      residentTotalMs,
-      residentSubmitMs,
-      stagesMs,
-    }));
   }
 } finally {
   runtime.dispose();

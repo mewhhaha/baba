@@ -227,6 +227,106 @@ interface DeviceLostBox {
   reason: string | null;
 }
 
+/** Immutable device resources shared only by one context's worker family. */
+interface SharedLexerKernel {
+  readonly pipelines: Map<string, GPUComputePipeline>;
+  readonly layout: GPUBindGroupLayout;
+  readonly tablesBuffer: GPUBuffer;
+  readonly deviceLost: DeviceLostBox;
+  users: number;
+}
+
+interface MutableLexerBuffers {
+  readonly paramsBuffer: GPUBuffer;
+  readonly querySet: GPUQuerySet | null;
+  readonly resolveBuffer: GPUBuffer | null;
+}
+
+interface LexerErrorScopeResults {
+  readonly oom: GPUError | null;
+  readonly validation: GPUError | null;
+  readonly failure: { readonly cause: unknown } | null;
+}
+
+async function collectLexerErrorScopes(
+  oomResult: Promise<GPUError | null>,
+  validationResult: Promise<GPUError | null>,
+): Promise<LexerErrorScopeResults> {
+  // Observe both promises immediately and retain the original rejection even
+  // if a second scope also rejects while a mapping is still pending.
+  const [oomResultState, validationResultState] = await Promise.allSettled([
+    oomResult,
+    validationResult,
+  ]);
+  let oom: GPUError | null = null;
+  let validation: GPUError | null = null;
+  let failure: { readonly cause: unknown } | null = null;
+  if (oomResultState.status === "fulfilled") {
+    oom = oomResultState.value;
+  } else {
+    failure = { cause: oomResultState.reason };
+  }
+  if (validationResultState.status === "fulfilled") {
+    validation = validationResultState.value;
+  } else if (failure === null) {
+    failure = { cause: validationResultState.reason };
+  }
+  return { oom, validation, failure };
+}
+
+function expect(value: unknown, message: string): asserts value {
+  if (!value) {
+    throw new Error(message);
+  }
+}
+
+function createMutableLexerBuffers(
+  device: GPUDevice,
+  wantsTimestamps: boolean,
+): MutableLexerBuffers {
+  // 13 u32 of Params, rounded up to the 16-byte struct alignment.
+  const paramsBuffer = device.createBuffer({
+    size: 64,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    label: "params",
+  });
+  let querySet: GPUQuerySet | null = null;
+  let resolveBuffer: GPUBuffer | null = null;
+  try {
+    if (wantsTimestamps) {
+      querySet = device.createQuerySet({
+        type: "timestamp",
+        count: TIMESTAMP_COUNT,
+      });
+      resolveBuffer = device.createBuffer({
+        size: STAGING_TIMESTAMP_BYTES,
+        usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+        label: "timestamps",
+      });
+    }
+    return { paramsBuffer, querySet, resolveBuffer };
+  } catch (error) {
+    paramsBuffer.destroy();
+    if (querySet !== null) {
+      querySet.destroy();
+    }
+    if (resolveBuffer !== null) {
+      resolveBuffer.destroy();
+    }
+    throw error;
+  }
+}
+
+function destroyMutableLexerBuffers(buffers: MutableLexerBuffers): void {
+  buffers.paramsBuffer.destroy();
+  if (buffers.resolveBuffer !== null) {
+    buffers.resolveBuffer.destroy();
+  }
+  if (buffers.querySet !== null) {
+    buffers.querySet.destroy();
+  }
+}
+
 function requirePositiveSafeInteger(value: number, optionName: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new TypeError(
@@ -251,13 +351,10 @@ export class WebGpuLexer {
   readonly usesStorageTables: boolean;
   readonly setupTimings: GpuSetupTimings;
 
-  readonly #pipelines: Map<string, GPUComputePipeline>;
-  readonly #layout: GPUBindGroupLayout;
-  readonly #tablesBuffer: GPUBuffer;
+  readonly #kernel: SharedLexerKernel;
   readonly #paramsBuffer: GPUBuffer;
   readonly #querySet: GPUQuerySet | null;
   readonly #resolveBuffer: GPUBuffer | null;
-  readonly #deviceLost: DeviceLostBox;
 
   #src: SizedBuffer | null = null;
   #nextPos: SizedBuffer | null = null;
@@ -285,16 +382,13 @@ export class WebGpuLexer {
     plan: LexerPlanTables,
     alphabet: AlphabetTables,
     packed: PackedTables,
-    pipelines: Map<string, GPUComputePipeline>,
-    layout: GPUBindGroupLayout,
-    tablesBuffer: GPUBuffer,
+    kernel: SharedLexerKernel,
     paramsBuffer: GPUBuffer,
     querySet: GPUQuerySet | null,
     resolveBuffer: GPUBuffer | null,
     limits: GpuLexerLimits,
     chunkSize: number,
     setupTimings: GpuSetupTimings,
-    deviceLost: DeviceLostBox,
     ownsDevice: boolean,
     usesStorageTables: boolean,
     runtime: WebGpuRuntime | undefined,
@@ -303,9 +397,7 @@ export class WebGpuLexer {
     this.plan = plan;
     this.alphabet = alphabet;
     this.packed = packed;
-    this.#pipelines = pipelines;
-    this.#layout = layout;
-    this.#tablesBuffer = tablesBuffer;
+    this.#kernel = kernel;
     this.#paramsBuffer = paramsBuffer;
     this.#querySet = querySet;
     this.#resolveBuffer = resolveBuffer;
@@ -314,7 +406,6 @@ export class WebGpuLexer {
     this.chunkSize = chunkSize;
     this.usesStorageTables = usesStorageTables;
     this.setupTimings = setupTimings;
-    this.#deviceLost = deviceLost;
     this.#ownsDevice = ownsDevice;
     this.#runtime = runtime;
   }
@@ -526,17 +617,21 @@ export class WebGpuLexer {
     const buildEnd = performance.now();
     device.pushErrorScope("validation");
     let module: GPUShaderModule;
-    let compilationInfo: GPUCompilationInfo;
-    let scopeError: GPUError | null = null;
+    let scopeResult: Promise<GPUError | null>;
     try {
       module = device.createShaderModule({
         code: source,
         label: "baba-lexer",
       });
-      compilationInfo = await module.getCompilationInfo();
     } finally {
-      scopeError = await device.popErrorScope();
+      // Device error scopes form one shared stack. Pop before awaiting shader
+      // diagnostics so another context can compile safely on the same device.
+      scopeResult = device.popErrorScope();
     }
+    const [compilationInfo, scopeError] = await Promise.all([
+      module.getCompilationInfo(),
+      scopeResult,
+    ]);
     const errors = compilationInfo.messages.filter((m) => m.type === "error");
     if (errors.length > 0) {
       const detail = errors
@@ -632,12 +727,11 @@ export class WebGpuLexer {
 
     device.pushErrorScope("validation");
     device.pushErrorScope("out-of-memory");
-    let tablesBuffer: GPUBuffer;
-    let paramsBuffer: GPUBuffer;
-    let querySet: GPUQuerySet | null = null;
-    let resolveBuffer: GPUBuffer | null = null;
-    let setupOom: GPUError | null = null;
-    let setupValidation: GPUError | null = null;
+    let tablesBuffer: GPUBuffer | null = null;
+    let mutableBuffers: MutableLexerBuffers | null = null;
+    let setupFailure: { readonly cause: unknown } | null = null;
+    let setupOomResult: Promise<GPUError | null>;
+    let setupValidationResult: Promise<GPUError | null>;
     try {
       tablesBuffer = device.createBuffer({
         size: tablesBufferSize,
@@ -652,59 +746,50 @@ export class WebGpuLexer {
         packed.words.byteLength,
       );
 
-      // 13 u32 of Params, rounded up to the 16-byte struct alignment.
-      paramsBuffer = device.createBuffer({
-        size: 64,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        label: "params",
-      });
-
-      if (wantsTimestamps) {
-        querySet = device.createQuerySet({
-          type: "timestamp",
-          count: TIMESTAMP_COUNT,
-        });
-        resolveBuffer = device.createBuffer({
-          size: STAGING_TIMESTAMP_BYTES,
-          usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
-          label: "timestamps",
-        });
-      }
+      mutableBuffers = createMutableLexerBuffers(device, wantsTimestamps);
+    } catch (cause) {
+      setupFailure = { cause };
     } finally {
-      try {
-        setupOom = await device.popErrorScope();
-      } finally {
-        setupValidation = await device.popErrorScope();
-      }
+      setupOomResult = device.popErrorScope();
+      setupValidationResult = device.popErrorScope();
     }
-    if (setupOom !== null) {
-      tablesBuffer.destroy();
-      paramsBuffer.destroy();
-      if (resolveBuffer !== null) {
-        resolveBuffer.destroy();
+    const setupScopes = await collectLexerErrorScopes(
+      setupOomResult,
+      setupValidationResult,
+    );
+    if (
+      setupFailure !== null || setupScopes.failure !== null ||
+      setupScopes.oom !== null || setupScopes.validation !== null
+    ) {
+      if (tablesBuffer !== null) {
+        tablesBuffer.destroy();
       }
-      if (querySet !== null) {
-        querySet.destroy();
+      if (mutableBuffers !== null) {
+        destroyMutableLexerBuffers(mutableBuffers);
       }
       if (ownsDevice) {
         device.destroy();
       }
-      throw new Error(`Setup allocation failed: ${setupOom.message}`);
     }
-    if (setupValidation !== null) {
-      tablesBuffer.destroy();
-      paramsBuffer.destroy();
-      if (resolveBuffer !== null) {
-        resolveBuffer.destroy();
-      }
-      if (querySet !== null) {
-        querySet.destroy();
-      }
-      if (ownsDevice) {
-        device.destroy();
-      }
-      throw new Error(`Setup validation failed: ${setupValidation.message}`);
+    if (setupFailure !== null) {
+      throw setupFailure.cause;
     }
+    if (setupScopes.failure !== null) {
+      throw setupScopes.failure.cause;
+    }
+    if (setupScopes.oom !== null) {
+      throw new Error(`Setup allocation failed: ${setupScopes.oom.message}`);
+    }
+    if (setupScopes.validation !== null) {
+      throw new Error(
+        `Setup validation failed: ${setupScopes.validation.message}`,
+      );
+    }
+    expect(tablesBuffer, "Successful WebGPU setup must allocate lexer tables.");
+    expect(
+      mutableBuffers,
+      "Successful WebGPU setup must allocate worker buffers.",
+    );
     const buffersEnd = performance.now();
 
     const setupTimings: GpuSetupTimings = {
@@ -725,20 +810,122 @@ export class WebGpuLexer {
       plan,
       alphabet,
       packed,
-      pipelines,
-      layout,
-      tablesBuffer,
-      paramsBuffer,
-      querySet,
-      resolveBuffer,
+      { pipelines, layout, tablesBuffer, deviceLost, users: 1 },
+      mutableBuffers.paramsBuffer,
+      mutableBuffers.querySet,
+      mutableBuffers.resolveBuffer,
       limits,
       chunkSize,
       setupTimings,
-      deviceLost,
       ownsDevice,
       usesStorageTables,
       options.runtime,
     );
+  }
+
+  /**
+   * @internal Create a context worker with independent mutable buffers. The
+   * kernel resources remain live until the last worker in this family dies.
+   */
+  static async createContextWorker(
+    compiled: WebGpuLexer,
+  ): Promise<WebGpuLexer> {
+    const runtime = compiled.#runtime;
+    if (runtime === undefined) {
+      throw new Error(
+        "A shared WebGPU lexer worker requires a runtime-owned device.",
+      );
+    }
+    const lease = await runtime.acquireLease();
+    try {
+      if (compiled.#destroyed) {
+        throw new Error("Cannot share a destroyed WebGpuLexer kernel.");
+      }
+      const started = performance.now();
+      const device = compiled.device;
+      device.pushErrorScope("validation");
+      device.pushErrorScope("out-of-memory");
+      let buffers: MutableLexerBuffers | null = null;
+      let allocationFailure: { readonly cause: unknown } | null = null;
+      let oomResult: Promise<GPUError | null>;
+      let validationResult: Promise<GPUError | null>;
+      try {
+        buffers = createMutableLexerBuffers(device, compiled.hasTimestamps);
+      } catch (cause) {
+        allocationFailure = { cause };
+      } finally {
+        oomResult = device.popErrorScope();
+        validationResult = device.popErrorScope();
+      }
+      const scopes = await collectLexerErrorScopes(
+        oomResult,
+        validationResult,
+      );
+      if (
+        allocationFailure !== null || scopes.failure !== null ||
+        scopes.oom !== null || scopes.validation !== null
+      ) {
+        if (buffers !== null) {
+          destroyMutableLexerBuffers(buffers);
+        }
+      }
+      if (allocationFailure !== null) {
+        throw allocationFailure.cause;
+      }
+      if (scopes.failure !== null) {
+        throw scopes.failure.cause;
+      }
+      if (scopes.oom !== null) {
+        throw new Error(`Worker allocation failed: ${scopes.oom.message}`);
+      }
+      if (scopes.validation !== null) {
+        throw new Error(
+          `Worker validation failed: ${scopes.validation.message}`,
+        );
+      }
+      expect(
+        buffers,
+        "Successful WebGPU worker setup must allocate worker buffers.",
+      );
+      if (compiled.#destroyed) {
+        destroyMutableLexerBuffers(buffers);
+        throw new Error(
+          "The shared WebGpuLexer kernel was destroyed during worker setup.",
+        );
+      }
+      const elapsed = performance.now() - started;
+      const setupTimings: GpuSetupTimings = {
+        decodePlanMs: 0,
+        buildAlphabetMs: 0,
+        packTablesMs: 0,
+        requestAdapterMs: 0,
+        requestDeviceMs: 0,
+        buildKernelSourceMs: 0,
+        createShaderModuleMs: 0,
+        createPipelinesMs: 0,
+        createBuffersMs: elapsed,
+        totalMs: elapsed,
+      };
+      compiled.#kernel.users += 1;
+      return new WebGpuLexer(
+        device,
+        compiled.plan,
+        compiled.alphabet,
+        compiled.packed,
+        compiled.#kernel,
+        buffers.paramsBuffer,
+        buffers.querySet,
+        buffers.resolveBuffer,
+        compiled.limits,
+        compiled.chunkSize,
+        setupTimings,
+        false,
+        compiled.usesStorageTables,
+        runtime,
+      );
+    } finally {
+      lease.release();
+    }
   }
 
   #ensure(
@@ -902,8 +1089,10 @@ export class WebGpuLexer {
     if (this.#runtime !== undefined) {
       this.#runtime.assertUsable();
     }
-    if (this.#deviceLost.reason !== null) {
-      throw new Error(`WebGPU device was lost: ${this.#deviceLost.reason}`);
+    if (this.#kernel.deviceLost.reason !== null) {
+      throw new Error(
+        `WebGPU device was lost: ${this.#kernel.deviceLost.reason}`,
+      );
     }
     if (options.borrowRecords === true) {
       throw new TypeError(
@@ -945,8 +1134,10 @@ export class WebGpuLexer {
     if (this.#runtime !== undefined) {
       this.#runtime.assertUsable();
     }
-    if (this.#deviceLost.reason !== null) {
-      throw new Error(`WebGPU device was lost: ${this.#deviceLost.reason}`);
+    if (this.#kernel.deviceLost.reason !== null) {
+      throw new Error(
+        `WebGPU device was lost: ${this.#kernel.deviceLost.reason}`,
+      );
     }
     if (options.borrowRecords === true) {
       throw new TypeError(
@@ -992,8 +1183,10 @@ export class WebGpuLexer {
     if (this.#runtime !== undefined) {
       this.#runtime.assertUsable();
     }
-    if (this.#deviceLost.reason !== null) {
-      throw new Error(`WebGPU device was lost: ${this.#deviceLost.reason}`);
+    if (this.#kernel.deviceLost.reason !== null) {
+      throw new Error(
+        `WebGPU device was lost: ${this.#kernel.deviceLost.reason}`,
+      );
     }
     if (this.#lexInFlight) {
       throw new Error(
@@ -1123,11 +1316,11 @@ export class WebGpuLexer {
       ].join(":");
       if (this.#bindGroup === null || this.#bindGroupKey !== key) {
         this.#bindGroup = this.device.createBindGroup({
-          layout: this.#layout,
+          layout: this.#kernel.layout,
           entries: [
             { binding: 0, resource: { buffer: this.#paramsBuffer } },
             { binding: 1, resource: { buffer: this.#src.buffer } },
-            { binding: 2, resource: { buffer: this.#tablesBuffer } },
+            { binding: 2, resource: { buffer: this.#kernel.tablesBuffer } },
             { binding: 3, resource: { buffer: this.#nextPos.buffer } },
             { binding: 4, resource: { buffer: this.#packedRec.buffer } },
             { binding: 5, resource: { buffer: this.#exitPos.buffer } },
@@ -1202,7 +1395,7 @@ export class WebGpuLexer {
               label: "baba integrated lexer",
             });
             for (const [stage, workgroups] of dispatches) {
-              const pipeline = this.#pipelines.get(stage);
+              const pipeline = this.#kernel.pipelines.get(stage);
               if (pipeline === undefined) {
                 throw new Error(`Missing compute pipeline for stage ${stage}.`);
               }
@@ -1217,7 +1410,7 @@ export class WebGpuLexer {
           }
           for (let index = 0; index < dispatches.length; index += 1) {
             const [stage, workgroups] = dispatches[index];
-            const pipeline = this.#pipelines.get(stage);
+            const pipeline = this.#kernel.pipelines.get(stage);
             if (pipeline === undefined) {
               throw new Error(`Missing compute pipeline for stage ${stage}.`);
             }
@@ -1349,8 +1542,9 @@ export class WebGpuLexer {
     let encodeEnd = 0;
     let submitStart = 0;
     let submitEnd = 0;
-    let oomError: GPUError | null = null;
-    let validationError: GPUError | null = null;
+    let oomResult: Promise<GPUError | null>;
+    let validationResult: Promise<GPUError | null>;
+    let mapping: Promise<void> | null = null;
     let gpuOperationFailure: { readonly cause: unknown } | null = null;
     try {
       this.#src = this.#ensure(
@@ -1407,11 +1601,11 @@ export class WebGpuLexer {
       ].join(":");
       if (this.#bindGroup === null || this.#bindGroupKey !== key) {
         this.#bindGroup = this.device.createBindGroup({
-          layout: this.#layout,
+          layout: this.#kernel.layout,
           entries: [
             { binding: 0, resource: { buffer: this.#paramsBuffer } },
             { binding: 1, resource: { buffer: this.#src.buffer } },
-            { binding: 2, resource: { buffer: this.#tablesBuffer } },
+            { binding: 2, resource: { buffer: this.#kernel.tablesBuffer } },
             { binding: 3, resource: { buffer: this.#nextPos.buffer } },
             { binding: 4, resource: { buffer: this.#packedRec.buffer } },
             { binding: 5, resource: { buffer: this.#exitPos.buffer } },
@@ -1476,7 +1670,7 @@ export class WebGpuLexer {
       ];
       for (let index = 0; index < dispatches.length; index += 1) {
         const [stage, workgroups] = dispatches[index];
-        const pipeline = this.#pipelines.get(stage);
+        const pipeline = this.#kernel.pipelines.get(stage);
         if (pipeline === undefined) {
           throw new Error(`Missing compute pipeline for stage ${stage}.`);
         }
@@ -1531,20 +1725,35 @@ export class WebGpuLexer {
       // --- one submit, one sync ----------------------------------------------
       submitStart = performance.now();
       this.device.queue.submit([commands]);
-      await this.#staging.buffer.mapAsync(GPUMapMode.READ, 0, stagingBytes);
-      submitEnd = performance.now();
+      mapping = this.#staging.buffer.mapAsync(GPUMapMode.READ, 0, stagingBytes);
     } catch (cause) {
       gpuOperationFailure = { cause };
     } finally {
-      try {
-        oomError = await this.device.popErrorScope();
-      } finally {
-        validationError = await this.device.popErrorScope();
-      }
+      // Close the device-wide scope stack before awaiting map completion. Each
+      // worker can then submit independently without capturing another's faults.
+      oomResult = this.device.popErrorScope();
+      validationResult = this.device.popErrorScope();
+    }
+    const scopeCompletion = collectLexerErrorScopes(
+      oomResult,
+      validationResult,
+    );
+    if (mapping !== null) {
+      await mapping.then(
+        () => {
+          submitEnd = performance.now();
+        },
+        (cause) => {
+          gpuOperationFailure = { cause };
+        },
+      );
+    }
+    const scopes = await scopeCompletion;
+    if (gpuOperationFailure === null && scopes.failure !== null) {
+      gpuOperationFailure = scopes.failure;
     }
 
-    // The scopes are popped AFTER the sync, so they cost no extra round trip -
-    // every enclosed operation has already completed.
+    // Scope results and mapping resolve for the same completed submission.
     if (gpuOperationFailure !== null) {
       if (this.#staging !== null) {
         this.#staging.buffer.unmap();
@@ -1564,18 +1773,18 @@ export class WebGpuLexer {
       );
     }
     const stagingBuffer = this.#staging.buffer;
-    if (oomError !== null || validationError !== null) {
+    if (scopes.oom !== null || scopes.validation !== null) {
       stagingBuffer.unmap();
       // A faulted submit leaves stale bytes in the staging buffer; the cached
       // bind group may also be invalid. Force a rebuild rather than reusing it.
       this.#bindGroupKey = "";
       this.#bindGroup = null;
       const parts: string[] = [];
-      if (validationError !== null) {
-        parts.push(`validation: ${validationError.message}`);
+      if (scopes.validation !== null) {
+        parts.push(`validation: ${scopes.validation.message}`);
       }
-      if (oomError !== null) {
-        parts.push(`out-of-memory: ${oomError.message}`);
+      if (scopes.oom !== null) {
+        parts.push(`out-of-memory: ${scopes.oom.message}`);
       }
       throw new Error(
         `GPU lex of ${n} UTF-16 units failed; the result would have been stale. ${
@@ -1583,10 +1792,10 @@ export class WebGpuLexer {
         }`,
       );
     }
-    if (this.#deviceLost.reason !== null) {
+    if (this.#kernel.deviceLost.reason !== null) {
       stagingBuffer.unmap();
       throw new Error(
-        `WebGPU device was lost during lex: ${this.#deviceLost.reason}`,
+        `WebGPU device was lost during lex: ${this.#kernel.deviceLost.reason}`,
       );
     }
 
@@ -1728,7 +1937,10 @@ export class WebGpuLexer {
     this.#bindGroup = null;
     this.#bindGroupKey = "";
     this.#bufferGeneration += 1;
-    this.#tablesBuffer.destroy();
+    this.#kernel.users -= 1;
+    if (this.#kernel.users === 0) {
+      this.#kernel.tablesBuffer.destroy();
+    }
     this.#paramsBuffer.destroy();
     if (this.#resolveBuffer !== null) {
       this.#resolveBuffer.destroy();

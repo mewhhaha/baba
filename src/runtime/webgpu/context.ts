@@ -7,19 +7,14 @@
  * and every submission holds a bounded runtime lease.
  */
 
-import { type AlphabetTables, buildAlphabetTables } from "./alphabet.ts";
-import {
-  chooseChunkLog2,
-  type PackedTables,
-  packTables,
-} from "./kernel_wgsl.ts";
-import { decodeLexerPlanTables, type LexerPlanTables } from "./plan_tables.ts";
+import type { AlphabetTables } from "./alphabet.ts";
+import type { PackedTables } from "./kernel_wgsl.ts";
+import type { LexerPlanTables } from "./plan_tables.ts";
 import type {
   GpuCompactLexResult,
   GpuLexerOptions,
   GpuLexResult,
   WebGpuLexer,
-  WebGpuLexerCreateOptions,
 } from "./lexer.ts";
 
 export interface WebGpuIntegratedLexerLease {
@@ -420,15 +415,19 @@ export class WebGpuRuntime {
     planBytes: Uint8Array,
     options: WebGpuLexerContextOptions,
   ): string {
-    let key = "";
+    const parts: string[] = [];
+    // Numeric chunks avoid per-byte string concatenation and the slower
+    // typed-array iterator while limiting each call to 8192 arguments.
+    const codes: number[] = [];
     for (let start = 0; start < planBytes.length; start += 8192) {
       const end = Math.min(start + 8192, planBytes.length);
-      let part = "";
+      codes.length = end - start;
       for (let index = start; index < end; index += 1) {
-        part += String.fromCharCode(planBytes[index]);
+        codes[index - start] = planBytes[index];
       }
-      key += part;
+      parts.push(String.fromCharCode(...codes));
     }
+    const key = parts.join("");
     if (options.simulateWorkgroupStorageLimit !== undefined) {
       return `${options.simulateWorkgroupStorageLimit}:${key}`;
     }
@@ -457,24 +456,20 @@ export class WebGpuLexerContext {
   #activeJobs = 0;
   #creatingWorkers = 0;
   #disposed = false;
-  #createOptions: WebGpuLexerCreateOptions;
 
   private constructor(
     runtime: WebGpuRuntime,
     planBytes: Uint8Array,
-    plan: LexerPlanTables,
-    alphabet: AlphabetTables,
-    packed: PackedTables,
-    chunkSize: number,
-    createOptions: WebGpuLexerCreateOptions,
+    worker: WebGpuLexer,
   ) {
     this.runtime = runtime;
     this.planBytes = planBytes.slice();
-    this.plan = plan;
-    this.alphabet = alphabet;
-    this.packed = packed;
-    this.chunkSize = chunkSize;
-    this.#createOptions = createOptions;
+    this.plan = worker.plan;
+    this.alphabet = worker.alphabet;
+    this.packed = worker.packed;
+    this.chunkSize = worker.chunkSize;
+    this.#workers.push(worker);
+    this.#idleWorkers.push(worker);
   }
 
   static async create(
@@ -482,42 +477,12 @@ export class WebGpuLexerContext {
     planBytes: Uint8Array,
     options: WebGpuLexerContextOptions,
   ): Promise<WebGpuLexerContext> {
-    const plan = decodeLexerPlanTables(planBytes);
-    if (!plan.guardFree) {
-      throw new Error(
-        `This kernel only supports guard-free grammars. Plan reports: ${
-          plan.guardDiagnostics.join("; ")
-        }`,
-      );
-    }
-    const alphabet = buildAlphabetTables(plan);
-    const packed = packTables(plan, alphabet);
-    let workgroupStorage = runtime.capabilities.limits
-      .maxComputeWorkgroupStorageSize;
-    if (options.simulateWorkgroupStorageLimit !== undefined) {
-      const simulated = options.simulateWorkgroupStorageLimit;
-      if (!Number.isSafeInteger(simulated) || simulated < 1) {
-        throw new Error(
-          `simulateWorkgroupStorageLimit must be a positive safe integer; received ${simulated}.`,
-        );
-      }
-      workgroupStorage = Math.min(workgroupStorage, simulated);
-    }
-    const chunkSize = 1 << chooseChunkLog2(workgroupStorage);
-    const context = new WebGpuLexerContext(
+    const module = await import("./lexer.ts");
+    const worker = await module.WebGpuLexer.create(planBytes, {
       runtime,
-      planBytes,
-      plan,
-      alphabet,
-      packed,
-      chunkSize,
-      {
-        simulateWorkgroupStorageLimit: options.simulateWorkgroupStorageLimit,
-      },
-    );
-    const worker = await context.#createWorker();
-    context.#idleWorkers.push(worker);
-    return context;
+      simulateWorkgroupStorageLimit: options.simulateWorkgroupStorageLimit,
+    });
+    return new WebGpuLexerContext(runtime, planBytes, worker);
   }
 
   get isDisposed(): boolean {
@@ -652,10 +617,11 @@ export class WebGpuLexerContext {
 
   async #createWorker(): Promise<WebGpuLexer> {
     const module = await import("./lexer.ts");
-    const worker = await module.WebGpuLexer.create(this.planBytes, {
-      ...this.#createOptions,
-      runtime: this.runtime,
-    });
+    const compiled = this.#workers[0];
+    if (compiled === undefined) {
+      throw new Error("A WebGpuLexerContext must retain its compiled worker.");
+    }
+    const worker = await module.WebGpuLexer.createContextWorker(compiled);
     this.#workers.push(worker);
     return worker;
   }

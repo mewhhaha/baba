@@ -7,10 +7,10 @@ generated parser's tokenizer that runs on the GPU. It is a **runtime backend,
 not a generate target**: it consumes a `parser.plan` that ships today, produces
 the identical token records, and emits no artifacts of its own.
 
-Read the measurement rules below before adopting it. The only published hardware
-run predates the current Wasm lexer throughput optimization, so it is historical
-evidence about the kernel shape—not a current crossover threshold. Its one-time
-setup cost is still not repaid by a single document.
+Read the measurement rules below before adopting it. The historical hardware
+results predate the current Wasm lexer throughput optimization and compact
+record transfer. Measure setup and complete owned-result latency on the intended
+host before selecting a backend.
 
 ## What It Is
 
@@ -20,8 +20,9 @@ backend produces the same four-`i32` records, in the same order, with the same
 values, from the same plan bytes.
 
 Nothing has to be regenerated. There is no plan-format change, no grammar
-change, and no semantic difference. Token identity is resolved from each DFA
-accepting state's ordered candidates and contextual guards.
+change, and no semantic difference for supported plans. Token identity follows
+each DFA accepting state's ordered candidates. Plans with source-dependent
+guards are rejected.
 
 The design and the measurements are recorded in
 [ADR 0001](adr/0001-webgpu-lexer-backend.md). Regenerate the numbers with
@@ -100,7 +101,7 @@ if (!tables.guardFree) {
 }
 ```
 
-All four shipped example grammars are guard-free.
+Both shipped example grammars, Funcfuck and GPU Duck, are guard-free.
 
 **Device headroom.** Every binding, buffer and dispatch grid is preflighted
 against `device.limits` before anything is allocated, and an input that does not
@@ -110,91 +111,128 @@ unsupported sizes as explicit rows; it never converts a capacity error into a
 partial result. At the WebGPU-guaranteed floor, worst-case output capacity is
 about 16.8 million UTF-16 units.
 
-## Historical Performance
+## Current Performance
 
-This historical run used NVIDIA GeForce RTX 4080 SUPER, Deno 2.9.4 / wgpu on
-Linux, grammar `funcfuck`, randomized source, medians of seven runs after two
-warmups, and worst-case output capacity with owned records. It predates the
-current Wasm lexer optimization and compact-record transfer, so it must not be
-used to select the backend or claim a current CPU/GPU speedup. Sizes are UTF-16
-code units.
+The initial-cleanup snapshot was measured on 2026-10-02 with an RTX 4080 SUPER,
+driver 615.71.09, Deno 2.9.4, Vulkan, and the randomized Funcfuck corpus (seed
+20250726). The owned CPU/GPU comparison below predates the cooperative
+classification improvement described afterward. These are medians and full
+ranges from nine runs after four warmups. Sizes count UTF-16 units; string
+encoding and cold setup are excluded from both steady-state columns. Both paths
+return owned four-word records; GPU capacity is the default one record per input
+unit. Byte parity was checked at every size.
 
-| size    | tokens  | cpu `lex_all` | gpu total | speedup |
-| ------- | ------- | ------------- | --------- | ------- |
-| 16 KiB  | 6505    | 0.45 ms       | 12.85 ms  | 0.04x   |
-| 32 KiB  | 12826   | 0.89 ms       | 13.03 ms  | 0.07x   |
-| 64 KiB  | 25764   | 1.57 ms       | 12.96 ms  | 0.12x   |
-| 128 KiB | 51671   | 2.82 ms       | 13.21 ms  | 0.21x   |
-| 256 KiB | 103243  | 5.53 ms       | 13.58 ms  | 0.41x   |
-| 512 KiB | 206362  | 10.75 ms      | 16.24 ms  | 0.66x   |
-| 1 MiB   | 413140  | 20.93 ms      | 16.45 ms  | 1.27x   |
-| 4 MiB   | 1651674 | 82.56 ms      | 35.99 ms  | 2.29x   |
-| 16 MiB  | 6605769 | 333.62 ms     | 133.87 ms | 2.49x   |
+| input  | Wasm total, ms       | GPU total, ms        |
+| ------ | -------------------- | -------------------- |
+| 16 KiB | 0.17 [0.12, 0.21]    | 13.93 [12.73, 14.95] |
+| 1 MiB  | 7.65 [7.19, 8.76]    | 17.50 [15.40, 18.92] |
+| 4 MiB  | 28.99 [28.19, 30.06] | 24.26 [22.68, 29.89] |
 
-**The historical crossover was 896 KiB of source.** Below it the backend lost,
-and at the small end it loses by more than an order of magnitude. A finer sweep
-reads 0.90x at 768 KiB, 1.04x at 896 KiB, 1.13x at 1 MiB and 1.34x at 1.25 MiB.
-On the stricter comparison of the worst observed GPU sample against the best
-observed CPU sample, the crossover is 1.25 MiB.
+In that snapshot, the GPU wins narrowly at the largest sampled size. The
+overlapping ranges and single adapter do not establish a portable crossover.
+Small files still pay a roughly 12 ms synchronization floor. Cold GPU setup took
+211 ms, versus 0.37 ms for the Wasm reference; reuse sessions and include setup
+for one-off workloads.
 
-That historical crossover moved up from 768 KiB after the Rust lexer stopped
-falling through the dense ASCII table into the sparse range scan. That made
-`lex_all` faster - about 48-50 MiB/s where it previously measured 44-48 - so the
-CPU side of this comparison improved and the GPU had further to climb. The table
-above still carries the pre-change GPU column; only the crossover and the CPU
-rate were re-measured. Any future engine change moves this number again, which
-is the general point: this backend is only ever ahead by a factor that the CPU
-lexer can erode.
+The pointer-doubling kernel now alternates its shared arrays instead of copying
+one into the other every round. Nine alternating before/after pairs reduced its
+median device time from 0.046 to 0.033 ms at 1 MiB and from 0.118 to 0.083 ms at
+4 MiB, about 29%; whole-call timings remained within the observed variation.
 
-The reason the small end was flat is that the dominant cost was neither compute
-nor bandwidth. It is host-device synchronization: `await mapAsync()` costs about
-11.3 ms on this stack regardless of payload size. At 16 KiB, 98% of the wall
-clock is that one wait. The whole pipeline is therefore one command encoder, one
-`queue.submit()` and one `mapAsync()`, and it still cannot get under the floor.
+### Cooperative Character Classification
 
-Cross-check on a second grammar (`gpu-duck`, periodic input): 0.94x at 1 MiB,
-2.05x at 16 MiB. It is slower than `funcfuck` despite having fewer DFA states
-(65 against 81), because the kernel's per-state table read has a data-dependent
-shared-memory bank pattern. **State count alone does not predict cost**, though
-it is a direct multiplier: the central pass costs `n * stateCount` by
-construction.
+The DFA summary pass (`pass_x`) now decodes and classifies source offsets
+cooperatively in shared-memory tiles. Each invocation classifies one offset;
+every DFA state then reuses its character class and UTF-16 width. Unicode range
+searches therefore happen once per offset instead of once per state. Decoding
+uses the full source bounds, so a surrogate pair crossing a tile boundary keeps
+its two-unit width. Segment boundaries still move to avoid splitting pairs. Both
+shared-table and storage-table capacity checks include the tile's memory. The
+backward DFA recurrence and its per-offset barrier remain **O(input length times
+DFA states)**; each tile adds one classification barrier.
 
-### Historical Setup Cost
+Isolated trials on the same adapter used nine alternating before/after pairs
+after four parity warmup pairs, with identical plan bytes and default output
+capacity. Their baseline is the initial-cleanup implementation, including the
+pointer-doubling change above, rather than the historical implementation in
+ADR 0001. The following device-stage medians and full ranges are separate from
+the owned CPU/GPU comparison above:
 
-| step                                        | cost      |
-| ------------------------------------------- | --------- |
-| `requestAdapter`                            | 138.79 ms |
-| `requestDevice`                             | 82.01 ms  |
-| tables, shader module, pipelines            | ~4 ms     |
-| **total `WebGpuLexer.create`**              | 226.06 ms |
-| the Wasm engine's equivalent, for reference | 0.342 ms  |
+| corpus         | input | initial-cleanup `pass_x`, ms | cooperative `pass_x`, ms |
+| -------------- | ----- | ---------------------------- | ------------------------ |
+| Funcfuck ASCII | 1 MiB | 0.911 [0.910, 0.929]         | 0.748 [0.748, 0.749]     |
+| Funcfuck ASCII | 4 MiB | 1.993 [1.990, 3.095]         | 1.655 [1.655, 2.324]     |
+| GPU Duck ASCII | 1 MiB | 2.027 [2.024, 2.746]         | 1.688 [1.684, 2.534]     |
+| GPU Duck ASCII | 4 MiB | 7.422 [7.003, 7.921]         | 6.014 [5.755, 6.774]     |
+| Unicode        | 1 MiB | 3.185 [3.049, 4.254]         | 0.931 [0.930, 0.936]     |
+| Unicode        | 4 MiB | 4.474 [3.672, 5.389]         | 1.226 [1.062, 3.164]     |
 
-That was 660x the CPU engine's setup. The per-call saving at the crossover was
-about 0 ms, and even the 16 MiB case saves only ~228 ms, which is roughly one
-device init. **No single document repays setup.** The backend is only defensible
-in a long-lived process that lexes repeatedly, and a device should be shared
-across every lexer that needs one.
+ASCII stage medians improve 17–19%. GPU Duck has 175 DFA states; both versions
+used shared tables on this adapter. The Unicode grammar uses `\p{L}`, `\p{N}`
+and emoji, with five DFA states, 1590 above-ASCII ranges and about 80% non-ASCII
+UTF-16 units. Its stage medians improve 71–73%, and its owned whole-call results
+are:
 
-### The Benchmark Baseline Matters
+| input | initial-cleanup total, ms | cooperative total, ms |
+| ----- | ------------------------- | --------------------- |
+| 1 MiB | 17.76 [17.31, 19.34]      | 15.65 [14.88, 16.56]  |
+| 4 MiB | 23.05 [22.63, 26.30]      | 19.96 [19.18, 24.35]  |
 
-The historical CPU column above is raw `lex_all` records, not `parser.lex()`,
-which also materializes the token tape and `Token` objects. The current
-benchmark makes the headline comparison stricter: CPU time is source copy +
-`lex_all` + owned raw-record copy, while GPU time is upload + encode +
-submit/map + compact-record expansion. It retains raw `lex_all` time only as a
-diagnostic. String-to-UTF-16 conversion is measured separately on both paths.
-Using `parser.lex()` would measure different work and artificially flatter the
-GPU result.
+Unicode whole-call medians improve 12–13%, with overlapping ranges at 4 MiB.
+Funcfuck whole-call ranges overlap at both sizes. GPU Duck's 4 MiB whole-call
+median moves from 28.27 [26.94, 28.64] to 26.36 [25.86, 27.08] ms. These are
+single-adapter measurements; a faster device stage does not establish a portable
+whole-call crossover.
+
+The updated single-token benchmark verifies parity through 16 MiB. Total GPU
+time grows from 14.34 ms at 4 MiB to 22.76 ms at 16 MiB; the DFA summary stages
+stay near 0.57–0.59 ms/MiB across 4–16 MiB. This input uses its proven capacity
+of one record and does not exhibit the retired quadratic scan.
+
+CPU total includes source copy, `lex_all`, and an owned record copy. GPU total
+includes upload, command encoding, submission/map, and compact-record expansion.
+The generated `parser.lex()` returns a lazy token tape and handles channels and
+diagnostics, so its timings measure a different public surface.
+
+Earlier kernel measurements and the retired quadratic scan are recorded in
+[ADR 0001](adr/0001-webgpu-lexer-backend.md). Its older CPU rates and crossover
+are historical, not backend-selection data.
+
+### Reusing Worker Setup
+
+`WebGpuRuntime.compileLexer()` caches equivalent plan bytes and supplies a
+bounded pool of workers through `context.lex()` and `context.lexCompact()`. The
+first worker decodes and packs the plan once. Additional workers share its
+pipelines, bind-group layout, and immutable table buffer; mutable source,
+result, parameter, and query buffers remain private. The last worker destroys
+the shared table.
+
+Plan cache keys now assemble exact byte strings in bounded numeric chunks,
+avoiding per-byte string allocations. Equal copied plans and views with a
+nonzero byte offset still reuse one context; distinct plan bytes remain
+distinct.
+
+On the same adapter and Deno version, twelve alternating pairs after eight
+warmup pairs measured the initial cleanup against shared worker setup and the
+new keys. Each sample compiles a fresh GPU Duck context on an initialized
+device, then holds its first worker while acquiring three more concurrently.
+Device initialization, lexing, and teardown are excluded. Cells show medians and
+full ranges in milliseconds; all first-compilation pairs improved.
+
+| operation             | initial cleanup      | reused setup         |
+| --------------------- | -------------------- | -------------------- |
+| compile first context | 9.76 [9.01, 10.30]   | 6.45 [6.05, 7.69]    |
+| acquire three workers | 16.00 [15.28, 16.47] | 0.045 [0.040, 0.061] |
+
+The plan has 175 DFA states and 38,324 bytes of packed lexer tables, which are
+uploaded once per worker family. These warm-device timings do not replace the
+cold setup measurement above or imply a comparable steady-state lexing speedup.
 
 ## Honest Reporting
 
-**Dispersion is large and unmodelled.** Two full runs over identical bytes at 16
-MiB produced 133.87 ms / 2.49x and 132.16 ms / 2.73x; the central pass alone
-swung 29% between them, and a third measurement of the same stage in a sweep
-landed 35% lower again. The GPU concurrently drove a desktop, and no clock
-pinning or GPU isolation was applied. Read every single-number speedup in this
-document as +/- 15%, and state any performance gate with dispersion rather than
-as a median.
+The GPU also drives a desktop; clocks and competing work are not isolated.
+Report full sample ranges alongside medians. A kernel-stage improvement may be
+hidden by synchronization and readback in the whole-call measurements.
 
 **One adapter, one stack.** Every number here is from a single NVIDIA GPU under
 Deno's wgpu on Linux. No second GPU, driver or WebGPU implementation has been
@@ -203,7 +241,7 @@ measured.
 **Not measured at all:**
 
 - the synchronization floor in Chrome/Dawn or Firefox on real GPU hardware. The
-  ~11.3 ms floor is a property of the measured stack and it is what sets the
+  synchronization floor is a property of the measured stack and sets the
   crossover. A host with a ~1 ms floor would move the crossover by roughly an
   order of magnitude, but that is an estimate by substitution, not a result;
 - floor-device throughput. Floor-device _behaviour_ is simulated and tested; its
@@ -211,21 +249,14 @@ measured.
   at the spec floor, but it remains unmeasured there;
 - readback cost on a non-Deno host. Its per-byte cost is discontinuous in the
   Deno data, so the claim that it "disappears in a browser" is untested;
-- any real Baba source file at these sizes. The largest program in this
-  repository is 224 bytes. All throughput input is synthetic and about three
-  orders of magnitude below the crossover.
+- real application corpora at these sizes. The throughput inputs above are
+  synthetic expansions of small example programs.
 
 **Worst-case device allocation is roughly 15x the UTF-16 source bytes.** Per
 UTF-16 unit this is 2 B of source, 12 B across the three per-position arrays, 8
 B of compact records and 8 B of staging—about 30 B total. The owned public
 four-word host result adds up to another 16 B per emitted record, so a
 one-token-per-unit input reaches roughly 23x across device and host memory.
-
-**`parse()` no longer fails below the sizes this backend targets.** It used to
-throw above roughly 8 KiB of repetition-heavy source, misrecorded here as
-"roughly 750 KiB". Cursor materialization is now linear in the token count and
-The densest measured grammar shape parses 6 MiB; an input that still does not
-fit reports `PARSER_INPUT_TOO_LARGE` rather than throwing. See `docs/limits.md`.
 
 ## Correctness
 
@@ -235,15 +266,19 @@ argument: record count plus every field of every record.
 `tests/webgpu_lexer_parity_test.ts` is the gate. It compiles its grammar inline,
 so it needs nothing on disk, and covers the empty string, error tokens, lone and
 paired surrogates, above-ASCII classes, longest-match backtracking, unterminated
-constructs, 9000-unit single tokens, both grid boundaries swept unit by unit,
-runs spanning three to five segments, a squeezed dispatch grid, and a simulated
-floor device. CI runs this gate through the Vulkan llvmpipe software adapter.
-That provides deterministic correctness coverage but is not evidence of hardware
-GPU performance.
+constructs, 9000-unit single tokens, classification-tile boundaries with
+accepted astral strings and partial tiles, chunk and segment boundaries swept
+unit by unit, runs spanning three to five segments, a squeezed dispatch grid,
+and a simulated floor device. The current CI workflow runs `deno task test`
+without `--unstable-webgpu`, so adapter-dependent cases are skipped. The
+host-side option and plan-decoding cases still run. Run the GPU gate explicitly
+on a WebGPU-enabled host; software-adapter parity is correctness evidence and
+does not measure hardware GPU performance.
 
-`deno task parity:webgpu-lexer` is the wider sweep across the four shipped
-example grammars, with multi-MiB corpora and failure-mode guards. It needs
-`deno task bootstrap` to have generated the example artifacts first.
+`deno task parity:webgpu-lexer` sweeps one shipped example grammar at a time,
+with multi-MiB corpora and failure-mode guards. It defaults to Funcfuck; use
+`--grammar gpu-duck` for the second example. It needs `deno task bootstrap` to
+have generated the example artifacts first.
 
 ## Benchmarks
 
@@ -251,6 +286,9 @@ example grammars, with multi-MiB corpora and failure-mode guards. It needs
 deno task bench:webgpu-lexer
 deno task bench:webgpu-lexer --grammar gpu-duck --runs 7 --json out.json
 deno task bench:webgpu-lexer:pathological
+deno test --unstable-webgpu --allow-read --allow-write --allow-run tests/webgpu_lexer_parity_test.ts
+deno task parity:webgpu-lexer
+deno task parity:webgpu-lexer --grammar gpu-duck
 # Explicit software-adapter experiment only; never report this as hardware data.
 deno task bench:webgpu-lexer --allow-fallback-adapter
 ```

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Remove redundant GPU frontend staging and skip grammar-inapplicable work.
+  Reduce shared-memory copies in GPU lexer pointer doubling.
+- Read back only populated frontend arrays and classify lexer source units
+  cooperatively before applying DFA transitions. See the
+  [GPU frontend](docs/webgpu-frontend.md#populated-readback-and-cooperative-classification)
+  and
+  [lexer measurements](docs/webgpu-lexer.md#cooperative-character-classification).
+- Share immutable lexer tables and pipelines across context workers while
+  keeping execution buffers independent, and reduce exact-byte plan-cache key
+  allocation.
+- Keep GPU execution code out of the normal Wasm loader's runtime dependencies.
+  Regenerate parser artifacts for the updated runtime identity.
+- Release lexer leases when frontend runtime acquisition fails, and validate
+  caller-supplied capacities against the actual executor allocation.
+- Compare default and oracle GPU capacities separately, and report resident
+  completion latency independently of submission.
+
 ## 9.0.2
 
 - Speed up DFA construction and Unicode intersection while preserving generated

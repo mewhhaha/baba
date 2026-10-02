@@ -143,20 +143,22 @@ export function passXWorkgroup(stateCount: number): number {
 }
 
 /**
- * Workgroup storage `pass_x` needs: the DFA tables plus four rotating columns of
- * two u32 per state. Independent of `SEG_SIZE`.
+ * Workgroup storage `pass_x` needs: the DFA tables, four rotating columns of
+ * two u32 per state, and one classified source unit per invocation. Independent
+ * of `SEG_SIZE`.
  */
 export function passXWorkgroupBytes(
   stateCount: number,
   classCount: number,
 ): number {
   const tableWords = 128 + stateCount + stateCount * classCount;
-  return tableWords * 4 + 8 * stateCount * 4;
+  const classificationWords = passXWorkgroup(stateCount);
+  return (tableWords + 8 * stateCount + classificationWords) * 4;
 }
 
 /** Workgroup storage for pass_x when the dense table stays in device storage. */
 export function passXStorageWorkgroupBytes(stateCount: number): number {
-  return (128 + stateCount + 8 * stateCount) * 4;
+  return (128 + stateCount + 8 * stateCount + passXWorkgroup(stateCount)) * 4;
 }
 
 /** Workgroup storage `pass_y` needs: three u32 per state. */
@@ -283,7 +285,8 @@ export function buildKernelSource(
     );
   }
   // PASS X keeps the whole DFA + classifier in workgroup shared memory plus four
-  // rotating state columns. PASS B needs 2 * CHUNK_SIZE u32. Each entry point's
+  // rotating state columns and one classification tile. PASS B needs
+  // 2 * CHUNK_SIZE u32. Each entry point's
   // requirement is checked against the device limit that was actually requested,
   // not against a constant chosen on one adapter.
   const passXBytes = passXWorkgroupBytes(packed.stateCount, packed.classCount);
@@ -298,6 +301,8 @@ export function buildKernelSource(
         `(128 + stateCount ${packed.stateCount} + stateCount*classCount ${denseLength} i32) ` +
         `plus four rotating columns of two u32 per state (${
           8 * packed.stateCount * 4
+        } B) and a classification tile (${
+          passXWorkgroup(packed.stateCount) * 4
         } B); this device reports maxComputeWorkgroupStorageSize=${maxComputeWorkgroupStorageSize} B. ` +
         `The storage-buffer fallback needs ${storagePassXBytes} B, ` +
         `but this device reports maxComputeWorkgroupStorageSize=${maxComputeWorkgroupStorageSize} B.`,
@@ -327,7 +332,7 @@ export function buildKernelSource(
 
   const passXWg = passXWorkgroup(packed.stateCount);
   // States each `pass_x` thread carries. 1 for every DFA with at most
-  // MAX_WORKGROUP_INVOCATIONS states, which is all four shipped grammars.
+  // MAX_WORKGROUP_INVOCATIONS states.
   const statesPerThread = Math.ceil(packed.stateCount / passXWg);
   const stateSlots: number[] = [];
   for (let slot = 0; slot < statesPerThread; slot += 1) {
@@ -339,8 +344,7 @@ export function buildKernelSource(
   // wgpu/NVIDIA at 16 MiB of randomized funcfuck source: the loop-over-array
   // form runs pass_x in 10.67 ms and this form in 8.10 ms, because a
   // dynamically indexed private array does not get promoted to registers.
-  // statesPerThread is 1 for every DFA with at most 256 states, which is all
-  // four shipped grammars.
+  // statesPerThread is 1 for every DFA with at most 256 states.
   const passXCompute = stateSlots.map((slot) =>
     `      {
         let q = li + ${slot}u * PASS_X_WG;
@@ -592,6 +596,10 @@ fn seg_start(k: u32, n: u32) -> u32 {
 // and writes column p; with four slots those never collide, so one barrier per
 // step is sufficient. Independent of SEG_SIZE.
 var<workgroup> col: array<u32, ${8 * packed.stateCount}>;
+// Class ids are validated nonnegative i32 values, leaving bit 31 available for
+// width - 1. Each invocation classifies a distinct offset, then all DFA states
+// share the result while applying the existing backward recurrence.
+var<workgroup> classifiedSource: array<u32, ${passXWg}>;
 
 @compute @workgroup_size(${passXWg})
 fn pass_x(
@@ -626,31 +634,52 @@ ${
     // overwritten.
     workgroupBarrier();
 
-    var p = limit;
+    var tileLimit = limit;
     loop {
-      if (p <= base) { break; }
-      p -= 1u;
-
-      let unit = read_unit(p);
-      var cp: u32 = unit;
-      var width: u32 = 1u;
-      if (unit >= 0xD800u && unit <= 0xDBFFu && (p + 1u) < n) {
-        let nxt = read_unit(p + 1u);
-        if (nxt >= 0xDC00u && nxt <= 0xDFFFu) {
-          cp = ((unit - 0xD800u) << 10u) + (nxt - 0xDC00u) + 0x10000u;
-          width = 2u;
-        }
+      if (tileLimit <= base) { break; }
+      var tileBase = base;
+      if (tileLimit - base > PASS_X_WG) {
+        tileBase = tileLimit - PASS_X_WG;
       }
-      let cls = class_of(cp);
-      // The segment boundary never splits a pair, so np <= limit always.
-      let np = p + width;
-      let nextSlot = (np & 3u) * 2u;
+      let sourcePosition = tileBase + li;
+      if (sourcePosition < tileLimit) {
+        let unit = read_unit(sourcePosition);
+        var cp: u32 = unit;
+        var width: u32 = 1u;
+        // Tile boundaries may split a pair. Decode against the full source so
+        // a high surrogate keeps its two-unit width across a tile boundary.
+        // A low surrogate's own offset retains the original one-unit result.
+        if (unit >= 0xD800u && unit <= 0xDBFFu && (sourcePosition + 1u) < n) {
+          let nxt = read_unit(sourcePosition + 1u);
+          if (nxt >= 0xDC00u && nxt <= 0xDFFFu) {
+            cp = ((unit - 0xD800u) << 10u) + (nxt - 0xDC00u) + 0x10000u;
+            width = 2u;
+          }
+        }
+        classifiedSource[li] = class_of(cp) | ((width - 1u) << 31u);
+      }
+      workgroupBarrier();
+
+      var p = tileLimit;
+      loop {
+        if (p <= tileBase) { break; }
+        p -= 1u;
+        let classified = classifiedSource[p - tileBase];
+        let cls = classified & 0x7FFFFFFFu;
+        let width = 1u + (classified >> 31u);
+        // The segment boundary never splits a pair, so np <= limit always.
+        let np = p + width;
+        let nextSlot = (np & 3u) * 2u;
 
 ${passXCompute}
 
-      let writeSlot = (p & 3u) * 2u;
+        let writeSlot = (p & 3u) * 2u;
 ${passXStore}
-      workgroupBarrier();
+        // This also finishes every classifiedSource read before the next tile
+        // overwrites it, so the cooperative load needs only one extra barrier.
+        workgroupBarrier();
+      }
+      tileLimit = tileBase;
     }
 
     // M_k = E_base. An empty segment contributes the identity element. This runs
@@ -785,7 +814,7 @@ fn pass_b(
     var limit = base + CHUNK_SIZE;
     if (limit > n) { limit = n; }
 
-    // Previous iteration's final read of ja must complete before it is refilled.
+    // Previous iteration's final reads must complete before the arrays are reused.
     workgroupBarrier();
     for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) {
       let p = base + i;
@@ -795,25 +824,41 @@ fn pass_b(
     }
     workgroupBarrier();
 
-    // Guarded pointer doubling. Invariant after round r:
-    //   ja[i] = min(position after 2^r orbit steps, first position >= limit).
+    // Guarded pointer doubling. After r completed rounds, the active array holds
+    // min(position after 2^r orbit steps, first position >= limit).
     // Every step advances at least one code unit, so CHUNK_LOG2 rounds are
     // enough to push every position in the chunk to or past the limit.
     for (var r = 0u; r < CHUNK_LOG2; r += 1u) {
-      for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) {
-        let v = ja[i];
-        var nv = v;
-        if (v < limit) { nv = ja[v - base]; }
-        jb[i] = nv;
+      if ((r & 1u) == 0u) {
+        for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) {
+          let v = ja[i];
+          var nv = v;
+          if (v < limit) { nv = ja[v - base]; }
+          jb[i] = nv;
+        }
+      } else {
+        for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) {
+          let v = jb[i];
+          var nv = v;
+          if (v < limit) { nv = jb[v - base]; }
+          ja[i] = nv;
+        }
       }
-      workgroupBarrier();
-      for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) { ja[i] = jb[i]; }
+      // All reads finish before the next round reuses the previous input array.
       workgroupBarrier();
     }
 
+    // Even round counts finish in ja; odd counts finish in jb. The preferred
+    // 4096-unit chunk uses 12 rounds, while the floor-device chunk uses 11.
     for (var i = li; i < CHUNK_SIZE; i += PASS_B_WG) {
       let p = base + i;
-      if (p < n) { exitPos[p] = ja[i]; }
+      if (p < n) {
+        if ((CHUNK_LOG2 & 1u) == 0u) {
+          exitPos[p] = ja[i];
+        } else {
+          exitPos[p] = jb[i];
+        }
+      }
     }
 
     chunk += params.passBStride;
