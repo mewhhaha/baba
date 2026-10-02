@@ -77,6 +77,66 @@ Inspect a generated binary parser plan with:
 deno task inspect-plan generated/wasm/parser.plan
 ```
 
+## Compiler and Incremental Document Improvements
+
+DFA construction indexes NFA ranges by alphabet segment and expands only the
+current live subset. Alphabet construction advances through sorted transition
+rows once, and DFA intersection merges sorted rows instead of comparing every
+pair of ranges. Unordered or overlapping DFA rows retain their original lookup
+and witness ordering. State numbering, candidate sets, alphabet classes, and
+resource-limit diagnostics are preserved.
+
+Local compiler measurements with Deno 2.9.7 / V8 15.0.245.2-rusty, five warmups
+and 20 samples (median milliseconds):
+
+| `large-runtime` operation | Before | After |
+| ------------------------- | -----: | ----: |
+| Compiler pipeline         |  16.18 | 14.38 |
+| Combined lexer DFA        |   8.67 |  7.32 |
+
+An alternating, same-process comparison of a Unicode-property identifier DFA
+(`[_\p{L}][_\p{L}\p{N}]*` plus whitespace), with five warmups and 20 samples,
+measured 9.92 -> 1.73 ms median. Complete DFA data matched the previous
+implementation across fixture and randomized comparisons.
+
+Unicode intersection of `\p{L}+` with the identifier pattern above measured
+0.667 -> 0.0168 ms per call. This comparison used 30 warmups and 40 alternating
+samples of 100 calls, with 677 and 678 ranges in the two start-state rows.
+
+Incremental documents share one parser analysis between validation and cursor
+materialization, copy shifted token suffixes using their fixed record layout,
+and reuse materialized snapshot text when reading token spans. Validation still
+reports success independently when cursor allocation fails.
+
+Measure these workloads with:
+
+```sh
+deno task bench:document
+deno task bench:document --before-root /path/to/previous/checkout
+```
+
+The comparison loads each checkout's compiler and runtime together so its plan
+identity matches its loader. It alternates operations between implementations
+after eight warmups and reports p25 and median over 40 samples. Each update
+measurement inserts and removes a space in the middle of 524,305 UTF-16 units.
+The token-text workload includes an edit and the first text read of every token
+in 77,952 units after 128 earlier insertions.
+
+Local results with Deno 2.9.4 / V8 15.0.245.2-rusty (median milliseconds):
+
+| Document operation                   | Before | After |
+| ------------------------------------ | -----: | ----: |
+| Incremental parse, insert and remove |  11.20 |  7.91 |
+| Incremental validate, insert/remove  |   5.23 |  4.28 |
+| Edit and first token-text pass       |   6.71 |  1.00 |
+
+These measurements are workload-specific. Three Wasm lexer experiments were
+reverted because they slowed ordinary fixtures, even when one improved long
+string tokens. The retained changes leave the Wasm engine and plan formats
+unchanged. Published source and documentation grow by about 6.2 KB; the package
+payload budget increases from 1,360,000 to 1,367,000 bytes. The shared loader
+source shrinks by about 2.2 KB.
+
 ## Wasm Hot Paths
 
 The scanner caches plan headers per call and skips per-character dependency

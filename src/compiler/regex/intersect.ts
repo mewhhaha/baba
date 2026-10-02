@@ -131,6 +131,60 @@ function overlappingTransitions(
   left: readonly DfaTransition[],
   right: readonly DfaTransition[],
 ): Array<{ codePoint: number; leftTarget: number; rightTarget: number }> {
+  if (
+    !hasOrderedDisjointTransitions(left) ||
+    !hasOrderedDisjointTransitions(right)
+  ) {
+    return overlappingUnorderedTransitions(left, right);
+  }
+  const result: Array<{
+    codePoint: number;
+    leftTarget: number;
+    rightTarget: number;
+  }> = [];
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftTransition = left[leftIndex];
+    const rightTransition = right[rightIndex];
+    expect(leftTransition, "Left DFA transition does not exist.");
+    expect(rightTransition, "Right DFA transition does not exist.");
+    const start = Math.max(leftTransition.start, rightTransition.start);
+    const end = Math.min(leftTransition.end, rightTransition.end);
+    if (start <= end) {
+      result.push({
+        codePoint: start,
+        leftTarget: leftTransition.target,
+        rightTarget: rightTransition.target,
+      });
+    }
+    if (leftTransition.end <= rightTransition.end) {
+      leftIndex++;
+    }
+    if (rightTransition.end <= leftTransition.end) {
+      rightIndex++;
+    }
+  }
+  return result;
+}
+
+function hasOrderedDisjointTransitions(
+  transitions: readonly DfaTransition[],
+): boolean {
+  let previousEnd = -Infinity;
+  for (const transition of transitions) {
+    if (transition.start <= previousEnd) {
+      return false;
+    }
+    previousEnd = transition.end;
+  }
+  return true;
+}
+
+function overlappingUnorderedTransitions(
+  left: readonly DfaTransition[],
+  right: readonly DfaTransition[],
+): Array<{ codePoint: number; leftTarget: number; rightTarget: number }> {
   const result: Array<{
     codePoint: number;
     leftTarget: number;
@@ -200,4 +254,10 @@ function transitionTarget(
     }
   }
   return null;
+}
+
+function expect(value: unknown, message: string): asserts value {
+  if (!value) {
+    throw new Error(message);
+  }
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 9.0.2
+
+- Speed up DFA construction and Unicode intersection while preserving generated
+  tables, witnesses, and resource-limit diagnostics.
+- Accelerate incremental parsing, validation, and token text reads after edits.
+  See
+  [performance measurements](docs/performance.md#compiler-and-incremental-document-improvements).
+- Add `deno task bench:document` for paired checkout comparisons.
+- Regenerate parser artifacts to use the updated runtime identity.
+
 ## 9.0.1
 
 - Speed up Wasm scanning, UTF-16 copies, and island parsing. See

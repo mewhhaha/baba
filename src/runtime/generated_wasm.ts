@@ -1289,6 +1289,9 @@ class ExternalSourceSnapshot implements SourceSnapshot {
     if (selectedEnd <= selectedStart) {
       return "";
     }
+    if (this.#materialized !== undefined) {
+      return this.#materialized.slice(selectedStart, selectedEnd);
+    }
     const parts: string[] = [];
     let offset = 0;
     for (const piece of this.pieces) {
@@ -1611,6 +1614,14 @@ function externalIncrementalRelex(
   searchFloorOffset: number,
   searchFloorToken: number,
 ): ExternalIncrementalRelexResult {
+  if (
+    previous.records.length !==
+      previous.count * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+  ) {
+    throw new Error(
+      "Incremental lexer records do not match their token count.",
+    );
+  }
   const oldSourceLength = previousSource.length;
   let earliestToken = previous.count;
   let firstTokenToCheck = 0;
@@ -1785,23 +1796,11 @@ function externalIncrementalRelex(
       tokenIndex++
     ) {
       const oldBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-      for (
-        let field = 0;
-        field < WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-        field++
-      ) {
-        const value = previous.records[oldBase + field];
-        if (value === undefined) {
-          throw new Error(
-            `Incremental token record ${tokenIndex} is incomplete.`,
-          );
-        }
-        let shifted = value;
-        if (field === 1 || field === 2 || field === 4) {
-          shifted += lengthDelta;
-        }
-        records[outputWord + field] = shifted;
-      }
+      records[outputWord] = previous.records[oldBase];
+      records[outputWord + 1] = previous.records[oldBase + 1] + lengthDelta;
+      records[outputWord + 2] = previous.records[oldBase + 2] + lengthDelta;
+      records[outputWord + 3] = previous.records[oldBase + 3];
+      records[outputWord + 4] = previous.records[oldBase + 4] + lengthDelta;
       outputWord += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
     }
   }
@@ -2132,11 +2131,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
 
     let parserWork: IncrementalParserWork | undefined;
     if (this.goal !== "lex") {
-      const validated = this.#validateCurrentRecords();
-      this.#validateResult = externalIncrementalValidateResult(
-        this.#snapshot,
-        validated,
-      );
+      this.#refreshParserResults();
       parserWork = {
         reparsedRanges: [{ start: 0, end: this.#source.length }],
         parserActions: this.#lexState.count,
@@ -2144,13 +2139,6 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
         reusedCheckpoints: 0,
         createdCheckpoints: 0,
       };
-      if (this.goal === "parse") {
-        const parsed = this.#parseCurrentRecords();
-        this.#parseResult = externalIncrementalParseResult(
-          this.#snapshot,
-          parsed,
-        );
-      }
     }
 
     if (this.goal === "lex") {
@@ -2237,56 +2225,38 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     if (this.goal === "lex") {
       return;
     }
-    this.#validateResult = externalIncrementalValidateResult(
-      this.#snapshot,
-      this.#validateCurrentRecords(),
-    );
-    if (this.goal === "parse") {
-      this.#parseResult = externalIncrementalParseResult(
-        this.#snapshot,
-        this.#parseCurrentRecords(),
-      );
-    }
-  }
-
-  #validateCurrentRecords(): ValidateParseResult {
-    const islandProgram = this.islandProgram;
-    if (islandProgram === undefined) {
-      throw new Error("Incremental validation has no strict island parser.");
-    }
-    return validateExternalIslandRecords(
-      this.metadata,
-      islandProgram,
-      this.wasm,
-      this.planByteLength,
-      this.sourceCache,
-      this.#source,
-      {
-        preserveTrivia: this.#preserveTrivia,
-        maxParserActions: this.#maxParserActions,
-      },
-      externalIncrementalRawRecords(this.#lexState),
-    );
-  }
-
-  #parseCurrentRecords(): CursorParseResult<Root> {
     const islandProgram = this.islandProgram;
     if (islandProgram === undefined) {
       throw new Error("Incremental parsing has no strict island parser.");
     }
-    return parseExternalIslandRecords(
+    const analysis = analyzeExternalIslandInRust(
       this.metadata,
       islandProgram,
       this.wasm,
       this.planByteLength,
       this.sourceCache,
       this.#source,
-      {
-        preserveTrivia: this.#preserveTrivia,
-        maxParserActions: this.#maxParserActions,
-      },
+      this.#maxParserActions,
       externalIncrementalRawRecords(this.#lexState),
     );
+    this.#validateResult = externalIncrementalValidateResult(
+      this.#snapshot,
+      analysis,
+    );
+    if (this.goal === "parse") {
+      const parsed = parseExternalIslandAnalysis<Root>(
+        this.metadata,
+        islandProgram,
+        this.wasm,
+        this.#source,
+        { preserveTrivia: this.#preserveTrivia },
+        analysis,
+      );
+      this.#parseResult = externalIncrementalParseResult(
+        this.#snapshot,
+        parsed,
+      );
+    }
   }
 
   #assertLive(): void {
@@ -2298,7 +2268,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
 
 function externalIncrementalValidateResult(
   snapshot: SourceSnapshot,
-  result: ValidateParseResult,
+  result: ExternalRustIslandAnalysis,
 ): IncrementalValidateResult {
   if (result.ok) {
     return {
@@ -2770,60 +2740,14 @@ function parseExternalIsland<Root extends RuleCursor>(
     source,
     maxParserActions,
   );
-  if (!analysis.ok) {
-    return {
-      ok: false,
-      source,
-      cursor: null,
-      diagnostics: analysis.diagnostics,
-    };
-  }
-  let preserveTrivia = metadata.defaultPreserveTrivia;
-  if (options !== undefined && options.preserveTrivia !== undefined) {
-    if (typeof options.preserveTrivia !== "boolean") {
-      throw new TypeError(
-        `preserveTrivia must be a boolean, got '${
-          String(options.preserveTrivia)
-        }'.`,
-      );
-    }
-    preserveTrivia = options.preserveTrivia;
-  }
-  try {
-    const cursor = materializeExternalIslandCursorInRust(
-      metadata,
-      program,
-      wasm,
-      source,
-      analysis,
-      preserveTrivia,
-    );
-    return { ok: true, source, cursor: cursor as Root, diagnostics: [] };
-  } catch (error) {
-    if (error instanceof ExternalWasmCapacityError) {
-      return {
-        ok: false,
-        source,
-        cursor: null,
-        diagnostics: [externalOversizedInputDiagnostic(
-          source,
-          error.requiredBytes,
-          externalOversizedSplitRemedy,
-        )],
-      };
-    }
-    return {
-      ok: false,
-      source,
-      cursor: null,
-      diagnostics: [
-        externalInternalParserDiagnostic(error, {
-          start: source.length,
-          end: source.length,
-        }),
-      ],
-    };
-  }
+  return parseExternalIslandAnalysis(
+    metadata,
+    program,
+    wasm,
+    source,
+    options,
+    analysis,
+  );
 }
 
 function parseExternalIslandRecords<Root extends RuleCursor>(
@@ -2851,6 +2775,24 @@ function parseExternalIslandRecords<Root extends RuleCursor>(
     maxParserActions,
     records,
   );
+  return parseExternalIslandAnalysis(
+    metadata,
+    program,
+    wasm,
+    source,
+    options,
+    analysis,
+  );
+}
+
+function parseExternalIslandAnalysis<Root extends RuleCursor>(
+  metadata: ExternalRuntimeMetadata,
+  program: StrictIslandParserProgram,
+  wasm: ExternalParserWasmExports,
+  source: string,
+  options: ParseOptions | undefined,
+  analysis: ExternalRustIslandAnalysis,
+): CursorParseResult<Root> {
   if (!analysis.ok) {
     return {
       ok: false,
@@ -2905,37 +2847,6 @@ function parseExternalIslandRecords<Root extends RuleCursor>(
       ],
     };
   }
-}
-
-function validateExternalIslandRecords(
-  metadata: ExternalRuntimeMetadata,
-  program: StrictIslandParserProgram,
-  wasm: ExternalParserWasmExports,
-  planByteLength: number,
-  sourceCache: ExternalWasmSourceCache,
-  source: string,
-  options: ParseOptions | undefined,
-  records: Int32Array,
-): ValidateParseResult {
-  const maxParserActions = externalPositiveLimit(
-    options,
-    "maxParserActions",
-    1_000_000,
-  );
-  const analysis = analyzeExternalIslandInRust(
-    metadata,
-    program,
-    wasm,
-    planByteLength,
-    sourceCache,
-    source,
-    maxParserActions,
-    records,
-  );
-  if (!analysis.ok) {
-    return { ok: false, source, diagnostics: analysis.diagnostics };
-  }
-  return { ok: true, source, diagnostics: [] };
 }
 
 function analyzeExternalIslandInRust(

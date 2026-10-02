@@ -71,6 +71,33 @@ export function buildDfa(
   limits: RegexCompilerLimits = {},
 ): Dfa {
   const segments = collectAlphabetSegments(nfa);
+  const segmentByBoundary = new Map<number, number>();
+  for (let index = 0; index < segments.length; index++) {
+    segmentByBoundary.set(segments[index].start, index);
+  }
+  segmentByBoundary.set(MAX_CODE_POINT + 1, segments.length);
+  const transitionsByNfaState = nfa.states.map((state) => {
+    const transitions: {
+      firstSegment: number;
+      afterSegment: number;
+      target: number;
+    }[] = [];
+    for (const transition of state.transitions) {
+      for (const range of transition.ranges) {
+        const firstSegment = segmentByBoundary.get(range.start);
+        const afterSegment = segmentByBoundary.get(range.end + 1);
+        if (firstSegment === undefined || afterSegment === undefined) {
+          throw new Error("NFA transition range has no alphabet boundary.");
+        }
+        transitions.push({
+          firstSegment,
+          afterSegment,
+          target: transition.target,
+        });
+      }
+    }
+    return transitions;
+  });
   const states: DfaState[] = [];
   const stateByKey = new Map<string, number>();
   const queue: number[][] = [];
@@ -79,11 +106,15 @@ export function buildDfa(
     const key = normalized.join(",");
     const existing = stateByKey.get(key);
     if (existing !== undefined) return existing;
-    const accepts = [
-      ...new Set(
-        normalized.flatMap((state) => nfa.states[state]?.accepts ?? []),
-      ),
-    ].sort((left, right) => left - right);
+    const acceptSet = new Set<number>();
+    for (const stateId of normalized) {
+      const state = nfa.states[stateId];
+      expect(state, `NFA state ${stateId} does not exist.`);
+      for (const accept of state.accepts) {
+        acceptSet.add(accept);
+      }
+    }
+    const accepts = [...acceptSet].sort((left, right) => left - right);
     const id = states.length;
     const limit = limits.dfaStateLimit;
     if (limit !== undefined && id >= limit) {
@@ -109,10 +140,35 @@ export function buildDfa(
   for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
     const nfaStates = queue[queueIndex];
     const dfaState = states[queueIndex];
+    expect(nfaStates, `DFA work item ${queueIndex} does not exist.`);
+    expect(dfaState, `DFA state ${queueIndex} does not exist.`);
     const transitions: DfaTransition[] = [];
-    for (const segment of segments) {
-      const targets = move(nfa, nfaStates, segment.start);
-      if (targets.length === 0) continue;
+    // Expand the live subset's ranges once instead of rescanning it for every
+    // global alphabet segment, including segments on which it cannot move.
+    const targetsBySegment: number[][] = [];
+    for (const stateId of nfaStates) {
+      const nfaTransitions = transitionsByNfaState[stateId];
+      expect(nfaTransitions, `NFA state ${stateId} has no transition plan.`);
+      for (const transition of nfaTransitions) {
+        for (
+          let segmentIndex = transition.firstSegment;
+          segmentIndex < transition.afterSegment;
+          segmentIndex++
+        ) {
+          let targets = targetsBySegment[segmentIndex];
+          if (targets === undefined) {
+            targets = [];
+            targetsBySegment[segmentIndex] = targets;
+          }
+          targets.push(transition.target);
+        }
+      }
+    }
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+      const targets = targetsBySegment[segmentIndex];
+      if (targets === undefined) continue;
+      const segment = segments[segmentIndex];
+      expect(segment, `DFA alphabet segment ${segmentIndex} does not exist.`);
       const target = addState(epsilonClosure(nfa, targets));
       const previous = transitions[transitions.length - 1];
       if (
@@ -246,7 +302,10 @@ export function computeDfaAlphabet(
   states: readonly DfaState[],
 ): DfaAlphabet {
   const boundaries = new Set([0, ASCII_CLASS_LIMIT, MAX_CODE_POINT + 1]);
+  const orderedTransitionsByState: boolean[] = [];
   for (const state of states) {
+    let previousEnd = -1;
+    let ordered = true;
     for (const transition of state.transitions) {
       if (transition.start < 0 || transition.end > MAX_CODE_POINT) {
         throw new Error(
@@ -258,9 +317,14 @@ export function computeDfaAlphabet(
           `DFA transition range [${transition.start}, ${transition.end}] is inverted.`,
         );
       }
+      if (transition.start <= previousEnd) {
+        ordered = false;
+      }
+      previousEnd = transition.end;
       boundaries.add(transition.start);
       if (transition.end < MAX_CODE_POINT) boundaries.add(transition.end + 1);
     }
+    orderedTransitionsByState.push(ordered);
   }
   const cuts = [...boundaries].sort((left, right) => left - right);
 
@@ -270,13 +334,33 @@ export function computeDfaAlphabet(
   const classIdByKey = new Map<string, number>();
   const segmentClassIds: number[] = [];
   const segments: CharRange[] = [];
+  const transitionIndexByState = new Uint32Array(states.length);
   for (let index = 0; index + 1 < cuts.length; index++) {
     const start = cuts[index];
     const end = cuts[index + 1] - 1;
     if (start > end) continue;
     const targets: number[] = [];
-    for (const state of states) {
-      targets.push(transitionTargetAt(state, start));
+    for (let stateIndex = 0; stateIndex < states.length; stateIndex++) {
+      const state = states[stateIndex];
+      expect(state, `DFA state at index ${stateIndex} does not exist.`);
+      if (!orderedTransitionsByState[stateIndex]) {
+        targets.push(transitionTargetAt(state, start));
+        continue;
+      }
+      // Cuts increase monotonically, so a sorted transition row is scanned
+      // only once across the entire alphabet instead of once per segment.
+      let transitionIndex = transitionIndexByState[stateIndex];
+      let transition = state.transitions[transitionIndex];
+      while (transition !== undefined && transition.end < start) {
+        transitionIndex++;
+        transition = state.transitions[transitionIndex];
+      }
+      transitionIndexByState[stateIndex] = transitionIndex;
+      let target = -1;
+      if (transition !== undefined && transition.start <= start) {
+        target = transition.target;
+      }
+      targets.push(target);
     }
     const key = targets.join(",");
     const existing = classIdByKey.get(key);
@@ -420,31 +504,19 @@ function epsilonClosure(nfa: Nfa, roots: readonly number[]): number[] {
     const stateId = queue[index];
     if (result.has(stateId)) continue;
     result.add(stateId);
-    for (const target of nfa.states[stateId]?.epsilon ?? []) {
+    const state = nfa.states[stateId];
+    expect(state, `NFA state ${stateId} does not exist.`);
+    for (const target of state.epsilon) {
       queue.push(target);
     }
   }
   return [...result].sort((left, right) => left - right);
 }
 
-function move(
-  nfa: Nfa,
-  stateIds: readonly number[],
-  codePoint: number,
-): number[] {
-  const result = new Set<number>();
-  for (const stateId of stateIds) {
-    for (const transition of nfa.states[stateId]?.transitions ?? []) {
-      if (
-        transition.ranges.some((range) =>
-          range.start <= codePoint && codePoint <= range.end
-        )
-      ) {
-        result.add(transition.target);
-      }
-    }
+function expect(value: unknown, message: string): asserts value {
+  if (!value) {
+    throw new Error(message);
   }
-  return [...result];
 }
 
 function collectAlphabetSegments(nfa: Nfa): CharRange[] {
