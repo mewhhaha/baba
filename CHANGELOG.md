@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Share Wasm plan decoding across setup and first use, reducing measured startup
+  totals by 37–48%. See [measurements](docs/performance.md#wasm-setup).
 - Upload incremental Wasm token records directly and avoid a redundant host copy
   in `parseRecords()`, while preserving snapshot and Wasm-memory alias safety.
   Cache island plan values during analysis and cursor construction; shrink the

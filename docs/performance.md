@@ -207,6 +207,25 @@ Two scanner experiments were reverted: quoted strings became 32–38% faster, bu
 ordinary statements slowed down. A contiguous cursor-copy experiment was also
 reverted after roughly 3% slower parsing.
 
+## Wasm Setup
+
+Parser setup validates the core once and reuses compact metadata. With
+precompiled modules, 20 warmups and 100 alternating samples on the same
+CPU/Deno, fresh-instance median creation-plus-first-call time fell:
+
+| Fixture / first call    | Before ms | After ms |
+| ----------------------- | --------- | -------- |
+| island-statements parse | 0.492     | 0.291    |
+| funcfuck lex            | 4.343     | 2.299    |
+| gpu-duck lex            | 9.106     | 4.740    |
+
+Two runs showed 37–48% lower totals; hot calls were unchanged within noise. Host
+checks stay lazy; successful first use clears the decoded cache.
+
+```sh
+deno task bench:wasm-setup --before-root /path/to/previous/checkout
+```
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that

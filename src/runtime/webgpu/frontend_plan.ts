@@ -36,6 +36,12 @@ export interface GpuFrontendPlanInspection {
 
 export function decodeGpuFrontendPlan(planBytes: Uint8Array): GpuFrontendPlan {
   const decoded = decodeCombinedWasmParserPlan(planBytes).compactRuntimePlan;
+  return decodeGpuFrontendPlanMetadata(decoded);
+}
+
+export function decodeGpuFrontendPlanMetadata(
+  decoded: unknown,
+): GpuFrontendPlan {
   const compact = expectRecord(decoded, "Wasm runtime metadata");
   const section = compact.g;
   if (section === undefined || section === null) {
@@ -209,7 +215,7 @@ export function inspectGpuFrontendPlan(
   if (compact.g === undefined || compact.g === null) {
     return null;
   }
-  const plan = decodeGpuFrontendPlan(planBytes);
+  const plan = decodeGpuFrontendPlanMetadata(compact);
   let rootLoopIsland: number | null = null;
   if (plan.execution.rootLoop !== null) {
     rootLoopIsland = plan.execution.rootLoop.island;

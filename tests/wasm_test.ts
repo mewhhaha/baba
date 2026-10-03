@@ -2040,6 +2040,46 @@ Deno.test("shared Wasm adapter supports async URL lexer loading", async () => {
   }
 });
 
+Deno.test("shared Wasm adapter keeps metadata validation lazy", async () => {
+  const { dir, mod, bytes, plan } = await materialize(`module = "ok" ;`);
+  try {
+    const module = new WebAssembly.Module(new Uint8Array(bytes).buffer);
+    const decoded = decodeCombinedWasmParserPlan(plan);
+    const compact = decoded.compactRuntimePlan;
+    assert(typeof compact === "object" && compact !== null);
+    assert("m" in compact && Array.isArray(compact.m));
+    const identity = [...compact.m];
+    identity[7] = "invalid-runtime-hash";
+    const core = plan.subarray(0, decoded.coreByteLength);
+    const cases = [
+      {
+        metadata: undefined,
+        message: "compact runtime metadata must be an object",
+      },
+      { metadata: null, message: "compact runtime metadata must be an object" },
+      {
+        metadata: { ...compact, m: identity },
+        message: "runtime identity",
+      },
+    ];
+    for (const { metadata, message } of cases) {
+      const parser = mod.createParser({
+        module,
+        plan: encodeCombinedWasmParserPlan(core, metadata),
+      });
+      try {
+        assertThrowsIncludes(() => parser.lex("ok"), message);
+        assertThrowsIncludes(() => parser.lex("ok"), message);
+        assertThrowsIncludes(() => parser.parse("ok"), message);
+      } finally {
+        parser.dispose();
+      }
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 function assertCursorRule(
   value:
     | CursorFieldValueLike

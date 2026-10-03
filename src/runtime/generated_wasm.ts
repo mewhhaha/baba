@@ -32,9 +32,10 @@ import {
 } from "../targets/runtime/diagnostic_codes.ts";
 import { RUNTIME_IMPLEMENTATION_METADATA } from "../targets/runtime/implementation.ts";
 import {
-  compileStrictIslandParserProgram,
+  compileStrictIslandParserProgramFromFrontendPlan,
   type StrictIslandParserProgram,
 } from "./island_parser.ts";
+import { decodeGpuFrontendPlanMetadata } from "./webgpu/frontend_plan.ts";
 import {
   WASM_ABI_VERSION,
   WASM_CURSOR_CHILD_RECORD_I32_COUNT,
@@ -628,6 +629,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
   #disposed = false;
   readonly #documents = new Set<ExternalIncrementalDocument<Root>>();
   #metadata: ExternalRuntimeMetadata | undefined;
+  #compactMetadata: { readonly value: unknown } | undefined;
   readonly #sourceCache: ExternalWasmSourceCache = { source: undefined };
   readonly #islandProgram: StrictIslandParserProgram | undefined;
   readonly #islandUnavailableReason: string | undefined;
@@ -643,7 +645,10 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
     let islandProgram: StrictIslandParserProgram | undefined;
     let islandUnavailableReason: string | undefined;
     try {
-      islandProgram = compileStrictIslandParserProgram(planBytes);
+      islandProgram = compileStrictIslandParserProgramFromFrontendPlan(
+        planBytes,
+        decodeGpuFrontendPlanMetadata(this.#loadCompactMetadata()),
+      );
     } catch (error) {
       if (error instanceof Error) {
         islandUnavailableReason = error.message;
@@ -839,6 +844,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       document.dispose();
     }
     this.#documents.clear();
+    this.#compactMetadata = undefined;
     this.#disposed = true;
   }
 
@@ -859,15 +865,31 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
     throw new Error(`Wasm parsing is unavailable: ${reason}`);
   }
 
+  #loadCompactMetadata(): unknown {
+    if (this.#compactMetadata !== undefined) {
+      return this.#compactMetadata.value;
+    }
+    const decoded = decodeCompactPlanBinary(
+      this.planBytes.subarray(
+        this.validatedPlan.runtimeMetadataOffset,
+        this.validatedPlan.runtimeMetadataOffset +
+          this.validatedPlan.runtimeMetadataLength,
+      ),
+    );
+    this.#compactMetadata = { value: decoded };
+    return decoded;
+  }
+
   #loadMetadata(): ExternalRuntimeMetadata {
     if (this.#metadata !== undefined) {
       return this.#metadata;
     }
     const metadata = decodeExternalRuntimeMetadata(
-      this.planBytes,
+      this.#loadCompactMetadata(),
       this.validatedPlan,
     );
     this.#metadata = metadata;
+    this.#compactMetadata = undefined;
     return metadata;
   }
 }
@@ -917,18 +939,10 @@ interface ExternalFieldConfig {
 }
 
 function decodeExternalRuntimeMetadata(
-  planBytes: Uint8Array,
+  decoded: unknown,
   validated: ValidatedWasmParserPlan,
 ): ExternalRuntimeMetadata {
-  const compact = expectRecord(
-    decodeCompactPlanBinary(
-      planBytes.subarray(
-        validated.runtimeMetadataOffset,
-        validated.runtimeMetadataOffset + validated.runtimeMetadataLength,
-      ),
-    ),
-    "compact runtime metadata",
-  );
+  const compact = expectRecord(decoded, "compact runtime metadata");
   const identity = expectArray(compact.m, "runtime identity metadata");
   const metadataVersion = expectNumber(
     identity[0],

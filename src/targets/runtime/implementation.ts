@@ -38,17 +38,17 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     {
       path: "src/runtime/generated_wasm.ts",
       role: "generated-wasm-parser-loader",
-      hash: "fnv1a64:a2a63001706b192a",
+      hash: "fnv1a64:3bb78bf9bf52c818",
     },
     {
       path: "src/runtime/island_parser.ts",
       role: "island-parser-loader",
-      hash: "fnv1a64:3abb988dd4050495",
+      hash: "fnv1a64:6d780ac2bbfce78f",
     },
     {
       path: "src/runtime/webgpu/frontend_plan.ts",
       role: "island-frontend-plan-decoder",
-      hash: "fnv1a64:2f3d4429821d6c01",
+      hash: "fnv1a64:66f39bb746d561bd",
     },
     {
       path: "src/runtime/webgpu/frontend_contract.ts",
@@ -137,7 +137,7 @@ export const RUNTIME_IMPLEMENTATION_SOURCES:
     },
   ] as const;
 
-export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:4e894a1b3bbd6881" as const;
+export const RUNTIME_IMPLEMENTATION_HASH = "fnv1a64:f025d5e1994e049b" as const;
 
 export const RUNTIME_IMPLEMENTATION_METADATA: RuntimeImplementationMetadata = {
   format: RUNTIME_IMPLEMENTATION_FORMAT,

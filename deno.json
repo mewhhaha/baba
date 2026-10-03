@@ -117,6 +117,7 @@
     "bench:compiler": "deno run --allow-read --allow-write scripts/compiler_bench.ts",
     "bench:runtime": "deno run --allow-read --allow-write scripts/runtime_bench.ts --budget size-budgets.json",
     "bench:document": "deno run --allow-read scripts/document_bench.ts",
+    "bench:wasm-setup": "deno run --allow-read scripts/wasm_setup_bench.ts",
     "bench:webgpu-lexer": "deno run --unstable-webgpu --allow-read --allow-write scripts/webgpu_lexer_bench.ts",
     "bench:webgpu-frontend": "deno run --unstable-webgpu --allow-read scripts/webgpu_frontend_bench.ts",
     "bench:webgpu-corpus": "deno run --unstable-webgpu --allow-read --allow-write scripts/webgpu_corpus_bench.ts",

@@ -70,6 +70,13 @@ export function compileStrictIslandParserProgram(
   planBytes: Uint8Array,
 ): StrictIslandParserProgram {
   const plan = decodeGpuFrontendPlan(planBytes);
+  return compileStrictIslandParserProgramFromFrontendPlan(planBytes, plan);
+}
+
+export function compileStrictIslandParserProgramFromFrontendPlan(
+  planBytes: Uint8Array,
+  plan: GpuFrontendPlan,
+): StrictIslandParserProgram {
   if (plan.throughput !== "strict") {
     throw new Error(
       `Production island parsing requires throughput 'strict', received '${plan.throughput}'.`,
