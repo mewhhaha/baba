@@ -84,6 +84,48 @@ WGPU_BACKENDS=vulkan WGPU_POWER_PREF=high deno task run
 This executes lexing, delimiter matching, island parsing, and compact IR
 allocation through `WebGpuFrontend`.
 
+Render the resident syntax IR directly to an offscreen overview:
+
+```sh
+WGPU_BACKENDS=vulkan WGPU_POWER_PREF=high \
+  deno task overview --output /tmp/gpu-duck-overview.ppm \
+  --json /tmp/gpu-duck-overview.json
+```
+
+The PPM image shows token spans across the upper strip and node spans in lanes
+selected by numeric rule ID. Colors identify numeric token/rule categories; the
+JSON report maps rule IDs to names. This consumer renders syntax without host
+semantic recipes or a syntax-IR readback. Image export maps only the final image
+and a small status summary.
+
+The task also compares completed CPU parse/upload/render, owned GPU
+parse/reupload/render, and resident GPU parse/render. It verifies image parity
+outside timing, uses device error scopes around consumer submission, and holds
+both the renderer execution and resident result until queue completion.
+
+From the repository root:
+
+```sh
+deno task bench:webgpu-overview --grammar gpu-duck \
+  --source examples/gpu-duck/programs/example.duck \
+  --output /tmp/gpu-duck-overview.ppm
+```
+
+To measure the checked-in programs unchanged, including setup and first calls:
+
+```sh
+deno task bench:webgpu-corpus --warmup 3 --runs 9 \
+  --json /tmp/baba-real-corpus.json
+```
+
+The checked-in GPU Duck program measured 14.01 ms for completed resident
+rendering versus 25.19 ms for owned GPU parsing and reupload. CPU parsing,
+upload, and rendering took 13.00 ms while also applying host semantic recipes;
+GPU setup took 602.12 ms separately. See the
+[corpus measurements](../../docs/webgpu-frontend.md#checked-in-programs-and-setup)
+for the costs on small files and the distinction between the TypeScript CPU
+oracle and normal Wasm lexing.
+
 Software adapters are rejected unless explicitly requested:
 
 ```sh

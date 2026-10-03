@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add checked-in-corpus benchmarks with fresh setup, first-call totals, and
+  explicit Wasm lexer versus TypeScript frontend comparisons. Add a resident
+  syntax overview that renders token and rule spans directly from GPU IR,
+  verifies image parity, and exports PPM images.
 - Avoid quadratic reference-owner searches for ordered, disjoint definitions,
   and skip integer character inspection for short tokens. See the
   [frontend measurements](docs/webgpu-frontend.md#reference-ownership-and-integer-bounds).

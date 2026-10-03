@@ -86,6 +86,7 @@ try {
   pass.dispatchWorkgroups(workgroups);
   pass.end();
   device.queue.submit([encoder.finish()]);
+  await device.queue.onSubmittedWorkDone();
 } finally {
   resident.dispose();
 }
@@ -101,6 +102,56 @@ destroyed while a caller owns it. `ingestResident()` returns after queue
 submission rather than completion. Submit consumers to the same queue before
 `dispose()`; a reused slot waits for its pending submission before recycling or
 growing buffers.
+
+The [GPU Duck syntax overview](../examples/gpu-duck/resident_overview.ts) is a
+complete downstream consumer. From the repository root, after bootstrap:
+
+```sh
+WGPU_BACKENDS=vulkan WGPU_POWER_PREF=high \
+  deno task bench:webgpu-overview --grammar gpu-duck \
+  --source examples/gpu-duck/programs/example.duck \
+  --output /tmp/baba-overview.ppm --json /tmp/baba-overview.json
+```
+
+From `examples/gpu-duck`, run:
+
+```sh
+deno task overview --output /tmp/baba-overview.ppm
+```
+
+The renderer reads resident token and node spans directly into an offscreen
+texture: token colors occupy the upper strip, and numeric rule IDs select the
+lower lanes. The JSON report supplies rule names for those IDs. This is a syntax
+overview; it performs no host semantic recipes. Timed resident calls map no
+syntax IR. Optional PPM export reads the final image separately.
+
+The script compares completed rendering through CPU parse/upload, owned GPU
+parse/reupload, and resident GPU parse/render, checks the three images
+byte-for-byte outside timing, and reports setup separately. CPU and owned paths
+include host semantics; the resident path measures syntax and rendering.
+
+On the same RTX 4080 SUPER and Deno 2.9.4, three warmups and nine rotating runs
+gave the following medians and full ranges in milliseconds, from source string
+to completed rendering. Shared GPU setup includes the frontend and renderer and
+is excluded from all three completed-pipeline columns.
+
+| input                   | CPU + upload            | GPU owned + reupload    | GPU resident            | GPU setup |
+| ----------------------- | ----------------------- | ----------------------- | ----------------------- | --------- |
+| Funcfuck `fanout.ff`    | 11.532 [11.506, 11.601] | 24.040 [23.927, 24.545] | 12.692 [12.573, 13.610] | 445.74    |
+| GPU Duck `example.duck` | 12.997 [12.159, 13.677] | 25.195 [24.850, 26.081] | 14.008 [13.733, 14.561] | 602.12    |
+
+Resident rendering reduced GPU Duck's completed pipeline by 44.4% relative to
+owned GPU parsing and reupload. The CPU pipeline was still faster for both
+checked-in inputs while also executing host semantic recipes. All three images
+matched byte-for-byte for each input. Optional export and image parity checks
+are outside the timed runs.
+
+Custom consumers should guard encoding, command finalization, and submission
+with validation and out-of-memory error scopes. Queue completion alone does not
+report validation failures. Keep the resident result, target texture, and
+renderer execution resources alive until the consumer's queue work completes,
+then dispose the execution and resident result. The example follows this
+lifetime even when a consumer fails.
 
 Default ingestion batches dependent kernels into one lexer pass and two island
 passes around the device-written indirect-dispatch copy. Set
@@ -224,6 +275,44 @@ emits JSON containing adapter limits, plan expansion factors, actual compact
 output bytes, full sample ranges, owned source/GPU/semantic phases, resident
 submission and completion timing, and a separate per-stage timestamp profile
 when the adapter supports timestamp queries.
+
+### Checked-In Programs and Setup
+
+Benchmark the example files unchanged, including fresh setup and first calls:
+
+```sh
+WGPU_BACKENDS=vulkan WGPU_POWER_PREF=high \
+  deno task bench:webgpu-corpus --warmup 3 --runs 9 \
+  --json /tmp/baba-real-corpus.json
+```
+
+On 2026-10-02, Deno 2.9.4 and an RTX 4080 SUPER, CPU ingestion was faster for
+all four checked-in programs. The following full-frontend times are
+milliseconds; warm columns are medians after three warmups and nine runs. The
+last column is one fresh GPU setup plus its first owned ingestion, including
+string encoding.
+
+| input                   | UTF-16 units | CPU oracle warm | GPU owned warm | GPU setup + first |
+| ----------------------- | ------------ | --------------- | -------------- | ----------------- |
+| Funcfuck `fanout.ff`    | 136          | 0.135           | 12.505         | 274.13            |
+| Funcfuck `pipeline.ff`  | 94           | 0.050           | 12.436         | 290.86            |
+| Funcfuck `window.ff`    | 140          | 0.087           | 12.531         | 292.59            |
+| GPU Duck `example.duck` | 4,688        | 1.724           | 13.568         | 402.40            |
+
+These CPU rows use the broader TypeScript `CpuFrontend` oracle, with the same
+owned flat IR and host semantic results as GPU ingestion. Both example plans use
+the general profile and are ineligible for normal Wasm parsing. Their normal raw
+Wasm lexers remain usable: warmed owned-record medians were 0.0047–0.0488 ms
+versus 11.51–11.74 ms for GPU lexing. Those lexer measurements use preencoded
+UTF-16 units. Resident syntax completion likewise starts from preencoded units
+and measured 12.40–13.61 ms, excluding host semantics and readback. The
+separately measured string encoding cost was 0.008–0.095 ms.
+
+Each input uses fresh backend instances; driver and JIT caches persist within
+the benchmark process. Setup excludes file I/O. The JSON records setup, first
+call, totals including setup and encoding, all warm samples, adapter limits, and
+parser eligibility. Full owned-output parity and one resident syntax readback
+are checked outside timing. The corpus is neither repeated nor padded.
 
 ### Initial Cleanup Measurements
 

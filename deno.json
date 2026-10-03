@@ -1,6 +1,6 @@
 {
   "name": "@mewhhaha/baba",
-  "version": "9.0.2",
+  "version": "9.0.3",
   "license": "MIT",
   "exports": {
     ".": "./src/mod.ts",
@@ -119,6 +119,8 @@
     "bench:document": "deno run --allow-read scripts/document_bench.ts",
     "bench:webgpu-lexer": "deno run --unstable-webgpu --allow-read --allow-write scripts/webgpu_lexer_bench.ts",
     "bench:webgpu-frontend": "deno run --unstable-webgpu --allow-read scripts/webgpu_frontend_bench.ts",
+    "bench:webgpu-corpus": "deno run --unstable-webgpu --allow-read --allow-write scripts/webgpu_corpus_bench.ts",
+    "bench:webgpu-overview": "deno run --unstable-webgpu --allow-read --allow-write scripts/webgpu_resident_overview.ts",
     "bench:island-parser": "deno run --allow-read scripts/island_parser_bench.ts",
     "bench:webgpu-lexer:pathological": "deno run --unstable-webgpu --allow-read scripts/webgpu_lexer_pathological.ts",
     "parity:webgpu-lexer": "deno run --unstable-webgpu --allow-read scripts/webgpu_lexer_parity.ts",
