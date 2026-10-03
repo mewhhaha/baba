@@ -1,8 +1,8 @@
 {
-  "publishPayloadBytes": 1439000,
+  "publishPayloadBytes": 1448000,
   "publishGeneratedExampleBytes": 0,
   "largestPublishFileBytes": 260000,
-  "generatedWasmLoaderSourceBytes": 150000,
+  "generatedWasmLoaderSourceBytes": 155000,
   "runtimeBudgets": {
     "island-statements": {
       "wasmBytesMax": {

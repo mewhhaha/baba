@@ -487,11 +487,11 @@ interface ExternalParserWasmExports {
 }
 
 interface ExternalWasmSourceCache {
-  source: string | undefined;
+  source: string | ExternalSourceSnapshot | undefined;
 }
 
 interface ExternalWasmSourceUpdate {
-  readonly previousSource: string;
+  readonly previousSource: ExternalSourceSnapshot;
   readonly edits: readonly TextEdit[];
 }
 
@@ -1287,20 +1287,42 @@ interface SourcePiece {
 
 class ExternalSourceSnapshot implements SourceSnapshot {
   #materialized: string | undefined;
+  #pieceStarts: readonly number[] | undefined;
+  #selectedPieceIndex = 0;
+  #selectedPiece: SourcePiece | undefined;
+  #selectedPieceStart = 0;
+  #selectedPieceEnd = 0;
 
   constructor(
     readonly version: number,
     private readonly pieces: readonly SourcePiece[],
     readonly length: number,
-  ) {}
+  ) {
+    this.#selectedPiece = pieces[0];
+    if (this.#selectedPiece !== undefined) {
+      this.#selectedPieceEnd = this.#selectedPiece.end -
+        this.#selectedPiece.start;
+    }
+  }
 
-  static initial(source: string): ExternalSourceSnapshot {
+  static initial(
+    source: string,
+    sourceCache: ExternalWasmSourceCache,
+  ): ExternalSourceSnapshot {
     const pieces: SourcePiece[] = [];
     if (source.length > 0) {
       pieces.push({ source, start: 0, end: source.length });
     }
     const snapshot = new ExternalSourceSnapshot(0, pieces, source.length);
     snapshot.#materialized = source;
+    const resident = sourceCache.source;
+    if (
+      resident === source ||
+      (resident instanceof ExternalSourceSnapshot &&
+        resident.#materialized === source)
+    ) {
+      sourceCache.source = snapshot;
+    }
     return snapshot;
   }
 
@@ -1313,9 +1335,73 @@ class ExternalSourceSnapshot implements SourceSnapshot {
     if (this.#materialized !== undefined) {
       return this.#materialized.slice(selectedStart, selectedEnd);
     }
+    const piece = this.#selectedPiece;
+    if (
+      piece !== undefined && selectedStart >= this.#selectedPieceStart &&
+      selectedEnd <= this.#selectedPieceEnd
+    ) {
+      return piece.source.slice(
+        piece.start + selectedStart - this.#selectedPieceStart,
+        piece.start + selectedEnd - this.#selectedPieceStart,
+      );
+    }
+    return this.slicePieces(selectedStart, selectedEnd);
+  }
+
+  private slicePieces(selectedStart: number, selectedEnd: number): string {
+    let piece = this.#selectedPiece;
+    if (piece === undefined) {
+      throw new Error("Nonempty source snapshot has no selected piece.");
+    }
+    let offset = this.#selectedPieceStart;
+    if (
+      selectedStart < offset ||
+      selectedStart >= offset + piece.end - piece.start
+    ) {
+      let starts = this.#pieceStarts;
+      if (starts === undefined) {
+        const indexed: number[] = [];
+        let pieceOffset = 0;
+        for (const part of this.pieces) {
+          indexed.push(pieceOffset);
+          pieceOffset += part.end - part.start;
+        }
+        starts = indexed;
+        this.#pieceStarts = indexed;
+      }
+      let lower = 0;
+      let upper = starts.length;
+      while (lower + 1 < upper) {
+        const middle = lower + Math.floor((upper - lower) / 2);
+        if (starts[middle] <= selectedStart) lower = middle;
+        else upper = middle;
+      }
+      piece = this.pieces[lower];
+      offset = starts[lower];
+      if (piece === undefined || offset === undefined) {
+        throw new Error("Source snapshot piece index is incomplete.");
+      }
+      this.#selectedPieceIndex = lower;
+      this.#selectedPiece = piece;
+      this.#selectedPieceStart = offset;
+      this.#selectedPieceEnd = offset + piece.end - piece.start;
+    }
+    if (selectedEnd <= offset + piece.end - piece.start) {
+      return piece.source.slice(
+        piece.start + selectedStart - offset,
+        piece.start + selectedEnd - offset,
+      );
+    }
     const parts: string[] = [];
-    let offset = 0;
-    for (const piece of this.pieces) {
+    for (
+      let index = this.#selectedPieceIndex;
+      index < this.pieces.length;
+      index++
+    ) {
+      const piece = this.pieces[index];
+      if (piece === undefined) {
+        throw new Error("Source snapshot slice has a missing piece.");
+      }
       const pieceLength = piece.end - piece.start;
       const pieceEnd = offset + pieceLength;
       if (pieceEnd <= selectedStart) {
@@ -1341,6 +1427,121 @@ class ExternalSourceSnapshot implements SourceSnapshot {
     }
     this.#materialized = this.slice(0, this.length);
     return this.#materialized;
+  }
+
+  static writeResidentSource(
+    memory: WebAssembly.Memory,
+    sourcePtr: number,
+    cache: ExternalWasmSourceCache,
+    source: string | ExternalSourceSnapshot,
+    update?: ExternalWasmSourceUpdate,
+  ): DataView {
+    const view = new DataView(memory.buffer);
+    const resident = cache.source;
+    if (
+      resident === source ||
+      (typeof source === "string" &&
+        resident instanceof ExternalSourceSnapshot &&
+        resident.#materialized === source)
+    ) {
+      cache.source = source;
+      return view;
+    }
+    if (
+      update === undefined ||
+      (resident !== update.previousSource &&
+        (typeof resident !== "string" ||
+          resident !== update.previousSource.#materialized))
+    ) {
+      if (typeof source === "string") {
+        writeExternalWasmSourceRange(view, sourcePtr, source, 0, source.length);
+      } else {
+        source.writeToWasm(view, sourcePtr, 0, source.length);
+      }
+      cache.source = source;
+      return view;
+    }
+    const firstEdit = update.edits[0];
+    const finalEdit = update.edits[update.edits.length - 1];
+    if (firstEdit === undefined || finalEdit === undefined) {
+      throw new Error("Incremental Wasm source update has no edits.");
+    }
+    let preservesLength = true;
+    for (const edit of update.edits) {
+      if (edit.newText.length !== edit.oldEnd - edit.start) {
+        preservesLength = false;
+        break;
+      }
+    }
+    if (preservesLength) {
+      for (const edit of update.edits) {
+        writeExternalWasmSourceRange(
+          view,
+          sourcePtr + edit.start * WASM_UTF16_UNIT_BYTES,
+          edit.newText,
+          0,
+          edit.newText.length,
+        );
+      }
+      cache.source = source;
+      return view;
+    }
+    const oldSuffixStart = finalEdit.oldEnd;
+    const newSuffixStart = oldSuffixStart +
+      source.length -
+      update.previousSource.length;
+    const bytes = new Uint8Array(memory.buffer);
+    bytes.copyWithin(
+      sourcePtr + newSuffixStart * WASM_UTF16_UNIT_BYTES,
+      sourcePtr + oldSuffixStart * WASM_UTF16_UNIT_BYTES,
+      sourcePtr + update.previousSource.length * WASM_UTF16_UNIT_BYTES,
+    );
+    if (typeof source !== "string") {
+      source.writeToWasm(view, sourcePtr, firstEdit.start, newSuffixStart);
+    } else {
+      throw new Error("Incremental Wasm source update requires a snapshot.");
+    }
+    cache.source = source;
+    return view;
+  }
+
+  writeToWasm(
+    view: DataView,
+    sourcePtr: number,
+    start: number,
+    end: number,
+  ): void {
+    if (this.#materialized !== undefined) {
+      writeExternalWasmSourceRange(
+        view,
+        sourcePtr,
+        this.#materialized,
+        start,
+        end,
+      );
+      return;
+    }
+    let offset = 0;
+    for (const piece of this.pieces) {
+      const pieceLength = piece.end - piece.start;
+      const pieceEnd = offset + pieceLength;
+      if (pieceEnd <= start) {
+        offset = pieceEnd;
+        continue;
+      }
+      if (offset >= end) break;
+      const localStart = Math.max(0, start - offset);
+      const localEnd = Math.min(pieceLength, end - offset);
+      writeExternalWasmSourceRange(
+        view,
+        sourcePtr,
+        piece.source,
+        piece.start + localStart,
+        piece.start + localEnd,
+        offset + localStart,
+      );
+      offset = pieceEnd;
+    }
   }
 
   apply(
@@ -2083,8 +2284,8 @@ function externalIncrementalRelex(
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
   previous: ExternalIncrementalLexState,
-  previousSource: string,
-  source: string,
+  previousSource: ExternalSourceSnapshot,
+  source: ExternalSourceSnapshot,
   edits: readonly TextEdit[],
   searchFloorOffset: number,
   searchFloorToken: number,
@@ -2478,7 +2679,6 @@ function externalIncrementalLexResult(
 class ExternalIncrementalDocument<Root extends RuleCursor> {
   #disposed = false;
   #snapshot: ExternalSourceSnapshot;
-  #source: string;
   #lexState: ExternalIncrementalLexState;
   #lexSearchFloorOffset = 0;
   #lexSearchFloorToken = 0;
@@ -2566,14 +2766,13 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       }
     }
     this.#maxParserActions = maxParserActions;
-    this.#snapshot = ExternalSourceSnapshot.initial(source);
-    this.#source = source;
+    this.#snapshot = ExternalSourceSnapshot.initial(source, sourceCache);
     this.#lexState = lexExternalIncrementalRecords(
       wasm,
       planByteLength,
       sourceCache,
       undefined,
-      source,
+      this.#snapshot,
       0,
       source.length,
     );
@@ -2642,20 +2841,18 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     const previousSnapshot = this.#snapshot;
     const previousLexState = this.#lexState;
     const applied = previousSnapshot.apply(parsedEdits);
-    const source = applied.snapshot.text();
     const relexed = externalIncrementalRelex(
       this.wasm,
       this.planByteLength,
       this.sourceCache,
       previousLexState,
-      this.#source,
-      source,
+      previousSnapshot,
+      applied.snapshot,
       parsedEdits,
       this.#lexSearchFloorOffset,
       this.#lexSearchFloorToken,
     );
     this.#snapshot = applied.snapshot;
-    this.#source = source;
     this.#lexState = relexed.state;
     this.#lexSearchFloorOffset = firstEdit.start;
     this.#lexSearchFloorToken = relexed.oldPrefixTokenCount;
@@ -2702,7 +2899,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       const reparsedRanges: Span[] = [];
       let parserActions = 0;
       if (reusedCounts === undefined) {
-        reparsedRanges.push({ start: 0, end: this.#source.length });
+        reparsedRanges.push({ start: 0, end: this.#snapshot.length });
         parserActions = this.#lexState.count;
       }
       parserWork = {
@@ -2822,7 +3019,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
           throw new Error("Incremental parse result has no owned cursor tape.");
         }
         const cursor = tape.rebindIncrementalTokens(
-          this.#source,
+          this.#snapshot,
           this.#lexState,
           this.#lexResult.keptRecordIndices,
           this.#lexResult.keptCount,
@@ -2845,7 +3042,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       this.wasm,
       this.planByteLength,
       this.sourceCache,
-      this.#source,
+      this.#snapshot,
       this.#maxParserActions,
       this.#lexState,
       reusedCounts,
@@ -2867,7 +3064,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
         this.metadata,
         islandProgram,
         this.wasm,
-        this.#source,
+        this.#snapshot.text(),
         { preserveTrivia: this.#preserveTrivia },
         analysis,
       );
@@ -3134,7 +3331,7 @@ function lexExternalRecords(
     return { ok: false, requiredBytes };
   }
   ensureExternalWasmCapacity(wasm.memory, requiredBytes);
-  let view = writeExternalWasmSource(
+  let view = ExternalSourceSnapshot.writeResidentSource(
     wasm.memory,
     sourcePtr,
     sourceCache,
@@ -3189,7 +3386,7 @@ function lexExternalIncrementalRecords(
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
   sourceUpdate: ExternalWasmSourceUpdate | undefined,
-  source: string,
+  source: ExternalSourceSnapshot,
   start: number,
   minimumEnd: number,
 ): ExternalIncrementalLexState {
@@ -3214,7 +3411,7 @@ function lexExternalIncrementalRecords(
     );
   }
   ensureExternalWasmCapacity(wasm.memory, requiredBytes);
-  let view = writeExternalWasmSource(
+  let view = ExternalSourceSnapshot.writeResidentSource(
     wasm.memory,
     sourcePtr,
     sourceCache,
@@ -3470,7 +3667,7 @@ function analyzeExternalIslandInRust(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
-  source: string,
+  source: string | ExternalSourceSnapshot,
   maxParserActions: number,
   externalRecords?: Int32Array | ExternalIncrementalLexState,
   reusedCounts?: ExternalIslandAnalysisCounts,
@@ -3570,7 +3767,7 @@ function prepareExternalWasmIslandRecords(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
-  source: string,
+  source: string | ExternalSourceSnapshot,
   externalRecords: Int32Array | ExternalIncrementalLexState | undefined,
 ): ExternalWasmIslandRecordPreparation {
   const sourcePtr = align(planByteLength, 8);
@@ -3594,7 +3791,7 @@ function prepareExternalWasmIslandRecords(
     return { ok: false, requiredBytes: tokenEnd };
   }
   ensureExternalWasmCapacity(wasm.memory, tokenEnd);
-  writeExternalWasmSource(
+  ExternalSourceSnapshot.writeResidentSource(
     wasm.memory,
     sourcePtr,
     sourceCache,
@@ -3676,7 +3873,7 @@ function prepareExternalWasmIslandRecords(
 function externalIslandStatusDiagnostic(
   metadata: ExternalRuntimeMetadata,
   program: StrictIslandParserProgram,
-  source: string,
+  source: string | ExternalSourceSnapshot,
   view: DataView,
   records: ExternalWasmIslandRecords,
   resultPtr: number,
@@ -4093,7 +4290,7 @@ class ExternalCursorTapeView {
 
   constructor(
     private readonly metadata: ExternalRuntimeMetadata,
-    private readonly source: string,
+    private source: string | ExternalSourceSnapshot,
     private tokenRecords: Int32Array,
     private ruleRecords: Int32Array,
     private readonly childRefs: Int32Array,
@@ -4117,7 +4314,7 @@ class ExternalCursorTapeView {
   }
 
   rebindIncrementalTokens(
-    source: string,
+    source: ExternalSourceSnapshot,
     state: ExternalIncrementalLexState,
     keptRecordIndices: Int32Array | null,
     keptCount: number,
@@ -4158,6 +4355,11 @@ class ExternalCursorTapeView {
     const pending = this.pendingTokens;
     if (pending === undefined) {
       throw new Error("Cursor snapshot has no pending incremental records.");
+    }
+    // Cursor traversal already packs the full token tape. Flatten once here
+    // so each later token-text read stays a direct string slice.
+    if (typeof this.source !== "string") {
+      this.source = this.source.text();
     }
     const { state, keptRecordIndices, keptCount } = pending;
     const tokenRecords = new Int32Array(
@@ -4558,7 +4760,7 @@ function externalOversizedInputMessage(
 }
 
 function externalOversizedInputDiagnostic(
-  source: string,
+  source: string | ExternalSourceSnapshot,
   requiredBytes: number,
   remedy: string,
 ): ExternalParseDiagnostic {
@@ -4659,7 +4861,7 @@ function externalDiagnosticDetailKindId(runtimeCode: number): number {
 }
 
 function externalUnexpectedCharacterSpan(
-  source: string,
+  source: string | ExternalSourceSnapshot,
   start: number,
   end: number,
 ): ExternalLexDiagnostic {
@@ -4692,7 +4894,7 @@ function externalTerminalForLiteralId(
 
 function externalCursorTokenDisplay(
   metadata: ExternalRuntimeMetadata,
-  source: string,
+  source: string | ExternalSourceSnapshot,
   token: ExternalCursorTokenData,
 ): string {
   if (token.type === externalCursorTokenEof) return "EOF";
@@ -4927,79 +5129,18 @@ function ensureExternalWasmCapacity(
   memory.grow(requiredPages - currentPages);
 }
 
-function writeExternalWasmSource(
-  memory: WebAssembly.Memory,
-  sourcePtr: number,
-  cache: ExternalWasmSourceCache,
-  source: string,
-  update?: ExternalWasmSourceUpdate,
-): DataView {
-  const view = new DataView(memory.buffer);
-  if (cache.source === source) {
-    return view;
-  }
-  if (update === undefined || cache.source !== update.previousSource) {
-    writeExternalWasmSourceRange(view, sourcePtr, source, 0, source.length);
-    cache.source = source;
-    return view;
-  }
-  const firstEdit = update.edits[0];
-  const finalEdit = update.edits[update.edits.length - 1];
-  if (firstEdit === undefined || finalEdit === undefined) {
-    throw new Error("Incremental Wasm source update has no edits.");
-  }
-  let preservesLength = true;
-  for (const edit of update.edits) {
-    if (edit.newText.length !== edit.oldEnd - edit.start) {
-      preservesLength = false;
-      break;
-    }
-  }
-  if (preservesLength) {
-    for (const edit of update.edits) {
-      writeExternalWasmSourceRange(
-        view,
-        sourcePtr + edit.start * WASM_UTF16_UNIT_BYTES,
-        edit.newText,
-        0,
-        edit.newText.length,
-      );
-    }
-    cache.source = source;
-    return view;
-  }
-  const oldSuffixStart = finalEdit.oldEnd;
-  const newSuffixStart = oldSuffixStart +
-    source.length -
-    update.previousSource.length;
-  const bytes = new Uint8Array(memory.buffer);
-  bytes.copyWithin(
-    sourcePtr + newSuffixStart * WASM_UTF16_UNIT_BYTES,
-    sourcePtr + oldSuffixStart * WASM_UTF16_UNIT_BYTES,
-    sourcePtr + update.previousSource.length * WASM_UTF16_UNIT_BYTES,
-  );
-  writeExternalWasmSourceRange(
-    view,
-    sourcePtr,
-    source,
-    firstEdit.start,
-    newSuffixStart,
-  );
-  cache.source = source;
-  return view;
-}
-
 function writeExternalWasmSourceRange(
   view: DataView,
   sourcePtr: number,
   source: string,
   start: number,
   end: number,
+  targetStart = start,
 ): void {
   if (hostLittleEndian) {
     const units = new Uint16Array(
       view.buffer,
-      sourcePtr + start * WASM_UTF16_UNIT_BYTES,
+      sourcePtr + targetStart * WASM_UTF16_UNIT_BYTES,
       end - start,
     );
     for (let index = start; index < end; index++) {
@@ -5009,7 +5150,7 @@ function writeExternalWasmSourceRange(
   }
   for (let index = start; index < end; index++) {
     view.setUint16(
-      sourcePtr + index * WASM_UTF16_UNIT_BYTES,
+      sourcePtr + (targetStart + index - start) * WASM_UTF16_UNIT_BYTES,
       source.charCodeAt(index),
       true,
     );

@@ -377,6 +377,74 @@ repeatable gain; callers reading every token or node should expect much less
 benefit than root-only readers. Wasm bytes, record layouts, and ABI are
 unchanged; the host loader source grows by 11.2 KB.
 
+## Incremental Source Pieces
+
+Incremental Wasm documents keep edited source in immutable pieces instead of
+joining a full string for every update. The resident-source cache identifies
+snapshots directly. Equal-length edits upload only replacement UTF-16 units;
+length-changing edits move the existing suffix and upload the changed range.
+Calls that invalidate the cache upload pieces directly, preserving surrogate
+pairs and isolated surrogate units.
+
+`snapshot.slice()` caches a selected piece and lazily indexes piece starts for
+other ranges. Local token reads avoid a document-size copy. `snapshot.text()`
+still joins and caches the full string when requested. Reused parse roots retain
+the source snapshot; their first child or field-reference read prepares cursor
+records and flattens text once for subsequent string slices. Fresh parser
+analysis accepts source pieces; full parse materialization uses flat text.
+
+An alternating comparison against `9.0.4` (`e26b6d8`) on an AMD Ryzen 7 7800X3D,
+Deno 2.9.4 / V8 15.0.245.2-rusty used 24 warmups and 120 samples, with
+background host activity. Each operation applies an edit and restores it. The
+first table keeps full-text reads outside the measured update path; parse
+operations read only success and the root span. Documents contain 4,194,307
+UTF-16 units. Parser action limits are 4,000,000. Fixed offsets target the
+middle statement; varied offsets advance by 7,919 statements modulo the
+statement count (p25 / median milliseconds):
+
+| Operation                        | Before        | After         |
+| -------------------------------- | ------------- | ------------- |
+| Parse, insert/remove             | 2.046 / 2.301 | 0.250 / 0.291 |
+| Parse, insert/remove, varied     | 2.245 / 2.545 | 0.267 / 0.416 |
+| Validate, insert/remove          | 0.375 / 0.454 | 0.173 / 0.214 |
+| Validate, insert/remove, varied  | 0.408 / 0.471 | 0.151 / 0.214 |
+| Lex, rename/restore              | 1.885 / 2.236 | 0.076 / 0.091 |
+| Validate, rename/restore         | 1.651 / 1.950 | 0.069 / 0.091 |
+| Validate, rename/restore, varied | 3.250 / 3.911 | 0.134 / 0.162 |
+| Parse, rename/restore            | 2.482 / 2.888 | 0.098 / 0.123 |
+| Parse, rename/restore, varied    | 1.976 / 2.440 | 0.128 / 0.153 |
+
+Renames replace `value` with `alias` and restore it, preserving token kinds,
+indices, and lengths. They avoid both full-string work and suffix movement.
+Whitespace updates still move a document-size suffix in Wasm. Source-piece
+maintenance depends on fragment count, and token reuse visits chunk descriptors;
+these results do not establish constant-time edits. V8 string flattening and
+garbage collection affect before/after ratios across runs.
+
+When callers also request the final full text, the 524,305-unit benchmark still
+improves median parsing from 0.220 to 0.051 ms, preserved-trivia parsing from
+0.201 to 0.036 ms, and validation from 0.058 to 0.026 ms. Whole-document reads
+remain linear: editing then traversing 77,824 units with child and field reads
+measures 10.60 to 10.05 ms. The first token-text pass after 128 fragmented edits
+over 77,952 units measures 1.234 to 1.192 ms, while p25 increases from 0.887 to
+0.959 ms. Earlier paired runs showed 7–34% slower token-text scans. These bulk
+reads show no consistent gain. If a caller needs the full source anyway,
+requesting `snapshot.text()` first enables flat-string slices for later reads.
+
+Ordinary `lex()`, `validate()`, and `parse()` remain within about 2% in a
+separate 12-warmup, 50-sample comparison. Document creation shows no consistent
+regression. Changed-terminal recovery and whole-file replacement measured within
+2% in eight-warmup, 40-sample runs. The Wasm engine remains 11,961 bytes; ABI
+and plan formats are unchanged. The shared loader grows by 4,941 bytes to
+154,773 bytes. Size budgets cover the added loader and measurement
+documentation.
+
+Reproduce the comparison with:
+
+```sh
+deno task bench:document --before-root /path/to/9.0.4 --warmups 24 --samples 120
+```
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that

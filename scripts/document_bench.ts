@@ -8,8 +8,30 @@ import type {
   RuleCursor,
 } from "../src/runtime/generated_wasm.ts";
 
-const warmups = 8;
-const samples = 40;
+let warmups = 8;
+let samples = 40;
+let beforeRoot: string | undefined;
+for (let index = 0; index < Deno.args.length; index += 2) {
+  const flag = Deno.args[index];
+  const value = Deno.args[index + 1];
+  if (value === undefined) {
+    throw new Error(`Missing value for ${flag}.`);
+  }
+  if (flag === "--before-root") {
+    beforeRoot = value;
+  } else if (flag === "--warmups" || flag === "--samples") {
+    const count = Number(value);
+    if (!Number.isSafeInteger(count) || count < 4) {
+      throw new Error(`${flag} must be an integer of at least 4.`);
+    }
+    if (flag === "--warmups") warmups = count;
+    else samples = count;
+  } else {
+    throw new Error(
+      "Usage: document_bench.ts [--before-root PROJECT] [--warmups COUNT] [--samples COUNT]",
+    );
+  }
+}
 const fixture = new URL(
   "../fixtures/perf/wasm/island-statements/",
   import.meta.url,
@@ -25,6 +47,7 @@ interface Operation {
   readonly name: string;
   readonly codeUnits: number;
   readonly run: () => void;
+  readonly verify?: () => void;
 }
 
 function operations(parser: ParserInstance): Operation[] {
@@ -202,7 +225,108 @@ function operations(parser: ParserInstance): Operation[] {
         }
       },
     },
+    ...sourcePieceOperations(parser, 512 * 1024, "insert"),
+    ...sourcePieceOperations(parser, 4 * 1024 * 1024, "insert"),
+    ...sourcePieceOperations(parser, 512 * 1024, "replace"),
+    ...sourcePieceOperations(parser, 4 * 1024 * 1024, "replace"),
   ];
+}
+
+function sourcePieceOperations(
+  parser: ParserInstance,
+  size: number,
+  editKind: "insert" | "replace",
+): Operation[] {
+  const statementCount = Math.ceil(size / statement.length);
+  const source = statement.repeat(statementCount);
+  const operations: Operation[] = [];
+  for (const goal of ["lex", "validate", "parse"] as const) {
+    for (const varied of [false, true]) {
+      if (goal === "lex" && varied) continue;
+      let document:
+        | IncrementalLexDocument
+        | IncrementalValidateDocument
+        | IncrementalParseDocument
+        | undefined;
+      let editIndex = 0;
+      let name = `incremental ${goal} insert+remove without full text`;
+      if (editKind === "replace") {
+        name = `incremental ${goal} name replacement+restore without full text`;
+      }
+      if (varied) name += ", varied offsets";
+      operations.push({
+        name,
+        codeUnits: source.length,
+        run: () => {
+          // Create during the first warmup; release after this operation so
+          // large documents do not all occupy the heap during measurements.
+          if (document === undefined) {
+            if (goal === "lex") {
+              document = parser.createDocument(source, { goal });
+            } else if (goal === "validate") {
+              document = parser.createDocument(source, {
+                goal,
+                maxParserActions: 4_000_000,
+              });
+            } else {
+              document = parser.createDocument(source, {
+                goal,
+                maxParserActions: 4_000_000,
+              });
+            }
+          }
+          let line = Math.floor(statementCount / 2);
+          if (varied) line = (editIndex * 7919) % statementCount;
+          editIndex++;
+          if (editKind === "replace") {
+            const start = line * statement.length + 4;
+            document.applyEdits([{
+              start,
+              oldEnd: start + 5,
+              newText: "alias",
+            }]);
+            document.applyEdits([{
+              start,
+              oldEnd: start + 5,
+              newText: "value",
+            }]);
+          } else {
+            const start = line * statement.length + statement.length - 1;
+            document.applyEdits([{ start, oldEnd: start, newText: " " }]);
+            document.applyEdits([{ start, oldEnd: start + 1, newText: "" }]);
+          }
+          if (document.snapshot.length !== source.length) {
+            throw new Error("Source-piece benchmark changed source length.");
+          }
+          if (document.goal !== "lex" && !document.validate().ok) {
+            throw new Error("Source-piece benchmark returned invalid source.");
+          }
+          if (document.goal === "parse") {
+            const result = document.parse();
+            if (!result.ok || result.cursor.span.end !== source.length) {
+              throw new Error(
+                "Source-piece benchmark returned an invalid cursor.",
+              );
+            }
+          }
+        },
+        verify: () => {
+          if (document === undefined) {
+            throw new Error(
+              "Source-piece benchmark did not create a document.",
+            );
+          }
+          // Full text is verified outside the measured update path.
+          if (document.snapshot.text() !== source) {
+            throw new Error("Source-piece benchmark changed source text.");
+          }
+          document.dispose();
+          document = undefined;
+        },
+      });
+    }
+  }
+  return operations;
 }
 
 function parserFrom(
@@ -236,13 +360,10 @@ const targets = [{
   name: "current",
   parser: parserFrom(compile, parseMetadata, createParser),
 }];
-if (Deno.args.length !== 0) {
-  if (Deno.args.length !== 2 || Deno.args[0] !== "--before-root") {
-    throw new Error("Usage: document_bench.ts [--before-root PROJECT]");
-  }
+if (beforeRoot !== undefined) {
   const cwd = new URL("file:///");
   cwd.pathname = `${Deno.cwd()}/`;
-  const previousRoot = new URL(`${Deno.args[1]}/`, cwd);
+  const previousRoot = new URL(`${beforeRoot}/`, cwd);
   const previousCompiler = await import(
     new URL("src/mod.ts", previousRoot).href
   ) as typeof import("../src/mod.ts");
@@ -285,6 +406,8 @@ try {
       }
     }
     for (let target = 0; target < targets.length; target++) {
+      const verify = workloads[target][operation].verify;
+      if (verify !== undefined) verify();
       times[target].sort((left, right) => left - right);
       console.log(JSON.stringify({
         target: targets[target].name,

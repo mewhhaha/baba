@@ -182,6 +182,7 @@ interface GeneratedParser {
     source: string,
     options: Record<string, unknown>,
   ): GeneratedIncrementalDocument;
+  reset(): void;
   dispose(): void;
 }
 
@@ -1657,13 +1658,57 @@ Deno.test("Wasm source writes preserve UTF-16 across full and incremental copies
         ]
       ) {
         document.applyEdits(edits);
-        assertEquals(document.snapshot.text(), source);
         assertSourceTokens(document.lex(), source);
       }
       parser.lex("unrelated");
       document.applyEdits([{ start: 0, oldEnd: 2, newText: "🦆" }]);
       assertSourceTokens(document.lex(), "🦆ø界\ud800zé");
       assertSourceTokens(saved, initial);
+      let source = "🦆ø界\ud800zé";
+      const retained: {
+        readonly lexed: ReturnType<typeof document.lex>;
+        readonly snapshot: typeof document.snapshot;
+        readonly source: string;
+      }[] = [];
+      // Keep source pieces unflattened through edits, random slicing, source
+      // cache invalidation, and growth. Include edits inside surrogate pairs.
+      for (let step = 0; step < 96; step++) {
+        const middle = Math.floor(source.length / 2);
+        const oldEnd = middle + step % 3;
+        let replacement = "😀";
+        if (step % 2 === 0) replacement = "ø\udc00";
+        const edits = [
+          { start: 0, oldEnd: 1, newText: "\ud800" },
+          { start: middle, oldEnd, newText: replacement },
+          { start: source.length, oldEnd: source.length, newText: "zé" },
+        ];
+        document.applyEdits(edits);
+        source = "\ud800" + source.slice(1, middle) + replacement +
+          source.slice(oldEnd) + "zé";
+        retained.push({
+          lexed: document.lex(),
+          snapshot: document.snapshot,
+          source,
+        });
+        for (let index = 0; index < 12; index++) {
+          const start = (index * 17 + step * 7) % (source.length + 1);
+          const end = Math.min(source.length, start + index * 3);
+          assertEquals(
+            document.snapshot.slice(start, end),
+            source.slice(start, end),
+          );
+        }
+        if (step % 11 === 0) parser.lex(initial);
+        if (step % 17 === 0) parser.lex("unrelated".repeat(4096));
+        if (step % 19 === 0) parser.reset();
+      }
+      document.dispose();
+      parser.lex("overwrite");
+      for (const old of retained) {
+        assertSourceTokens(old.lexed, old.source);
+        assertEquals(old.snapshot.slice(), old.source);
+        assertEquals(old.snapshot.text(), old.source);
+      }
     } finally {
       document.dispose();
     }

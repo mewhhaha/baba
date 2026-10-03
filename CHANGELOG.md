@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 9.0.5
+
+- Keep incremental Wasm source snapshots in pieces during reused updates. Upload
+  UTF-16 ranges without flattening, index fragment slices, and defer full cursor
+  text until traversal. Equal-length renames on 4 MiB documents measure 16–24×
+  faster; full token-text scans can cost more. See
+  [measurements](docs/performance.md#incremental-source-pieces).
+
 ## 9.0.4
 
 - Share incremental lexer chunks and shift reused spans through chunk offsets.

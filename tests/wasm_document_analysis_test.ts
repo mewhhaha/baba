@@ -766,7 +766,8 @@ Deno.test("Wasm documents retain token and cursor spans after edits throughout l
   const parser = documentParser();
   try {
     for (const trivia of ["preserve", "discard"] as const) {
-      const document = parser.createDocument("let name = 1;\n".repeat(512), {
+      let source = "let name = 1;\n".repeat(512);
+      const document = parser.createDocument(source, {
         goal: "parse",
         trivia,
       });
@@ -778,7 +779,6 @@ Deno.test("Wasm documents retain token and cursor spans after edits throughout l
         source: string;
       }[] = [];
       function check(retain: boolean): void {
-        const source = document.snapshot.text();
         const options = { preserveTrivia: trivia === "preserve" };
         const lexed = document.lex();
         const parsed = document.parse();
@@ -806,7 +806,6 @@ Deno.test("Wasm documents retain token and cursor spans after edits throughout l
       }
       check(true);
       for (let index = 0; index < 160; index++) {
-        const source = document.snapshot.text();
         const line = (index * 173) % 512;
         let start = 0;
         for (let before = 0; before < line; before++) {
@@ -818,13 +817,13 @@ Deno.test("Wasm documents retain token and cursor spans after edits throughout l
         let name = "expandedname";
         if (index % 2 === 0) name = "n";
         document.applyEdits([{ start, oldEnd, newText: name }]);
+        source = source.slice(0, start) + name + source.slice(oldEnd);
         if (index % 24 === 0) check(true);
         else if (index % 12 === 0) check(false);
         if (index % 31 === 0) parser.lex("let other = 22;\n".repeat(8192));
       }
       check(false);
       // Force full parser uploads and visible-token mapping changes as well.
-      const source = document.snapshot.text();
       document.applyEdits([
         { start: 0, oldEnd: 0, newText: " \t" },
         {
@@ -833,19 +832,21 @@ Deno.test("Wasm documents retain token and cursor spans after edits throughout l
           newText: "let last = 2000;\n",
         },
       ]);
+      source = " \t" + source + "let last = 2000;\n";
       check(true);
       document.applyEdits([{
         start: 0,
         oldEnd: document.snapshot.length - 17,
         newText: "",
       }]);
+      source = source.slice(source.length - 17);
       check(false);
       document.dispose();
       parser.lex("let overwrite = 3;\n".repeat(16384));
       for (const old of retained) {
-        assertEquals(old.lexed.snapshot.text(), old.source);
         assertEquals(lexShape(old.lexed), old.lexShape);
         assertEquals(JSON.stringify(cursorShape(old.cursor)), old.cursorShape);
+        assertEquals(old.lexed.snapshot.text(), old.source);
       }
     }
   } finally {
