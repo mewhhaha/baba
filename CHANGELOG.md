@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 9.0.6
+
+- Reuse packed Wasm cursor coordinates for small edits that leave token kinds
+  and spans unchanged, with fresh text and wrappers for each snapshot. Measured
+  rename-plus-first-field reads improve by 90–150× on 512 KiB and 4 MiB
+  documents; edits that move token boundaries keep the deferred refresh path.
+  See [measurements](docs/performance.md#incremental-cursor-coordinates).
+
 ## 9.0.5
 
 - Keep incremental Wasm source snapshots in pieces during reused updates. Upload

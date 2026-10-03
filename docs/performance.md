@@ -389,9 +389,10 @@ pairs and isolated surrogate units.
 `snapshot.slice()` caches a selected piece and lazily indexes piece starts for
 other ranges. Local token reads avoid a document-size copy. `snapshot.text()`
 still joins and caches the full string when requested. Reused parse roots retain
-the source snapshot; their first child or field-reference read prepares cursor
-records and flattens text once for subsequent string slices. Fresh parser
-analysis accepts source pieces; full parse materialization uses flat text.
+the source snapshot. When token coordinates need refreshing, their first child
+or field-reference read prepares cursor records and flattens text once for
+subsequent string slices. Fresh parser analysis accepts source pieces; full
+parse materialization uses flat text.
 
 An alternating comparison against `9.0.4` (`e26b6d8`) on an AMD Ryzen 7 7800X3D,
 Deno 2.9.4 / V8 15.0.245.2-rusty used 24 warmups and 120 samples, with
@@ -443,6 +444,59 @@ Reproduce the comparison with:
 
 ```sh
 deno task bench:document --before-root /path/to/9.0.4 --warmups 24 --samples 120
+```
+
+## Incremental Cursor Coordinates
+
+Small edits that preserve each token's spec, accepting state, index, and UTF-16
+start and end can share the cursor tape's owned token records and rule spans.
+The source length must also match so reused suffix coordinates stay valid. This
+removes whole-document packing and text flattening when reading a local child or
+field after an equal-length identifier rename. Comparisons remain capped at 64
+old and new relexed records combined.
+
+Every snapshot gets fresh cursor wrappers and caches. Token text slices the
+current source pieces, while earlier cursors retain their own text and spans
+after later edits, arena growth, reset, and document disposal. A prior pending
+coordinate refresh remains pending and shares its immutable record descriptor;
+it still runs on the first child or field-reference read. Boundary changes,
+changed terminals, failed parses, and larger relex windows keep their existing
+refresh paths. Equal total source length alone does not permit record reuse.
+
+An alternating comparison against `9.0.5` (`67448c2`) on an AMD Ryzen 7 7800X3D,
+Deno 2.9.4 / V8 15.0.245.2-rusty used 24 warmups and 80 samples with background
+host activity. Each sample renames the first statement's `value` to `alias` or
+back, then reads the first child, its `name` field, text, and span. Documents
+already own packed cursor records. Full-source verification occurs outside the
+timer; parser action limits are 4,000,000. Times below are medians in
+milliseconds:
+
+| UTF-16 units | Trivia   | Before | After  | Speedup |
+| ------------ | -------- | ------ | ------ | ------- |
+| 524,305      | Discard  | 1.190  | 0.0128 | 93×     |
+| 524,305      | Preserve | 1.300  | 0.0102 | 127×    |
+| 4,194,307    | Discard  | 9.263  | 0.1006 | 92×     |
+| 4,194,307    | Preserve | 10.799 | 0.0718 | 150×    |
+
+Changed-length `value`/`renamed` controls stay within about 1% in these same
+workloads. Root-span-only rename/restore updates still perform the bounded
+coordinate comparison: the 4,194,307-unit fixed-offset median changes from
+0.0517 to 0.0547 ms. Chunk and source-piece maintenance still depend on document
+structure, so these measurements do not establish constant-time updates.
+
+Full-tree reads remain linear. A separate alternating 24-warmup, 120-sample run
+edits and traverses all children and fields of a 77,824-unit document. The
+equal-length median measures 10.252 to 10.277 ms; changed-length edits measure
+10.600 to 9.731 ms. There is no consistent gain for full traversal. Ordinary
+parse and validation medians stay within 0.3% in a 12-warmup, 50-sample run;
+lexing measures 2.930 to 3.011 ms. Document creation shows no consistent
+regression. The Wasm engine remains 11,961 bytes, with unchanged ABI and plan
+formats. The shared loader adds 1,356 bytes to reach 156,129 bytes.
+
+Reproduce the local-read comparisons and traversal controls with:
+
+```sh
+deno task bench:document --before-root /path/to/9.0.5 --warmups 24 --samples 80
 ```
 
 ## Lexer Backtracking Worst Case

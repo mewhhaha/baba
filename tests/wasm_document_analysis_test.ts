@@ -854,6 +854,137 @@ Deno.test("Wasm documents retain token and cursor spans after edits throughout l
   }
 });
 
+Deno.test("Wasm cursor coordinates retain fresh text and isolated spans across unchanged and pending layouts", () => {
+  function shape(cursor: SyntaxCursor): unknown {
+    if (cursor.type === "token") {
+      return {
+        type: cursor.type,
+        kind: cursor.kind,
+        tokenType: cursor.tokenType,
+        text: cursor.text,
+        span: cursor.span,
+        tokenIndex: cursor.tokenIndex,
+      };
+    }
+    const fields: unknown[] = [];
+    let names = ["name", "value"];
+    if (cursor.name === "module") names = ["statements"];
+    for (const name of names) {
+      fields.push(
+        cursor.fieldArray(name).map((value) => {
+          assert(value !== null && "type" in value);
+          return shape(value);
+        }),
+      );
+    }
+    return {
+      type: cursor.type,
+      name: cursor.name,
+      span: cursor.span,
+      tokenRange: cursor.tokenRange,
+      children: cursor.children().map(shape),
+      fields,
+    };
+  }
+  const parser = documentParser();
+  try {
+    for (const trivia of ["preserve", "discard"] as const) {
+      let source = " let alpha = 1;\nlet bravo = 2;\nlet gamma = 3;\n";
+      const document = parser.createDocument(source, { goal: "parse", trivia });
+      const initial = document.parse();
+      assert(initial.ok);
+      const oldRule = initial.cursor.child(0);
+      assert(oldRule !== undefined && oldRule.type === "rule");
+      const oldName = oldRule.field("name");
+      assert(oldName !== undefined && oldName !== null && "type" in oldName);
+      assert(oldName.type === "token");
+      // Mutating an escaped span must not alter the shared record arrays or
+      // the wrappers for a later source version.
+      (oldName.span as { start: number; end: number }).start = 999;
+      document.applyEdits([{ start: 5, oldEnd: 10, newText: "delta" }]);
+      source = source.slice(0, 5) + "delta" + source.slice(10);
+      const updated = document.parse();
+      assert(updated.ok);
+      const newRule = updated.cursor.child(0);
+      assert(newRule !== undefined && newRule.type === "rule");
+      const newName = newRule.field("name");
+      assert(newName !== undefined && newName !== null && "type" in newName);
+      assert(newName.type === "token");
+      assert(newRule !== oldRule && newName !== oldName);
+      assertEquals(newName.text, "delta");
+      assertEquals(newName.span.start, 5);
+      assertEquals(newName.span.end, 10);
+      assertEquals(oldName.text, "alpha");
+      assertEquals(oldName.span.start, 999);
+      const retained: { cursor: RuleCursor; source: string }[] = [{
+        cursor: updated.cursor,
+        source,
+      }];
+
+      // Leave shifted coordinates pending, then create many versions with
+      // matching coordinates before reading any of their children or fields.
+      document.applyEdits([{ start: 0, oldEnd: 1, newText: "   " }]);
+      source = "   " + source.slice(1);
+      for (let index = 0; index < 24; index++) {
+        const selected = index % 3;
+        let line = 0;
+        for (let before = 0; before < selected; before++) {
+          line = source.indexOf("\n", line) + 1;
+        }
+        const start = source.indexOf("let", line) + 4;
+        let name = "omega";
+        if (index % 2 === 0) name = "sigma";
+        document.applyEdits([{ start, oldEnd: start + 5, newText: name }]);
+        source = source.slice(0, start) + name + source.slice(start + 5);
+        const parsed = document.parse();
+        assert(parsed.ok);
+        if (index % 4 === 0) retained.push({ cursor: parsed.cursor, source });
+      }
+      parser.lex("let temporary = 1;\n".repeat(8192));
+      const options = { preserveTrivia: trivia === "preserve" };
+      const current = document.parse();
+      const fresh = parser.parse(source, options);
+      assert(current.ok && fresh.ok);
+      assertEquals(
+        JSON.stringify(shape(current.cursor)),
+        JSON.stringify(shape(fresh.cursor)),
+      );
+
+      // Total length and terminal positions are unchanged, but internal
+      // token boundaries move. This must refresh both token and rule spans.
+      const first = source.indexOf("let") + 4;
+      const second = source.indexOf("let", first) + 4;
+      document.applyEdits([
+        { start: first, oldEnd: first + 5, newText: "epsilon" },
+        { start: second, oldEnd: second + 5, newText: "eta" },
+      ]);
+      source = source.slice(0, first) + "epsilon" +
+        source.slice(first + 5, second) + "eta" + source.slice(second + 5);
+      const moved = document.parse();
+      const movedFresh = parser.parse(source, options);
+      assert(moved.ok && movedFresh.ok);
+      assertEquals(
+        JSON.stringify(shape(moved.cursor)),
+        JSON.stringify(shape(movedFresh.cursor)),
+      );
+      retained.push({ cursor: moved.cursor, source });
+      document.dispose();
+      parser.reset();
+      parser.lex("let overwrite = 2;\n".repeat(16384));
+      for (const saved of retained.reverse()) {
+        const expected = parser.parse(saved.source, options);
+        assert(expected.ok);
+        assertEquals(
+          JSON.stringify(shape(saved.cursor)),
+          JSON.stringify(shape(expected.cursor)),
+        );
+      }
+    }
+  } finally {
+    parser.dispose();
+  }
+});
+
 Deno.test("Wasm documents preserve shifted lookahead dependencies across distant token chunks", () => {
   const built = compile(
     String.raw`

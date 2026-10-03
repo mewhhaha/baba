@@ -2207,9 +2207,11 @@ function externalIncrementalTerminalsMatch(
   program: StrictIslandParserProgram,
   previous: ExternalIncrementalLexState,
   relexed: ExternalIncrementalRelexResult,
-): "none" | "terminals" | "positions" {
+  preserveCoordinates: boolean,
+): "none" | "terminals" | "positions" | "coordinates" {
   const terminals: number[] = [];
   let positionsMatch = previous.count === relexed.state.count;
+  let coordinatesMatch = positionsMatch && preserveCoordinates;
   for (
     let index = relexed.oldPrefixTokenCount;
     index < relexed.oldSuffixTokenStart;
@@ -2237,9 +2239,9 @@ function externalIncrementalTerminalsMatch(
     index++
   ) {
     const chunk = relexed.state.chunkForToken(index);
-    const spec = chunk.records[
-      (index - chunk.tokenStart) * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
-    ];
+    const base = (index - chunk.tokenStart) *
+      WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    const spec = chunk.records[base];
     if (spec < 0) {
       return "none";
     }
@@ -2249,10 +2251,9 @@ function externalIncrementalTerminalsMatch(
     }
     if (positionsMatch) {
       const previousChunk = previous.chunkForToken(index);
-      const previousSpec = previousChunk.records[
-        (index - previousChunk.tokenStart) *
-        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
-      ];
+      const previousBase = (index - previousChunk.tokenStart) *
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      const previousSpec = previousChunk.records[previousBase];
       const previousTerminal = program.terminalBySpec[previousSpec];
       if (previousTerminal === undefined) {
         throw new Error(
@@ -2261,6 +2262,19 @@ function externalIncrementalTerminalsMatch(
       }
       if (previousTerminal !== terminal) {
         positionsMatch = false;
+        coordinatesMatch = false;
+      } else if (
+        coordinatesMatch &&
+        (previousSpec !== spec ||
+          previousChunk.records[previousBase + 1] +
+                previousChunk.offsetDelta !==
+            chunk.records[base + 1] + chunk.offsetDelta ||
+          previousChunk.records[previousBase + 2] +
+                previousChunk.offsetDelta !==
+            chunk.records[base + 2] + chunk.offsetDelta ||
+          previousChunk.records[previousBase + 3] !== chunk.records[base + 3])
+      ) {
+        coordinatesMatch = false;
       }
     }
     if (terminal >= 0) {
@@ -2272,6 +2286,9 @@ function externalIncrementalTerminalsMatch(
   }
   if (matched !== terminals.length) {
     return "none";
+  }
+  if (coordinatesMatch) {
+    return "coordinates";
   }
   if (positionsMatch) {
     return "positions";
@@ -2872,6 +2889,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     if (this.goal !== "lex") {
       let reusedCounts: ExternalIslandAnalysisCounts | undefined;
       let reuseCursorStructure = false;
+      let reuseCursorCoordinates = false;
       let reuseChecks = 0;
       const changedRecords = relexed.oldSuffixTokenStart +
         relexed.newSuffixTokenStart - 2 * relexed.oldPrefixTokenCount;
@@ -2889,13 +2907,21 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
           program,
           previousLexState,
           relexed,
+          this.goal === "parse" &&
+            previousSnapshot.length === this.#snapshot.length,
         );
         if (match !== "none") {
           reusedCounts = this.#analysisCounts;
-          reuseCursorStructure = match === "positions";
+          reuseCursorStructure = match === "positions" ||
+            match === "coordinates";
+          reuseCursorCoordinates = match === "coordinates";
         }
       }
-      this.#refreshParserResults(reusedCounts, reuseCursorStructure);
+      this.#refreshParserResults(
+        reusedCounts,
+        reuseCursorStructure,
+        reuseCursorCoordinates,
+      );
       const reparsedRanges: Span[] = [];
       let parserActions = 0;
       if (reusedCounts === undefined) {
@@ -2994,6 +3020,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
   #refreshParserResults(
     reusedCounts?: ExternalIslandAnalysisCounts,
     reuseCursorStructure = false,
+    reuseCursorCoordinates = false,
   ): void {
     if (this.goal === "lex") {
       return;
@@ -3023,6 +3050,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
           this.#lexState,
           this.#lexResult.keptRecordIndices,
           this.#lexResult.keptCount,
+          reuseCursorCoordinates,
         );
         if (cursor !== undefined) {
           this.#parseResult = {
@@ -4318,6 +4346,7 @@ class ExternalCursorTapeView {
     state: ExternalIncrementalLexState,
     keptRecordIndices: Int32Array | null,
     keptCount: number,
+    reuseCoordinates: boolean,
   ): RuleCursor | undefined {
     let tokenCount = this.tokenRecords.length / WASM_TOKEN_RECORD_I32_COUNT;
     if (this.pendingTokens !== undefined) {
@@ -4326,21 +4355,27 @@ class ExternalCursorTapeView {
     if (tokenCount !== keptCount) {
       return undefined;
     }
-    // Matching terminals at each raw position keep child, field, value, and
-    // rule ranges unchanged. Share those immutable tapes without retaining
-    // prior cursor wrappers or source versions. Refresh dense token records
-    // and rule spans only when a child or field reference is read.
+    let tokenRecords = this.tokenRecords;
+    let pendingTokens = this.pendingTokens;
+    if (!reuseCoordinates) {
+      tokenRecords = new Int32Array(0);
+      pendingTokens = { state, keptRecordIndices, keptCount };
+    }
+    // Matching terminals at each raw position keep topology unchanged. Exact
+    // token coordinates also preserve dense token records and rule spans.
+    // Share owned arrays (or an earlier pending refresh with those same
+    // coordinates) while each snapshot gets fresh wrappers and source text.
     const tape = new ExternalCursorTapeView(
       this.metadata,
       source,
-      new Int32Array(0),
+      tokenRecords,
       this.ruleRecords,
       this.childRefs,
       this.fieldRecords,
       this.valueRecords,
       this.valueItems,
       undefined,
-      { state, keptRecordIndices, keptCount },
+      pendingTokens,
     );
     const root = tape.cursorForRuleRef(0);
     // This fresh span belongs to the new tape and has not escaped to a caller.

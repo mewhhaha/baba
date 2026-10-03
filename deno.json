@@ -1,6 +1,6 @@
 {
   "name": "@mewhhaha/baba",
-  "version": "9.0.5",
+  "version": "9.0.6",
   "license": "MIT",
   "exports": {
     ".": "./src/mod.ts",

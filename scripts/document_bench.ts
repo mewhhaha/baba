@@ -71,6 +71,7 @@ function operations(parser: ParserInstance): Operation[] {
     trivia: "preserve",
   });
   const traversed = parser.createDocument(tokenSource, { goal: "parse" });
+  const traversedStable = parser.createDocument(tokenSource, { goal: "parse" });
   const edits = [];
   for (let index = 0; index < 4096; index += 32) {
     const start = index * statement.length;
@@ -130,6 +131,7 @@ function operations(parser: ParserInstance): Operation[] {
   }
   const expectedTraversal = readCursor(initial.cursor);
   let traversalName = "value";
+  let stableTraversalName = "value";
   let variedIndex = 0;
   return [
     {
@@ -208,6 +210,36 @@ function operations(parser: ParserInstance): Operation[] {
       },
     },
     {
+      name: "equal-length edit then first cursor traversal and field reads",
+      codeUnits: tokenSource.length,
+      run: () => {
+        let nextName = "alias";
+        if (stableTraversalName === "alias") {
+          nextName = "value";
+        }
+        traversedStable.applyEdits([{
+          start: 4,
+          oldEnd: 9,
+          newText: nextName,
+        }]);
+        stableTraversalName = nextName;
+        const result = traversedStable.parse();
+        if (!result.ok || readCursor(result.cursor) !== expectedTraversal) {
+          throw new Error(
+            "Stable cursor traversal returned invalid text or fields.",
+          );
+        }
+      },
+      verify: () => {
+        const expected = tokenSource.slice(0, 4) + stableTraversalName +
+          tokenSource.slice(9);
+        if (traversedStable.snapshot.text() !== expected) {
+          throw new Error("Stable cursor traversal changed other source text.");
+        }
+        traversedStable.dispose();
+      },
+    },
+    {
       name: "first token-text pass after fragmented edits",
       codeUnits: tokenSource.length + edits.length,
       run: () => {
@@ -229,7 +261,84 @@ function operations(parser: ParserInstance): Operation[] {
     ...sourcePieceOperations(parser, 4 * 1024 * 1024, "insert"),
     ...sourcePieceOperations(parser, 512 * 1024, "replace"),
     ...sourcePieceOperations(parser, 4 * 1024 * 1024, "replace"),
+    ...localCursorOperations(parser, 512 * 1024),
+    ...localCursorOperations(parser, 4 * 1024 * 1024),
   ];
+}
+
+function localCursorOperations(
+  parser: ParserInstance,
+  size: number,
+): Operation[] {
+  const source = statement.repeat(Math.ceil(size / statement.length));
+  const operations: Operation[] = [];
+  for (const trivia of ["discard", "preserve"] as const) {
+    for (const equalLength of [true, false]) {
+      let document: IncrementalParseDocument | undefined;
+      let currentName = "value";
+      let name = `rename then first child and name field, ${trivia} trivia`;
+      if (equalLength) name += ", equal length";
+      else name += ", changed length";
+      operations.push({
+        name,
+        codeUnits: source.length,
+        run: () => {
+          if (document === undefined) {
+            document = parser.createDocument(source, {
+              goal: "parse",
+              trivia,
+              maxParserActions: 4_000_000,
+            });
+          }
+          let nextName = "value";
+          if (currentName === "value") {
+            nextName = "renamed";
+            if (equalLength) nextName = "alias";
+          }
+          document.applyEdits([{
+            start: 4,
+            oldEnd: 4 + currentName.length,
+            newText: nextName,
+          }]);
+          currentName = nextName;
+          const parsed = document.parse();
+          if (!parsed.ok) {
+            throw new Error("Local cursor benchmark returned invalid source.");
+          }
+          const rule = parsed.cursor.child(0);
+          if (rule === undefined || rule.type !== "rule") {
+            throw new Error("Local cursor benchmark returned no first child.");
+          }
+          const value = rule.field("name");
+          if (
+            value === undefined || value === null || !("type" in value) ||
+            value.type !== "token" || value.text !== nextName ||
+            value.span.start !== 4 || value.span.end !== 4 + nextName.length
+          ) {
+            throw new Error(
+              "Local cursor benchmark returned an invalid field.",
+            );
+          }
+        },
+        verify: () => {
+          if (document === undefined) {
+            throw new Error(
+              "Local cursor benchmark did not create a document.",
+            );
+          }
+          const expected = source.slice(0, 4) + currentName + source.slice(9);
+          if (document.snapshot.text() !== expected) {
+            throw new Error(
+              "Local cursor benchmark changed other source text.",
+            );
+          }
+          document.dispose();
+          document = undefined;
+        },
+      });
+    }
+  }
+  return operations;
 }
 
 function sourcePieceOperations(
