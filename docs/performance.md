@@ -226,6 +226,61 @@ checks stay lazy; successful first use clears the decoded cache.
 deno task bench:wasm-setup --before-root /path/to/previous/checkout
 ```
 
+## Incremental Island Analysis Reuse
+
+For a previously valid document, compare the relexed window's terminals before
+repeating analysis. Matching windows reuse structural, region, and field counts;
+validation documents also avoid uploading the full token buffer. Parse documents
+still rebuild cursors with current text, trivia, and spans. Comparison is capped
+at 64 old-plus-new records; larger windows and failed analyses take the full
+path.
+
+On the same CPU/Deno, eight warmups and 40 alternating samples of a space
+insertion/removal in 524,305 UTF-16 units measured p25 / median milliseconds:
+
+| Operation            | Before      | After       |
+| -------------------- | ----------- | ----------- |
+| Incremental parse    | 6.99 / 7.45 | 5.84 / 6.06 |
+| Incremental validate | 3.88 / 4.06 | 1.77 / 1.87 |
+
+Repeated runs improved median parsing by 15–20% and validation by 54–56%.
+Changed-token recovery and whole-file rewrites were unchanged within noise. The
+Wasm binary and ABI are unchanged; the host loader grows by about 3.3 KB.
+Reproduce with:
+
+```sh
+deno task bench:document --before-root /path/to/previous/checkout
+```
+
+## Incremental Token Mapping Reuse
+
+After an error-free lex result, compare at most 64 changed records. If the raw
+record count and kept/trivia classifications match, reuse the immutable visible
+token mapping and avoid a full diagnostic scan. Each version gets a new token
+tape, snapshot, and lazy cache. Errors, changed counts or classifications, and
+larger windows use the full rebuild. This applies to all document goals.
+
+Against a checkout that already includes analysis reuse above, a longer run on
+the same CPU/Deno used 24 warmups and 160 alternating samples of the same
+524,305-unit insertion/removal. Times are p25 / median milliseconds:
+
+| Operation             | Before      | After       |
+| --------------------- | ----------- | ----------- |
+| Parse                 | 7.55 / 7.66 | 6.00 / 6.11 |
+| Validate              | 2.69 / 2.75 | 1.16 / 1.23 |
+| Lex, preserved trivia | 2.67 / 2.72 | 1.11 / 1.16 |
+| Lex, discarded trivia | 2.82 / 2.88 | 1.07 / 1.12 |
+
+Median reductions were 20.3%, 55.3%, 57.2%, and 61.0%, respectively. Shorter
+40-sample runs showed 33–55% lower validation times and noisier parse medians.
+Whole-file rewrite time stayed within 1% of the previous path. This changes only
+document bookkeeping; ordinary `lex()`, `validate()`, and `parse()` are
+unchanged. The host loader grows by about 2.7 KB; Wasm bytes and ABI stay
+unchanged.
+
+`bench:document` now also measures both lex-document trivia modes. It defaults
+to eight warmups and 40 samples; the longer run changed those two constants.
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that

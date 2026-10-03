@@ -214,6 +214,10 @@ interface GeneratedIncrementalDocument {
       readonly reusedTokens: number;
     };
     readonly parser?: {
+      readonly reparsedRanges: readonly {
+        readonly start: number;
+        readonly end: number;
+      }[];
       readonly parserActions: number;
       readonly reuseChecks: number;
       readonly reusedCheckpoints: number;
@@ -1301,7 +1305,7 @@ Deno.test("Wasm documents reuse lexer records across edits", async () => {
     assert(update.lexer.reusedTokens > 0);
     assert(update.lexer.relexedRange.start <= valueStart);
     assert(update.parser);
-    assertEquals(update.parser.reuseChecks, 0);
+    assertEquals(update.parser.reuseChecks, 1);
     assertEquals(update.parser.reusedCheckpoints, 0);
     assertEquals(document.validate().ok, true);
     const newParse = document.parse();
@@ -1402,7 +1406,7 @@ Deno.test("Wasm documents invalidate guarded tokens from their lookahead depende
   }
 });
 
-Deno.test("Wasm documents report full island reparses without LR checkpoints", async () => {
+Deno.test("Wasm documents reuse validation for an unchanged terminal stream", async () => {
   const { dir, mod, bytes, plan } = await materialize(STATEMENT_GRAMMAR);
   try {
     const parser = mod.createParser({ bytes, plan }) as GeneratedParser;
@@ -1417,7 +1421,9 @@ Deno.test("Wasm documents report full island reparses without LR checkpoints", a
 
     assertEquals(document.validate().ok, true);
     assert(update.parser);
-    assert(update.parser.parserActions > 0);
+    assertEquals(update.parser.parserActions, 0);
+    assertEquals(update.parser.reparsedRanges.length, 0);
+    assertEquals(update.parser.reuseChecks, 1);
     assertEquals(update.parser.reusedCheckpoints, 0);
     assertEquals(update.parser.createdCheckpoints, 0);
 

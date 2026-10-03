@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Reuse immutable incremental token mappings for small edits that preserve
+  record counts and trivia selection, with fresh token text and spans. See
+  [measurements](docs/performance.md#incremental-token-mapping-reuse).
+- Reuse successful incremental island analysis for small edits that preserve
+  terminals, refreshing cursor text and spans. Measured medians improve parsing
+  by 15–20% and validation by 54–56%. See
+  [measurements](docs/performance.md#incremental-island-analysis-reuse).
 - Share Wasm plan decoding across setup and first use, reducing measured startup
   totals by 37–48%. See [measurements](docs/performance.md#wasm-setup).
 - Upload incremental Wasm token records directly and avoid a redundant host copy

@@ -1,6 +1,9 @@
 import { assert, assertEquals, compile } from "./helpers.ts";
 import { createParser } from "../src/runtime/generated_wasm.ts";
 import type {
+  IncrementalLexResult,
+  IncrementalParseDocument,
+  IncrementalValidateDocument,
   ParserInstance,
   SyntaxCursor,
 } from "../src/runtime/generated_wasm.ts";
@@ -43,6 +46,109 @@ function documentParser(): ParserInstance {
   assert(plan !== undefined && plan.encoding === "binary");
   return createParser({ bytes: wasm.content, plan: plan.content });
 }
+
+Deno.test("Wasm document token tapes stay current across trivia changes, errors, and retained snapshots", () => {
+  function shape(
+    result: Pick<IncrementalLexResult, "tokenTape" | "diagnostics">,
+  ): string {
+    const tokens = [];
+    for (let index = 0; index < result.tokenTape.length; index++) {
+      const token = result.tokenTape.token(index);
+      assert(token !== undefined);
+      tokens.push(token);
+    }
+    return JSON.stringify({ tokens, diagnostics: result.diagnostics });
+  }
+  const parser = documentParser();
+  try {
+    for (const trivia of ["preserve", "discard"] as const) {
+      const original = "let x=1;let y=2;";
+      const document = parser.createDocument(original, { goal: "lex", trivia });
+      const retained: {
+        result: IncrementalLexResult;
+        source: string;
+        expected: string;
+      }[] = [];
+      const sources = [
+        original,
+        "let longname=1;let y=2;",
+        "let longname=z;let y=2;",
+        "let longname= ;let y=2;",
+        "let longname=z;let y=2;",
+        "let longname=z;let   y=2;",
+        " let longname=z;let   y=2;",
+        "let longname=z;let   y=2;",
+        "let longname=@;let   y=2;",
+        "let longname=$;let   y=2;",
+        "let longername=$;let   y=2;",
+        "let longername=z;let   y=2;",
+        "let longername=z;let   y=20000;",
+        "let longername=z;let   y=\ud800;",
+        "let longername=z;let   y=😀;",
+        "",
+        " \t",
+        "a",
+        " \t",
+        "@",
+        "",
+        "let x=1;".repeat(128),
+        "let y=2;".repeat(128),
+      ];
+      for (const source of sources) {
+        const previous = document.snapshot.text();
+        let start = 0;
+        while (start < previous.length && previous[start] === source[start]) {
+          start++;
+        }
+        let oldEnd = previous.length;
+        let newEnd = source.length;
+        while (
+          oldEnd > start && newEnd > start &&
+          previous[oldEnd - 1] === source[newEnd - 1]
+        ) {
+          oldEnd--;
+          newEnd--;
+        }
+        document.applyEdits([{
+          start,
+          oldEnd,
+          newText: source.slice(start, newEnd),
+        }]);
+        const fresh = parser.lex(source, {
+          preserveTrivia: trivia === "preserve",
+        });
+        const result = document.lex();
+        assertEquals(result.version, document.version);
+        assertEquals(result.snapshot, document.snapshot);
+        assertEquals(result.tokenTape.length, fresh.tokenTape.length);
+        assertEquals(
+          JSON.stringify(result.diagnostics),
+          JSON.stringify(fresh.diagnostics),
+        );
+        if (source === "let longname=@;let   y=2;") {
+          assertEquals(
+            JSON.stringify(result.diagnostics),
+            JSON.stringify([{
+              code: "LEX_UNEXPECTED_CHARACTER",
+              message: 'Unexpected character "@".',
+              span: { start: 13, end: 14 },
+            }]),
+          );
+        }
+        // Keep every tape lazy until later edits and arena growth have finished.
+        retained.push({ result, source, expected: shape(fresh) });
+      }
+      parser.lex("let temporary=3;".repeat(8192));
+      document.dispose();
+      for (const saved of retained) {
+        assertEquals(saved.result.snapshot.text(), saved.source);
+        assertEquals(shape(saved.result), saved.expected);
+      }
+    }
+  } finally {
+    parser.dispose();
+  }
+});
 
 Deno.test("Wasm parse documents retain validation diagnostics and work across edits", () => {
   const parser = documentParser();
@@ -120,6 +226,207 @@ Deno.test("Wasm parse documents keep successful validation when cursor allocatio
     assertEquals(parsed.diagnostics[0].code, "PARSER_INTERNAL_ERROR");
   } finally {
     WebAssembly.Memory.prototype.grow = grow;
+    parser.dispose();
+  }
+});
+
+Deno.test("Wasm documents reuse analysis while refreshing text, trivia, spans, and snapshots", () => {
+  function shape(cursor: SyntaxCursor): unknown {
+    if (cursor.type === "token") {
+      return {
+        type: cursor.type,
+        tokenType: cursor.tokenType,
+        kind: cursor.kind,
+        text: cursor.text,
+        span: cursor.span,
+        tokenIndex: cursor.tokenIndex,
+      };
+    }
+    return {
+      type: cursor.type,
+      name: cursor.name,
+      span: cursor.span,
+      tokenRange: cursor.tokenRange,
+      children: cursor.children().map(shape),
+    };
+  }
+  const parser = documentParser();
+  try {
+    for (const trivia of ["preserve", "discard"] as const) {
+      const original = "let x=1;let y=2;";
+      const parsed = parser.createDocument(original, {
+        goal: "parse",
+        trivia,
+        maxParserActions: 10,
+      });
+      const validated = parser.createDocument(original, {
+        goal: "validate",
+        trivia,
+        maxParserActions: 10,
+      });
+      const retained = parsed.parse();
+      assert(retained.ok);
+      const retainedShape = JSON.stringify(shape(retained.cursor));
+      const retainedValidation = validated.validate();
+      const sources = [
+        " \tlet x=1;let y=2;",
+        " \tlet longer=1;let y=2;",
+        " \tlet longer=10000;let y=2;",
+        " \tlet\n\tlonger=10000;let y=2;",
+        "let\n\tlonger=10000; \nlet y=2; \t",
+        "let longer=10000; let y=2;",
+      ];
+      for (const source of sources) {
+        const previous = parsed.snapshot.text();
+        let start = 0;
+        while (start < previous.length && previous[start] === source[start]) {
+          start++;
+        }
+        let oldEnd = previous.length;
+        let newEnd = source.length;
+        while (
+          oldEnd > start && newEnd > start &&
+          previous[oldEnd - 1] === source[newEnd - 1]
+        ) {
+          oldEnd--;
+          newEnd--;
+        }
+        const edits = [{ start, oldEnd, newText: source.slice(start, newEnd) }];
+        const parsedUpdate = parsed.applyEdits(edits);
+        const validatedUpdate = validated.applyEdits(edits);
+        assertEquals(parsedUpdate.parser.parserActions, 0);
+        assertEquals(parsedUpdate.parser.reparsedRanges.length, 0);
+        assertEquals(parsedUpdate.parser.reuseChecks, 1);
+        assertEquals(
+          JSON.stringify(parsedUpdate.parser),
+          JSON.stringify(validatedUpdate.parser),
+        );
+        assertEquals(parsed.snapshot.text(), source);
+        const validation = validated.validate();
+        assert(validation.ok);
+        assertEquals(validation.version, validated.version);
+        assertEquals(validation.snapshot, validated.snapshot);
+        // Overwrite the shared Wasm arena between document calls.
+        parser.lex("let temporary=3;".repeat(8192));
+        const updated = parsed.parse();
+        const fresh = parser.parse(source, {
+          preserveTrivia: trivia === "preserve",
+          maxParserActions: 10,
+        });
+        assert(updated.ok && fresh.ok);
+        assertEquals(
+          JSON.stringify(shape(updated.cursor)),
+          JSON.stringify(shape(fresh.cursor)),
+        );
+        const statement = updated.cursor.child(0);
+        assert(statement !== undefined && statement.type === "rule");
+        const name = statement.field("name");
+        assert(name !== undefined && name !== null && !Array.isArray(name));
+        assert("type" in name && name.type === "token");
+        assertEquals(name.text, source.slice(name.span.start, name.span.end));
+        assertEquals(JSON.stringify(shape(retained.cursor)), retainedShape);
+        assertEquals(retainedValidation.snapshot.text(), original);
+        assertEquals(retainedValidation.version, 0);
+      }
+      const source = parsed.snapshot.text();
+      const valueAt = source.lastIndexOf("2");
+      const edits = [
+        { start: 4, oldEnd: 10, newText: "alias" },
+        { start: valueAt, oldEnd: valueAt + 1, newText: "300" },
+      ];
+      for (const document of [parsed, validated]) {
+        const update = document.applyEdits(edits);
+        assertEquals(update.parser.parserActions, 0);
+        assertEquals(update.parser.reuseChecks, 1);
+      }
+      const updated = parsed.parse();
+      const fresh = parser.parse(parsed.snapshot.text(), {
+        preserveTrivia: trivia === "preserve",
+        maxParserActions: 10,
+      });
+      assert(updated.ok && fresh.ok);
+      assertEquals(
+        JSON.stringify(shape(updated.cursor)),
+        JSON.stringify(shape(fresh.cursor)),
+      );
+      parsed.dispose();
+      validated.dispose();
+    }
+  } finally {
+    parser.dispose();
+  }
+});
+
+Deno.test("Wasm document analysis reuse falls back for changed terminals, failures, and large windows", () => {
+  const parser = documentParser();
+  try {
+    for (const goal of ["validate", "parse"] as const) {
+      let document: IncrementalParseDocument | IncrementalValidateDocument;
+      if (goal === "parse") {
+        document = parser.createDocument("let x=1;let y=2;", {
+          goal: "parse",
+          maxParserActions: 10,
+        });
+      } else {
+        document = parser.createDocument("let x=1;let y=2;", {
+          goal: "validate",
+          maxParserActions: 10,
+        });
+      }
+      for (
+        const source of [
+          "let x=;let y=2;",
+          "let x=;  let y=2;",
+          "let x=@;let y=2;",
+          "let x=1;let y=2;",
+          "let x=1;let y=2;let z=3;",
+          "let x=1;let y=2;let z=@;",
+          "let x=1;let y=2;",
+        ]
+      ) {
+        const update = document.applyEdits([{
+          start: 0,
+          oldEnd: document.snapshot.length,
+          newText: source,
+        }]);
+        const result = document.validate();
+        const fresh = parser.validate(source, { maxParserActions: 10 });
+        assertEquals(result.ok, fresh.ok);
+        assertEquals(
+          JSON.stringify(result.diagnostics),
+          JSON.stringify(fresh.diagnostics),
+        );
+        assert(update.parser.parserActions > 0);
+        assertEquals(update.parser.reparsedRanges.length, 1);
+        if (document.goal === "parse") {
+          const parsed = document.parse();
+          assertEquals(parsed.ok, fresh.ok);
+          assertEquals(
+            JSON.stringify(parsed.diagnostics),
+            JSON.stringify(fresh.diagnostics),
+          );
+        }
+      }
+      document.dispose();
+
+      const source = "let x=1;".repeat(20);
+      let large: IncrementalParseDocument | IncrementalValidateDocument;
+      if (goal === "parse") {
+        large = parser.createDocument(source, { goal: "parse" });
+      } else {
+        large = parser.createDocument(source, { goal: "validate" });
+      }
+      const update = large.applyEdits([{
+        start: 0,
+        oldEnd: source.length,
+        newText: source.replaceAll("x", "renamed"),
+      }]);
+      assertEquals(large.validate().ok, true);
+      assert(update.parser.parserActions > 0);
+      assertEquals(update.parser.reuseChecks, 0);
+      large.dispose();
+    }
+  } finally {
     parser.dispose();
   }
 });

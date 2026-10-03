@@ -1,6 +1,7 @@
 import { compile, parseMetadata } from "../src/mod.ts";
 import { createParser } from "../src/runtime/generated_wasm.ts";
 import type {
+  IncrementalLexDocument,
   IncrementalParseDocument,
   IncrementalValidateDocument,
   ParserInstance,
@@ -28,6 +29,14 @@ interface Operation {
 function operations(parser: ParserInstance): Operation[] {
   const parsed = parser.createDocument(source, { goal: "parse" });
   const validated = parser.createDocument(source, { goal: "validate" });
+  const preserved = parser.createDocument(source, {
+    goal: "lex",
+    trivia: "preserve",
+  });
+  const discarded = parser.createDocument(source, {
+    goal: "lex",
+    trivia: "discard",
+  });
   const lexed = parser.createDocument(tokenSource, {
     goal: "lex",
     trivia: "preserve",
@@ -39,12 +48,18 @@ function operations(parser: ParserInstance): Operation[] {
   }
   lexed.applyEdits(edits);
   function update(
-    document: IncrementalParseDocument | IncrementalValidateDocument,
+    document:
+      | IncrementalLexDocument
+      | IncrementalParseDocument
+      | IncrementalValidateDocument,
   ): void {
     document.applyEdits([{ start: editAt, oldEnd: editAt, newText: " " }]);
     document.applyEdits([{ start: editAt, oldEnd: editAt + 1, newText: "" }]);
-    if (!document.validate().ok || document.snapshot.text() !== source) {
-      throw new Error("Incremental benchmark changed the validated source.");
+    if (document.snapshot.text() !== source) {
+      throw new Error("Incremental benchmark changed the source.");
+    }
+    if (document.goal !== "lex" && !document.validate().ok) {
+      throw new Error("Incremental benchmark returned invalid source.");
     }
   }
   return [
@@ -65,6 +80,16 @@ function operations(parser: ParserInstance): Operation[] {
       name: "incremental validate insert+remove",
       codeUnits: source.length,
       run: () => update(validated),
+    },
+    {
+      name: "incremental lex insert+remove, preserved trivia",
+      codeUnits: source.length,
+      run: () => update(preserved),
+    },
+    {
+      name: "incremental lex insert+remove, discarded trivia",
+      codeUnits: source.length,
+      run: () => update(discarded),
     },
     {
       name: "first token-text pass after fragmented edits",

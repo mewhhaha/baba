@@ -177,6 +177,7 @@ export interface IncrementalLexWork {
 
 export interface IncrementalParserWork {
   readonly reparsedRanges: readonly Span[];
+  /** Raw token records submitted to fresh analysis, excluding cursor rebuilding. */
   readonly parserActions: number;
   readonly reuseChecks: number;
   readonly reusedCheckpoints: number;
@@ -1623,6 +1624,59 @@ interface ExternalIncrementalRelexResult {
   readonly newSuffixTokenStart: number;
 }
 
+const MAX_INCREMENTAL_REUSE_RECORDS = 64;
+
+function externalIncrementalTerminalsMatch(
+  program: StrictIslandParserProgram,
+  previous: ExternalIncrementalLexState,
+  relexed: ExternalIncrementalRelexResult,
+): boolean {
+  const terminals: number[] = [];
+  for (
+    let index = relexed.oldPrefixTokenCount;
+    index < relexed.oldSuffixTokenStart;
+    index++
+  ) {
+    const spec = previous.records[
+      index * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+    ];
+    if (spec < 0) {
+      return false;
+    }
+    const terminal = program.terminalBySpec[spec];
+    if (terminal === undefined) {
+      throw new Error(`Incremental token ${index} has unknown spec ${spec}.`);
+    }
+    if (terminal >= 0) {
+      terminals.push(terminal);
+    }
+  }
+  let matched = 0;
+  for (
+    let index = relexed.oldPrefixTokenCount;
+    index < relexed.newSuffixTokenStart;
+    index++
+  ) {
+    const spec = relexed.state.records[
+      index * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+    ];
+    if (spec < 0) {
+      return false;
+    }
+    const terminal = program.terminalBySpec[spec];
+    if (terminal === undefined) {
+      throw new Error(`Incremental token ${index} has unknown spec ${spec}.`);
+    }
+    if (terminal >= 0) {
+      if (terminals[matched] !== terminal) {
+        return false;
+      }
+      matched++;
+    }
+  }
+  return matched === terminals.length;
+}
+
 function externalIncrementalRelex(
   wasm: ExternalParserWasmExports,
   planByteLength: number,
@@ -1879,12 +1933,82 @@ function externalIncrementalTokenAtStart(
   return lower;
 }
 
+interface ExternalIncrementalLexResult {
+  readonly result: IncrementalLexResult;
+  readonly keptRecordIndices: Int32Array | null;
+  readonly keptCount: number;
+  readonly hasErrors: boolean;
+}
+
 function externalIncrementalLexResult(
   metadata: ExternalRuntimeMetadata,
   snapshot: SourceSnapshot,
   state: ExternalIncrementalLexState,
   preserveTrivia: boolean,
-): IncrementalLexResult {
+  update?: {
+    readonly previousState: ExternalIncrementalLexState;
+    readonly previousResult: ExternalIncrementalLexResult;
+    readonly relexed: ExternalIncrementalRelexResult;
+  },
+): ExternalIncrementalLexResult {
+  if (
+    update !== undefined &&
+    !update.previousResult.hasErrors &&
+    update.previousState.count === state.count &&
+    update.relexed.newSuffixTokenStart - update.relexed.oldPrefixTokenCount <=
+      MAX_INCREMENTAL_REUSE_RECORDS
+  ) {
+    let matches = true;
+    for (
+      let index = update.relexed.oldPrefixTokenCount;
+      index < update.relexed.newSuffixTokenStart;
+      index++
+    ) {
+      const base = index * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      const spec = state.records[base];
+      const oldSpec = update.previousState.records[base];
+      if (spec === undefined || oldSpec === undefined) {
+        throw new Error(`Incremental token record ${index} has no spec.`);
+      }
+      if (spec < 0) {
+        matches = false;
+        break;
+      }
+      const trivia = metadata.specIsTrivia[spec];
+      const oldTrivia = metadata.specIsTrivia[oldSpec];
+      if (trivia === undefined || oldTrivia === undefined) {
+        throw new Error(
+          `Incremental token record ${index} has an unknown spec.`,
+        );
+      }
+      if (!preserveTrivia && trivia !== oldTrivia) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      // The immutable mapping still selects the same records. Tokens use the
+      // new records and snapshot, so text, spans, and lazy caches stay fresh.
+      const { keptRecordIndices, keptCount } = update.previousResult;
+      return {
+        result: {
+          version: snapshot.version,
+          snapshot,
+          tokenTape: new ExternalSnapshotTokenTape(
+            metadata,
+            snapshot,
+            state.records,
+            keptRecordIndices,
+            keptCount,
+          ),
+          diagnostics: [],
+        },
+        keptRecordIndices,
+        keptCount,
+        hasErrors: false,
+      };
+    }
+  }
   const diagnostics: LexDiagnostic[] = [];
   let keptRecordIndices: Int32Array | undefined;
   let keptCount = 0;
@@ -1910,7 +2034,13 @@ function externalIncrementalLexResult(
       keptCount++;
       continue;
     }
-    if (!preserveTrivia && metadata.specIsTrivia[specIndex] === 1) {
+    const isTrivia = metadata.specIsTrivia[specIndex];
+    if (isTrivia === undefined) {
+      throw new Error(
+        `Incremental token record ${tokenIndex} references unknown spec ${specIndex}.`,
+      );
+    }
+    if (!preserveTrivia && isTrivia === 1) {
       if (keptRecordIndices === undefined) {
         keptRecordIndices = new Int32Array(state.count);
         for (let keptIndex = 0; keptIndex < keptCount; keptIndex++) {
@@ -1929,16 +2059,21 @@ function externalIncrementalLexResult(
     indices = keptRecordIndices;
   }
   return {
-    version: snapshot.version,
-    snapshot,
-    tokenTape: new ExternalSnapshotTokenTape(
-      metadata,
+    result: {
+      version: snapshot.version,
       snapshot,
-      state.records,
-      indices,
-      keptCount,
-    ),
-    diagnostics,
+      tokenTape: new ExternalSnapshotTokenTape(
+        metadata,
+        snapshot,
+        state.records,
+        indices,
+        keptCount,
+      ),
+      diagnostics,
+    },
+    keptRecordIndices: indices,
+    keptCount,
+    hasErrors: diagnostics.length !== 0,
   };
 }
 
@@ -1949,9 +2084,10 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
   #lexState: ExternalIncrementalLexState;
   #lexSearchFloorOffset = 0;
   #lexSearchFloorToken = 0;
-  #lexResult: IncrementalLexResult;
+  #lexResult: ExternalIncrementalLexResult;
   #validateResult: IncrementalValidateResult | undefined;
   #parseResult: IncrementalParseResult<Root> | undefined;
+  #analysisCounts: ExternalIslandAnalysisCounts | undefined;
   readonly #preserveTrivia: boolean;
   readonly #maxParserActions: number;
 
@@ -2064,7 +2200,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
 
   lex(): IncrementalLexResult {
     this.#assertLive();
-    return this.#lexResult;
+    return this.#lexResult.result;
   }
 
   validate(): IncrementalValidateResult {
@@ -2130,15 +2266,46 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       this.#snapshot,
       this.#lexState,
       this.#preserveTrivia,
+      {
+        previousState: previousLexState,
+        previousResult: this.#lexResult,
+        relexed,
+      },
     );
 
     let parserWork: IncrementalParserWork | undefined;
     if (this.goal !== "lex") {
-      this.#refreshParserResults();
+      let reusedCounts: ExternalIslandAnalysisCounts | undefined;
+      let reuseChecks = 0;
+      const changedRecords = relexed.oldSuffixTokenStart +
+        relexed.newSuffixTokenStart - 2 * relexed.oldPrefixTokenCount;
+      // Bound host comparison work even when an edit replaces most of a file.
+      if (
+        this.#analysisCounts !== undefined &&
+        changedRecords <= MAX_INCREMENTAL_REUSE_RECORDS
+      ) {
+        const program = this.islandProgram;
+        if (program === undefined) {
+          throw new Error("Incremental parsing has no strict island parser.");
+        }
+        reuseChecks = 1;
+        if (
+          externalIncrementalTerminalsMatch(program, previousLexState, relexed)
+        ) {
+          reusedCounts = this.#analysisCounts;
+        }
+      }
+      this.#refreshParserResults(reusedCounts);
+      const reparsedRanges: Span[] = [];
+      let parserActions = 0;
+      if (reusedCounts === undefined) {
+        reparsedRanges.push({ start: 0, end: this.#source.length });
+        parserActions = this.#lexState.count;
+      }
       parserWork = {
-        reparsedRanges: [{ start: 0, end: this.#source.length }],
-        parserActions: this.#lexState.count,
-        reuseChecks: 0,
+        reparsedRanges,
+        parserActions,
+        reuseChecks,
         reusedCheckpoints: 0,
         createdCheckpoints: 0,
       };
@@ -2224,13 +2391,22 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     };
   }
 
-  #refreshParserResults(): void {
+  #refreshParserResults(reusedCounts?: ExternalIslandAnalysisCounts): void {
     if (this.goal === "lex") {
       return;
     }
     const islandProgram = this.islandProgram;
     if (islandProgram === undefined) {
       throw new Error("Incremental parsing has no strict island parser.");
+    }
+    if (reusedCounts !== undefined && this.goal === "validate") {
+      this.#validateResult = {
+        ok: true,
+        version: this.#snapshot.version,
+        snapshot: this.#snapshot,
+        diagnostics: [],
+      };
+      return;
     }
     const analysis = analyzeExternalIslandInRust(
       this.metadata,
@@ -2241,7 +2417,16 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       this.#source,
       this.#maxParserActions,
       this.#lexState,
+      reusedCounts,
     );
+    this.#analysisCounts = undefined;
+    if (analysis.ok) {
+      this.#analysisCounts = {
+        structuralTokenCount: analysis.structuralTokenCount,
+        regionCount: analysis.regionCount,
+        transitionFieldCount: analysis.transitionFieldCount,
+      };
+    }
     this.#validateResult = externalIncrementalValidateResult(
       this.#snapshot,
       analysis,
@@ -2671,15 +2856,18 @@ type ExternalWasmIslandRecordPreparation =
     readonly requiredBytes: number;
   };
 
+interface ExternalIslandAnalysisCounts {
+  readonly structuralTokenCount: number;
+  readonly regionCount: number;
+  readonly transitionFieldCount: number;
+}
+
 type ExternalRustIslandAnalysis =
-  | {
+  | (ExternalIslandAnalysisCounts & {
     readonly ok: true;
     readonly records: ExternalWasmIslandRecords;
     readonly resultPtr: number;
-    readonly structuralTokenCount: number;
-    readonly regionCount: number;
-    readonly transitionFieldCount: number;
-  }
+  })
   | {
     readonly ok: false;
     readonly diagnostics: readonly ExternalParseDiagnostic[];
@@ -2861,6 +3049,7 @@ function analyzeExternalIslandInRust(
   source: string,
   maxParserActions: number,
   externalRecords?: Int32Array | ExternalIncrementalLexState,
+  reusedCounts?: ExternalIslandAnalysisCounts,
 ): ExternalRustIslandAnalysis {
   const prepared = prepareExternalWasmIslandRecords(
     wasm,
@@ -2896,6 +3085,9 @@ function analyzeExternalIslandInRust(
     };
   }
   ensureExternalWasmCapacity(wasm.memory, requiredBytes);
+  if (reusedCounts !== undefined) {
+    return { ok: true, records, resultPtr, ...reusedCounts };
+  }
   const status = wasm.analyze_island_records(
     records.tokenPtr,
     records.rawTokenCount,

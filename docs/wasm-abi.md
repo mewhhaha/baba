@@ -138,10 +138,12 @@ location fields; materialization writes the final tape counts and root
 reference. Generated `abi.json` records the exact field order and compact tape
 widths.
 
-`maxParserActions` now bounds island transitions. Incremental documents retain
-their public result and work-counter shapes, but parsing reparses the complete
-structural token stream and reports zero LR checkpoints because LR checkpoints
-no longer exist.
+`maxParserActions` bounds island transitions. Incremental documents can reuse
+successful analysis when a changed window preserves the terminal sequence.
+`parserActions` counts raw records submitted to fresh analysis, excluding cursor
+rebuilding. Reuse reports no reparsed ranges, zero actions, and one reuse check.
+Changed terminals, failed analysis, and large windows require fresh analysis. LR
+checkpoint counts remain zero.
 
 ## Ownership, Lifetime, And Errors
 
