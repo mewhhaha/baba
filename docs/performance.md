@@ -281,6 +281,102 @@ unchanged.
 `bench:document` now also measures both lex-document trivia modes. It defaults
 to eight warmups and 40 samples; the longer run changed those two constants.
 
+## Incremental Cursor Structure Reuse
+
+Successful parse documents can also share child, field, and value tables when
+terminal classifications retain their raw token indices. New versions get fresh
+cursor caches and root spans. The first child or field-reference read creates
+dense token records and refreshes rule spans from the current owned lexer tape.
+No prior cursor wrappers or Wasm views are retained. Changed indices, failed
+parses, and larger windows use the normal materializer.
+
+Against `7c14431`, 24 warmups and 120 alternating samples on the same CPU/Deno
+measured p25 / median milliseconds:
+
+| Operation                               | Before       | After       |
+| --------------------------------------- | ------------ | ----------- |
+| 512 KiB parse edit, discarded trivia    | 5.28 / 5.37  | 1.27 / 1.37 |
+| 512 KiB parse edit, preserved trivia    | 5.32 / 5.43  | 1.28 / 1.39 |
+| 76 KiB edit, full cursor and field read | 7.87 / 10.05 | 6.39 / 9.78 |
+
+The first two operations insert and remove a space, then inspect the root. Their
+median edit latency falls by about 74%. Bulk traversal timings varied between
+runs, so there is no claim of a repeatable full-tree traversal gain. The first
+child read still refreshes token and rule arrays in linear time; callers that
+inspect the tree after every edit see a smaller benefit than root-only readers.
+Lexer and validation document timings were within about 3% of the baseline.
+
+Separate profiled runs on 4,194,307 UTF-16 units, with a four-million-action
+limit, reduced parse-update p25 / median time from 49.16 / 58.11 to 12.17 /
+12.37 ms. No island materializer ran during those updates. Ordinary public calls
+on 524,304 units stayed within 3% of the baseline. Wasm bytes and ABI are
+unchanged; the host loader source grows by 5.5 KB.
+
+The document benchmark now includes preserved-trivia parsing and edit-plus-full
+cursor/field traversal. Its default is eight warmups and 40 samples; the paired
+table above used 24 and 120. Reproduce the workloads with:
+
+```sh
+deno task bench:document --before-root /path/to/previous/checkout
+```
+
+## Incremental Token Chunks
+
+Small edits share immutable token chunks instead of copying the full five-word
+record tape and shifting every suffix span. A chunk contains at most 1,024
+records and carries an offset adjustment. Its maximum lookahead dependency end
+allows safe skipping even when individual dependency ends are not monotonic.
+Token lookup caches the current chunk and searches chunk boundaries when needed.
+Parser uploads and deferred cursor refreshes pack directly from the chunks.
+
+Initial lexing and whole-file replacement retain a flat tape. The first small
+edit detaches bounded chunks; later edits share them without retaining prior
+document objects. Adjacent slices can rejoin without copying. When fragmentation
+grows, small neighboring chunks are packed together, avoiding periodic full-tape
+compaction. Source-string materialization still scales with document length.
+
+The baseline already includes cursor structure reuse above. On the same
+7800X3D/Deno 2.9.4, 24 warmups and 120 alternating samples measured p25 / median
+milliseconds for a space insertion and removal on 524,305 UTF-16 units:
+
+| Operation                | Before      | After       |
+| ------------------------ | ----------- | ----------- |
+| Parse, discarded trivia  | 1.31 / 1.54 | 0.23 / 0.26 |
+| Parse, preserved trivia  | 1.29 / 1.52 | 0.22 / 0.25 |
+| Validate, fixed offset   | 1.11 / 1.20 | 0.05 / 0.06 |
+| Validate, varied offsets | 1.20 / 1.47 | 0.06 / 0.08 |
+| Lex, preserved trivia    | 1.05 / 1.09 | 0.05 / 0.06 |
+| Lex, discarded trivia    | 0.98 / 1.04 | 0.05 / 0.05 |
+
+Eligible parse updates that inspect the root are about six times faster; lex and
+validation updates are about 18–20 times faster. A separate paired run used 16
+warmups, 64 samples, 4,194,307 units, and a four-million-action limit:
+
+| Operation                | Before        | After       |
+| ------------------------ | ------------- | ----------- |
+| Parse, fixed offset      | 12.84 / 13.82 | 1.37 / 1.70 |
+| Parse, varied offsets    | 11.57 / 12.74 | 1.39 / 1.81 |
+| Validate, fixed offset   | 11.85 / 12.37 | 1.20 / 1.48 |
+| Validate, varied offsets | 12.03 / 13.83 | 1.24 / 1.50 |
+
+Varied-offset parse p95 fell from 16.67 to 3.01 ms in that run. Host load and
+garbage collection affected tail timings in other runs; these are not latency
+bounds. The document benchmark now reports p95 and includes varied-offset edits.
+
+The gain is for repeated small edits. In separate paired 512 KiB runs, creating
+a lex/parse document without a source write was about 11% slower. Creation plus
+the first small edit, including the source write, was 2% slower for lexing and
+6% slower for parsing. Whole-file rename/restore validation was 7% slower;
+changed-terminal failure/recovery was 17% faster. Ordinary public calls stayed
+within 1% of the baseline.
+
+Full scans remain linear: the 76 KiB edit-plus-cursor/field workload measured
+7.04 / 10.91 versus 7.49 / 11.87 ms, and the first token-text pass measured 0.88
+/ 0.94 versus 0.93 / 1.00 ms. Traversal medians varied across runs, with no
+repeatable gain; callers reading every token or node should expect much less
+benefit than root-only readers. Wasm bytes, record layouts, and ABI are
+unchanged; the host loader source grows by 11.2 KB.
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that

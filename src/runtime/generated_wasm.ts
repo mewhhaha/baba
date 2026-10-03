@@ -1502,18 +1502,379 @@ function externalParseTextEdits(
   return parsed;
 }
 
-interface ExternalIncrementalLexState {
-  readonly records: Int32Array;
-  readonly count: number;
+const MAX_INCREMENTAL_CHUNK_TOKENS = 1024;
+
+class ExternalIncrementalLexChunk {
+  constructor(
+    readonly records: Int32Array,
+    readonly tokenStart: number,
+    readonly offsetDelta: number,
+    private dependencyEnd: number | undefined,
+  ) {}
+
+  get maxDependencyEnd(): number {
+    let end = this.dependencyEnd;
+    if (end === undefined) {
+      end = 0;
+      const records = this.records;
+      for (
+        let base = 0;
+        base < records.length;
+        base += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+      ) {
+        end = Math.max(end, records[base + 4]);
+      }
+      this.dependencyEnd = end;
+    }
+    return end;
+  }
+}
+
+function appendExternalIncrementalLexChunks(
+  chunks: ExternalIncrementalLexChunk[],
+  records: Int32Array,
+  offsetDelta: number,
+  maxDependencyEnd?: number,
+): void {
+  const chunkWords = MAX_INCREMENTAL_CHUNK_TOKENS *
+    WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+  for (let start = 0; start < records.length; start += chunkWords) {
+    let part = records;
+    if (start !== 0 || records.length > chunkWords) {
+      part = records.subarray(start, start + chunkWords);
+    }
+    // A short surviving slice must not keep an entire old document's token
+    // allocation alive. Each shared backing buffer holds at most one chunk.
+    if (part.buffer.byteLength > chunkWords * WASM_I32_BYTES) {
+      part = part.slice();
+    }
+    let dependencyEnd = maxDependencyEnd;
+    if (dependencyEnd === undefined) {
+      dependencyEnd = 0;
+      for (
+        let base = 0;
+        base < part.length;
+        base += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+      ) {
+        dependencyEnd = Math.max(dependencyEnd, part[base + 4]);
+      }
+    }
+    const last = chunks[chunks.length - 1];
+    let tokenStart = 0;
+    if (last !== undefined) {
+      const lastCount = last.records.length /
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      tokenStart = last.tokenStart + lastCount;
+      // Adjacent slices of one immutable allocation can be joined without
+      // copying. No chunk retains a prior document or cursor wrapper.
+      if (
+        last.offsetDelta === offsetDelta &&
+        last.records.buffer === part.buffer &&
+        last.records.byteOffset + last.records.byteLength === part.byteOffset &&
+        last.records.length + part.length <= chunkWords
+      ) {
+        chunks[chunks.length - 1] = new ExternalIncrementalLexChunk(
+          new Int32Array(
+            part.buffer,
+            last.records.byteOffset,
+            last.records.length + part.length,
+          ),
+          last.tokenStart,
+          offsetDelta,
+          Math.max(last.maxDependencyEnd, dependencyEnd),
+        );
+        continue;
+      }
+    }
+    chunks.push(
+      new ExternalIncrementalLexChunk(
+        part,
+        tokenStart,
+        offsetDelta,
+        dependencyEnd,
+      ),
+    );
+  }
+}
+
+class ExternalIncrementalLexState {
+  #selectedChunk: ExternalIncrementalLexChunk | undefined;
+
+  private constructor(
+    readonly chunks: readonly ExternalIncrementalLexChunk[],
+    readonly count: number,
+  ) {}
+
+  static fromWasmRecords(
+    view: DataView,
+    tokenPtr: number,
+    count: number,
+  ): ExternalIncrementalLexState {
+    const chunks: ExternalIncrementalLexChunk[] = [];
+    if (count > 0) {
+      // Initial lexing and whole-file replacement keep the ordinary flat copy.
+      // The first small splice detaches bounded chunks for subsequent edits.
+      const records = copyI32Tape(
+        view,
+        tokenPtr,
+        count * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
+      );
+      chunks.push(new ExternalIncrementalLexChunk(records, 0, 0, undefined));
+    }
+    return new ExternalIncrementalLexState(chunks, count);
+  }
+
+  chunkForToken(index: number): ExternalIncrementalLexChunk {
+    if (index < 0 || index >= this.count) {
+      throw new Error(`Incremental token record ${index} is missing.`);
+    }
+    const selected = this.#selectedChunk;
+    if (
+      selected !== undefined && index >= selected.tokenStart &&
+      index < selected.tokenStart + selected.records.length /
+            WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+    ) {
+      return selected;
+    }
+    let lower = 0;
+    let upper = this.chunks.length;
+    while (lower + 1 < upper) {
+      const middle = lower + Math.floor((upper - lower) / 2);
+      const chunk = this.chunks[middle];
+      if (chunk === undefined) {
+        throw new Error("Incremental lexer chunk is missing.");
+      }
+      if (chunk.tokenStart <= index) {
+        lower = middle;
+      } else {
+        upper = middle;
+      }
+    }
+    const chunk = this.chunks[lower];
+    if (chunk === undefined) {
+      throw new Error(`Incremental token record ${index} has no chunk.`);
+    }
+    this.#selectedChunk = chunk;
+    return chunk;
+  }
+
+  splice(
+    prefixCount: number,
+    suffixStart: number,
+    created: readonly ExternalIncrementalLexState[],
+    offsetDelta: number,
+  ): ExternalIncrementalLexState {
+    if (
+      prefixCount === 0 && suffixStart === this.count && created.length === 1
+    ) {
+      const replacement = created[0];
+      if (replacement === undefined) {
+        throw new Error("Incremental lexer replacement is missing.");
+      }
+      return replacement;
+    }
+    const chunks: ExternalIncrementalLexChunk[] = [];
+    for (const chunk of this.chunks) {
+      if (chunk.tokenStart >= prefixCount) break;
+      const prefixWords = (prefixCount - chunk.tokenStart) *
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      if (prefixWords >= chunk.records.length) {
+        chunks.push(chunk);
+        continue;
+      }
+      const records = chunk.records.subarray(0, prefixWords);
+      appendExternalIncrementalLexChunks(
+        chunks,
+        records,
+        chunk.offsetDelta,
+      );
+    }
+    for (const part of created) {
+      for (const chunk of part.chunks) {
+        const last = chunks[chunks.length - 1];
+        let tokenStart = 0;
+        if (last !== undefined) {
+          tokenStart = last.tokenStart +
+            last.records.length / WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+        }
+        if (
+          tokenStart === chunk.tokenStart &&
+          chunk.records.length <=
+            MAX_INCREMENTAL_CHUNK_TOKENS *
+              WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+        ) {
+          chunks.push(chunk);
+        } else {
+          let maxDependencyEnd: number | undefined;
+          if (
+            chunk.records.length <= MAX_INCREMENTAL_CHUNK_TOKENS *
+                WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+          ) {
+            maxDependencyEnd = chunk.maxDependencyEnd;
+          }
+          appendExternalIncrementalLexChunks(
+            chunks,
+            chunk.records,
+            chunk.offsetDelta,
+            maxDependencyEnd,
+          );
+        }
+      }
+    }
+    for (const chunk of this.chunks) {
+      const count = chunk.records.length /
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      if (chunk.tokenStart + count <= suffixStart) continue;
+      const suffixWords = Math.max(0, suffixStart - chunk.tokenStart) *
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      if (suffixWords === 0 && count === MAX_INCREMENTAL_CHUNK_TOKENS) {
+        const last = chunks[chunks.length - 1];
+        let tokenStart = 0;
+        if (last !== undefined) {
+          tokenStart = last.tokenStart + last.records.length /
+              WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+        }
+        if (tokenStart === chunk.tokenStart && offsetDelta === 0) {
+          chunks.push(chunk);
+        } else {
+          chunks.push(
+            new ExternalIncrementalLexChunk(
+              chunk.records,
+              tokenStart,
+              chunk.offsetDelta + offsetDelta,
+              chunk.maxDependencyEnd,
+            ),
+          );
+        }
+        continue;
+      }
+      const records = chunk.records.subarray(suffixWords);
+      let maxDependencyEnd: number | undefined;
+      if (
+        suffixWords === 0 &&
+        records.length <= MAX_INCREMENTAL_CHUNK_TOKENS *
+            WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+      ) {
+        maxDependencyEnd = chunk.maxDependencyEnd;
+      }
+      appendExternalIncrementalLexChunks(
+        chunks,
+        records,
+        chunk.offsetDelta + offsetDelta,
+        maxDependencyEnd,
+      );
+    }
+    let count = 0;
+    const last = chunks[chunks.length - 1];
+    if (last !== undefined) {
+      count = last.tokenStart + last.records.length /
+          WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    }
+    // Join small adjacent chunks after edits at many sites. Compact only those
+    // chunks, rather than copying a whole document at the fragmentation limit.
+    if (chunks.length > Math.ceil(count / MAX_INCREMENTAL_CHUNK_TOKENS) + 64) {
+      const compacted: ExternalIncrementalLexChunk[] = [];
+      for (const chunk of chunks) {
+        const last = compacted[compacted.length - 1];
+        if (
+          last === undefined ||
+          last.records.length + chunk.records.length >
+            MAX_INCREMENTAL_CHUNK_TOKENS *
+              WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+        ) {
+          compacted.push(chunk);
+          continue;
+        }
+        const records = new Int32Array(
+          last.records.length + chunk.records.length,
+        );
+        let output = 0;
+        for (const part of [last, chunk]) {
+          for (
+            let base = 0;
+            base < part.records.length;
+            base += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+          ) {
+            records[output] = part.records[base];
+            records[output + 1] = part.records[base + 1] + part.offsetDelta;
+            records[output + 2] = part.records[base + 2] + part.offsetDelta;
+            records[output + 3] = part.records[base + 3];
+            records[output + 4] = part.records[base + 4] + part.offsetDelta;
+            output += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+          }
+        }
+        compacted[compacted.length - 1] = new ExternalIncrementalLexChunk(
+          records,
+          last.tokenStart,
+          0,
+          Math.max(
+            last.maxDependencyEnd + last.offsetDelta,
+            chunk.maxDependencyEnd + chunk.offsetDelta,
+          ),
+        );
+      }
+      return new ExternalIncrementalLexState(compacted, count);
+    }
+    return new ExternalIncrementalLexState(chunks, count);
+  }
+
+  writeParserRecords(
+    target: Int32Array,
+    keptRecordIndices: Int32Array | null,
+  ): void {
+    let targetBase = 0;
+    let keptIndex = 0;
+    for (const chunk of this.chunks) {
+      const records = chunk.records;
+      const offsetDelta = chunk.offsetDelta;
+      let sourceBase = 0;
+      if (keptRecordIndices !== null) {
+        while (targetBase < target.length) {
+          const recordIndex = keptRecordIndices[keptIndex];
+          if (recordIndex === undefined) {
+            throw new Error("Incremental cursor token mapping is incomplete.");
+          }
+          sourceBase = (recordIndex - chunk.tokenStart) *
+            WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+          if (sourceBase >= records.length) break;
+          if (sourceBase < 0) {
+            throw new Error("Incremental token mapping is out of order.");
+          }
+          target[targetBase] = records[sourceBase];
+          target[targetBase + 1] = records[sourceBase + 1] + offsetDelta;
+          target[targetBase + 2] = records[sourceBase + 2] + offsetDelta;
+          target[targetBase + 3] = records[sourceBase + 3];
+          targetBase += WASM_TOKEN_RECORD_I32_COUNT;
+          keptIndex++;
+        }
+      } else {
+        for (
+          ;
+          sourceBase < records.length;
+          sourceBase += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+        ) {
+          target[targetBase] = records[sourceBase];
+          target[targetBase + 1] = records[sourceBase + 1] + offsetDelta;
+          target[targetBase + 2] = records[sourceBase + 2] + offsetDelta;
+          target[targetBase + 3] = records[sourceBase + 3];
+          targetBase += WASM_TOKEN_RECORD_I32_COUNT;
+        }
+      }
+    }
+    if (targetBase !== target.length) {
+      throw new Error("Incremental parser token records are incomplete.");
+    }
+  }
 }
 
 class ExternalSnapshotTokenTape implements TokenTape {
   #cache: (Token | undefined)[] | undefined;
+  #chunk: ExternalIncrementalLexChunk | undefined;
 
   constructor(
     private readonly metadata: ExternalRuntimeMetadata,
     private readonly snapshot: SourceSnapshot,
-    private readonly records: Int32Array,
+    private readonly state: ExternalIncrementalLexState,
     private readonly keptRecordIndices: Int32Array | null,
     private readonly keptCount: number,
   ) {}
@@ -1547,10 +1908,19 @@ class ExternalSnapshotTokenTape implements TokenTape {
         }
         recordIndex = selected;
       }
+      let chunk = this.#chunk;
+      if (
+        chunk === undefined || recordIndex < chunk.tokenStart ||
+        recordIndex >= chunk.tokenStart + chunk.records.length /
+              WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+      ) {
+        chunk = this.state.chunkForToken(recordIndex);
+        this.#chunk = chunk;
+      }
       token = materializeExternalSnapshotToken(
         this.metadata,
         this.snapshot,
-        this.records,
+        chunk,
         recordIndex,
       );
     }
@@ -1562,16 +1932,22 @@ class ExternalSnapshotTokenTape implements TokenTape {
 function materializeExternalSnapshotToken(
   metadata: ExternalRuntimeMetadata,
   snapshot: SourceSnapshot,
-  records: Int32Array,
+  chunk: ExternalIncrementalLexChunk,
   recordIndex: number,
 ): Token {
-  const base = recordIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+  const records = chunk.records;
+  const base = (recordIndex - chunk.tokenStart) *
+    WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
   const specIndex = records[base];
-  const start = records[base + 1];
-  const end = records[base + 2];
-  if (specIndex === undefined || start === undefined || end === undefined) {
+  const rawStart = records[base + 1];
+  const rawEnd = records[base + 2];
+  if (
+    specIndex === undefined || rawStart === undefined || rawEnd === undefined
+  ) {
     throw new Error(`Incremental token record ${recordIndex} is incomplete.`);
   }
+  const start = rawStart + chunk.offsetDelta;
+  const end = rawEnd + chunk.offsetDelta;
   if (specIndex < 0) {
     return {
       type: "error",
@@ -1630,18 +2006,20 @@ function externalIncrementalTerminalsMatch(
   program: StrictIslandParserProgram,
   previous: ExternalIncrementalLexState,
   relexed: ExternalIncrementalRelexResult,
-): boolean {
+): "none" | "terminals" | "positions" {
   const terminals: number[] = [];
+  let positionsMatch = previous.count === relexed.state.count;
   for (
     let index = relexed.oldPrefixTokenCount;
     index < relexed.oldSuffixTokenStart;
     index++
   ) {
-    const spec = previous.records[
-      index * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+    const chunk = previous.chunkForToken(index);
+    const spec = chunk.records[
+      (index - chunk.tokenStart) * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
     ];
     if (spec < 0) {
-      return false;
+      return "none";
     }
     const terminal = program.terminalBySpec[spec];
     if (terminal === undefined) {
@@ -1657,24 +2035,47 @@ function externalIncrementalTerminalsMatch(
     index < relexed.newSuffixTokenStart;
     index++
   ) {
-    const spec = relexed.state.records[
-      index * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+    const chunk = relexed.state.chunkForToken(index);
+    const spec = chunk.records[
+      (index - chunk.tokenStart) * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
     ];
     if (spec < 0) {
-      return false;
+      return "none";
     }
     const terminal = program.terminalBySpec[spec];
     if (terminal === undefined) {
       throw new Error(`Incremental token ${index} has unknown spec ${spec}.`);
     }
+    if (positionsMatch) {
+      const previousChunk = previous.chunkForToken(index);
+      const previousSpec = previousChunk.records[
+        (index - previousChunk.tokenStart) *
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+      ];
+      const previousTerminal = program.terminalBySpec[previousSpec];
+      if (previousTerminal === undefined) {
+        throw new Error(
+          `Incremental token ${index} has unknown spec ${previousSpec}.`,
+        );
+      }
+      if (previousTerminal !== terminal) {
+        positionsMatch = false;
+      }
+    }
     if (terminal >= 0) {
       if (terminals[matched] !== terminal) {
-        return false;
+        return "none";
       }
       matched++;
     }
   }
-  return matched === terminals.length;
+  if (matched !== terminals.length) {
+    return "none";
+  }
+  if (positionsMatch) {
+    return "positions";
+  }
+  return "terminals";
 }
 
 function externalIncrementalRelex(
@@ -1688,69 +2089,63 @@ function externalIncrementalRelex(
   searchFloorOffset: number,
   searchFloorToken: number,
 ): ExternalIncrementalRelexResult {
-  if (
-    previous.records.length !==
-      previous.count * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
-  ) {
-    throw new Error(
-      "Incremental lexer records do not match their token count.",
-    );
-  }
   const oldSourceLength = previousSource.length;
   let earliestToken = previous.count;
   let firstTokenToCheck = 0;
   const firstEdit = edits[0];
   // Tokens before the prior floor were proven independent of that offset.
-  // They remain independent of later offsets because reused prefix records
-  // and their dependency ends are unchanged.
-  if (
-    firstEdit !== undefined &&
-    firstEdit.start >= searchFloorOffset
-  ) {
+  if (firstEdit !== undefined && firstEdit.start >= searchFloorOffset) {
     firstTokenToCheck = Math.min(searchFloorToken, previous.count);
   }
-  for (
-    let tokenIndex = firstTokenToCheck;
-    tokenIndex < previous.count;
-    tokenIndex++
-  ) {
-    const base = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-    const tokenStart = previous.records[base + 1];
-    const dependencyEnd = previous.records[base + 4];
-    if (tokenStart === undefined || dependencyEnd === undefined) {
-      throw new Error(`Incremental token record ${tokenIndex} is incomplete.`);
-    }
-    for (const edit of edits) {
-      let intersectsDependency = tokenStart < edit.oldEnd &&
-        dependencyEnd > edit.start;
-      if (edit.start === edit.oldEnd) {
-        intersectsDependency = tokenStart <= edit.start &&
-          dependencyEnd >= edit.start;
+  for (const chunk of previous.chunks) {
+    const chunkCount = chunk.records.length /
+      WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    if (chunk.tokenStart + chunkCount <= firstTokenToCheck) continue;
+    // Lookahead dependency ends need not be monotonic. The maximum proves
+    // that every token in a chunk is independent of all later edits.
+    if (
+      firstEdit !== undefined &&
+      chunk.records.length <=
+        MAX_INCREMENTAL_CHUNK_TOKENS *
+          WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT &&
+      chunk.maxDependencyEnd + chunk.offsetDelta < firstEdit.start
+    ) continue;
+    let tokenIndex = Math.max(firstTokenToCheck, chunk.tokenStart);
+    for (; tokenIndex < chunk.tokenStart + chunkCount; tokenIndex++) {
+      const base = (tokenIndex - chunk.tokenStart) *
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+      const tokenStart = chunk.records[base + 1] + chunk.offsetDelta;
+      const dependencyEnd = chunk.records[base + 4] + chunk.offsetDelta;
+      for (const edit of edits) {
+        let intersectsDependency = tokenStart < edit.oldEnd &&
+          dependencyEnd > edit.start;
+        if (edit.start === edit.oldEnd) {
+          intersectsDependency = tokenStart <= edit.start &&
+            dependencyEnd >= edit.start;
+        }
+        if (intersectsDependency) {
+          earliestToken = tokenIndex;
+          break;
+        }
       }
-      if (intersectsDependency) {
-        earliestToken = tokenIndex;
-        break;
-      }
+      if (earliestToken !== previous.count) break;
     }
-    if (earliestToken !== previous.count) {
-      break;
-    }
-  }
-  if (earliestToken === previous.count && edits.length > 0) {
-    earliestToken = previous.count;
+    if (earliestToken !== previous.count) break;
   }
 
   let relexStart = 0;
   if (earliestToken < previous.count) {
-    const selected = previous.records[
-      earliestToken * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
+    const chunk = previous.chunkForToken(earliestToken);
+    const selected = chunk.records[
+      (earliestToken - chunk.tokenStart) *
+        WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
     ];
     if (selected === undefined) {
       throw new Error(
         `Incremental token record ${earliestToken} has no start offset.`,
       );
     }
-    relexStart = selected;
+    relexStart = selected + chunk.offsetDelta;
   } else {
     relexStart = oldSourceLength;
   }
@@ -1776,7 +2171,7 @@ function externalIncrementalRelex(
   }
   const oldSuffixStart = finalEdit.oldEnd;
   const newSuffixStart = oldSuffixStart + lengthDelta;
-  const createdParts: Int32Array[] = [];
+  const createdParts: ExternalIncrementalLexState[] = [];
   let createdCount = 0;
   let cursor = relexStart;
   let oldSuffixTokenStart = previous.count;
@@ -1805,11 +2200,15 @@ function externalIncrementalRelex(
     if (lexed.count === 0) {
       cursor = source.length;
     } else {
-      createdParts.push(lexed.records);
+      createdParts.push(lexed);
       createdCount += lexed.count;
-      const lastBase = (lexed.count - 1) *
+      const last = lexed.chunks[lexed.chunks.length - 1];
+      if (last === undefined) {
+        throw new Error("Incremental lexer has no final token chunk.");
+      }
+      const lastBase = last.records.length -
         WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-      const nextCursor = lexed.records[lastBase + 2];
+      const nextCursor = last.records[lastBase + 2] + last.offsetDelta;
       if (nextCursor === undefined || nextCursor <= cursor) {
         throw new Error(
           `Incremental lexer did not advance from source offset ${cursor}.`,
@@ -1836,51 +2235,24 @@ function externalIncrementalRelex(
   }
 
   const reusedSuffixCount = previous.count - oldSuffixTokenStart;
-  const totalCount = earliestToken + createdCount + reusedSuffixCount;
-  const records = new Int32Array(
-    totalCount * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
-  );
-  const prefixWordCount = earliestToken *
-    WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-  records.set(previous.records.subarray(0, prefixWordCount), 0);
-  let outputWord = prefixWordCount;
   let dependencyEnd = cursor;
   for (const part of createdParts) {
-    records.set(part, outputWord);
-    for (
-      let index = 0;
-      index < part.length;
-      index += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
-    ) {
-      const selected = part[index + 4];
-      if (selected !== undefined && selected > dependencyEnd) {
-        dependencyEnd = selected;
-      }
-    }
-    outputWord += part.length;
-  }
-  const oldSuffixWordStart = oldSuffixTokenStart *
-    WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-  if (lengthDelta === 0) {
-    records.set(previous.records.subarray(oldSuffixWordStart), outputWord);
-  } else {
-    for (
-      let tokenIndex = oldSuffixTokenStart;
-      tokenIndex < previous.count;
-      tokenIndex++
-    ) {
-      const oldBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-      records[outputWord] = previous.records[oldBase];
-      records[outputWord + 1] = previous.records[oldBase + 1] + lengthDelta;
-      records[outputWord + 2] = previous.records[oldBase + 2] + lengthDelta;
-      records[outputWord + 3] = previous.records[oldBase + 3];
-      records[outputWord + 4] = previous.records[oldBase + 4] + lengthDelta;
-      outputWord += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    for (const chunk of part.chunks) {
+      dependencyEnd = Math.max(
+        dependencyEnd,
+        chunk.maxDependencyEnd + chunk.offsetDelta,
+      );
     }
   }
+  const state = previous.splice(
+    earliestToken,
+    oldSuffixTokenStart,
+    createdParts,
+    lengthDelta,
+  );
 
   return {
-    state: { records, count: totalCount },
+    state,
     work: {
       relexedRange: { start: relexStart, end: dependencyEnd },
       scannedCodeUnits: dependencyEnd - relexStart,
@@ -1906,9 +2278,10 @@ function externalIncrementalTokenAtStart(
   let upper = state.count;
   while (lower < upper) {
     const middle = lower + Math.floor((upper - lower) / 2);
-    const tokenStart = state.records[
-      middle * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
-    ];
+    const chunk = state.chunkForToken(middle);
+    const tokenStart = chunk.records[
+      (middle - chunk.tokenStart) * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
+    ] + chunk.offsetDelta;
     if (tokenStart === undefined) {
       throw new Error(`Incremental token record ${middle} has no start.`);
     }
@@ -1921,9 +2294,10 @@ function externalIncrementalTokenAtStart(
   if (lower === state.count) {
     return undefined;
   }
-  const tokenStart = state.records[
-    lower * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
-  ];
+  const chunk = state.chunkForToken(lower);
+  const tokenStart = chunk.records[
+    (lower - chunk.tokenStart) * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT + 1
+  ] + chunk.offsetDelta;
   if (tokenStart === undefined) {
     throw new Error(`Incremental token record ${lower} has no start.`);
   }
@@ -1964,9 +2338,17 @@ function externalIncrementalLexResult(
       index < update.relexed.newSuffixTokenStart;
       index++
     ) {
-      const base = index * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-      const spec = state.records[base];
-      const oldSpec = update.previousState.records[base];
+      const chunk = state.chunkForToken(index);
+      const previousChunk = update.previousState.chunkForToken(index);
+      const spec = chunk
+        .records[
+          (index - chunk.tokenStart) * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+        ];
+      const oldSpec = previousChunk
+        .records[
+          (index - previousChunk.tokenStart) *
+          WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+        ];
       if (spec === undefined || oldSpec === undefined) {
         throw new Error(`Incremental token record ${index} has no spec.`);
       }
@@ -1997,7 +2379,7 @@ function externalIncrementalLexResult(
           tokenTape: new ExternalSnapshotTokenTape(
             metadata,
             snapshot,
-            state.records,
+            state,
             keptRecordIndices,
             keptCount,
           ),
@@ -2012,47 +2394,63 @@ function externalIncrementalLexResult(
   const diagnostics: LexDiagnostic[] = [];
   let keptRecordIndices: Int32Array | undefined;
   let keptCount = 0;
-  for (let tokenIndex = 0; tokenIndex < state.count; tokenIndex++) {
-    const base = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-    const specIndex = state.records[base];
-    const start = state.records[base + 1];
-    const end = state.records[base + 2];
-    if (specIndex === undefined || start === undefined || end === undefined) {
-      throw new Error(`Incremental token record ${tokenIndex} is incomplete.`);
-    }
-    if (specIndex < 0) {
-      diagnostics.push({
-        code: "LEX_UNEXPECTED_CHARACTER",
-        message: `Unexpected character ${
-          JSON.stringify(snapshot.slice(start, end))
-        }.`,
-        span: { start, end },
-      });
+  for (const chunk of state.chunks) {
+    const records = chunk.records;
+    let tokenIndex = chunk.tokenStart;
+    for (
+      let base = 0;
+      base < records.length;
+      base += WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT, tokenIndex++
+    ) {
+      const specIndex = records[base];
+      if (specIndex === undefined) {
+        throw new Error(
+          `Incremental token record ${tokenIndex} is incomplete.`,
+        );
+      }
+      if (specIndex < 0) {
+        const rawStart = records[base + 1];
+        const rawEnd = records[base + 2];
+        if (rawStart === undefined || rawEnd === undefined) {
+          throw new Error(
+            `Incremental token record ${tokenIndex} is incomplete.`,
+          );
+        }
+        const start = rawStart + chunk.offsetDelta;
+        const end = rawEnd + chunk.offsetDelta;
+        diagnostics.push({
+          code: "LEX_UNEXPECTED_CHARACTER",
+          message: `Unexpected character ${
+            JSON.stringify(snapshot.slice(start, end))
+          }.`,
+          span: { start, end },
+        });
+        if (keptRecordIndices !== undefined) {
+          keptRecordIndices[keptCount] = tokenIndex;
+        }
+        keptCount++;
+        continue;
+      }
+      const isTrivia = metadata.specIsTrivia[specIndex];
+      if (isTrivia === undefined) {
+        throw new Error(
+          `Incremental token record ${tokenIndex} references unknown spec ${specIndex}.`,
+        );
+      }
+      if (!preserveTrivia && isTrivia === 1) {
+        if (keptRecordIndices === undefined) {
+          keptRecordIndices = new Int32Array(state.count);
+          for (let keptIndex = 0; keptIndex < keptCount; keptIndex++) {
+            keptRecordIndices[keptIndex] = keptIndex;
+          }
+        }
+        continue;
+      }
       if (keptRecordIndices !== undefined) {
         keptRecordIndices[keptCount] = tokenIndex;
       }
       keptCount++;
-      continue;
     }
-    const isTrivia = metadata.specIsTrivia[specIndex];
-    if (isTrivia === undefined) {
-      throw new Error(
-        `Incremental token record ${tokenIndex} references unknown spec ${specIndex}.`,
-      );
-    }
-    if (!preserveTrivia && isTrivia === 1) {
-      if (keptRecordIndices === undefined) {
-        keptRecordIndices = new Int32Array(state.count);
-        for (let keptIndex = 0; keptIndex < keptCount; keptIndex++) {
-          keptRecordIndices[keptIndex] = keptIndex;
-        }
-      }
-      continue;
-    }
-    if (keptRecordIndices !== undefined) {
-      keptRecordIndices[keptCount] = tokenIndex;
-    }
-    keptCount++;
   }
   let indices: Int32Array | null = null;
   if (keptRecordIndices !== undefined) {
@@ -2065,7 +2463,7 @@ function externalIncrementalLexResult(
       tokenTape: new ExternalSnapshotTokenTape(
         metadata,
         snapshot,
-        state.records,
+        state,
         indices,
         keptCount,
       ),
@@ -2276,6 +2674,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     let parserWork: IncrementalParserWork | undefined;
     if (this.goal !== "lex") {
       let reusedCounts: ExternalIslandAnalysisCounts | undefined;
+      let reuseCursorStructure = false;
       let reuseChecks = 0;
       const changedRecords = relexed.oldSuffixTokenStart +
         relexed.newSuffixTokenStart - 2 * relexed.oldPrefixTokenCount;
@@ -2289,13 +2688,17 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
           throw new Error("Incremental parsing has no strict island parser.");
         }
         reuseChecks = 1;
-        if (
-          externalIncrementalTerminalsMatch(program, previousLexState, relexed)
-        ) {
+        const match = externalIncrementalTerminalsMatch(
+          program,
+          previousLexState,
+          relexed,
+        );
+        if (match !== "none") {
           reusedCounts = this.#analysisCounts;
+          reuseCursorStructure = match === "positions";
         }
       }
-      this.#refreshParserResults(reusedCounts);
+      this.#refreshParserResults(reusedCounts, reuseCursorStructure);
       const reparsedRanges: Span[] = [];
       let parserActions = 0;
       if (reusedCounts === undefined) {
@@ -2391,7 +2794,10 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     };
   }
 
-  #refreshParserResults(reusedCounts?: ExternalIslandAnalysisCounts): void {
+  #refreshParserResults(
+    reusedCounts?: ExternalIslandAnalysisCounts,
+    reuseCursorStructure = false,
+  ): void {
     if (this.goal === "lex") {
       return;
     }
@@ -2399,14 +2805,39 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
     if (islandProgram === undefined) {
       throw new Error("Incremental parsing has no strict island parser.");
     }
-    if (reusedCounts !== undefined && this.goal === "validate") {
+    if (reusedCounts !== undefined) {
       this.#validateResult = {
         ok: true,
         version: this.#snapshot.version,
         snapshot: this.#snapshot,
         diagnostics: [],
       };
-      return;
+      if (this.goal === "validate") {
+        return;
+      }
+      const previous = this.#parseResult;
+      if (reuseCursorStructure && previous !== undefined && previous.ok) {
+        const tape = externalCursorTapeByRoot.get(previous.cursor);
+        if (tape === undefined) {
+          throw new Error("Incremental parse result has no owned cursor tape.");
+        }
+        const cursor = tape.rebindIncrementalTokens(
+          this.#source,
+          this.#lexState,
+          this.#lexResult.keptRecordIndices,
+          this.#lexResult.keptCount,
+        );
+        if (cursor !== undefined) {
+          this.#parseResult = {
+            ok: true,
+            version: this.#snapshot.version,
+            snapshot: this.#snapshot,
+            cursor: cursor as Root,
+            diagnostics: [],
+          };
+          return;
+        }
+      }
     }
     const analysis = analyzeExternalIslandInRust(
       this.metadata,
@@ -2830,14 +3261,7 @@ function lexExternalIncrementalRecords(
       `Wasm incremental lexer returned token count ${count} for capacity ${maxRecords}.`,
     );
   }
-  return {
-    records: copyI32Tape(
-      view,
-      tokenPtr,
-      count * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT,
-    ),
-    count,
-  };
+  return ExternalIncrementalLexState.fromWasmRecords(view, tokenPtr, count);
 }
 
 interface ExternalWasmIslandRecords {
@@ -3159,14 +3583,6 @@ function prepareExternalWasmIslandRecords(
         WASM_TOKEN_RECORD_I32_COUNT;
     } else {
       rawTokenCapacity = externalRecords.count;
-      if (
-        externalRecords.records.length !==
-          rawTokenCapacity * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
-      ) {
-        throw new Error(
-          "Incremental lexer records do not match their token count.",
-        );
-      }
     }
   }
   if (rawTokenCapacity < 1) {
@@ -3201,15 +3617,7 @@ function prepareExternalWasmIslandRecords(
     } else {
       // Dependency ends remain in the document's immutable lexer state. The
       // parser consumes only the four lexer fields, directly in its arena.
-      const records = externalRecords.records;
-      for (let tokenIndex = 0; tokenIndex < rawTokenCount; tokenIndex++) {
-        const sourceBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-        const targetBase = tokenIndex * WASM_TOKEN_RECORD_I32_COUNT;
-        target[targetBase] = records[sourceBase];
-        target[targetBase + 1] = records[sourceBase + 1];
-        target[targetBase + 2] = records[sourceBase + 2];
-        target[targetBase + 3] = records[sourceBase + 3];
-      }
+      externalRecords.writeParserRecords(target, null);
     }
     return {
       ok: true,
@@ -3672,6 +4080,12 @@ const externalCursorTapeByRoot = new WeakMap<
   ExternalCursorTapeView
 >();
 
+interface ExternalIncrementalCursorTokens {
+  readonly state: ExternalIncrementalLexState;
+  readonly keptRecordIndices: Int32Array | null;
+  readonly keptCount: number;
+}
+
 class ExternalCursorTapeView {
   private readonly ruleCache: (RuleCursor | undefined)[] = [];
   private readonly tokenCache: (TokenCursor | undefined)[] = [];
@@ -3680,13 +4094,14 @@ class ExternalCursorTapeView {
   constructor(
     private readonly metadata: ExternalRuntimeMetadata,
     private readonly source: string,
-    private readonly tokenRecords: Int32Array,
-    private readonly ruleRecords: Int32Array,
+    private tokenRecords: Int32Array,
+    private ruleRecords: Int32Array,
     private readonly childRefs: Int32Array,
     private readonly fieldRecords: Int32Array,
     private readonly valueRecords: Int32Array,
     private readonly valueItems: Int32Array,
     reuse?: ExternalCursorTapeReuse,
+    private pendingTokens?: ExternalIncrementalCursorTokens,
   ) {
     this.reuse = reuse;
     if (reuse !== undefined) {
@@ -3699,6 +4114,79 @@ class ExternalCursorTapeView {
       throw new Error("Expected a rule cursor reference.");
     }
     return this.ruleCursor(externalCursorRefIndex(ref));
+  }
+
+  rebindIncrementalTokens(
+    source: string,
+    state: ExternalIncrementalLexState,
+    keptRecordIndices: Int32Array | null,
+    keptCount: number,
+  ): RuleCursor | undefined {
+    let tokenCount = this.tokenRecords.length / WASM_TOKEN_RECORD_I32_COUNT;
+    if (this.pendingTokens !== undefined) {
+      tokenCount = this.pendingTokens.keptCount;
+    }
+    if (tokenCount !== keptCount) {
+      return undefined;
+    }
+    // Matching terminals at each raw position keep child, field, value, and
+    // rule ranges unchanged. Share those immutable tapes without retaining
+    // prior cursor wrappers or source versions. Refresh dense token records
+    // and rule spans only when a child or field reference is read.
+    const tape = new ExternalCursorTapeView(
+      this.metadata,
+      source,
+      new Int32Array(0),
+      this.ruleRecords,
+      this.childRefs,
+      this.fieldRecords,
+      this.valueRecords,
+      this.valueItems,
+      undefined,
+      { state, keptRecordIndices, keptCount },
+    );
+    const root = tape.cursorForRuleRef(0);
+    // This fresh span belongs to the new tape and has not escaped to a caller.
+    const span = root.span as { start: number; end: number };
+    span.start = 0;
+    span.end = source.length;
+    externalCursorTapeByRoot.set(root, tape);
+    return root;
+  }
+
+  private prepareIncrementalCursorRecords(): void {
+    const pending = this.pendingTokens;
+    if (pending === undefined) {
+      throw new Error("Cursor snapshot has no pending incremental records.");
+    }
+    const { state, keptRecordIndices, keptCount } = pending;
+    const tokenRecords = new Int32Array(
+      keptCount * WASM_TOKEN_RECORD_I32_COUNT,
+    );
+    state.writeParserRecords(tokenRecords, keptRecordIndices);
+    const ruleRecords = this.ruleRecords.slice();
+    ruleRecords[1] = 0;
+    ruleRecords[2] = this.source.length;
+    for (
+      let base = WASM_CURSOR_RULE_RECORD_I32_COUNT;
+      base < ruleRecords.length;
+      base += WASM_CURSOR_RULE_RECORD_I32_COUNT
+    ) {
+      const first = ruleRecords[base + 3] * WASM_TOKEN_RECORD_I32_COUNT;
+      const last = (ruleRecords[base + 4] - 1) * WASM_TOKEN_RECORD_I32_COUNT;
+      const start = tokenRecords[first + 1];
+      const end = tokenRecords[last + 2];
+      if (start === undefined || end === undefined) {
+        throw new Error(
+          "Incremental cursor rule has an incomplete token range.",
+        );
+      }
+      ruleRecords[base + 1] = start;
+      ruleRecords[base + 2] = end;
+    }
+    this.tokenRecords = tokenRecords;
+    this.ruleRecords = ruleRecords;
+    this.pendingTokens = undefined;
   }
 
   private ruleCursor(ruleIndex: number): RuleCursor {
@@ -3974,6 +4462,9 @@ class ExternalCursorTapeView {
   }
 
   private elementForRef(ref: number): SyntaxCursor {
+    if (this.pendingTokens !== undefined) {
+      this.prepareIncrementalCursorRecords();
+    }
     if (externalCursorRefIsToken(ref)) {
       return this.tokenCursor(externalCursorRefIndex(ref));
     }

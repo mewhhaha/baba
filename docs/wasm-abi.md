@@ -145,6 +145,20 @@ rebuilding. Reuse reports no reparsed ranges, zero actions, and one reuse check.
 Changed terminals, failed analysis, and large windows require fresh analysis. LR
 checkpoint counts remain zero.
 
+Matching terminal classifications at the same raw token indices also allow
+cursor-table reuse. Each version owns fresh cursor caches and spans. Token and
+rule records are refreshed on the first child read; child, field, and value
+tables stay immutable and shared. Retained cursors remain independent of Wasm
+memory, later edits, and parser disposal.
+
+Incremental lexer records also remain host-owned. Initial lexing and whole-file
+replacement retain flat records; the first small edit splits reused records into
+bounded immutable chunks. Each chunk carries its source-offset adjustment and a
+maximum lookahead dependency end. Edits can share token data while updating span
+offsets, and retained token tapes keep their own snapshot and lazy cache. Small
+neighboring chunks are joined when fragmentation grows. This storage policy does
+not change the Wasm record layout or ABI.
+
 ## Ownership, Lifetime, And Errors
 
 The host owns input and result buffers at or after `input_base()`. Low-level

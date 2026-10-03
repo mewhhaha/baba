@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 9.0.4
+
+- Share incremental lexer chunks and shift reused spans through chunk offsets.
+  Index lookahead dependency bounds and compact neighboring chunks, preserving
+  retained snapshots. See
+  [measurements](docs/performance.md#incremental-token-chunks).
+- Reuse incremental cursor structure when terminal kinds retain their token
+  indices. Refresh token and span arrays on the first child read, preserving
+  snapshot ownership. Measured edit latency falls by about 74%. See
+  [measurements](docs/performance.md#incremental-cursor-structure-reuse).
 - Reuse immutable incremental token mappings for small edits that preserve
   record counts and trivia selection, with fresh token text and spans. See
   [measurements](docs/performance.md#incremental-token-mapping-reuse).
@@ -18,6 +28,9 @@
   document measurements improve median incremental parsing by 6.1% and
   validation by 14.3%. See
   [performance measurements](docs/performance.md#wasm-incremental-record-uploads).
+
+## 9.0.3
+
 - Add checked-in-corpus benchmarks with fresh setup, first-call totals, and
   explicit Wasm lexer versus TypeScript frontend comparisons. Add a resident
   syntax overview that renders token and rule spans directly from GPU IR,

@@ -5,6 +5,8 @@ import type {
   IncrementalParseDocument,
   IncrementalValidateDocument,
   ParserInstance,
+  RuleCursor,
+  SourceSnapshot,
   SyntaxCursor,
 } from "../src/runtime/generated_wasm.ts";
 
@@ -226,6 +228,120 @@ Deno.test("Wasm parse documents keep successful validation when cursor allocatio
     assertEquals(parsed.diagnostics[0].code, "PARSER_INTERNAL_ERROR");
   } finally {
     WebAssembly.Memory.prototype.grow = grow;
+    parser.dispose();
+  }
+});
+
+Deno.test("Wasm documents retain lazy cursor fields and spans across topology reuse and trivia movement", () => {
+  function shape(cursor: SyntaxCursor): unknown {
+    if (cursor.type === "token") {
+      return {
+        type: cursor.type,
+        tokenType: cursor.tokenType,
+        kind: cursor.kind,
+        text: cursor.text,
+        span: cursor.span,
+        tokenIndex: cursor.tokenIndex,
+      };
+    }
+    const fields: Record<string, unknown> = {};
+    for (const name of ["statements", "name", "value"]) {
+      fields[name] = cursor.fieldArray(name).map((value) => {
+        assert(value !== null && "type" in value);
+        return shape(value);
+      });
+    }
+    return {
+      type: cursor.type,
+      name: cursor.name,
+      span: cursor.span,
+      tokenRange: cursor.tokenRange,
+      children: cursor.children().map(shape),
+      fields,
+    };
+  }
+  const parser = documentParser();
+  try {
+    for (const trivia of ["preserve", "discard"] as const) {
+      const document = parser.createDocument(" \tlet x=1 ;\nlet y=2;\n", {
+        goal: "parse",
+        trivia,
+      });
+      const retained: {
+        cursor: RuleCursor;
+        snapshot: SourceSnapshot;
+        source: string;
+        expected: string;
+      }[] = [];
+      const sources = [
+        " \tlet x=1 ;\nlet y=2;\n",
+        " \tlet x=10000 ;\nlet y=2;\n",
+        " \tlet x=10000 ;\nlet longer=2;\n",
+        " \n\t let x=10000 ;\nlet longer=2;\n",
+        // The terminal sequence and raw count match, but token indices move.
+        " \n\t let x =10000;\nlet longer=2;\n",
+        " \n\t let x=10000 ;\nlet longer=2;\n",
+        " \n\t let x=10000 ;\nlet longer=200;\n\t ",
+        "let x=10000;let longer=200;let z=3;",
+        "let x=10000;let longer=200;let z=@;",
+        "let x=10000;let longer=200;let z=3;",
+        "let x=10000;let alias=200;let z=3;",
+        "",
+        " \t",
+        " \n\t ",
+        "let x=1;",
+        "let renamed=1;",
+        "let x=1;".repeat(256),
+        "let renamed=1;" + "let x=1;".repeat(255),
+        "let renamed=1;" + "let x=1;".repeat(254) + "let end=200000;",
+      ];
+      for (const source of sources) {
+        const previous = document.snapshot.text();
+        let start = 0;
+        while (start < previous.length && previous[start] === source[start]) {
+          start++;
+        }
+        let oldEnd = previous.length;
+        let newEnd = source.length;
+        while (
+          oldEnd > start && newEnd > start &&
+          previous[oldEnd - 1] === source[newEnd - 1]
+        ) {
+          oldEnd--;
+          newEnd--;
+        }
+        document.applyEdits([{
+          start,
+          oldEnd,
+          newText: source.slice(start, newEnd),
+        }]);
+        const maintained = document.parse();
+        const fresh = parser.parse(source, {
+          preserveTrivia: trivia === "preserve",
+        });
+        assertEquals(maintained.ok, fresh.ok);
+        assertEquals(
+          JSON.stringify(maintained.diagnostics),
+          JSON.stringify(fresh.diagnostics),
+        );
+        if (maintained.ok && fresh.ok) {
+          // Leave wrappers and field references lazy across further versions.
+          retained.push({
+            cursor: maintained.cursor,
+            snapshot: maintained.snapshot,
+            source,
+            expected: JSON.stringify(shape(fresh.cursor)),
+          });
+        }
+        parser.lex("let temporary=3;".repeat(8192));
+      }
+      document.dispose();
+      for (const saved of retained) {
+        assertEquals(saved.snapshot.text(), saved.source);
+        assertEquals(JSON.stringify(shape(saved.cursor)), saved.expected);
+      }
+    }
+  } finally {
     parser.dispose();
   }
 });
@@ -603,5 +719,206 @@ Deno.test("Wasm parseRecords retains caller records across aliased source writes
     }
   } finally {
     WebAssembly.Instance = Instance;
+  }
+});
+
+Deno.test("Wasm documents retain token and cursor spans after edits throughout large token tapes", () => {
+  function lexShape(
+    result: Pick<IncrementalLexResult, "tokenTape" | "diagnostics">,
+  ): string {
+    const tokens = new Array(result.tokenTape.length);
+    // Changing lookup direction exercises both cached and searched chunks.
+    for (let index = tokens.length - 1; index >= 0; index--) {
+      const token = result.tokenTape.token(index);
+      assert(token !== undefined);
+      tokens[index] = token;
+    }
+    return JSON.stringify({ tokens, diagnostics: result.diagnostics });
+  }
+  function cursorShape(cursor: SyntaxCursor): unknown {
+    if (cursor.type === "token") {
+      return {
+        type: cursor.type,
+        tokenType: cursor.tokenType,
+        kind: cursor.kind,
+        text: cursor.text,
+        span: cursor.span,
+        tokenIndex: cursor.tokenIndex,
+      };
+    }
+    const fields: unknown[] = [];
+    if (cursor.name === "statement") {
+      for (const name of ["name", "value"]) {
+        const field = cursor.field(name);
+        assert(field !== undefined && field !== null && "type" in field);
+        fields.push(cursorShape(field));
+      }
+    }
+    return {
+      type: cursor.type,
+      name: cursor.name,
+      span: cursor.span,
+      tokenRange: cursor.tokenRange,
+      children: cursor.children().map(cursorShape),
+      fields,
+    };
+  }
+  const parser = documentParser();
+  try {
+    for (const trivia of ["preserve", "discard"] as const) {
+      const document = parser.createDocument("let name = 1;\n".repeat(512), {
+        goal: "parse",
+        trivia,
+      });
+      const retained: {
+        lexed: IncrementalLexResult;
+        cursor: RuleCursor;
+        lexShape: string;
+        cursorShape: string;
+        source: string;
+      }[] = [];
+      function check(retain: boolean): void {
+        const source = document.snapshot.text();
+        const options = { preserveTrivia: trivia === "preserve" };
+        const lexed = document.lex();
+        const parsed = document.parse();
+        const freshLex = parser.lex(source, options);
+        const freshParse = parser.parse(source, options);
+        assert(parsed.ok && freshParse.ok);
+        const expectedLex = lexShape(freshLex);
+        const expectedCursor = JSON.stringify(cursorShape(freshParse.cursor));
+        if (retain) {
+          // Leave document wrappers lazy until after compaction and disposal.
+          retained.push({
+            lexed,
+            cursor: parsed.cursor,
+            lexShape: expectedLex,
+            cursorShape: expectedCursor,
+            source,
+          });
+        } else {
+          assertEquals(lexShape(lexed), expectedLex);
+          assertEquals(
+            JSON.stringify(cursorShape(parsed.cursor)),
+            expectedCursor,
+          );
+        }
+      }
+      check(true);
+      for (let index = 0; index < 160; index++) {
+        const source = document.snapshot.text();
+        const line = (index * 173) % 512;
+        let start = 0;
+        for (let before = 0; before < line; before++) {
+          start = source.indexOf("\n", start) + 1;
+        }
+        start += 4;
+        const oldEnd = source.indexOf(" ", start);
+        assert(oldEnd > start);
+        let name = "expandedname";
+        if (index % 2 === 0) name = "n";
+        document.applyEdits([{ start, oldEnd, newText: name }]);
+        if (index % 24 === 0) check(true);
+        else if (index % 12 === 0) check(false);
+        if (index % 31 === 0) parser.lex("let other = 22;\n".repeat(8192));
+      }
+      check(false);
+      // Force full parser uploads and visible-token mapping changes as well.
+      const source = document.snapshot.text();
+      document.applyEdits([
+        { start: 0, oldEnd: 0, newText: " \t" },
+        {
+          start: source.length,
+          oldEnd: source.length,
+          newText: "let last = 2000;\n",
+        },
+      ]);
+      check(true);
+      document.applyEdits([{
+        start: 0,
+        oldEnd: document.snapshot.length - 17,
+        newText: "",
+      }]);
+      check(false);
+      document.dispose();
+      parser.lex("let overwrite = 3;\n".repeat(16384));
+      for (const old of retained) {
+        assertEquals(old.lexed.snapshot.text(), old.source);
+        assertEquals(lexShape(old.lexed), old.lexShape);
+        assertEquals(JSON.stringify(cursorShape(old.cursor)), old.cursorShape);
+      }
+    }
+  } finally {
+    parser.dispose();
+  }
+});
+
+Deno.test("Wasm documents preserve shifted lookahead dependencies across distant token chunks", () => {
+  const built = compile(
+    String.raw`
+    token LETTER = /[xzq]/ ;
+    contextual APPLICATION_SPACE = /[ ]+(?=[xzq]*z)/ ;
+    module = statement* ;
+    statement = "app" APPLICATION_SPACE LETTER* ";" ;
+  `,
+    { targets: ["wasm"] },
+  );
+  assert(built.bundle, JSON.stringify(built.diagnostics));
+  const wasm = built.bundle.files.find((file) =>
+    file.path === "wasm/parser.wasm"
+  );
+  const plan = built.bundle.files.find((file) =>
+    file.path === "wasm/parser.plan"
+  );
+  assert(wasm !== undefined && wasm.encoding === "binary");
+  assert(plan !== undefined && plan.encoding === "binary");
+  const parser = createParser({ bytes: wasm.content, plan: plan.content });
+  function check(
+    document: {
+      lex(): IncrementalLexResult;
+      readonly snapshot: SourceSnapshot;
+    },
+  ): void {
+    const fresh = parser.lex(document.snapshot.text(), {
+      preserveTrivia: true,
+    });
+    const current = document.lex();
+    assertEquals(
+      JSON.stringify(current.diagnostics),
+      JSON.stringify(fresh.diagnostics),
+    );
+    assertEquals(current.tokenTape.length, fresh.tokenTape.length);
+    for (let index = 0; index < fresh.tokenTape.length; index++) {
+      assertEquals(
+        JSON.stringify(current.tokenTape.token(index)),
+        JSON.stringify(fresh.tokenTape.token(index)),
+      );
+    }
+  }
+  try {
+    const document = parser.createDocument("app " + "x".repeat(4096) + "z;", {
+      goal: "lex",
+      trivia: "preserve",
+    });
+    document.applyEdits([{ start: 0, oldEnd: 3, newText: "appx" }]);
+    check(document);
+    const source = document.snapshot.text();
+    const changed = document.applyEdits([{
+      start: source.length - 2,
+      oldEnd: source.length - 1,
+      newText: "q",
+    }]);
+    assertEquals(changed.lexer.relexedRange.start, 4);
+    check(document);
+    const restored = document.applyEdits([{
+      start: source.length - 2,
+      oldEnd: source.length - 1,
+      newText: "z",
+    }]);
+    assertEquals(restored.lexer.relexedRange.start, 4);
+    check(document);
+    document.dispose();
+  } finally {
+    parser.dispose();
   }
 });

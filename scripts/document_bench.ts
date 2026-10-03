@@ -5,6 +5,7 @@ import type {
   IncrementalParseDocument,
   IncrementalValidateDocument,
   ParserInstance,
+  RuleCursor,
 } from "../src/runtime/generated_wasm.ts";
 
 const warmups = 8;
@@ -28,7 +29,12 @@ interface Operation {
 
 function operations(parser: ParserInstance): Operation[] {
   const parsed = parser.createDocument(source, { goal: "parse" });
+  const parsedPreserved = parser.createDocument(source, {
+    goal: "parse",
+    trivia: "preserve",
+  });
   const validated = parser.createDocument(source, { goal: "validate" });
+  const varied = parser.createDocument(source, { goal: "validate" });
   const preserved = parser.createDocument(source, {
     goal: "lex",
     trivia: "preserve",
@@ -41,6 +47,7 @@ function operations(parser: ParserInstance): Operation[] {
     goal: "lex",
     trivia: "preserve",
   });
+  const traversed = parser.createDocument(tokenSource, { goal: "parse" });
   const edits = [];
   for (let index = 0; index < 4096; index += 32) {
     const start = index * statement.length;
@@ -52,9 +59,10 @@ function operations(parser: ParserInstance): Operation[] {
       | IncrementalLexDocument
       | IncrementalParseDocument
       | IncrementalValidateDocument,
+    offset = editAt,
   ): void {
-    document.applyEdits([{ start: editAt, oldEnd: editAt, newText: " " }]);
-    document.applyEdits([{ start: editAt, oldEnd: editAt + 1, newText: "" }]);
+    document.applyEdits([{ start: offset, oldEnd: offset, newText: " " }]);
+    document.applyEdits([{ start: offset, oldEnd: offset + 1, newText: "" }]);
     if (document.snapshot.text() !== source) {
       throw new Error("Incremental benchmark changed the source.");
     }
@@ -62,6 +70,44 @@ function operations(parser: ParserInstance): Operation[] {
       throw new Error("Incremental benchmark returned invalid source.");
     }
   }
+  function readCursor(root: RuleCursor): number {
+    let textLength = 0;
+    for (let index = 0; index < root.childCount; index++) {
+      const statement = root.child(index);
+      if (statement === undefined || statement.type !== "rule") {
+        throw new Error("Cursor traversal benchmark has no statement.");
+      }
+      for (
+        let tokenIndex = 0;
+        tokenIndex < statement.childCount;
+        tokenIndex++
+      ) {
+        const token = statement.child(tokenIndex);
+        if (token === undefined || token.type !== "token") {
+          throw new Error("Cursor traversal benchmark has no token.");
+        }
+        textLength += token.text.length + token.span.end - token.span.start;
+      }
+      for (const name of ["name", "value"]) {
+        const value = statement.field(name);
+        if (
+          value === undefined || value === null || !("type" in value) ||
+          value.type !== "token"
+        ) {
+          throw new Error(`Cursor traversal benchmark has no '${name}' field.`);
+        }
+        textLength += value.text.length;
+      }
+    }
+    return textLength;
+  }
+  const initial = traversed.parse();
+  if (!initial.ok) {
+    throw new Error("Cursor traversal benchmark has no initial parse.");
+  }
+  const expectedTraversal = readCursor(initial.cursor);
+  let traversalName = "value";
+  let variedIndex = 0;
   return [
     {
       name: "incremental parse insert+remove",
@@ -77,9 +123,32 @@ function operations(parser: ParserInstance): Operation[] {
       },
     },
     {
+      name: "incremental parse insert+remove, preserved trivia",
+      codeUnits: source.length,
+      run: () => {
+        update(parsedPreserved);
+        const result = parsedPreserved.parse();
+        if (!result.ok || result.cursor.span.end !== source.length) {
+          throw new Error(
+            "Preserved-trivia benchmark returned an invalid cursor.",
+          );
+        }
+      },
+    },
+    {
       name: "incremental validate insert+remove",
       codeUnits: source.length,
       run: () => update(validated),
+    },
+    {
+      name: "incremental validate insert+remove at varied offsets",
+      codeUnits: source.length,
+      run: () => {
+        const statementCount = source.length / statement.length;
+        const selected = (variedIndex * 7919) % statementCount;
+        variedIndex++;
+        update(varied, selected * statement.length + statement.length - 1);
+      },
     },
     {
       name: "incremental lex insert+remove, preserved trivia",
@@ -90,6 +159,30 @@ function operations(parser: ParserInstance): Operation[] {
       name: "incremental lex insert+remove, discarded trivia",
       codeUnits: source.length,
       run: () => update(discarded),
+    },
+    {
+      name: "edit then first cursor traversal and field reads",
+      codeUnits: tokenSource.length,
+      run: () => {
+        let nextName = "renamed";
+        if (traversalName === "renamed") {
+          nextName = "value";
+        }
+        traversed.applyEdits([{
+          start: 4,
+          oldEnd: 4 + traversalName.length,
+          newText: nextName,
+        }]);
+        traversalName = nextName;
+        // The name contributes text and span length as a child, then field text.
+        const expected = expectedTraversal + (nextName.length - 5) * 3;
+        const result = traversed.parse();
+        if (!result.ok || readCursor(result.cursor) !== expected) {
+          throw new Error(
+            "Cursor traversal benchmark returned invalid text or fields.",
+          );
+        }
+      },
     },
     {
       name: "first token-text pass after fragmented edits",
@@ -199,6 +292,7 @@ try {
         codeUnits: workloads[target][operation].codeUnits,
         p25Ms: times[target][Math.floor(samples / 4)],
         medianMs: times[target][Math.floor(samples / 2)],
+        p95Ms: times[target][Math.floor(samples * 0.95)],
       }));
     }
   }
