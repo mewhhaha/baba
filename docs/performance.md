@@ -696,6 +696,39 @@ deno task bench:tokens --before-root /path/to/b81efa2 --warmups 24 --samples 100
 deno task bench:document --before-root /path/to/b81efa2 --warmups 24 --samples 120
 ```
 
+## Resolved Token Bindings
+
+Decoded lexer specifications retain their named or literal binding. Token
+materialization reads that binding directly instead of repeating a map lookup.
+Missing bindings still fail at the metadata decoding boundary. Only one
+reference per specification is added; cursor ownership, lazy text, and encoded
+plans remain unchanged.
+
+Against `35a3f95`, the same host and fixture used 24 warmups and 100 alternating
+`bench:tokens` samples. Medians are milliseconds:
+
+| UTF-16 units | Pass                         | Before | After  | Change |
+| ------------ | ---------------------------- | ------ | ------ | ------ |
+| 77,824       | First cursor spans           | 2.901  | 2.790  | -3.8%  |
+| 524,305      | First cursor spans           | 29.190 | 26.745 | -8.4%  |
+| 524,305      | First cursor text and fields | 32.668 | 30.646 | -6.2%  |
+| 524,305      | First lexer spans            | 42.290 | 40.947 | -3.2%  |
+| 524,305      | First lexer text             | 42.867 | 41.321 | -3.6%  |
+
+A 16-warmup, 64-sample run confirmed cursor span gains of 4–9% and a 6% larger
+first text-and-field gain. Smaller first cursor text passes and cached passes
+show little consistent change. Smaller first lexer text passes measured 2–3.5%
+slower across both runs. With 24 warmups and 80 samples,
+edit-plus-full-traversal controls over 77,824 units improved from 3.099 to 2.975
+ms for changed-length edits and from 2.962 to 2.811 ms for equal-length edits,
+or 4–5%. Local reads retain the earlier gains. Loader source shrinks from
+159,877 to 158,798 bytes; Wasm bytes and ABI are unchanged.
+
+```sh
+deno task bench:tokens --before-root /path/to/35a3f95 --warmups 24 --samples 100
+deno task bench:document --before-root /path/to/35a3f95 --warmups 24 --samples 80
+```
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that

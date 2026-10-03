@@ -914,8 +914,16 @@ interface ExternalRuntimeMetadata {
 }
 
 type ExternalLexerSpec =
-  | { readonly type: "named"; readonly tokenId: number }
-  | { readonly type: "literal"; readonly literalId: number };
+  | {
+    readonly type: "named";
+    readonly tokenId: number;
+    readonly named: ExternalNamedToken;
+  }
+  | {
+    readonly type: "literal";
+    readonly literalId: number;
+    readonly literal: ExternalLiteralToken;
+  };
 
 interface ExternalNamedToken {
   readonly id: number;
@@ -1028,17 +1036,19 @@ function decodeExternalRuntimeMetadata(
     const kind = expectNumber(row[0], "lexer specification kind");
     const id = expectNumber(row[1], "lexer specification id");
     if (kind === 0) {
-      if (!namedById.has(id)) {
+      const named = namedById.get(id);
+      if (named === undefined) {
         throw new Error(`Lexer specification references named token ${id}.`);
       }
-      specs.push({ type: "named", tokenId: id });
+      specs.push({ type: "named", tokenId: id, named });
       continue;
     }
     if (kind === 1) {
-      if (!literalById.has(id)) {
+      const literal = literalById.get(id);
+      if (literal === undefined) {
         throw new Error(`Lexer specification references literal token ${id}.`);
       }
-      specs.push({ type: "literal", literalId: id });
+      specs.push({ type: "literal", literalId: id, literal });
       continue;
     }
     throw new Error(`Unsupported lexer specification kind ${kind}.`);
@@ -1053,12 +1063,7 @@ function decodeExternalRuntimeMetadata(
     if (spec.type !== "named") {
       continue;
     }
-    const named = namedById.get(spec.tokenId);
-    if (named === undefined) {
-      throw new Error(
-        `Lexer specification references named token ${spec.tokenId}.`,
-      );
-    }
+    const named = spec.named;
     if (named.channel === "trivia") {
       specIsTrivia[specIndex] = 1;
       hasTriviaSpecs = true;
@@ -2164,12 +2169,7 @@ function materializeExternalSnapshotToken(
     );
   }
   if (spec.type === "literal") {
-    const literal = metadata.literalById.get(spec.literalId);
-    if (literal === undefined) {
-      throw new Error(
-        `Incremental token record ${recordIndex} references unknown literal ${spec.literalId}.`,
-      );
-    }
+    const literal = spec.literal;
     return {
       type: "literal",
       literal: literal.value,
@@ -2178,12 +2178,7 @@ function materializeExternalSnapshotToken(
       channel: "main",
     };
   }
-  const named = metadata.namedById.get(spec.tokenId);
-  if (named === undefined) {
-    throw new Error(
-      `Incremental token record ${recordIndex} references unknown token ${spec.tokenId}.`,
-    );
-  }
+  const named = spec.named;
   return {
     type: "named",
     kind: named.name,
@@ -4203,10 +4198,6 @@ function externalCursorTokenDataFromSpec(
     return externalCursorErrorToken(start, end, tokenIndex);
   }
   if (spec.type === "literal") {
-    const literal = metadata.literalById.get(spec.literalId);
-    if (literal === undefined) {
-      return externalCursorErrorToken(start, end, tokenIndex);
-    }
     return {
       type: externalCursorTokenLiteral,
       id: spec.literalId,
@@ -4216,10 +4207,7 @@ function externalCursorTokenDataFromSpec(
       tokenIndex,
     };
   }
-  const named = metadata.namedById.get(spec.tokenId);
-  if (named === undefined) {
-    return externalCursorErrorToken(start, end, tokenIndex);
-  }
+  const named = spec.named;
   let terminal = -1;
   if (named.channel === "main") {
     terminal = externalTerminalForNamedTokenId(metadata, spec.tokenId);
@@ -4270,10 +4258,7 @@ function materializeExternalTokenRecordValue(
     throw new Error("Wasm lexer emitted an unknown token spec.");
   }
   if (spec.type === "literal") {
-    const literal = metadata.literalById.get(spec.literalId);
-    if (literal === undefined) {
-      throw new Error("Wasm lexer emitted an unknown literal spec.");
-    }
+    const literal = spec.literal;
     return {
       type: "literal",
       literal: literal.value,
@@ -4282,10 +4267,7 @@ function materializeExternalTokenRecordValue(
       channel: "main",
     };
   }
-  const named = metadata.namedById.get(spec.tokenId);
-  if (named === undefined) {
-    throw new Error("Wasm lexer emitted an unknown named token spec.");
-  }
+  const named = spec.named;
   return new ExternalNamedLexerToken(
     named.name,
     source,
@@ -4785,17 +4767,14 @@ class ExternalCursorTapeView {
     let tokenType: "named" | "literal";
     let kind: string;
     if (spec.type === "named") {
-      const named = this.metadata.namedById.get(spec.tokenId);
-      if (named === undefined || named.channel !== "main") {
+      const named = spec.named;
+      if (named.channel !== "main") {
         throw new Error("Cursor references an unknown named token.");
       }
       tokenType = "named";
       kind = named.name;
     } else {
-      const literal = this.metadata.literalById.get(spec.literalId);
-      if (literal === undefined) {
-        throw new Error("Cursor references an unknown literal token.");
-      }
+      const literal = spec.literal;
       tokenType = "literal";
       kind = literal.value;
     }

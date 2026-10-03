@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Resolve lexer specification bindings once when decoding runtime metadata.
+  First cursor span reads measure 4–8% faster, and larger first text and field
+  passes improve by 6%, while the loader shrinks by 1,079 bytes. See
+  [measurements](docs/performance.md#resolved-token-bindings).
+
 - Dispatch flat cursor children straight to their rule or token cache and decode
   packed references with integer operations. Cached full-tree text and field
   reads measure about 15% faster without adding retained state. See
