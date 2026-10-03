@@ -660,6 +660,42 @@ deno task bench:document --before-root /path/to/311aa1e --warmups 16 --samples 6
 deno task bench:tokens --before-root /path/to/311aa1e --warmups 12 --samples 50
 ```
 
+## Direct Cursor Dispatch
+
+Root children resolve directly to the rule cache, and region token children
+resolve directly to the token cache. Field values retain their generic reference
+dispatcher. Integer reference tags and indices use bit operations; region
+children check their token tag. The bounded incremental coordinate refresh
+remains at the lookup boundary, keeping materialization and snapshot ownership
+unchanged. No additional per-cursor state is retained.
+
+Against `b81efa2`, an AMD Ryzen 7 7800X3D with Deno 2.9.4 / V8 15.0.245.2-rusty
+used 24 warmups and 100 alternating `bench:tokens` samples, with background host
+activity. The grammar, input, and checksums match the token wrapper benchmark
+above. Medians are milliseconds:
+
+| UTF-16 units | Cursor pass            | Before | After | Change |
+| ------------ | ---------------------- | ------ | ----- | ------ |
+| 77,824       | First spans            | 3.131  | 2.908 | -7%    |
+| 77,824       | First text and fields  | 3.599  | 3.261 | -9%    |
+| 77,824       | Cached text and fields | 0.703  | 0.598 | -15%   |
+| 524,305      | Cached text and fields | 6.094  | 5.180 | -15%   |
+
+A 16-warmup, 64-sample run measured cached passes 18% faster over 77,824 units
+and 10% faster over 524,305 units. Fresh passes over the larger input showed no
+consistent gain. Parse-only calls remain within 2% in these runs. Incremental
+full traversal remains noisy: changed-length edits measured 10% slower in a
+16-warmup, 64-sample run, then within 1% in a 24-warmup, 120-sample repeat.
+Equal-length traversal stayed within 3% in the longer run. Local edit-plus-field
+reads retain the previous indexing gain. These results support a repeatable
+cached-read improvement, not a full-traversal latency bound. Wasm bytes, ABI,
+and plan formats are unchanged; the loader adds 33 bytes to reach 159,877 bytes.
+
+```sh
+deno task bench:tokens --before-root /path/to/b81efa2 --warmups 24 --samples 100
+deno task bench:document --before-root /path/to/b81efa2 --warmups 24 --samples 120
+```
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that

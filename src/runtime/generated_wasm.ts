@@ -4388,10 +4388,10 @@ class ExternalCursorTapeView {
   }
 
   cursorForRuleRef(ref: number): RuleCursor {
-    if (externalCursorRefIsToken(ref)) {
+    if ((ref & 1) === 1) {
       throw new Error("Expected a rule cursor reference.");
     }
-    return this.ruleCursor(externalCursorRefIndex(ref));
+    return this.ruleCursor(ref >>> 1);
   }
 
   rebindIncrementalTokens(
@@ -4624,7 +4624,13 @@ class ExternalCursorTapeView {
         if (!Number.isInteger(index) || index < 0 || index >= childCount) {
           return undefined;
         }
-        return this.elementForRef((index + 1) * 2);
+        if (
+          this.pendingTokens !== undefined &&
+          this.incrementalRecordReads >= MAX_INCREMENTAL_CURSOR_RECORD_READS
+        ) {
+          this.prepareIncrementalCursorRecords();
+        }
+        return this.ruleCursor(index + 1);
       };
     } else {
       child = (index: number): SyntaxCursor | undefined => {
@@ -4634,10 +4640,16 @@ class ExternalCursorTapeView {
         const ref = this.childRefs[
           (childStart + index) * WASM_CURSOR_CHILD_RECORD_I32_COUNT
         ];
-        if (ref === undefined) {
+        if (ref === undefined || ref < 0 || (ref & 1) !== 1) {
           throw new Error("Cursor child edge is missing.");
         }
-        return this.elementForRef(ref);
+        if (
+          this.pendingTokens !== undefined &&
+          this.incrementalRecordReads >= MAX_INCREMENTAL_CURSOR_RECORD_READS
+        ) {
+          this.prepareIncrementalCursorRecords();
+        }
+        return this.tokenCursor(ref >>> 1);
       };
     }
     const cursor: RuleCursor = {
@@ -4811,18 +4823,16 @@ class ExternalCursorTapeView {
   }
 
   private elementForRef(ref: number): SyntaxCursor {
-    // Resolve a bounded number of local coordinates from immutable chunks.
-    // Bulk traversal switches once to dense records and flat source slices.
     if (
       this.pendingTokens !== undefined &&
       this.incrementalRecordReads >= MAX_INCREMENTAL_CURSOR_RECORD_READS
     ) {
       this.prepareIncrementalCursorRecords();
     }
-    if (externalCursorRefIsToken(ref)) {
-      return this.tokenCursor(externalCursorRefIndex(ref));
+    if ((ref & 1) === 1) {
+      return this.tokenCursor(ref >>> 1);
     }
-    return this.ruleCursor(externalCursorRefIndex(ref));
+    return this.ruleCursor(ref >>> 1);
   }
 
   private arrayItemIds(head: number, count: number): number[] {
@@ -4879,14 +4889,6 @@ class ExternalCursorTapeView {
     }
     throw new Error("Cursor field value has an unknown kind.");
   }
-}
-
-function externalCursorRefIsToken(ref: number): boolean {
-  return ref % 2 === 1;
-}
-
-function externalCursorRefIndex(ref: number): number {
-  return Math.floor(ref / 2);
 }
 
 const externalOversizedSplitRemedy =

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Dispatch flat cursor children straight to their rule or token cache and decode
+  packed references with integer operations. Cached full-tree text and field
+  reads measure about 15% faster without adding retained state. See
+  [measurements](docs/performance.md#direct-cursor-dispatch).
+
 - Index strict-island children directly from the flat cursor layout. Reads near
   the end of a 4 MiB tree after an equal-length rename measure 22–24× faster;
   cached full traversals improve by 8–25%. Test arbitrary lookup order with
