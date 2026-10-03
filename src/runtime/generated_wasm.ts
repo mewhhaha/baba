@@ -4286,7 +4286,7 @@ function materializeExternalTokenRecordValue(
   if (named === undefined) {
     throw new Error("Wasm lexer emitted an unknown named token spec.");
   }
-  return externalNamedToken(
+  return new ExternalNamedLexerToken(
     named.name,
     source,
     start,
@@ -4309,6 +4309,54 @@ interface ExternalIncrementalCursorTokens {
   readonly state: ExternalIncrementalLexState;
   readonly keptRecordIndices: Int32Array | null;
   readonly keptCount: number;
+}
+
+// Returning a plain record lets derived private fields own source coordinates
+// without exposing a different public prototype or changing it per token.
+class ExternalPlainTokenRecord {
+  constructor() {
+    return {};
+  }
+}
+
+class ExternalNamedTokenCursor extends ExternalPlainTokenRecord
+  implements TokenCursor {
+  readonly type = "token";
+  readonly tokenType = "named";
+  declare readonly kind: string;
+  declare readonly text: string;
+  declare readonly span: Span;
+  declare readonly tokenIndex: number;
+  readonly #source: string | ExternalSourceSnapshot;
+  readonly #start: number;
+  readonly #end: number;
+
+  private static readonly textProperty: PropertyDescriptor = {
+    enumerable: true,
+    configurable: true,
+    get(this: ExternalNamedTokenCursor): string {
+      return this.#source.slice(this.#start, this.#end);
+    },
+  };
+
+  constructor(
+    kind: string,
+    source: string | ExternalSourceSnapshot,
+    start: number,
+    end: number,
+    tokenIndex: number,
+  ) {
+    super();
+    this.kind = kind;
+    // Share one lazy getter while keeping text enumerable on each token for
+    // object spreading and JSON. Private coordinates isolate escaped spans.
+    Object.defineProperty(this, "text", ExternalNamedTokenCursor.textProperty);
+    this.span = { start, end };
+    this.tokenIndex = tokenIndex;
+    this.#source = source;
+    this.#start = start;
+    this.#end = end;
+  }
 }
 
 class ExternalCursorTapeView {
@@ -4681,19 +4729,25 @@ class ExternalCursorTapeView {
       tokenType = "literal";
       kind = literal.value;
     }
-    const span = { start, end };
-    const source = this.source;
-    const cursor: TokenCursor = {
-      type: "token",
-      tokenType,
-      kind,
-      get text() {
-        if (tokenType === "literal") return kind;
-        return source.slice(start, end);
-      },
-      span,
-      tokenIndex,
-    } as unknown as TokenCursor;
+    let cursor: TokenCursor;
+    if (tokenType === "literal") {
+      cursor = {
+        type: "token",
+        tokenType,
+        kind,
+        text: kind,
+        span: { start, end },
+        tokenIndex,
+      };
+    } else {
+      cursor = new ExternalNamedTokenCursor(
+        kind,
+        this.source,
+        start,
+        end,
+        tokenIndex,
+      );
+    }
     this.tokenCache[tokenIndex] = cursor;
     return cursor;
   }
@@ -4950,26 +5004,44 @@ function externalCursorTokenDisplay(
   return JSON.stringify(source.slice(token.start, token.end));
 }
 
-function externalNamedToken(
-  kind: string,
-  source: string,
-  start: number,
-  end: number,
-  channel: "main" | "trivia",
-): Token {
-  let text: string | undefined;
-  return {
-    type: "named",
-    kind,
-    get text() {
-      if (text === undefined) {
-        text = source.slice(start, end);
+class ExternalNamedLexerToken extends ExternalPlainTokenRecord {
+  readonly type = "named";
+  declare readonly kind: string;
+  declare readonly text: string;
+  declare readonly span: Span;
+  declare readonly channel: "main" | "trivia";
+  readonly #source: string;
+  readonly #start: number;
+  readonly #end: number;
+  #text: string | undefined;
+
+  private static readonly textProperty: PropertyDescriptor = {
+    enumerable: true,
+    configurable: true,
+    get(this: ExternalNamedLexerToken): string {
+      if (this.#text === undefined) {
+        this.#text = this.#source.slice(this.#start, this.#end);
       }
-      return text;
+      return this.#text;
     },
-    span: { start, end },
-    channel,
-  } as Token;
+  };
+
+  constructor(
+    kind: string,
+    source: string,
+    start: number,
+    end: number,
+    channel: "main" | "trivia",
+  ) {
+    super();
+    this.kind = kind;
+    Object.defineProperty(this, "text", ExternalNamedLexerToken.textProperty);
+    this.span = { start, end };
+    this.channel = channel;
+    this.#source = source;
+    this.#start = start;
+    this.#end = end;
+  }
 }
 
 function externalErrorToken(source: string, start: number, end: number): Token {

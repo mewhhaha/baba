@@ -854,6 +854,142 @@ Deno.test("Wasm documents retain token and cursor spans after edits throughout l
   }
 });
 
+Deno.test("Wasm lexer named tokens retain enumerable text, channels, and owned spans across arena reuse", () => {
+  const parser = documentParser();
+  try {
+    const result = parser.lex("let alpha = 12;\n", { preserveTrivia: true });
+    assertEquals(result.diagnostics.length, 0);
+    const named = result.tokenTape.token(2);
+    const trivia = result.tokenTape.token(1);
+    const unread = result.tokenTape.token(6);
+    assert(named !== undefined && named.type === "named");
+    assert(trivia !== undefined && trivia.type === "named");
+    assert(unread !== undefined && unread.type === "named");
+    assert(result.tokenTape.token(2) === named);
+    assertEquals(Object.getPrototypeOf(named), Object.prototype);
+    assertEquals(Object.getPrototypeOf(trivia), Object.prototype);
+    assertEquals(Object.getPrototypeOf(unread), Object.prototype);
+    const expected = {
+      type: "named",
+      kind: "IDENT",
+      text: "alpha",
+      span: { start: 4, end: 9 },
+      channel: "main",
+    };
+    assertEquals(JSON.stringify(named), JSON.stringify(expected));
+    assertEquals(JSON.stringify({ ...named }), JSON.stringify(expected));
+    assertEquals(
+      JSON.stringify(Object.keys(named)),
+      JSON.stringify(["type", "kind", "text", "span", "channel"]),
+    );
+    assertEquals(trivia.kind, "WS");
+    assertEquals(trivia.channel, "trivia");
+    assertEquals(unread.kind, "INT");
+    assertEquals(unread.channel, "main");
+    // Read these texts for the first time after escaped spans and Wasm memory
+    // have changed. Their slices belong to the original source coordinates.
+    (trivia.span as { start: number; end: number }).start = 999;
+    (unread.span as { start: number; end: number }).end = 999;
+    parser.reset();
+    parser.lex("let overwrite = 34;\n".repeat(16384));
+    parser.dispose();
+    assertEquals(named.text, "alpha");
+    assertEquals(trivia.text, " ");
+    assertEquals(unread.text, "12");
+    assertEquals(trivia.span.start, 999);
+    assertEquals(unread.span.end, 999);
+    assertEquals(trivia.text, " ");
+    assertEquals(unread.text, "12");
+  } finally {
+    parser.dispose();
+  }
+});
+
+Deno.test("Wasm token cursors serialize public fields and retain owned text after span mutation and disposal", () => {
+  const parser = documentParser();
+  try {
+    for (const trivia of ["preserve", "discard"] as const) {
+      const document = parser.createDocument("let alpha = 12;\n", {
+        goal: "parse",
+        trivia,
+      });
+      const initial = document.parse();
+      assert(initial.ok);
+      const statement = initial.cursor.child(0);
+      assert(statement !== undefined && statement.type === "rule");
+      const literal = statement.child(0);
+      const named = statement.child(1);
+      assert(literal !== undefined && literal.type === "token");
+      assert(named !== undefined && named.type === "token");
+      assert(statement.field("name") === named);
+      let tokenIndex = 1;
+      if (trivia === "preserve") tokenIndex = 2;
+      const expected = [
+        {
+          type: "token",
+          tokenType: "literal",
+          kind: "let",
+          text: "let",
+          span: { start: 0, end: 3 },
+          tokenIndex: 0,
+        },
+        {
+          type: "token",
+          tokenType: "named",
+          kind: "IDENT",
+          text: "alpha",
+          span: { start: 4, end: 9 },
+          tokenIndex,
+        },
+      ];
+      for (const [index, token] of [literal, named].entries()) {
+        assertEquals(Object.getPrototypeOf(token), Object.prototype);
+        assertEquals(
+          JSON.stringify(Object.keys(token)),
+          JSON.stringify([
+            "type",
+            "tokenType",
+            "kind",
+            "text",
+            "span",
+            "tokenIndex",
+          ]),
+        );
+        assertEquals(JSON.stringify(token), JSON.stringify(expected[index]));
+        assertEquals(
+          JSON.stringify({ ...token }),
+          JSON.stringify(expected[index]),
+        );
+      }
+      (named.span as { start: number; end: number }).start = 999;
+      (literal.span as { start: number; end: number }).end = 999;
+      document.applyEdits([{ start: 4, oldEnd: 9, newText: "delta" }]);
+      const updated = document.parse();
+      assert(updated.ok);
+      const renamedStatement = updated.cursor.child(0);
+      assert(
+        renamedStatement !== undefined && renamedStatement.type === "rule",
+      );
+      const renamed = renamedStatement.field("name");
+      assert(renamed !== undefined && renamed !== null && "type" in renamed);
+      assert(renamed.type === "token");
+      assert(renamed !== named);
+      assertEquals(renamed.span.start, 4);
+      assertEquals(renamed.span.end, 9);
+      document.dispose();
+      parser.reset();
+      parser.lex("let overwrite = 34;\n".repeat(16384));
+      assertEquals(named.text, "alpha");
+      assertEquals(literal.text, "let");
+      assertEquals(renamed.text, "delta");
+      assertEquals(named.span.start, 999);
+      assertEquals(literal.span.end, 999);
+    }
+  } finally {
+    parser.dispose();
+  }
+});
+
 Deno.test("Wasm cursor coordinates retain fresh text and isolated spans across unchanged and pending layouts", () => {
   function shape(cursor: SyntaxCursor): unknown {
     if (cursor.type === "token") {

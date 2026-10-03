@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 9.0.7
+
+- Share lazy named-token getters and store known literal cursor text directly.
+  Full cursor reads measure roughly 2–3× faster, lexer token-text passes improve
+  by 1.6–1.8×, and a fully read 77,824-unit tree retains about 67% less
+  JavaScript heap. Plain prototypes, token keys, JSON, and snapshot ownership
+  are covered by focused tests. See
+  [measurements](docs/performance.md#wasm-token-wrappers).
+
 ## 9.0.6
 
 - Reuse packed Wasm cursor coordinates for small edits that leave token kinds

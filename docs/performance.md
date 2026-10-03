@@ -499,6 +499,70 @@ Reproduce the local-read comparisons and traversal controls with:
 deno task bench:document --before-root /path/to/9.0.5 --warmups 24 --samples 80
 ```
 
+## Wasm Token Wrappers
+
+Named cursor and ordinary lexer tokens share a lazy text getter instead of
+allocating a getter function for every wrapper. The getter remains an own,
+enumerable property, preserving plain-object prototypes, token keys, JSON, and
+object spreading. Private source coordinates preserve text independently of
+mutations to escaped span objects. Lexer tokens cache their text on its first
+read; named cursor text continues to slice its source snapshot. Literal cursors
+store the known grammar literal directly. Text reads and retained tokens stay
+valid after arena growth, reset, later edits, and disposal.
+
+A baseline CPU profile of repeated fresh parses and full cursor reads over
+77,824 UTF-16 units attributed about 79% of sampled time to token-wrapper
+creation and garbage collection. These changes target that host allocation cost.
+Callers that only read lexer counts or parse success create no token wrappers
+and see little benefit.
+
+`bench:tokens` alternates targets using each version's compiler and runtime. An
+AMD Ryzen 7 7800X3D with Deno 2.9.4 / V8 15.0.245.2-rusty used 12 warmups and 50
+samples, with background host activity, against `9.0.6` (`a6efcf9`). Inputs
+repeat `let value = other;` plus a newline. First cursor passes include parsing,
+wrapper creation, token spans, and optionally text and `name`/`value` fields,
+discarding trivia. Cached passes retain a fully read root. Lexer passes preserve
+trivia and sum all token spans or text, including EOF; first passes include
+lexing and wrapper creation. Timings below are medians in milliseconds:
+
+| UTF-16 units | Operation                      | Before  | After  |
+| ------------ | ------------------------------ | ------- | ------ |
+| 77,824       | Cursor, first spans            | 10.494  | 4.603  |
+| 77,824       | Cursor, first text and fields  | 13.621  | 6.442  |
+| 77,824       | Cursor, cached text and fields | 2.289   | 1.133  |
+| 524,305      | Cursor, first spans            | 111.533 | 46.369 |
+| 524,305      | Cursor, first text and fields  | 132.113 | 59.472 |
+| 524,305      | Cursor, cached text and fields | 35.784  | 14.976 |
+| 524,305      | Lexer, first spans             | 116.520 | 69.200 |
+| 524,305      | Lexer, first text              | 114.393 | 69.463 |
+| 524,305      | Lexer, cached text             | 20.870  | 5.240  |
+
+Count-only lexing on 524,305 units measures 4.333 to 4.100 ms; parsing with only
+the root span read measures 9.838 to 10.251 ms. They show no consistent gain.
+Separate 24-warmup, 80-sample edit-plus-first-traversal measurements over 77,824
+units improve medians from 11.836 to 4.254 ms for changed-length renames and
+12.921 to 4.101 ms for equal-length renames. The improvement applies to reading
+tokens, while source updates, chunk maintenance, and dense record refreshes
+retain their existing costs. Whole-tree scans still scale with token count, and
+token composition, V8 optimization, and garbage collection affect ratios.
+Equal-length first-name-field reads on 4,194,307 units measure 0.0502 to 0.0432
+ms with discarded trivia and 0.0299 to 0.0253 ms with preserved trivia. They
+retain the packed-coordinate reuse benefit from the previous change.
+
+Three isolated runs per target read a 77,824-unit tree after warming parser
+metadata through validation. Forced major collections before and after the read
+measure a median JavaScript heap increase of 16,287,768 to 5,386,232 bytes
+(15.53 to 5.14 MiB), about 67% less. This excludes typed-array buffers and Wasm
+linear memory. The generic Wasm engine remains 11,961 bytes with the same ABI
+and plan formats. The shared loader grows by 2,103 bytes to 158,232 bytes.
+
+Reproduce the token-read comparisons with:
+
+```sh
+deno task bench:tokens --before-root /path/to/9.0.6 --warmups 12 --samples 50
+deno task bench:document --before-root /path/to/9.0.6 --warmups 24 --samples 80
+```
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that
