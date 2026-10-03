@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Upload incremental Wasm token records directly and avoid a redundant host copy
+  in `parseRecords()`, while preserving snapshot and Wasm-memory alias safety.
+  Cache island plan values during analysis and cursor construction; shrink the
+  generic engine by 733 bytes without changing ABI or plan formats. Paired
+  document measurements improve median incremental parsing by 6.1% and
+  validation by 14.3%. See
+  [performance measurements](docs/performance.md#wasm-incremental-record-uploads).
 - Add checked-in-corpus benchmarks with fresh setup, first-call totals, and
   explicit Wasm lexer versus TypeScript frontend comparisons. Add a resident
   syntax overview that renders token and rule spans directly from GPU IR,

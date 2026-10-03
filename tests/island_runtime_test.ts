@@ -81,6 +81,75 @@ Deno.test("production island runtime materializes root and region cursors", () =
   assertEquals(preservedFirst.fieldArray("values").length, 2);
 });
 
+Deno.test("production island cursors retain empty regions, trivia spans, and fields", () => {
+  const parser = createIslandParser();
+  const source = " \nx x ; \n ; \t x ; \n";
+  try {
+    const discarded = parser.parse(source, { preserveTrivia: false });
+    const preserved = parser.parse(source, { preserveTrivia: true });
+    assert(discarded.ok);
+    assert(preserved.ok);
+
+    // Exercise later arena writes before reading either returned snapshot.
+    assertEquals(parser.parse("x ; ".repeat(512)).ok, true);
+    assertEquals(parser.validate(";").ok, true);
+    const cases = [
+      {
+        cursor: discarded.cursor,
+        spans: [{ start: 2, end: 7 }, { start: 10, end: 11 }, {
+          start: 14,
+          end: 17,
+        }],
+        tokenRanges: [{ start: 0, end: 3 }, { start: 3, end: 4 }, {
+          start: 4,
+          end: 6,
+        }],
+      },
+      {
+        cursor: preserved.cursor,
+        spans: [{ start: 0, end: 10 }, { start: 10, end: 14 }, {
+          start: 14,
+          end: 19,
+        }],
+        tokenRanges: [{ start: 0, end: 7 }, { start: 7, end: 9 }, {
+          start: 9,
+          end: 13,
+        }],
+      },
+    ];
+    for (const testCase of cases) {
+      assertEquals(testCase.cursor.span.start, 0);
+      assertEquals(testCase.cursor.span.end, source.length);
+      const chunks = testCase.cursor.fieldArray("chunks");
+      assertEquals(chunks.length, 3);
+      assertEquals(testCase.cursor.childCount, 3);
+      const valueCounts = [2, 0, 1];
+      const childCounts = [3, 1, 2];
+      for (let index = 0; index < chunks.length; index++) {
+        const chunk = chunks[index];
+        assert(chunk !== null && "type" in chunk);
+        assert(chunk.type === "rule");
+        assertEquals(chunk.name, "chunk");
+        assertEquals(chunk, testCase.cursor.child(index));
+        assertEquals(chunk.span.start, testCase.spans[index].start);
+        assertEquals(chunk.span.end, testCase.spans[index].end);
+        assertEquals(chunk.tokenRange.start, testCase.tokenRanges[index].start);
+        assertEquals(chunk.tokenRange.end, testCase.tokenRanges[index].end);
+        assertEquals(chunk.childCount, childCounts[index]);
+        const values = chunk.fieldArray("values");
+        assertEquals(values.length, valueCounts[index]);
+        for (const value of values) {
+          assert(value !== null && "type" in value);
+          assert(value.type === "token");
+          assertEquals(value.text, "x");
+        }
+      }
+    }
+  } finally {
+    parser.dispose();
+  }
+});
+
 Deno.test("production island documents preserve incremental API shapes", () => {
   const parser = createIslandParser();
   const document = parser.createDocument("x ;", {

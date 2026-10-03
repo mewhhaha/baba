@@ -158,6 +158,55 @@ Engine size: 10,165 -> 12,694 bytes; plan size and the 193-page memory
 high-water mark are unchanged. Results vary by machine. Compare the same plan
 and adapter with `bench:runtime --wasm-core before.wasm`.
 
+## Wasm Incremental Record Uploads
+
+The 2026-10-03 changes upload five-word incremental token records directly into
+Wasm's four-word token layout. This removes a temporary 16-byte-per-token array
+and its copy on each edit. `parseRecords()` also uploads independent host
+records directly; records that alias Wasm memory are still protected before
+memory growth or tape writes. Returned token and cursor tapes retain their owned
+snapshots across later calls.
+
+Rust island analysis and cursor materialization cache immutable plan values and
+table addresses once per call. The generic engine shrinks from 12,694 to 11,961
+bytes. Wasm ABI 14, core plan format 9, plan sizes, and the `island-statements`
+193-page memory high-water mark are unchanged. This round leaves the lexer path
+unchanged.
+
+An alternating checkout comparison on an AMD Ryzen 7 7800X3D with Deno 2.9.4 /
+V8 15.0.245.2-rusty used eight warmups and 40 samples. Each update inserts and
+removes a space in the middle of 524,305 UTF-16 units (p25 / median
+milliseconds):
+
+| Document operation                   | Before      | After       |
+| ------------------------------------ | ----------- | ----------- |
+| Incremental parse, insert and remove | 7.95 / 8.35 | 7.31 / 7.84 |
+| Incremental validate, insert/remove  | 4.05 / 4.55 | 3.78 / 3.90 |
+
+The median improvements are 6.1% for parsing and 14.3% for validation on this
+workload. First token-text reads after fragmented edits measured 0.91 / 0.95 ->
+0.92 / 1.00 ms; that path is unchanged and the difference is within sample
+variation. Island caching alone showed roughly 2% lower ordinary parse time,
+close to measurement noise, so these document results describe the combined
+changes rather than a repeatable standalone parser gain.
+
+A separate comparison of complete public calls on 524,304 UTF-16 units used 12
+warmups and 50 rotating samples. Median `lex()` time was 3.09 -> 3.08 ms,
+`validate()` 3.10 -> 3.15 ms, parsing with discarded trivia 5.03 -> 4.87 ms, and
+parsing with preserved trivia 5.15 -> 5.19 ms. These ordinary-path differences
+are small; the larger benefit is incremental record transfer.
+
+Reproduce the document comparison and isolate an engine change with:
+
+```sh
+deno task bench:document --before-root /path/to/previous/checkout
+deno task bench:runtime --wasm-core /path/to/before.wasm
+```
+
+Two scanner experiments were reverted: quoted strings became 32–38% faster, but
+ordinary statements slowed down. A contiguous cursor-copy experiment was also
+reverted after roughly 3% slower parsing.
+
 ## Lexer Backtracking Worst Case
 
 `fn lex_all` used to be O(n^2), and the shape is reachable from grammars that

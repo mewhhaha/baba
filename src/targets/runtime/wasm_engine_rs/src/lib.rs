@@ -1063,50 +1063,43 @@ fn island_plan_is_valid(base: i32, core_length: i32, offset: i32, state_count: i
     true
 }
 
-#[inline]
-fn island_plan_address() -> i32 {
-    plan_addr(header(PLAN_HEADER_ISLAND_PLAN))
+struct IslandRuntimePlan {
+    address: i32,
+    spec_count: i32,
+    state_count: i32,
+    terminal_count: i32,
+    start_state: i32,
+    accepting_mask: i32,
+    boundary_terminal: i32,
+    spec_terminals: i32,
+    transitions: i32,
+    fields: i32,
 }
 
-#[inline]
-fn island_config(field: i32) -> i32 {
-    unsafe { load_i32(island_plan_address() + field * 4) }
-}
-
-#[inline]
-fn island_spec_terminal(spec: i32) -> i32 {
-    unsafe { load_i32(island_plan_address() + (ISLAND_CONFIG_I32_COUNT + spec) * 4) }
-}
-
-#[inline]
-fn island_transition_index(terminal: i32, state: i32) -> i32 {
-    terminal * header(PLAN_HEADER_ISLAND_STATE_COUNT) + state
-}
-
-#[inline]
-fn island_transition_target(terminal: i32, state: i32) -> i32 {
-    let spec_count = header(PLAN_HEADER_SPEC_COUNT);
-    let index = island_transition_index(terminal, state);
-    unsafe { load_i32(island_plan_address() + (ISLAND_CONFIG_I32_COUNT + spec_count + index) * 4) }
-}
-
-#[inline]
-fn island_transition_field(terminal: i32, state: i32) -> i32 {
-    let spec_count = header(PLAN_HEADER_SPEC_COUNT);
-    let transition_count =
-        island_config(ISLAND_CONFIG_TERMINAL_COUNT) * header(PLAN_HEADER_ISLAND_STATE_COUNT);
-    let index = island_transition_index(terminal, state);
-    unsafe {
-        load_i32(
-            island_plan_address()
-                + (ISLAND_CONFIG_I32_COUNT + spec_count + transition_count + index) * 4,
-        )
+fn load_island_runtime_plan() -> IslandRuntimePlan {
+    let base = loaded_plan_base();
+    let address = base + header_at(base, PLAN_HEADER_ISLAND_PLAN);
+    let spec_count = header_at(base, PLAN_HEADER_SPEC_COUNT);
+    let state_count = header_at(base, PLAN_HEADER_ISLAND_STATE_COUNT);
+    let terminal_count = unsafe { load_i32(address + ISLAND_CONFIG_TERMINAL_COUNT * 4) };
+    let spec_terminals = address + ISLAND_CONFIG_I32_COUNT * 4;
+    let transitions = spec_terminals + spec_count * 4;
+    let fields = transitions + terminal_count * state_count * 4;
+    // Tape writes may alias arbitrary linear-memory addresses from LLVM's
+    // perspective. Keep the loaded plan's immutable configuration in locals
+    // so materialization does not reread its header for every token.
+    IslandRuntimePlan {
+        address,
+        spec_count,
+        state_count,
+        terminal_count,
+        start_state: unsafe { load_i32(address + ISLAND_CONFIG_START_STATE * 4) },
+        accepting_mask: unsafe { load_i32(address + ISLAND_CONFIG_ACCEPTING_MASK * 4) },
+        boundary_terminal: unsafe { load_i32(address + ISLAND_CONFIG_BOUNDARY_TERMINAL * 4) },
+        spec_terminals,
+        transitions,
+        fields,
     }
-}
-
-#[inline]
-fn island_accepts(state: i32) -> bool {
-    island_config(ISLAND_CONFIG_ACCEPTING_MASK) & (1 << state) != 0
 }
 
 fn initialize_island_result(result: i32) {
@@ -1129,16 +1122,20 @@ fn island_runtime_is_available() -> bool {
     header(PLAN_HEADER_ISLAND_STATE_COUNT) > 0 && header(PLAN_HEADER_ISLAND_PLAN) > 0
 }
 
-fn next_structural_record(tokens: i32, raw_count: i32, start: i32) -> i32 {
-    let spec_count = header(PLAN_HEADER_SPEC_COUNT);
+fn next_structural_record(
+    tokens: i32,
+    raw_count: i32,
+    start: i32,
+    plan: &IslandRuntimePlan,
+) -> i32 {
     let mut record_index = start;
     while record_index < raw_count {
         let record = token_record_address(tokens, record_index);
         let spec = unsafe { load_i32(record) };
-        if spec < 0 || spec >= spec_count {
+        if spec < 0 || spec >= plan.spec_count {
             return record_index;
         }
-        if island_spec_terminal(spec) >= 0 {
+        if unsafe { load_i32(plan.spec_terminals + spec * 4) } >= 0 {
             return record_index;
         }
         record_index += 1;
@@ -1160,11 +1157,8 @@ pub extern "C" fn analyze_island_records(
     if !island_runtime_is_available() || tokens <= 0 || raw_count < 0 || max_actions < 1 {
         return ISLAND_STATUS_INVALID;
     }
-    let spec_count = header(PLAN_HEADER_SPEC_COUNT);
-    let terminal_count = island_config(ISLAND_CONFIG_TERMINAL_COUNT);
-    let start_state = island_config(ISLAND_CONFIG_START_STATE);
-    let boundary_terminal = island_config(ISLAND_CONFIG_BOUNDARY_TERMINAL);
-    let state_count = header(PLAN_HEADER_ISLAND_STATE_COUNT);
+    let plan = load_island_runtime_plan();
+    let start_state = plan.start_state;
     let mut structural_count = 0;
     let mut state = start_state;
     let mut region_count = 0;
@@ -1179,15 +1173,15 @@ pub extern "C" fn analyze_island_records(
         if spec < 0 {
             return return_island_failure(ISLAND_STATUS_LEXICAL, result, record_index, start_state);
         }
-        if spec >= spec_count {
+        if spec >= plan.spec_count {
             return ISLAND_STATUS_INVALID;
         }
-        let terminal = island_spec_terminal(spec);
+        let terminal = unsafe { load_i32(plan.spec_terminals + spec * 4) };
         if terminal < 0 {
             record_index += 1;
             continue;
         }
-        if terminal >= terminal_count {
+        if terminal >= plan.terminal_count {
             return ISLAND_STATUS_INVALID;
         }
         if structural_count == max_actions {
@@ -1203,8 +1197,9 @@ pub extern "C" fn analyze_island_records(
             record_index += 1;
             continue;
         }
-        let target = island_transition_target(terminal, state);
-        if target == state_count {
+        let transition_index = terminal * plan.state_count + state;
+        let target = unsafe { load_i32(plan.transitions + transition_index * 4) };
+        if target == plan.state_count {
             parse_status = ISLAND_STATUS_UNEXPECTED;
             if state == start_state && region_count > 0 {
                 parse_status = ISLAND_STATUS_TRAILING;
@@ -1213,20 +1208,20 @@ pub extern "C" fn analyze_island_records(
             record_index += 1;
             continue;
         }
-        if target < 0 || target >= state_count {
+        if target < 0 || target >= plan.state_count {
             parse_status = ISLAND_STATUS_INVALID;
             record_index += 1;
             continue;
         }
-        if island_transition_field(terminal, state) >= 0 {
+        if unsafe { load_i32(plan.fields + transition_index * 4) } >= 0 {
             transition_field_count += 1;
         }
         state = target;
         region_token_count += 1;
-        if terminal == boundary_terminal {
-            if !island_accepts(state) {
+        if terminal == plan.boundary_terminal {
+            if plan.accepting_mask & (1 << state) == 0 {
                 parse_status = ISLAND_STATUS_UNEXPECTED;
-                error_record = next_structural_record(tokens, raw_count, record_index + 1);
+                error_record = next_structural_record(tokens, raw_count, record_index + 1, &plan);
                 record_index += 1;
                 continue;
             }
@@ -1248,7 +1243,9 @@ pub extern "C" fn analyze_island_records(
     if parse_status != ISLAND_STATUS_OK {
         return return_island_failure(parse_status, result, error_record, state);
     }
-    if structural_count == 0 && island_config(ISLAND_CONFIG_ROOT_ACCEPTS_EMPTY) == 0 {
+    if structural_count == 0
+        && unsafe { load_i32(plan.address + ISLAND_CONFIG_ROOT_ACCEPTS_EMPTY * 4) } == 0
+    {
         return return_island_failure(ISLAND_STATUS_UNEXPECTED, result, raw_count, start_state);
     }
     if region_token_count > 0 {
@@ -1379,7 +1376,12 @@ struct RegionCursorRange {
     field_count: i32,
 }
 
-fn finalize_cursor_region(tokens: i32, tape: &CursorTapeArena, region: RegionCursorRange) -> bool {
+fn finalize_cursor_region(
+    tokens: i32,
+    tape: &CursorTapeArena,
+    region: RegionCursorRange,
+    region_rule: i32,
+) -> bool {
     if region.record_end <= region.record_start {
         return false;
     }
@@ -1390,7 +1392,7 @@ fn finalize_cursor_region(tokens: i32, tape: &CursorTapeArena, region: RegionCur
     tape.store_rule(
         region.rule_index,
         CursorRuleRecord {
-            rule: island_config(ISLAND_CONFIG_REGION_RULE),
+            rule: region_rule,
             span_start,
             span_end,
             token_start: region.record_start,
@@ -1440,9 +1442,11 @@ pub extern "C" fn materialize_island_records(
     {
         return ISLAND_STATUS_INVALID;
     }
-    let state_count = header(PLAN_HEADER_ISLAND_STATE_COUNT);
-    let start_state = island_config(ISLAND_CONFIG_START_STATE);
-    let boundary_terminal = island_config(ISLAND_CONFIG_BOUNDARY_TERMINAL);
+    let plan = load_island_runtime_plan();
+    let start_state = plan.start_state;
+    let root_rule = unsafe { load_i32(plan.address + ISLAND_CONFIG_ROOT_RULE * 4) };
+    let region_rule_id = unsafe { load_i32(plan.address + ISLAND_CONFIG_REGION_RULE * 4) };
+    let root_field = unsafe { load_i32(plan.address + ISLAND_CONFIG_ROOT_FIELD * 4) };
     let mut state = start_state;
     let mut cursor_token_count = 0;
     let mut tape = CursorTapeArena {
@@ -1475,10 +1479,10 @@ pub extern "C" fn materialize_island_records(
     while record_index < raw_count {
         let raw_record = token_record_address(tokens, record_index);
         let spec = unsafe { load_i32(raw_record) };
-        if spec < 0 || spec >= header(PLAN_HEADER_SPEC_COUNT) {
+        if spec < 0 || spec >= plan.spec_count {
             return ISLAND_STATUS_INVALID;
         }
-        let terminal = island_spec_terminal(spec);
+        let terminal = unsafe { load_i32(plan.spec_terminals + spec * 4) };
         if terminal < 0 {
             record_index += 1;
             continue;
@@ -1501,6 +1505,7 @@ pub extern "C" fn materialize_island_records(
                     field_start: region_field_start,
                     field_count: region_field_count,
                 },
+                region_rule_id,
             ) {
                 return ISLAND_STATUS_INVALID;
             }
@@ -1548,11 +1553,12 @@ pub extern "C" fn materialize_island_records(
         }
         previous_region_child = child;
         region_child_count += 1;
-        let target = island_transition_target(terminal, state);
-        if target < 0 || target >= state_count {
+        let transition_index = terminal * plan.state_count + state;
+        let target = unsafe { load_i32(plan.transitions + transition_index * 4) };
+        if target < 0 || target >= plan.state_count {
             return ISLAND_STATUS_INVALID;
         }
-        let field = island_transition_field(terminal, state);
+        let field = unsafe { load_i32(plan.fields + transition_index * 4) };
         if field >= 0 {
             if !tape.append_field(field, cursor_token_index * 2 + 1) {
                 return ISLAND_STATUS_CAPACITY;
@@ -1561,8 +1567,8 @@ pub extern "C" fn materialize_island_records(
         }
         state = target;
         region_token_count += 1;
-        if terminal == boundary_terminal {
-            if !island_accepts(state) {
+        if terminal == plan.boundary_terminal {
+            if plan.accepting_mask & (1 << state) == 0 {
                 return ISLAND_STATUS_INVALID;
             }
             let root_child = tape.append_child(previous_root_child, region_rule * 2);
@@ -1598,6 +1604,7 @@ pub extern "C" fn materialize_island_records(
                 field_start: region_field_start,
                 field_count: region_field_count,
             },
+            region_rule_id,
         ) {
             return ISLAND_STATUS_INVALID;
         }
@@ -1609,7 +1616,6 @@ pub extern "C" fn materialize_island_records(
         cursor_token_count = raw_count;
     }
     let root_field_start = tape.field_count;
-    let root_field = island_config(ISLAND_CONFIG_ROOT_FIELD);
     if root_field >= 0 {
         let mut region = 0;
         while region < region_count {
@@ -1629,7 +1635,7 @@ pub extern "C" fn materialize_island_records(
     tape.store_rule(
         0,
         CursorRuleRecord {
-            rule: island_config(ISLAND_CONFIG_ROOT_RULE),
+            rule: root_rule,
             span_start: 0,
             span_end: source_length,
             token_start: 0,

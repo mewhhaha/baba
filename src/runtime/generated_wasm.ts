@@ -810,6 +810,12 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
         `Wasm parser external lexer records end at ${expectedStart}, expected source length ${source.length}.`,
       );
     }
+    let ownedRecords = records;
+    if (records.buffer === this.wasm.memory.buffer) {
+      // Source writes can overlap the caller's records, and memory growth can
+      // detach them before upload. Other host-owned buffers need no staging.
+      ownedRecords = records.slice();
+    }
     return parseExternalIslandRecords(
       metadata,
       this.#requireIslandProgram(),
@@ -818,7 +824,7 @@ class ExternalWasmParserInstance<Root extends RuleCursor = RuleCursor>
       this.#sourceCache,
       source,
       options,
-      records.slice(),
+      ownedRecords,
     ) as CursorParseResult<Root>;
   }
 
@@ -1859,23 +1865,6 @@ function externalIncrementalTokenAtStart(
   return lower;
 }
 
-function externalIncrementalRawRecords(
-  state: ExternalIncrementalLexState,
-): Int32Array {
-  const records = new Int32Array(
-    state.count * WASM_TOKEN_RECORD_I32_COUNT,
-  );
-  for (let tokenIndex = 0; tokenIndex < state.count; tokenIndex++) {
-    const sourceBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
-    const targetBase = tokenIndex * WASM_TOKEN_RECORD_I32_COUNT;
-    records[targetBase] = state.records[sourceBase];
-    records[targetBase + 1] = state.records[sourceBase + 1];
-    records[targetBase + 2] = state.records[sourceBase + 2];
-    records[targetBase + 3] = state.records[sourceBase + 3];
-  }
-  return records;
-}
-
 function externalIncrementalLexResult(
   metadata: ExternalRuntimeMetadata,
   snapshot: SourceSnapshot,
@@ -2237,7 +2226,7 @@ class ExternalIncrementalDocument<Root extends RuleCursor> {
       this.sourceCache,
       this.#source,
       this.#maxParserActions,
-      externalIncrementalRawRecords(this.#lexState),
+      this.#lexState,
     );
     this.#validateResult = externalIncrementalValidateResult(
       this.#snapshot,
@@ -2857,7 +2846,7 @@ function analyzeExternalIslandInRust(
   sourceCache: ExternalWasmSourceCache,
   source: string,
   maxParserActions: number,
-  externalRecords?: Int32Array,
+  externalRecords?: Int32Array | ExternalIncrementalLexState,
 ): ExternalRustIslandAnalysis {
   const prepared = prepareExternalWasmIslandRecords(
     wasm,
@@ -2952,15 +2941,27 @@ function prepareExternalWasmIslandRecords(
   planByteLength: number,
   sourceCache: ExternalWasmSourceCache,
   source: string,
-  externalRecords: Int32Array | undefined,
+  externalRecords: Int32Array | ExternalIncrementalLexState | undefined,
 ): ExternalWasmIslandRecordPreparation {
   const sourcePtr = align(planByteLength, 8);
   const sourceByteLength = source.length * WASM_UTF16_UNIT_BYTES;
   const tokenPtr = align(sourcePtr + sourceByteLength, WASM_I32_BYTES);
   let rawTokenCapacity = source.length;
   if (externalRecords !== undefined) {
-    rawTokenCapacity = externalRecords.length /
-      WASM_TOKEN_RECORD_I32_COUNT;
+    if (externalRecords instanceof Int32Array) {
+      rawTokenCapacity = externalRecords.length /
+        WASM_TOKEN_RECORD_I32_COUNT;
+    } else {
+      rawTokenCapacity = externalRecords.count;
+      if (
+        externalRecords.records.length !==
+          rawTokenCapacity * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT
+      ) {
+        throw new Error(
+          "Incremental lexer records do not match their token count.",
+        );
+      }
+    }
   }
   if (rawTokenCapacity < 1) {
     rawTokenCapacity = 1;
@@ -2978,18 +2979,39 @@ function prepareExternalWasmIslandRecords(
     source,
   );
   if (externalRecords !== undefined) {
-    new Int32Array(
+    let rawTokenCount: number;
+    if (externalRecords instanceof Int32Array) {
+      rawTokenCount = externalRecords.length / WASM_TOKEN_RECORD_I32_COUNT;
+    } else {
+      rawTokenCount = externalRecords.count;
+    }
+    const target = new Int32Array(
       wasm.memory.buffer,
       tokenPtr,
-      externalRecords.length,
-    ).set(externalRecords);
+      rawTokenCount * WASM_TOKEN_RECORD_I32_COUNT,
+    );
+    if (externalRecords instanceof Int32Array) {
+      target.set(externalRecords);
+    } else {
+      // Dependency ends remain in the document's immutable lexer state. The
+      // parser consumes only the four lexer fields, directly in its arena.
+      const records = externalRecords.records;
+      for (let tokenIndex = 0; tokenIndex < rawTokenCount; tokenIndex++) {
+        const sourceBase = tokenIndex * WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+        const targetBase = tokenIndex * WASM_TOKEN_RECORD_I32_COUNT;
+        target[targetBase] = records[sourceBase];
+        target[targetBase + 1] = records[sourceBase + 1];
+        target[targetBase + 2] = records[sourceBase + 2];
+        target[targetBase + 3] = records[sourceBase + 3];
+      }
+    }
     return {
       ok: true,
       records: {
         tokenPtr,
-        rawTokenCount: externalRecords.length /
-          WASM_TOKEN_RECORD_I32_COUNT,
-        nextPtr: tokenPtr + externalRecords.length * WASM_I32_BYTES,
+        rawTokenCount,
+        nextPtr: tokenPtr + rawTokenCount * WASM_TOKEN_RECORD_I32_COUNT *
+            WASM_I32_BYTES,
       },
     };
   }
