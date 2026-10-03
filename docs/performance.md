@@ -285,10 +285,10 @@ to eight warmups and 40 samples; the longer run changed those two constants.
 
 Successful parse documents can also share child, field, and value tables when
 terminal classifications retain their raw token indices. New versions get fresh
-cursor caches and root spans. The first child or field-reference read creates
-dense token records and refreshes rule spans from the current owned lexer tape.
-No prior cursor wrappers or Wasm views are retained. Changed indices, failed
-parses, and larger windows use the normal materializer.
+cursor caches and root spans. Local child and field reads resolve coordinates
+from immutable chunks; bulk reads create dense token records and refresh rule
+spans. No prior cursor wrappers or Wasm views are retained. Changed indices,
+failed parses, and larger windows use the normal materializer.
 
 Against `7c14431`, 24 warmups and 120 alternating samples on the same CPU/Deno
 measured p25 / median milliseconds:
@@ -389,9 +389,9 @@ pairs and isolated surrogate units.
 `snapshot.slice()` caches a selected piece and lazily indexes piece starts for
 other ranges. Local token reads avoid a document-size copy. `snapshot.text()`
 still joins and caches the full string when requested. Reused parse roots retain
-the source snapshot. When token coordinates need refreshing, their first child
-or field-reference read prepares cursor records and flattens text once for
-subsequent string slices. Fresh parser analysis accepts source pieces; full
+the source snapshot. Local coordinate reads use the chunks and source pieces
+directly. Bulk traversal prepares packed cursor records and flattens text once
+for subsequent string slices. Fresh parser analysis accepts source pieces; full
 parse materialization uses flat text.
 
 An alternating comparison against `9.0.4` (`e26b6d8`) on an AMD Ryzen 7 7800X3D,
@@ -459,9 +459,9 @@ Every snapshot gets fresh cursor wrappers and caches. Token text slices the
 current source pieces, while earlier cursors retain their own text and spans
 after later edits, arena growth, reset, and document disposal. A prior pending
 coordinate refresh remains pending and shares its immutable record descriptor;
-it still runs on the first child or field-reference read. Boundary changes,
-changed terminals, failed parses, and larger relex windows keep their existing
-refresh paths. Equal total source length alone does not permit record reuse.
+local reads can now resolve it through the chunks as described below. Changed
+terminals, failed parses, and larger relex windows keep their existing paths.
+Equal total source length alone does not permit record reuse.
 
 An alternating comparison against `9.0.5` (`67448c2`) on an AMD Ryzen 7 7800X3D,
 Deno 2.9.4 / V8 15.0.245.2-rusty used 24 warmups and 80 samples with background
@@ -561,6 +561,59 @@ Reproduce the token-read comparisons with:
 ```sh
 deno task bench:tokens --before-root /path/to/9.0.6 --warmups 12 --samples 50
 deno task bench:document --before-root /path/to/9.0.6 --warmups 24 --samples 80
+```
+
+## Local Incremental Cursor Reads
+
+Small edits that preserve terminal kinds and their raw token indices can resolve
+local token coordinates directly from immutable lexer chunks. A rule span reads
+only its first and last token; a token cursor reads one record through the
+trivia mapping and applies the chunk's offset adjustment. These reads avoid
+packing the whole token tape, copying every rule record, and flattening the
+source.
+
+Each cursor tape permits 64 direct record reads before the next child or field
+reference switches to the existing dense refresh path. This bounds extra lookup
+work during bulk traversal. Earlier wrappers keep their span objects and source
+coordinates through that switch, later edits, reset, arena growth, and disposal.
+Versions with matching coordinates can share a pending record descriptor while
+reading text from their own source snapshot. Changed indices, changed terminals,
+and failed parses keep the normal analysis and materialization paths.
+
+Against `9.0.7` (`e34f17d`), an AMD Ryzen 7 7800X3D with Deno 2.9.4 / V8
+15.0.245.2-rusty used 24 warmups and 80 alternating samples, with background
+host activity. Inputs repeat `let value = other;` plus a newline. Each sample
+renames the first statement's `value` to `renamed` or back, then reads the first
+child, its `name` field, text, and span. Full-source verification occurs outside
+the timer; parser action limits are 4,000,000. Medians are milliseconds:
+
+| UTF-16 units | Trivia   | Before | After | Speedup |
+| ------------ | -------- | ------ | ----- | ------- |
+| 524,305      | Discard  | 1.115  | 0.023 | 48×     |
+| 524,305      | Preserve | 1.301  | 0.024 | 55×     |
+| 4,194,307    | Discard  | 9.756  | 0.346 | 28×     |
+| 4,194,307    | Preserve | 11.389 | 0.466 | 24×     |
+
+Length-changing edits still move the Wasm source suffix, and source pieces and
+token chunks still require descriptor maintenance. These are not constant-time
+updates. Garbage collection and host load affect tails, particularly at 4 MiB.
+Equal-length local reads retain their previous gain and show no consistent new
+improvement.
+
+Full edit-plus-traversal controls over 77,824 units measure 3.073 to 3.127 ms
+for changed-length renames and 3.093 to 3.148 ms for equal-length renames, both
+within 2%. Separate 12-warmup, 50-sample ordinary-call controls show parse-only
+medians within 3% and first text-and-field passes between 8% faster and 1%
+slower. Cached cursor text-and-field passes measure 2–6% slower in that run.
+Bulk scans still scale with token count; this change targets local reads after
+eligible edits. The shared loader grows by 2,565 bytes to 160,797 bytes. Wasm
+bytes, ABI, plan formats, token keys, and cursor prototypes are unchanged.
+
+Reproduce local reads and bulk controls with:
+
+```sh
+deno task bench:document --before-root /path/to/9.0.7 --warmups 24 --samples 80
+deno task bench:tokens --before-root /path/to/9.0.7 --warmups 12 --samples 50
 ```
 
 ## Lexer Backtracking Worst Case

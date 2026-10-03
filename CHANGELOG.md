@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Resolve local incremental cursor coordinates directly from immutable lexer
+  chunks before switching bulk reads to packed records. Length-changing renames
+  followed by one child and field read measure 24–55× faster on 512 KiB and 4
+  MiB documents, with retained spans and snapshot ownership covered by tests.
+  See [measurements](docs/performance.md#local-incremental-cursor-reads).
+
 ## 9.0.7
 
 - Share lazy named-token getters and store known literal cursor text directly.

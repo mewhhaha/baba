@@ -146,9 +146,11 @@ Changed terminals, failed analysis, and large windows require fresh analysis. LR
 checkpoint counts remain zero.
 
 Matching terminal classifications at the same raw token indices also allow
-cursor-table reuse. Each version owns fresh cursor caches and spans. Token and
-rule records are refreshed on the first child read; child, field, and value
-tables stay immutable and shared. Retained cursors remain independent of Wasm
+cursor-table reuse. Each version owns fresh cursor caches and spans. Local token
+and rule coordinates resolve directly from the immutable lexer chunks. Bulk
+reads refresh packed token and rule records; child, field, and value tables stay
+immutable and shared. Matching coordinates can share the owned packed records or
+a pending refresh descriptor. Retained cursors remain independent of Wasm
 memory, later edits, and parser disposal.
 
 Incremental lexer records also remain host-owned. Initial lexing and whole-file

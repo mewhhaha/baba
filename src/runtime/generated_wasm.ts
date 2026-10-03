@@ -4311,6 +4311,8 @@ interface ExternalIncrementalCursorTokens {
   readonly keptCount: number;
 }
 
+const MAX_INCREMENTAL_CURSOR_RECORD_READS = 64;
+
 // Returning a plain record lets derived private fields own source coordinates
 // without exposing a different public prototype or changing it per token.
 class ExternalPlainTokenRecord {
@@ -4363,6 +4365,7 @@ class ExternalCursorTapeView {
   private readonly ruleCache: (RuleCursor | undefined)[] = [];
   private readonly tokenCache: (TokenCursor | undefined)[] = [];
   private reuse: ExternalCursorTapeReuse | undefined;
+  private incrementalRecordReads = 0;
 
   constructor(
     private readonly metadata: ExternalRuntimeMetadata,
@@ -4474,6 +4477,44 @@ class ExternalCursorTapeView {
     this.pendingTokens = undefined;
   }
 
+  private readIncrementalCursorToken(tokenIndex: number): ExternalTokenRecord {
+    const pending = this.pendingTokens;
+    if (pending === undefined) {
+      throw new Error("Cursor snapshot has no pending incremental records.");
+    }
+    if (tokenIndex < 0 || tokenIndex >= pending.keptCount) {
+      throw new Error("Cursor references an unknown incremental token.");
+    }
+    let recordIndex = tokenIndex;
+    if (pending.keptRecordIndices !== null) {
+      const mapped = pending.keptRecordIndices[tokenIndex];
+      if (mapped === undefined) {
+        throw new Error("Incremental cursor token mapping is incomplete.");
+      }
+      recordIndex = mapped;
+    }
+    const chunk = pending.state.chunkForToken(recordIndex);
+    const base = (recordIndex - chunk.tokenStart) *
+      WASM_INCREMENTAL_TOKEN_RECORD_I32_COUNT;
+    const specIndex = chunk.records[base];
+    const start = chunk.records[base + 1];
+    const end = chunk.records[base + 2];
+    const acceptingState = chunk.records[base + 3];
+    if (
+      specIndex === undefined || start === undefined || end === undefined ||
+      acceptingState === undefined
+    ) {
+      throw new Error("Incremental cursor token record is incomplete.");
+    }
+    this.incrementalRecordReads++;
+    return {
+      specIndex,
+      start: start + chunk.offsetDelta,
+      end: end + chunk.offsetDelta,
+      acceptingState,
+    };
+  }
+
   private ruleCursor(ruleIndex: number): RuleCursor {
     const cached = this.ruleCache[ruleIndex];
     if (cached !== undefined) return cached;
@@ -4511,6 +4552,17 @@ class ExternalCursorTapeView {
       fieldStart === undefined || fieldCount === undefined
     ) {
       throw new Error("Cursor rule record is incomplete.");
+    }
+    if (this.pendingTokens !== undefined) {
+      if (ruleIndex === 0) {
+        span.start = 0;
+        span.end = this.source.length;
+      } else {
+        const first = this.readIncrementalCursorToken(tokenRange.start);
+        const last = this.readIncrementalCursorToken(tokenRange.end - 1);
+        span.start = first.start;
+        span.end = last.end;
+      }
     }
     if (
       this.reuse !== undefined &&
@@ -4696,6 +4748,15 @@ class ExternalCursorTapeView {
   private tokenCursor(tokenIndex: number): TokenCursor {
     const cached = this.tokenCache[tokenIndex];
     if (cached !== undefined) return cached;
+    if (this.pendingTokens !== undefined) {
+      const record = this.readIncrementalCursorToken(tokenIndex);
+      return this.materializeTokenCursor(
+        tokenIndex,
+        record.specIndex,
+        record.start,
+        record.end,
+      );
+    }
     const base = tokenIndex * WASM_TOKEN_RECORD_I32_COUNT;
     if (
       base < 0 || base + WASM_TOKEN_RECORD_I32_COUNT > this.tokenRecords.length
@@ -4708,6 +4769,15 @@ class ExternalCursorTapeView {
     if (specIndex === undefined || start === undefined || end === undefined) {
       throw new Error("Cursor token record is incomplete.");
     }
+    return this.materializeTokenCursor(tokenIndex, specIndex, start, end);
+  }
+
+  private materializeTokenCursor(
+    tokenIndex: number,
+    specIndex: number,
+    start: number,
+    end: number,
+  ): TokenCursor {
     const spec = this.metadata.specs[specIndex];
     if (spec === undefined) {
       throw new Error("Cursor token references an unknown lexer spec.");
@@ -4753,7 +4823,12 @@ class ExternalCursorTapeView {
   }
 
   private elementForRef(ref: number): SyntaxCursor {
-    if (this.pendingTokens !== undefined) {
+    // Resolve a bounded number of local coordinates from immutable chunks.
+    // Bulk traversal switches once to dense records and flat source slices.
+    if (
+      this.pendingTokens !== undefined &&
+      this.incrementalRecordReads >= MAX_INCREMENTAL_CURSOR_RECORD_READS
+    ) {
       this.prepareIncrementalCursorRecords();
     }
     if (externalCursorRefIsToken(ref)) {

@@ -1121,6 +1121,140 @@ Deno.test("Wasm cursor coordinates retain fresh text and isolated spans across u
   }
 });
 
+Deno.test("Wasm local cursor reads retain spans and identity when later reads traverse the full tree", () => {
+  function shape(cursor: SyntaxCursor): unknown {
+    if (cursor.type === "token") {
+      return {
+        type: cursor.type,
+        tokenType: cursor.tokenType,
+        kind: cursor.kind,
+        text: cursor.text,
+        span: cursor.span,
+        tokenIndex: cursor.tokenIndex,
+      };
+    }
+    return {
+      type: cursor.type,
+      name: cursor.name,
+      span: cursor.span,
+      tokenRange: cursor.tokenRange,
+      children: cursor.children().map(shape),
+    };
+  }
+  const parser = documentParser();
+  try {
+    for (const trivia of ["preserve", "discard"] as const) {
+      let source = " " + "let alpha = 12;\n".repeat(256);
+      const document = parser.createDocument(source, { goal: "parse", trivia });
+      const retained: {
+        cursor: RuleCursor;
+        source: string;
+        rule: RuleCursor;
+        token: SyntaxCursor;
+        expectedRule: string;
+        expectedToken: string;
+      }[] = [];
+      for (
+        const edit of [
+          { start: 0, oldEnd: 1, newText: " \t " },
+          { start: 7, oldEnd: 12, newText: "omega" },
+          { start: 7, oldEnd: 12, newText: "expanded" },
+        ]
+      ) {
+        const update = document.applyEdits([edit]);
+        assert(update.goal === "parse");
+        assertEquals(update.parser.parserActions, 0);
+        source = source.slice(0, edit.start) + edit.newText +
+          source.slice(edit.oldEnd);
+        const result = document.parse();
+        assert(result.ok);
+        const rule = result.cursor.child(255);
+        assert(rule !== undefined && rule.type === "rule");
+        const token = rule.field("name");
+        assert(token !== undefined && token !== null && "type" in token);
+        assert(token.type === "token");
+        assertEquals(rule.child(1), token);
+        const options = { preserveTrivia: trivia === "preserve" };
+        const fresh = parser.parse(source, options);
+        assert(fresh.ok);
+        const expectedRule = fresh.cursor.child(255);
+        assert(expectedRule !== undefined && expectedRule.type === "rule");
+        const expectedToken = expectedRule.field("name");
+        assert(
+          expectedToken !== undefined && expectedToken !== null &&
+            "type" in expectedToken,
+        );
+        assertEquals(
+          JSON.stringify(rule.span),
+          JSON.stringify(expectedRule.span),
+        );
+        assertEquals(
+          JSON.stringify(rule.tokenRange),
+          JSON.stringify(expectedRule.tokenRange),
+        );
+        assertEquals(
+          JSON.stringify(shape(token)),
+          JSON.stringify(shape(expectedToken)),
+        );
+        // Each version stays partially read until after the document is gone.
+        retained.push({
+          cursor: result.cursor,
+          source,
+          rule,
+          token,
+          expectedRule: JSON.stringify(shape(expectedRule)),
+          expectedToken: JSON.stringify(shape(expectedToken)),
+        });
+      }
+      const latest = document.parse();
+      assert(latest.ok);
+      const first = latest.cursor.child(0);
+      assert(first !== undefined && first.type === "rule");
+      const name = first.field("name");
+      assert(name !== undefined && name !== null && "type" in name);
+      assert(name.type === "token");
+      // Escaped spans remain owned by their wrappers during bulk reads.
+      (first.span as { start: number; end: number }).start = 999;
+      (name.span as { start: number; end: number }).start = 888;
+      const children = latest.cursor.children();
+      for (const child of children) {
+        assert(child.type === "rule");
+        child.children();
+        child.field("name");
+      }
+      assertEquals(latest.cursor.child(0), first);
+      assertEquals(first.child(1), name);
+      assertEquals(first.span.start, 999);
+      assertEquals(name.span.start, 888);
+      assertEquals(name.text, "expanded");
+      document.dispose();
+      parser.reset();
+      parser.lex("let overwrite = 3;\n".repeat(8192));
+      for (const saved of retained) {
+        const options = { preserveTrivia: trivia === "preserve" };
+        const fresh = parser.parse(saved.source, options);
+        assert(fresh.ok);
+        // The first rule of the latest snapshot was intentionally mutated.
+        for (let index = 1; index < saved.cursor.childCount; index++) {
+          const actual = saved.cursor.child(index);
+          const expected = fresh.cursor.child(index);
+          assert(actual !== undefined && expected !== undefined);
+          assertEquals(
+            JSON.stringify(shape(actual)),
+            JSON.stringify(shape(expected)),
+          );
+        }
+        assertEquals(saved.cursor.child(255), saved.rule);
+        assertEquals(saved.rule.field("name"), saved.token);
+        assertEquals(JSON.stringify(shape(saved.rule)), saved.expectedRule);
+        assertEquals(JSON.stringify(shape(saved.token)), saved.expectedToken);
+      }
+    }
+  } finally {
+    parser.dispose();
+  }
+});
+
 Deno.test("Wasm documents preserve shifted lookahead dependencies across distant token chunks", () => {
   const built = compile(
     String.raw`
