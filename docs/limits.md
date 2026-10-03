@@ -69,12 +69,12 @@ trace, so raising the limit does not reserve additional linear memory.
 
 ## Cursor Traversal Cost
 
-Cursor child edges are linked nodes, so `RuleCursor.child(index)` resolves an
-index by walking. Sequential access costs one link step per child. The first
-non-monotonic access materializes a child-node index for that rule once, one i32
-per child, after which reverse and random access are direct lookups. Both orders
-are therefore linear in the child count in total; only the extra index array is
-paid, and only for rules actually traversed out of order.
+The strict-island cursor tape keeps its linked child-record encoding. Its host
+adapter resolves root children through ordered region rule indices and region
+children through contiguous token-child records. `RuleCursor.child(index)` uses
+direct lookup for sequential, reverse, and arbitrary access, without a separate
+index array. Reading every child remains linear in child count because each
+requested cursor wrapper must be returned or materialized.
 
 ## Size Budgets
 

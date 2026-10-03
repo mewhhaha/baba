@@ -274,68 +274,84 @@ function localCursorOperations(
   const operations: Operation[] = [];
   for (const trivia of ["discard", "preserve"] as const) {
     for (const equalLength of [true, false]) {
-      let document: IncrementalParseDocument | undefined;
-      let currentName = "value";
-      let name = `rename then first child and name field, ${trivia} trivia`;
-      if (equalLength) name += ", equal length";
-      else name += ", changed length";
-      operations.push({
-        name,
-        codeUnits: source.length,
-        run: () => {
-          if (document === undefined) {
-            document = parser.createDocument(source, {
-              goal: "parse",
-              trivia,
-              maxParserActions: 4_000_000,
-            });
-          }
-          let nextName = "value";
-          if (currentName === "value") {
-            nextName = "renamed";
-            if (equalLength) nextName = "alias";
-          }
-          document.applyEdits([{
-            start: 4,
-            oldEnd: 4 + currentName.length,
-            newText: nextName,
-          }]);
-          currentName = nextName;
-          const parsed = document.parse();
-          if (!parsed.ok) {
-            throw new Error("Local cursor benchmark returned invalid source.");
-          }
-          const rule = parsed.cursor.child(0);
-          if (rule === undefined || rule.type !== "rule") {
-            throw new Error("Local cursor benchmark returned no first child.");
-          }
-          const value = rule.field("name");
-          if (
-            value === undefined || value === null || !("type" in value) ||
-            value.type !== "token" || value.text !== nextName ||
-            value.span.start !== 4 || value.span.end !== 4 + nextName.length
-          ) {
-            throw new Error(
-              "Local cursor benchmark returned an invalid field.",
-            );
-          }
-        },
-        verify: () => {
-          if (document === undefined) {
-            throw new Error(
-              "Local cursor benchmark did not create a document.",
-            );
-          }
-          const expected = source.slice(0, 4) + currentName + source.slice(9);
-          if (document.snapshot.text() !== expected) {
-            throw new Error(
-              "Local cursor benchmark changed other source text.",
-            );
-          }
-          document.dispose();
-          document = undefined;
-        },
-      });
+      for (const position of ["first", "middle", "last"] as const) {
+        let document: IncrementalParseDocument | undefined;
+        let currentName = "value";
+        const statementCount = source.length / statement.length;
+        let childIndex = 0;
+        if (position === "middle") childIndex = Math.floor(statementCount / 2);
+        else if (position === "last") childIndex = statementCount - 1;
+        let name =
+          `rename then ${position} child and name field, ${trivia} trivia`;
+        if (equalLength) name += ", equal length";
+        else name += ", changed length";
+        operations.push({
+          name,
+          codeUnits: source.length,
+          run: () => {
+            if (document === undefined) {
+              document = parser.createDocument(source, {
+                goal: "parse",
+                trivia,
+                maxParserActions: 4_000_000,
+              });
+            }
+            let nextName = "value";
+            if (currentName === "value") {
+              nextName = "renamed";
+              if (equalLength) nextName = "alias";
+            }
+            document.applyEdits([{
+              start: 4,
+              oldEnd: 4 + currentName.length,
+              newText: nextName,
+            }]);
+            currentName = nextName;
+            const parsed = document.parse();
+            if (!parsed.ok) {
+              throw new Error(
+                "Local cursor benchmark returned invalid source.",
+              );
+            }
+            const rule = parsed.cursor.child(childIndex);
+            if (rule === undefined || rule.type !== "rule") {
+              throw new Error(
+                "Local cursor benchmark returned no selected child.",
+              );
+            }
+            const value = rule.field("name");
+            let expectedName = "value";
+            let expectedStart = childIndex * statement.length + 4;
+            if (childIndex === 0) expectedName = nextName;
+            else expectedStart += nextName.length - 5;
+            if (
+              value === undefined || value === null || !("type" in value) ||
+              value.type !== "token" || value.text !== expectedName ||
+              value.span.start !== expectedStart ||
+              value.span.end !== expectedStart + expectedName.length
+            ) {
+              throw new Error(
+                "Local cursor benchmark returned an invalid field.",
+              );
+            }
+          },
+          verify: () => {
+            if (document === undefined) {
+              throw new Error(
+                "Local cursor benchmark did not create a document.",
+              );
+            }
+            const expected = source.slice(0, 4) + currentName + source.slice(9);
+            if (document.snapshot.text() !== expected) {
+              throw new Error(
+                "Local cursor benchmark changed other source text.",
+              );
+            }
+            document.dispose();
+            document = undefined;
+          },
+        });
+      }
     }
   }
   return operations;

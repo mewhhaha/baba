@@ -1255,6 +1255,105 @@ Deno.test("Wasm local cursor reads retain spans and identity when later reads tr
   }
 });
 
+Deno.test("Wasm island children retain order across variable region sizes and arbitrary lookup order", () => {
+  const built = compile(
+    String.raw`
+    token IDENT = /[a-z]+/;
+    skip WS = /[ \t\r\n]+/;
+    module = rows:row*;
+    row = "let" name:IDENT ("+" terms:IDENT)* ";";
+  `,
+    {
+      targets: ["wasm"],
+      metadata: {
+        gpuFrontend: {
+          version: 3,
+          throughput: "strict",
+          root: "module",
+          islands: [
+            { rule: "module", boundary: { kind: "root" } },
+            { rule: "row", boundary: { kind: "terminated", terminal: ";" } },
+          ],
+          semantics: { rules: {} },
+        },
+      },
+    },
+  );
+  assert(built.bundle !== undefined);
+  const wasm = built.bundle.files.find((file) =>
+    file.path === "wasm/parser.wasm"
+  );
+  const plan = built.bundle.files.find((file) =>
+    file.path === "wasm/parser.plan"
+  );
+  assert(wasm !== undefined && wasm.encoding === "binary");
+  assert(plan !== undefined && plan.encoding === "binary");
+  const parser = createParser({ bytes: wasm.content, plan: plan.content });
+  const lines = [
+    "let alpha;\n",
+    "let beta + gamma;\n",
+    "let delta + eta + theta;\n",
+  ];
+  const expected = [
+    ["let", "alpha", ";"],
+    ["let", "beta", "+", "gamma", ";"],
+    ["let", "delta", "+", "eta", "+", "theta", ";"],
+  ];
+  const source = lines.join("").repeat(128);
+  try {
+    for (const preserveTrivia of [true, false]) {
+      const parsed = parser.parse(source, { preserveTrivia });
+      assert(parsed.ok);
+      const root = parsed.cursor;
+      assertEquals(root.childCount, 384);
+      for (const invalid of [-1, 0.5, NaN, Infinity, 384]) {
+        assertEquals(root.child(invalid), undefined);
+      }
+      const retained: RuleCursor[] = [];
+      for (let step = 0; step < root.childCount; step++) {
+        const index = (step * 173) % root.childCount;
+        const rule = root.child(index);
+        assert(rule !== undefined && rule.type === "rule");
+        const texts = expected[index % expected.length];
+        assert(texts !== undefined);
+        assertEquals(rule.childCount, texts.length);
+        for (let child = texts.length - 1; child >= 0; child--) {
+          const token = rule.child(child);
+          assert(token !== undefined && token.type === "token");
+          assertEquals(token.text, texts[child]);
+          assertEquals(
+            source.slice(token.span.start, token.span.end),
+            token.text,
+          );
+          assertEquals(rule.child(child), token);
+        }
+        assertEquals(rule.field("name"), rule.child(1));
+        const terms = rule.fieldArray("terms");
+        assertEquals(terms.length, (texts.length - 3) / 2);
+        for (let term = 0; term < terms.length; term++) {
+          assertEquals(terms[term], rule.child(3 + term * 2));
+        }
+        assertEquals(rule.child(rule.childCount), undefined);
+        retained[index] = rule;
+      }
+      const children = root.children();
+      const fields = root.fieldArray("rows");
+      for (let index = root.childCount - 1; index >= 0; index--) {
+        assertEquals(root.child(index), retained[index]);
+        assertEquals(children[index], retained[index]);
+        assertEquals(fields[index], retained[index]);
+      }
+      const empty = parser.parse(" \n\t", { preserveTrivia });
+      assert(empty.ok);
+      assertEquals(empty.cursor.childCount, 0);
+      assertEquals(empty.cursor.child(0), undefined);
+      assertEquals(empty.cursor.children().length, 0);
+    }
+  } finally {
+    parser.dispose();
+  }
+});
+
 Deno.test("Wasm documents preserve shifted lookahead dependencies across distant token chunks", () => {
   const built = compile(
     String.raw`

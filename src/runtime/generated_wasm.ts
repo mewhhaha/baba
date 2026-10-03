@@ -4361,6 +4361,8 @@ class ExternalNamedTokenCursor extends ExternalPlainTokenRecord
   }
 }
 
+// The strict-island materializer emits a flat root whose region rules are
+// numbered in child order. Each region's token child edges are contiguous.
 class ExternalCursorTapeView {
   private readonly ruleCache: (RuleCursor | undefined)[] = [];
   private readonly tokenCache: (TokenCursor | undefined)[] = [];
@@ -4609,56 +4611,42 @@ class ExternalCursorTapeView {
       }
     }
     let childrenCache: readonly SyntaxCursor[] | undefined;
-    // Child edges form a singly linked node list in the Wasm arena, so a child
-    // index has to be resolved by walking. Sequential access keeps a walk
-    // cursor and costs one link step per child. The first non-monotonic access
-    // materializes the whole node list once (one i32 per child) and every
-    // access after that is a direct index, so reverse and random traversal of
-    // a long child list stay linear in total instead of quadratic.
-    let childNodes: Int32Array | undefined;
-    let walkIndex = 0;
-    let walkNode = childStart;
+    if (
+      ruleIndex === 0 &&
+      childCount !==
+        this.ruleRecords.length / WASM_CURSOR_RULE_RECORD_I32_COUNT - 1
+    ) {
+      throw new Error("Strict island root has an invalid region count.");
+    }
+    let child: RuleCursor["child"];
+    if (ruleIndex === 0) {
+      child = (index: number): SyntaxCursor | undefined => {
+        if (!Number.isInteger(index) || index < 0 || index >= childCount) {
+          return undefined;
+        }
+        return this.elementForRef((index + 1) * 2);
+      };
+    } else {
+      child = (index: number): SyntaxCursor | undefined => {
+        if (!Number.isInteger(index) || index < 0 || index >= childCount) {
+          return undefined;
+        }
+        const ref = this.childRefs[
+          (childStart + index) * WASM_CURSOR_CHILD_RECORD_I32_COUNT
+        ];
+        if (ref === undefined) {
+          throw new Error("Cursor child edge is missing.");
+        }
+        return this.elementForRef(ref);
+      };
+    }
     const cursor: RuleCursor = {
       type: "rule",
       name,
       span,
       tokenRange,
       childCount,
-      child: (index: number): SyntaxCursor | undefined => {
-        if (!Number.isInteger(index) || index < 0) return undefined;
-        if (index >= childCount) return undefined;
-        if (childNodes === undefined && index < walkIndex) {
-          const nodes = new Int32Array(childCount);
-          let node = childStart;
-          for (let position = 0; position < childCount; position++) {
-            nodes[position] = node;
-            if (position + 1 < childCount) {
-              node = this.childEdgeNext(node);
-            }
-          }
-          childNodes = nodes;
-        }
-        let childNode: number;
-        if (childNodes !== undefined) {
-          const indexed = childNodes[index];
-          if (indexed === undefined) {
-            throw new Error("Cursor child edge is missing.");
-          }
-          childNode = indexed;
-        } else {
-          while (walkIndex < index) {
-            walkNode = this.childEdgeNext(walkNode);
-            walkIndex++;
-          }
-          childNode = walkNode;
-        }
-        const ref =
-          this.childRefs[childNode * WASM_CURSOR_CHILD_RECORD_I32_COUNT];
-        if (ref === undefined) {
-          throw new Error("Cursor child edge is missing.");
-        }
-        return this.elementForRef(ref);
-      },
+      child,
       children: (): readonly SyntaxCursor[] => {
         if (childrenCache !== undefined) return childrenCache;
         const children: SyntaxCursor[] = [];
@@ -4835,14 +4823,6 @@ class ExternalCursorTapeView {
       return this.tokenCursor(externalCursorRefIndex(ref));
     }
     return this.ruleCursor(externalCursorRefIndex(ref));
-  }
-
-  private childEdgeNext(node: number): number {
-    const next = this.childRefs[node * WASM_CURSOR_CHILD_RECORD_I32_COUNT + 1];
-    if (next === undefined || next < 0) {
-      throw new Error("Cursor child edge is missing.");
-    }
-    return next;
   }
 
   private arrayItemIds(head: number, count: number): number[] {

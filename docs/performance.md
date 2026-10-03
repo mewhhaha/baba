@@ -301,10 +301,10 @@ measured p25 / median milliseconds:
 
 The first two operations insert and remove a space, then inspect the root. Their
 median edit latency falls by about 74%. Bulk traversal timings varied between
-runs, so there is no claim of a repeatable full-tree traversal gain. The first
-child read still refreshes token and rule arrays in linear time; callers that
-inspect the tree after every edit see a smaller benefit than root-only readers.
-Lexer and validation document timings were within about 3% of the baseline.
+runs, so there is no claim of a repeatable full-tree traversal gain. Bulk reads
+still refresh token and rule arrays in linear time; callers that inspect the
+whole tree after every edit see a smaller benefit than root-only readers. Lexer
+and validation document timings were within about 3% of the baseline.
 
 Separate profiled runs on 4,194,307 UTF-16 units, with a four-million-action
 limit, reduced parse-update p25 / median time from 49.16 / 58.11 to 12.17 /
@@ -614,6 +614,50 @@ Reproduce local reads and bulk controls with:
 ```sh
 deno task bench:document --before-root /path/to/9.0.7 --warmups 24 --samples 80
 deno task bench:tokens --before-root /path/to/9.0.7 --warmups 12 --samples 50
+```
+
+## Indexed Island Children
+
+The strict-island materializer emits a flat root whose region rules are numbered
+in child order. Each region's token child records are contiguous. The host
+adapter uses those existing layout invariants to resolve any child directly,
+without walking prior links or allocating a reverse-lookup index. Root and
+region child functions are separate so their hot calls stay simple. The linked
+record encoding, Wasm bytes, and ABI remain unchanged.
+
+`bench:document` now measures first, middle, and last child reads after renaming
+the first statement. Against `311aa1e`, an AMD Ryzen 7 7800X3D with Deno 2.9.4 /
+V8 15.0.245.2-rusty used 16 warmups and 64 alternating samples with background
+host activity. Inputs repeat `let value = other;` plus a newline. Each operation
+reads the selected statement's `name` field, text, and span; full-source checks
+occur outside the timer. Equal-length renames use `value`/`alias` and
+length-changing renames use `value`/`renamed`. Medians are milliseconds:
+
+| UTF-16 units | Child  | Edit length | Trivia   | Before | After | Speedup |
+| ------------ | ------ | ----------- | -------- | ------ | ----- | ------- |
+| 524,305      | Last   | Equal       | Discard  | 0.080  | 0.009 | 9×      |
+| 524,305      | Last   | Equal       | Preserve | 0.078  | 0.008 | 10×     |
+| 4,194,307    | Middle | Equal       | Discard  | 0.307  | 0.025 | 12×     |
+| 4,194,307    | Last   | Equal       | Discard  | 0.587  | 0.025 | 24×     |
+| 4,194,307    | Last   | Equal       | Preserve | 0.589  | 0.027 | 22×     |
+| 4,194,307    | Last   | Changed     | Discard  | 0.698  | 0.130 | 5×      |
+
+Changed-length edits still move the Wasm source suffix. First-child reads retain
+the previous local-coordinate benefit. Full edit-plus-traversal controls over
+77,824 units measure 3.033 to 3.058 ms for changed-length renames and 2.978 to
+2.959 ms for equal-length renames, within 1%. Separate 12-warmup, 50-sample
+token controls measure cached full-tree text and field passes at 0.756 to 0.699
+ms over 77,824 units and 7.592 to 5.725 ms over 524,305 units, about 8% and 25%
+faster. Fresh first-text passes show no consistent gain; parse-only times vary
+within 4%. Timings depend on V8 optimization, garbage collection, and host load.
+
+Tests check child ordering, field aliases, bounds, reverse and arbitrary reads,
+variable region sizes, empty roots, and both trivia policies. The shared loader
+shrinks by 953 bytes to 159,844 bytes. Reproduce the comparison with:
+
+```sh
+deno task bench:document --before-root /path/to/311aa1e --warmups 16 --samples 64
+deno task bench:tokens --before-root /path/to/311aa1e --warmups 12 --samples 50
 ```
 
 ## Lexer Backtracking Worst Case

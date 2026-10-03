@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Index strict-island children directly from the flat cursor layout. Reads near
+  the end of a 4 MiB tree after an equal-length rename measure 22–24× faster;
+  cached full traversals improve by 8–25%. Test arbitrary lookup order with
+  variable region sizes and both trivia policies. See
+  [measurements](docs/performance.md#indexed-island-children).
+
 - Resolve local incremental cursor coordinates directly from immutable lexer
   chunks before switching bulk reads to packed records. Length-changing renames
   followed by one child and field read measure 24–55× faster on 512 KiB and 4
